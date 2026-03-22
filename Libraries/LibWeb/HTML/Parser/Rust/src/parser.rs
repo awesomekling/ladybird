@@ -153,6 +153,11 @@ impl HtmlParser {
         ));
     }
 
+    /// Set the form element pointer (used in fragment parsing setup).
+    pub fn set_form_element(&mut self, form_element: DomHandle) {
+        self.form_element = Some(form_element);
+    }
+
     // =======================================================================
     // Main parsing loop
     // https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
@@ -335,54 +340,21 @@ impl HtmlParser {
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#mathml-text-integration-point
     fn adjusted_current_node_is_mathml_text_integration_point(&self) -> bool {
-        if let Some(node) = self.adjusted_current_node() {
-            // A node is a MathML text integration point if it is one of the following elements:
-            // A MathML mi, mo, mn, ms, or mtext element.
-            node.namespace == DomNamespace::MathML
-                && matches!(
-                    node.tag_name.as_str(),
-                    "mi" | "mo" | "mn" | "ms" | "mtext"
-                )
-        } else {
-            false
-        }
+        self.adjusted_current_node()
+            .is_some_and(is_mathml_text_integration_point)
     }
 
     /// Check if the adjusted current node is a MathML annotation-xml element.
     fn adjusted_current_node_is_mathml_annotation_xml(&self) -> bool {
-        if let Some(node) = self.adjusted_current_node() {
+        self.adjusted_current_node().is_some_and(|node| {
             node.namespace == DomNamespace::MathML && node.tag_name == tags::ANNOTATION_XML
-        } else {
-            false
-        }
+        })
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#html-integration-point
     fn adjusted_current_node_is_html_integration_point(&self) -> bool {
-        if let Some(node) = self.adjusted_current_node() {
-            // A MathML annotation-xml element whose start tag token had an attribute with the name
-            // "encoding" whose value was an ASCII case-insensitive match for "text/html" or
-            // "application/xhtml+xml".
-            // NOTE: We check the element's actual encoding attribute here.
-            if node.namespace == DomNamespace::MathML && node.tag_name == tags::ANNOTATION_XML {
-                // Check the cached encoding attribute from the start tag token.
-                if let Some(ref encoding) = node.encoding_attr {
-                    if encoding.eq_ignore_ascii_case("text/html")
-                        || encoding.eq_ignore_ascii_case("application/xhtml+xml")
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            // An SVG foreignObject, desc, or title element.
-            if node.namespace == DomNamespace::SVG
-                && matches!(node.tag_name.as_str(), "foreignObject" | "desc" | "title")
-            {
-                return true;
-            }
-        }
-        false
+        self.adjusted_current_node()
+            .is_some_and(is_html_integration_point)
     }
 
     // =======================================================================
@@ -994,59 +966,30 @@ impl HtmlParser {
         }
 
         for prefix in QUIRKS_PUBLIC_ID_PREFIXES {
-            if public_id
-                .get(..prefix.len())
-                .is_some_and(|s| s.eq_ignore_ascii_case(prefix))
-            {
+            if public_id_starts_with_ignore_case(public_id, prefix) {
                 return QuirksMode::Yes;
             }
         }
 
         if doctype.missing_system_identifier {
-            if public_id
-                .get(.."-//W3C//DTD HTML 4.01 Frameset//".len())
-                .is_some_and(|s| s.eq_ignore_ascii_case("-//W3C//DTD HTML 4.01 Frameset//"))
-            {
-                return QuirksMode::Yes;
-            }
-            if public_id
-                .get(.."-//W3C//DTD HTML 4.01 Transitional//".len())
-                .is_some_and(|s| {
-                    s.eq_ignore_ascii_case("-//W3C//DTD HTML 4.01 Transitional//")
-                })
+            if public_id_starts_with_ignore_case(public_id, "-//W3C//DTD HTML 4.01 Frameset//")
+                || public_id_starts_with_ignore_case(public_id, "-//W3C//DTD HTML 4.01 Transitional//")
             {
                 return QuirksMode::Yes;
             }
         }
 
-        if public_id
-            .get(.."-//W3C//DTD XHTML 1.0 Frameset//".len())
-            .is_some_and(|s| s.eq_ignore_ascii_case("-//W3C//DTD XHTML 1.0 Frameset//"))
-        {
-            return QuirksMode::Limited;
-        }
-        if public_id
-            .get(.."-//W3C//DTD XHTML 1.0 Transitional//".len())
-            .is_some_and(|s| s.eq_ignore_ascii_case("-//W3C//DTD XHTML 1.0 Transitional//"))
+        if public_id_starts_with_ignore_case(public_id, "-//W3C//DTD XHTML 1.0 Frameset//")
+            || public_id_starts_with_ignore_case(public_id, "-//W3C//DTD XHTML 1.0 Transitional//")
         {
             return QuirksMode::Limited;
         }
 
-        if !doctype.missing_system_identifier {
-            if public_id
-                .get(.."-//W3C//DTD HTML 4.01 Frameset//".len())
-                .is_some_and(|s| s.eq_ignore_ascii_case("-//W3C//DTD HTML 4.01 Frameset//"))
-            {
-                return QuirksMode::Limited;
-            }
-            if public_id
-                .get(.."-//W3C//DTD HTML 4.01 Transitional//".len())
-                .is_some_and(|s| {
-                    s.eq_ignore_ascii_case("-//W3C//DTD HTML 4.01 Transitional//")
-                })
-            {
-                return QuirksMode::Limited;
-            }
+        if !doctype.missing_system_identifier
+            && (public_id_starts_with_ignore_case(public_id, "-//W3C//DTD HTML 4.01 Frameset//")
+                || public_id_starts_with_ignore_case(public_id, "-//W3C//DTD HTML 4.01 Transitional//"))
+        {
+            return QuirksMode::Limited;
         }
 
         QuirksMode::No
@@ -2124,7 +2067,6 @@ impl HtmlParser {
                     | "pre"
                     | "search"
                     | "section"
-                    | "select"
                     | "summary"
                     | "ul"
             )
@@ -2398,21 +2340,6 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "input"
         if token.is_start_tag() && token.tag_name() == tags::INPUT {
-            // If the parser was created as part of the HTML fragment parsing algorithm and
-            // the context element is a select element, ignore the token.
-            if self.parsing_fragment
-                && self
-                    .context_element
-                    .is_some_and(|ctx| ctx.local_name() == tags::SELECT)
-            {
-                return;
-            }
-            // If the stack of open elements has a select element in scope:
-            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
-                // Pop elements until a select element has been popped.
-                self.stack_of_open_elements
-                    .pop_until_tag_name_popped(tags::SELECT);
-            }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2441,11 +2368,6 @@ impl HtmlParser {
         if token.is_start_tag() && token.tag_name() == tags::HR {
             if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
-            }
-            // If the stack of open elements has a select element in scope:
-            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
-                self.stack_of_open_elements
-                    .generate_implied_end_tags(None);
             }
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2504,36 +2426,29 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "select"
         if token.is_start_tag() && token.tag_name() == tags::SELECT {
-            // If the parser was created as part of the HTML fragment parsing algorithm and
-            // the context element is a select element, ignore the token.
-            if self.parsing_fragment
-                && self
-                    .context_element
-                    .is_some_and(|ctx| ctx.local_name() == tags::SELECT)
-            {
-                // Parse error. Ignore the token.
-            }
-            // If the stack of open elements has a select element in scope:
-            else if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
-                // Parse error. Pop elements until a select element has been popped.
-                self.stack_of_open_elements
-                    .pop_until_tag_name_popped(tags::SELECT);
+            self.reconstruct_the_active_formatting_elements();
+            self.insert_html_element(token);
+            self.frameset_ok = false;
+            // If the insertion mode is one of "in table", "in caption", "in table body",
+            // "in row", or "in cell", switch to "in select in table".
+            if matches!(
+                self.insertion_mode,
+                InsertionMode::InTable
+                    | InsertionMode::InCaption
+                    | InsertionMode::InTableBody
+                    | InsertionMode::InRow
+                    | InsertionMode::InCell
+            ) {
+                self.insertion_mode = InsertionMode::InSelectInTable;
             } else {
-                // No select in scope: create select normally.
-                self.reconstruct_the_active_formatting_elements();
-                self.insert_html_element(token);
-                self.frameset_ok = false;
+                self.insertion_mode = InsertionMode::InSelect;
             }
             return;
         }
 
         // -> A start tag whose tag name is "option"
         if token.is_start_tag() && token.tag_name() == tags::OPTION {
-            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
-                // Generate implied end tags except for optgroup elements.
-                self.stack_of_open_elements
-                    .generate_implied_end_tags(Some("optgroup"));
-            } else if self
+            if self
                 .stack_of_open_elements
                 .current_node()
                 .is_some_and(|n| n.is_html_element(tags::OPTION))
@@ -2547,10 +2462,7 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "optgroup"
         if token.is_start_tag() && token.tag_name() == tags::OPTGROUP {
-            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
-                // Generate implied end tags.
-                self.stack_of_open_elements.generate_implied_end_tags(None);
-            } else if self
+            if self
                 .stack_of_open_elements
                 .current_node()
                 .is_some_and(|n| n.is_html_element(tags::OPTION))
@@ -3748,10 +3660,209 @@ impl HtmlParser {
         self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inselect
     fn handle_in_select(&mut self, token: &Token) {
-        // NOTE: The current HTML spec no longer has InSelect mode.
-        // This is kept as a fallback that processes tokens using InBody rules.
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
+        // -> A character token that is U+0000 NULL
+        if token.is_character() && token.code_point == 0 {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> Any other character token
+        if token.is_character() {
+            self.insert_character(token.code_point);
+            return;
+        }
+
+        // -> A comment token
+        if token.is_comment() {
+            self.insert_comment(token);
+            return;
+        }
+
+        // -> A DOCTYPE token
+        if token.is_doctype() {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> A start tag whose tag name is "html"
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "option"
+        if token.is_start_tag() && token.tag_name() == tags::OPTION {
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
+            {
+                self.stack_of_open_elements.pop();
+            }
+            self.insert_html_element(token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "optgroup"
+        if token.is_start_tag() && token.tag_name() == tags::OPTGROUP {
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
+            {
+                self.stack_of_open_elements.pop();
+            }
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
+            {
+                self.stack_of_open_elements.pop();
+            }
+            self.insert_html_element(token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "hr"
+        if token.is_start_tag() && token.tag_name() == tags::HR {
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
+            {
+                self.stack_of_open_elements.pop();
+            }
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
+            {
+                self.stack_of_open_elements.pop();
+            }
+            self.insert_html_element(token);
+            self.stack_of_open_elements.pop();
+            return;
+        }
+
+        // -> An end tag whose tag name is "optgroup"
+        if token.is_end_tag() && token.tag_name() == tags::OPTGROUP {
+            // First, if the current node is an option element, and the node immediately before
+            // it in the stack of open elements is an optgroup element, then pop the current node.
+            let should_pop_option = if let Some(current) = self.stack_of_open_elements.current_node()
+            {
+                if current.is_html_element(tags::OPTION) {
+                    let len = self.stack_of_open_elements.len();
+                    len >= 2
+                        && self
+                            .stack_of_open_elements
+                            .get(len - 2)
+                            .is_some_and(|e| e.is_html_element(tags::OPTGROUP))
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if should_pop_option {
+                self.stack_of_open_elements.pop();
+            }
+
+            // If the current node is an optgroup element, then pop that node.
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
+            {
+                self.stack_of_open_elements.pop();
+            } else {
+                // Parse error. Ignore the token.
+            }
+            return;
+        }
+
+        // -> An end tag whose tag name is "option"
+        if token.is_end_tag() && token.tag_name() == tags::OPTION {
+            if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
+            {
+                self.stack_of_open_elements.pop();
+            } else {
+                // Parse error. Ignore the token.
+            }
+            return;
+        }
+
+        // -> An end tag whose tag name is "select"
+        if token.is_end_tag() && token.tag_name() == tags::SELECT {
+            if !self
+                .stack_of_open_elements
+                .has_in_select_scope(tags::SELECT)
+            {
+                // Parse error. Ignore the token. (fragment case)
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped(tags::SELECT);
+            self.reset_the_insertion_mode_appropriately();
+            return;
+        }
+
+        // -> A start tag whose tag name is "select"
+        if token.is_start_tag() && token.tag_name() == tags::SELECT {
+            // Parse error.
+            if !self
+                .stack_of_open_elements
+                .has_in_select_scope(tags::SELECT)
+            {
+                // Ignore the token. (fragment case)
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped(tags::SELECT);
+            self.reset_the_insertion_mode_appropriately();
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "input", "keygen", "textarea"
+        if token.is_start_tag()
+            && matches!(token.tag_name(), "input" | "keygen" | "textarea")
+        {
+            // Parse error.
+            if !self
+                .stack_of_open_elements
+                .has_in_select_scope(tags::SELECT)
+            {
+                // Ignore the token. (fragment case)
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped(tags::SELECT);
+            self.reset_the_insertion_mode_appropriately();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "script", "template"
+        // -> An end tag whose tag name is "template"
+        if (token.is_start_tag() && matches!(token.tag_name(), "script" | "template"))
+            || (token.is_end_tag() && token.tag_name() == tags::TEMPLATE)
+        {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+
+        // -> An end-of-file token
+        if token.is_eof() {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> Anything else
+        // Parse error. Ignore the token.
     }
 
     fn handle_in_select_in_table(&mut self, token: &Token) {
@@ -4381,6 +4492,13 @@ fn adjust_foreign_attribute(name: &str) -> Option<(DomNamespace, &str, &str)> {
         "xmlns:xlink" => Some((DomNamespace::XMLNS, "xmlns", "xlink")),
         _ => None,
     }
+}
+
+/// Check if a public ID starts with a prefix (case-insensitive).
+fn public_id_starts_with_ignore_case(public_id: &str, prefix: &str) -> bool {
+    public_id
+        .get(..prefix.len())
+        .is_some_and(|s| s.eq_ignore_ascii_case(prefix))
 }
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#mathml-text-integration-point
