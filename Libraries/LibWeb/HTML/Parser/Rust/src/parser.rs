@@ -4181,6 +4181,12 @@ impl HtmlParser {
             return;
         }
 
+        // -> A DOCTYPE token
+        if token.is_doctype() {
+            // Parse error. Ignore the token.
+            return;
+        }
+
         // For other tokens in foreign content, insert the element in the appropriate namespace.
         if token.is_start_tag() {
             let namespace = self

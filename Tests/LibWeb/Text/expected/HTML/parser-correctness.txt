@@ -13,3 +13,4 @@ PASS: table context clearing
 PASS: adoption agency furthest block
 PASS: fragment parsing SVG context
 PASS: script not executed in fragment
+PASS: DOCTYPE ignored in foreign content

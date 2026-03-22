@@ -235,5 +235,22 @@ test(() => {
             println("FAIL: script not executed in fragment - executed=" + window.__scriptExecuted);
         }
     }
+
+    // Test 16: DOCTYPE inside foreign content should be ignored
+    // A DOCTYPE token inside SVG should be treated as a parse error and ignored.
+    {
+        let doc = new DOMParser().parseFromString(
+            "<!DOCTYPE html><html><body><svg><!DOCTYPE html><rect/></svg></body></html>",
+            "text/html"
+        );
+        let svg = doc.querySelector("svg");
+        let rect = doc.querySelector("rect");
+        // The DOCTYPE should be ignored; rect should still be created as a child of svg.
+        if (svg && rect && rect.parentNode === svg) {
+            println("PASS: DOCTYPE ignored in foreign content");
+        } else {
+            println("FAIL: DOCTYPE ignored in foreign content");
+        }
+    }
 });
 </script>
