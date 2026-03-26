@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
 #include <AK/GenericShorthands.h>
 #include <AK/Optional.h>
+#include <AK/StringBuilder.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
 
@@ -155,18 +157,97 @@ static NonnullRefPtr<InvalidationPlan> make_invalidate_whole_subtree_invalidatio
     return invalidation;
 }
 
-static void add_invalidation_plan_for_properties(StyleInvalidationData& style_invalidation_data, InvalidationSet const& invalidation_properties, InvalidationPlan const& plan)
+static void add_invalidation_plan_for_properties(HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>>& target_invalidation_plans, InvalidationSet const& invalidation_properties, InvalidationPlan const& plan)
 {
     invalidation_properties.for_each_property([&](auto const& invalidation_property) {
         if (!should_register_invalidation_property(invalidation_property))
             return IterationDecision::Continue;
 
-        auto& stored_invalidation = style_invalidation_data.invalidation_plans.ensure(invalidation_property, [] {
+        auto& stored_invalidation = target_invalidation_plans.ensure(invalidation_property, [] {
             return InvalidationPlan::create();
         });
         stored_invalidation->include_all_from(plan);
         return IterationDecision::Continue;
     });
+}
+
+static void record_debug_selector_for_property_map(HashMap<InvalidationSet::Property, HashTable<String>>& target_debug_selectors, InvalidationSet const& invalidation_properties, Selector const& selector)
+{
+    if (!LAYOUT_THRASH_DEBUG)
+        return;
+
+    Optional<String> selector_text;
+    invalidation_properties.for_each_property([&](auto const& invalidation_property) {
+        if (!should_register_invalidation_property(invalidation_property))
+            return IterationDecision::Continue;
+
+        if (!selector_text.has_value())
+            selector_text = selector.serialize();
+
+        auto& selectors = target_debug_selectors.ensure(invalidation_property, [] {
+            return HashTable<String> {};
+        });
+        selectors.set(*selector_text);
+        return IterationDecision::Continue;
+    });
+}
+
+void StyleInvalidationData::record_debug_selector_for_properties(InvalidationSet const& invalidation_properties, Selector const& selector)
+{
+    record_debug_selector_for_property_map(debug_selectors_by_invalidation_property, invalidation_properties, selector);
+}
+
+void StyleInvalidationData::record_debug_selector_for_has_non_subject_properties(InvalidationSet const& invalidation_properties, Selector const& selector)
+{
+    record_debug_selector_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, invalidation_properties, selector);
+}
+
+static String debug_description_for_property_map(HashMap<InvalidationSet::Property, HashTable<String>> const& debug_selectors_by_property, Vector<InvalidationSet::Property> const& properties, size_t max_selectors)
+{
+    if (!LAYOUT_THRASH_DEBUG)
+        return "<none>"_string;
+
+    StringBuilder builder;
+    bool first_property = true;
+    for (auto const& property : properties) {
+        auto selectors = debug_selectors_by_property.get(property);
+        if (!selectors.has_value() || selectors->is_empty())
+            continue;
+
+        if (!first_property)
+            builder.append("; "sv);
+        first_property = false;
+
+        builder.appendff("{}: count={} selectors=[", property, selectors->size());
+
+        size_t appended_selectors = 0;
+        for (auto const& selector_text : *selectors) {
+            if (appended_selectors > 0)
+                builder.append(" | "sv);
+            builder.append(selector_text);
+            ++appended_selectors;
+            if (appended_selectors >= max_selectors)
+                break;
+        }
+
+        if (selectors->size() > appended_selectors)
+            builder.appendff(" | ... +{}", selectors->size() - appended_selectors);
+        builder.append(']');
+    }
+
+    if (first_property)
+        return "<none>"_string;
+    return MUST(builder.to_string());
+}
+
+String StyleInvalidationData::debug_description_for_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
+{
+    return debug_description_for_property_map(debug_selectors_by_invalidation_property, properties, max_selectors);
+}
+
+String StyleInvalidationData::debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
+{
+    return debug_description_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, properties, max_selectors);
 }
 
 struct SelectorRighthand {
@@ -262,7 +343,8 @@ void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&
                 if (nested_selector->compound_selectors().size() > 1) {
                     InvalidationSet has_only;
                     has_only.set_needs_invalidate_pseudo_class(PseudoClass::Has);
-                    add_invalidation_plan_for_properties(style_invalidation_data, has_only, *make_invalidate_whole_subtree_invalidation());
+                    add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, has_only, *make_invalidate_whole_subtree_invalidation());
+                    style_invalidation_data.record_debug_selector_for_properties(has_only, *nested_selector);
                 }
             }
         }
@@ -287,7 +369,8 @@ static void add_invalidation_sets_to_cover_scope_leakage_of_relative_selector_in
                 return;
 
             auto invalidation_set = build_invalidation_set_for_simple_selectors(simple_selectors, ExcludePropertiesNestedInNotPseudoClass::No, style_invalidation_data, InsideNthChildPseudoClass::No);
-            add_invalidation_plan_for_properties(style_invalidation_data, invalidation_set, *make_invalidate_whole_subtree_invalidation());
+            add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_set, *make_invalidate_whole_subtree_invalidation());
+            style_invalidation_data.record_debug_selector_for_properties(invalidation_set, selector_to_invalidate);
         });
     };
 
@@ -306,6 +389,7 @@ static void add_invalidation_sets_to_cover_scope_leakage_of_relative_selector_in
 
 static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidationData& style_invalidation_data, Selector const& selector, InsideNthChildPseudoClass inside_nth_child_pseudo_class)
 {
+    bool const selector_contains_has = selector.contains_pseudo_class(PseudoClass::Has);
     auto const& compound_selectors = selector.compound_selectors();
     int compound_selector_index = compound_selectors.size() - 1;
     VERIFY(compound_selector_index >= 0);
@@ -345,7 +429,8 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
                 // we need to make sure all affected siblings are invalidated.
                 root_plan->invalidate_whole_subtree = true;
             }
-            add_invalidation_plan_for_properties(style_invalidation_data, invalidation_properties, *root_plan);
+            add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *root_plan);
+            style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
 
             invalidation_set_for_rightmost_selector = subject_match_set;
             selector_righthand = SelectorRighthand {
@@ -358,7 +443,12 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             VERIFY(selector_righthand.has_value());
 
             auto plan = build_invalidation_for_combinator(previous_compound_combinator, *selector_righthand);
-            add_invalidation_plan_for_properties(style_invalidation_data, invalidation_properties, *plan);
+            add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *plan);
+            style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
+            if (selector_contains_has) {
+                add_invalidation_plan_for_properties(style_invalidation_data.has_non_subject_invalidation_plans, invalidation_properties, *plan);
+                style_invalidation_data.record_debug_selector_for_has_non_subject_properties(invalidation_properties, selector);
+            }
 
             selector_righthand = SelectorRighthand {
                 .subject_match_set = move(subject_match_set),

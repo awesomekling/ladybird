@@ -7,8 +7,10 @@
 #pragma once
 
 #include <AK/HashMap.h>
+#include <AK/HashTable.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/RefCounted.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/InvalidationSet.h>
 #include <LibWeb/CSS/Selector.h>
@@ -64,13 +66,20 @@ void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&
 
 struct StyleInvalidationData {
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> invalidation_plans;
+    HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_non_subject_invalidation_plans;
     HashTable<FlyString> ids_used_in_has_selectors;
     HashTable<FlyString> class_names_used_in_has_selectors;
     HashTable<FlyString> attribute_names_used_in_has_selectors;
     HashTable<FlyString> tag_names_used_in_has_selectors;
     HashTable<PseudoClass> pseudo_classes_used_in_has_selectors;
+    HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_invalidation_property;
+    HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_has_non_subject_invalidation_property;
 
     void build_invalidation_sets_for_selector(Selector const& selector);
+    void record_debug_selector_for_properties(InvalidationSet const&, Selector const&);
+    void record_debug_selector_for_has_non_subject_properties(InvalidationSet const&, Selector const&);
+    [[nodiscard]] String debug_description_for_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
+    [[nodiscard]] String debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
 };
 
 }

@@ -51,6 +51,7 @@
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/NamedNodeMap.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/StyleInvalidator.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/Geometry/DOMRectList.h>
@@ -147,6 +148,73 @@ GC_DEFINE_ALLOCATOR(Element);
     }
 
     return MUST(builder.to_string());
+}
+
+[[maybe_unused]] static String format_invalidation_properties_for_debug(Vector<CSS::InvalidationSet::Property> const& properties)
+{
+    if (properties.is_empty())
+        return "<none>"_string;
+
+    StringBuilder builder;
+    bool first = true;
+    for (auto const& property : properties) {
+        if (!first)
+            builder.append(", "sv);
+        builder.appendff("{}", property);
+        first = false;
+    }
+    return MUST(builder.to_string());
+}
+
+static Vector<CSS::InvalidationSet::Property> collect_non_subject_has_invalidation_properties(Element const& element)
+{
+    Vector<CSS::InvalidationSet::Property> properties;
+    auto append_unique = [&](CSS::InvalidationSet::Property property) {
+        if (!properties.contains_slow(property))
+            properties.append(move(property));
+    };
+
+    if (auto const& id = element.id(); id.has_value())
+        append_unique({ CSS::InvalidationSet::Property::Type::Id, *id });
+
+    for (auto const& class_name : element.class_names())
+        append_unique({ CSS::InvalidationSet::Property::Type::Class, class_name });
+
+    append_unique({ CSS::InvalidationSet::Property::Type::TagName, element.local_name() });
+
+    element.for_each_attribute([&](Attr const& attribute) {
+        auto const& local_name = attribute.local_name();
+        if (local_name == HTML::AttributeNames::id || local_name == HTML::AttributeNames::class_)
+            return;
+        append_unique({ CSS::InvalidationSet::Property::Type::Attribute, local_name });
+    });
+
+    if (element.matches_enabled_pseudo_class())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Enabled });
+    if (element.matches_disabled_pseudo_class())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Disabled });
+    if (element.is_defined())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Defined });
+    if (element.matches_checked_pseudo_class())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Checked });
+    if (element.matches_placeholder_shown_pseudo_class())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::PlaceholderShown });
+    if (element.matches_link_pseudo_class()) {
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Link });
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::AnyLink });
+    }
+    if (element.matches_local_link_pseudo_class())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::LocalLink });
+    if (is<HTML::HTMLHtmlElement>(element))
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Root });
+    if (element.is_shadow_host())
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Host });
+    if (is<HTML::HTMLInputElement>(element) || is<HTML::HTMLSelectElement>(element) || is<HTML::HTMLTextAreaElement>(element)) {
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Required });
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Optional });
+    }
+
+    return properties;
 }
 
 [[maybe_unused]] static String current_script_stack_for_debug(JS::VM& vm, size_t max_frames = 5)
@@ -1949,18 +2017,54 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
 
 void Element::invalidate_style_if_affected_by_has()
 {
-    dbgln_if(LAYOUT_THRASH_DEBUG, ":has() invalidation for {} ({:p}) subject={} non_subject={} sibling_relative={}",
-        debug_description(),
-        this,
-        affected_by_has_pseudo_class_in_subject_position(),
-        affected_by_has_pseudo_class_in_non_subject_position(),
-        affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator());
+    bool const affected_in_subject_position = affected_by_has_pseudo_class_in_subject_position();
+    bool const affected_in_non_subject_position = affected_by_has_pseudo_class_in_non_subject_position();
 
-    if (affected_by_has_pseudo_class_in_subject_position()) {
+    if (affected_in_subject_position || affected_in_non_subject_position) {
+        dbgln_if(LAYOUT_THRASH_DEBUG, ":has() invalidation for {} ({:p}) subject={} non_subject={} sibling_relative={}",
+            debug_description(),
+            this,
+            affected_in_subject_position,
+            affected_in_non_subject_position,
+            affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator());
+    }
+
+    if (affected_in_subject_position) {
         set_needs_style_update(true);
     }
-    if (affected_by_has_pseudo_class_in_non_subject_position()) {
-        invalidate_style(StyleInvalidationReason::Other, { { CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Has } }, {});
+    if (affected_in_non_subject_position) {
+        auto properties = collect_non_subject_has_invalidation_properties(*this);
+
+        auto& root = this->root();
+        auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot&>(root).style_scope() : document().style_scope();
+        CSS::StyleScope* shadow_style_scope = nullptr;
+        if (is_shadow_host()) {
+            if (auto element_shadow_root = shadow_root())
+                shadow_style_scope = &element_shadow_root->style_scope();
+        }
+
+        auto invalidate_for_style_scope = [&](CSS::StyleScope& current_style_scope, StringView scope_name) {
+            auto plan = document().style_computer().has_non_subject_invalidation_plan_for_properties(properties, current_style_scope);
+            auto selectors = current_style_scope.m_style_invalidation_data
+                ? current_style_scope.m_style_invalidation_data->debug_description_for_has_non_subject_properties(properties)
+                : "<none>"_string;
+            dbgln_if(LAYOUT_THRASH_DEBUG, ":has() non-subject invalidation for {} ({:p}) scope={} properties=[{}] plan={{ self={} whole_subtree={} descendant_rules={} sibling_rules={} }} selectors={{ {} }}",
+                debug_description(),
+                this,
+                scope_name,
+                format_invalidation_properties_for_debug(properties),
+                plan->invalidate_self,
+                plan->invalidate_whole_subtree,
+                plan->descendant_rules.size(),
+                plan->sibling_rules.size(),
+                selectors);
+            return document().style_invalidator().enqueue_invalidation_plan(*this, StyleInvalidationReason::Other, *plan);
+        };
+
+        if (invalidate_for_style_scope(style_scope, root.is_shadow_root() ? "shadow-root"sv : "document"sv))
+            return;
+        if (shadow_style_scope)
+            (void)invalidate_for_style_scope(*shadow_style_scope, "shadow-host"sv);
     }
 }
 

@@ -196,12 +196,9 @@ RuleCache const* StyleComputer::rule_cache_for_cascade_origin(CascadeOrigin casc
     return true;
 }
 
-NonnullRefPtr<InvalidationPlan> StyleComputer::invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
+static NonnullRefPtr<InvalidationPlan> invalidation_plan_for_property_map(HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> const& invalidation_plans, Vector<InvalidationSet::Property> const& properties)
 {
     auto result = InvalidationPlan::create();
-    if (!style_scope.m_style_invalidation_data)
-        return result;
-    auto const& invalidation_plans = style_scope.m_style_invalidation_data->invalidation_plans;
     for (auto const& property : properties) {
         if (auto it = invalidation_plans.find(property); it != invalidation_plans.end()) {
             result->include_all_from(*it->value);
@@ -210,6 +207,20 @@ NonnullRefPtr<InvalidationPlan> StyleComputer::invalidation_plan_for_properties(
         }
     }
     return result;
+}
+
+NonnullRefPtr<InvalidationPlan> StyleComputer::invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
+{
+    if (!style_scope.m_style_invalidation_data)
+        return InvalidationPlan::create();
+    return invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->invalidation_plans, properties);
+}
+
+NonnullRefPtr<InvalidationPlan> StyleComputer::has_non_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
+{
+    if (!style_scope.m_style_invalidation_data)
+        return InvalidationPlan::create();
+    return invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->has_non_subject_invalidation_plans, properties);
 }
 
 bool StyleComputer::invalidation_property_used_in_has_selector(InvalidationSet::Property const& property, StyleScope const& style_scope) const
