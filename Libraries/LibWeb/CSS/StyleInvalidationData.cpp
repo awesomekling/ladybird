@@ -216,6 +216,62 @@ static void record_debug_selector_for_hash_table(HashTable<String>& target_debug
     target_debug_selectors.set(selector.serialize());
 }
 
+static bool invalidation_sets_have_same_properties(InvalidationSet const& a, InvalidationSet const& b)
+{
+    Vector<InvalidationSet::Property> a_properties;
+    a.for_each_property([&](auto const& property) {
+        a_properties.append(property);
+        return IterationDecision::Continue;
+    });
+
+    size_t b_property_count = 0;
+    bool has_all_properties = true;
+    b.for_each_property([&](auto const& property) {
+        ++b_property_count;
+        if (!a_properties.contains_slow(property)) {
+            has_all_properties = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+
+    return has_all_properties && a_properties.size() == b_property_count;
+}
+
+static bool properties_include_all_from_invalidation_set(Vector<InvalidationSet::Property> const& properties, InvalidationSet const& invalidation_set)
+{
+    bool matches = true;
+    invalidation_set.for_each_property([&](auto const& property) {
+        if (!properties.contains_slow(property)) {
+            matches = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return matches;
+}
+
+static void add_specific_has_invalidation_plan(Vector<SpecificHasInvalidationPlan>& target_invalidation_plans, InvalidationSet const& invalidation_properties, InvalidationPlan const& plan, Selector const& selector)
+{
+    for (auto& entry : target_invalidation_plans) {
+        if (!invalidation_sets_have_same_properties(entry.match_set, invalidation_properties))
+            continue;
+
+        entry.plan->include_all_from(plan);
+        record_debug_selector_for_hash_table(entry.debug_selectors, selector);
+        return;
+    }
+
+    auto specific_plan = SpecificHasInvalidationPlan {
+        .match_set = invalidation_properties,
+        .plan = InvalidationPlan::create(),
+        .debug_selectors = {},
+    };
+    specific_plan.plan->include_all_from(plan);
+    record_debug_selector_for_hash_table(specific_plan.debug_selectors, selector);
+    target_invalidation_plans.append(move(specific_plan));
+}
+
 void StyleInvalidationData::record_debug_selector_for_properties(InvalidationSet const& invalidation_properties, Selector const& selector)
 {
     record_debug_selector_for_property_map(debug_selectors_by_invalidation_property, invalidation_properties, selector);
@@ -307,6 +363,20 @@ static String debug_description_for_selector_hash_table(HashTable<String> const&
     return MUST(builder.to_string());
 }
 
+static String debug_description_for_matching_specific_has_invalidation_plans(Vector<SpecificHasInvalidationPlan> const& plans, Vector<InvalidationSet::Property> const& properties, StringView label, size_t max_selectors)
+{
+    HashTable<String> matching_selectors;
+    for (auto const& plan : plans) {
+        if (!properties_include_all_from_invalidation_set(properties, plan.match_set))
+            continue;
+
+        for (auto const& selector_text : plan.debug_selectors)
+            matching_selectors.set(selector_text);
+    }
+
+    return debug_description_for_selector_hash_table(matching_selectors, label, max_selectors);
+}
+
 String StyleInvalidationData::debug_description_for_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
     return debug_description_for_property_map(debug_selectors_by_invalidation_property, properties, max_selectors);
@@ -314,7 +384,7 @@ String StyleInvalidationData::debug_description_for_properties(Vector<Invalidati
 
 String StyleInvalidationData::debug_description_for_has_subject_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
-    auto description = debug_description_for_property_map(debug_selectors_by_has_subject_invalidation_property, properties, max_selectors);
+    auto description = debug_description_for_matching_specific_has_invalidation_plans(specific_has_subject_invalidation_plans, properties, "<specific-subject-has>"sv, max_selectors);
     auto generic_description = debug_description_for_selector_hash_table(debug_selectors_for_generic_has_subject_invalidation, "<generic-subject-has>"sv, max_selectors);
     if (description == "<none>"sv)
         return generic_description;
@@ -325,7 +395,7 @@ String StyleInvalidationData::debug_description_for_has_subject_properties(Vecto
 
 String StyleInvalidationData::debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
-    auto description = debug_description_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, properties, max_selectors);
+    auto description = debug_description_for_matching_specific_has_invalidation_plans(specific_has_non_subject_invalidation_plans, properties, "<specific-non-subject-has>"sv, max_selectors);
     auto generic_description = debug_description_for_selector_hash_table(debug_selectors_for_generic_has_non_subject_invalidation, "<generic-non-subject-has>"sv, max_selectors);
     if (description == "<none>"sv)
         return generic_description;
@@ -519,7 +589,10 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
     InvalidationSet invalidation_set_for_rightmost_selector;
     Selector::Combinator previous_compound_combinator = Selector::Combinator::None;
     Optional<SelectorRighthand> selector_righthand;
+    size_t processed_simple_selector_group_count = 0;
     for_each_consecutive_simple_selector_group(selector, [&](Vector<Selector::SimpleSelector const&> const& simple_selectors, Selector::Combinator combinator, bool is_rightmost) {
+        bool const has_left_hand_context = processed_simple_selector_group_count + 1 < compound_selectors.size();
+
         // Collect properties used in :has() so we can decide if only specific properties
         // trigger descendant invalidation or if the entire document must be invalidated.
         bool simple_selector_group_contains_has = false;
@@ -554,9 +627,10 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             }
             add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *root_plan);
             style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
-            if (simple_selector_group_contains_has) {
+            if (simple_selector_group_contains_has && !has_left_hand_context) {
                 if (specific_has_subject_invalidation_properties.has_properties()) {
                     add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *root_plan);
+                    add_specific_has_invalidation_plan(style_invalidation_data.specific_has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *root_plan, selector);
                     style_invalidation_data.record_debug_selector_for_has_subject_properties(specific_has_subject_invalidation_properties, selector);
                 } else {
                     style_invalidation_data.add_generic_has_subject_invalidation_plan(*root_plan, selector);
@@ -576,9 +650,10 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             auto plan = build_invalidation_for_combinator(previous_compound_combinator, *selector_righthand);
             add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *plan);
             style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
-            if (simple_selector_group_contains_has) {
+            if (simple_selector_group_contains_has && !has_left_hand_context) {
                 if (specific_has_subject_invalidation_properties.has_properties()) {
                     add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan);
+                    add_specific_has_invalidation_plan(style_invalidation_data.specific_has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan, selector);
                     style_invalidation_data.record_debug_selector_for_has_subject_properties(specific_has_subject_invalidation_properties, selector);
                 } else {
                     style_invalidation_data.add_generic_has_subject_invalidation_plan(*plan, selector);
@@ -587,6 +662,7 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             if (selector_contains_has) {
                 if (specific_has_subject_invalidation_properties.has_properties()) {
                     add_invalidation_plan_for_properties(style_invalidation_data.has_non_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan);
+                    add_specific_has_invalidation_plan(style_invalidation_data.specific_has_non_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan, selector);
                     style_invalidation_data.record_debug_selector_for_has_non_subject_properties(specific_has_subject_invalidation_properties, selector);
                 } else {
                     style_invalidation_data.add_generic_has_non_subject_invalidation_plan(*plan, selector);
@@ -601,6 +677,7 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
         }
 
         previous_compound_combinator = combinator;
+        ++processed_simple_selector_group_count;
     });
 
     return invalidation_set_for_rightmost_selector;

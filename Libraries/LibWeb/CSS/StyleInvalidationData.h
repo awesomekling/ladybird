@@ -60,6 +60,12 @@ struct InvalidationPlan final : RefCounted<InvalidationPlan> {
     Vector<SiblingInvalidationRule> sibling_rules;
 };
 
+struct SpecificHasInvalidationPlan {
+    InvalidationSet match_set;
+    NonnullRefPtr<InvalidationPlan> plan;
+    HashTable<String> debug_selectors;
+};
+
 struct StyleInvalidationData;
 
 void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&, InvalidationSet&, ExcludePropertiesNestedInNotPseudoClass, StyleInvalidationData&, InsideNthChildPseudoClass);
@@ -68,6 +74,8 @@ struct StyleInvalidationData {
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> invalidation_plans;
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_subject_invalidation_plans;
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_non_subject_invalidation_plans;
+    Vector<SpecificHasInvalidationPlan> specific_has_subject_invalidation_plans;
+    Vector<SpecificHasInvalidationPlan> specific_has_non_subject_invalidation_plans;
     NonnullRefPtr<InvalidationPlan> generic_has_subject_invalidation_plan { InvalidationPlan::create() };
     NonnullRefPtr<InvalidationPlan> generic_has_non_subject_invalidation_plan { InvalidationPlan::create() };
     HashTable<FlyString> ids_used_in_has_selectors;

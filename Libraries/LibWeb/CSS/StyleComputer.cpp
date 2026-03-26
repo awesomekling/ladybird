@@ -221,6 +221,33 @@ static Vector<InvalidationSet::Property> properties_excluding_has_pseudo_class(V
     return filtered_properties;
 }
 
+static bool properties_include_all_from_invalidation_set(Vector<InvalidationSet::Property> const& properties, InvalidationSet const& invalidation_set)
+{
+    bool matches = true;
+    invalidation_set.for_each_property([&](auto const& property) {
+        if (!properties.contains_slow(property)) {
+            matches = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return matches;
+}
+
+static NonnullRefPtr<InvalidationPlan> invalidation_plan_for_specific_has_plans(Vector<SpecificHasInvalidationPlan> const& invalidation_plans, Vector<InvalidationSet::Property> const& properties)
+{
+    auto result = InvalidationPlan::create();
+    for (auto const& invalidation_plan : invalidation_plans) {
+        if (!properties_include_all_from_invalidation_set(properties, invalidation_plan.match_set))
+            continue;
+
+        result->include_all_from(*invalidation_plan.plan);
+        if (result->invalidate_whole_subtree)
+            break;
+    }
+    return result;
+}
+
 NonnullRefPtr<InvalidationPlan> StyleComputer::invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
 {
     if (!style_scope.m_style_invalidation_data)
@@ -233,7 +260,7 @@ NonnullRefPtr<InvalidationPlan> StyleComputer::has_subject_invalidation_plan_for
     if (!style_scope.m_style_invalidation_data)
         return InvalidationPlan::create();
 
-    auto plan = invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->has_subject_invalidation_plans, properties_excluding_has_pseudo_class(properties));
+    auto plan = invalidation_plan_for_specific_has_plans(style_scope.m_style_invalidation_data->specific_has_subject_invalidation_plans, properties_excluding_has_pseudo_class(properties));
     plan->include_all_from(*style_scope.m_style_invalidation_data->generic_has_subject_invalidation_plan);
     return plan;
 }
@@ -243,7 +270,7 @@ NonnullRefPtr<InvalidationPlan> StyleComputer::has_non_subject_invalidation_plan
     if (!style_scope.m_style_invalidation_data)
         return InvalidationPlan::create();
 
-    auto plan = invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->has_non_subject_invalidation_plans, properties_excluding_has_pseudo_class(properties));
+    auto plan = invalidation_plan_for_specific_has_plans(style_scope.m_style_invalidation_data->specific_has_non_subject_invalidation_plans, properties_excluding_has_pseudo_class(properties));
     plan->include_all_from(*style_scope.m_style_invalidation_data->generic_has_non_subject_invalidation_plan);
     return plan;
 }
