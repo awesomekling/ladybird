@@ -216,6 +216,13 @@ NonnullRefPtr<InvalidationPlan> StyleComputer::invalidation_plan_for_properties(
     return invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->invalidation_plans, properties);
 }
 
+NonnullRefPtr<InvalidationPlan> StyleComputer::has_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
+{
+    if (!style_scope.m_style_invalidation_data)
+        return InvalidationPlan::create();
+    return invalidation_plan_for_property_map(style_scope.m_style_invalidation_data->has_subject_invalidation_plans, properties);
+}
+
 NonnullRefPtr<InvalidationPlan> StyleComputer::has_non_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const& properties, StyleScope const& style_scope) const
 {
     if (!style_scope.m_style_invalidation_data)

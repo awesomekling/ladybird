@@ -166,7 +166,7 @@ GC_DEFINE_ALLOCATOR(Element);
     return MUST(builder.to_string());
 }
 
-static Vector<CSS::InvalidationSet::Property> collect_non_subject_has_invalidation_properties(Element const& element)
+static Vector<CSS::InvalidationSet::Property> collect_has_invalidation_properties(Element const& element, bool include_has_pseudo_class)
 {
     Vector<CSS::InvalidationSet::Property> properties;
     auto append_unique = [&](CSS::InvalidationSet::Property property) {
@@ -213,6 +213,8 @@ static Vector<CSS::InvalidationSet::Property> collect_non_subject_has_invalidati
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Required });
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Optional });
     }
+    if (include_has_pseudo_class)
+        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Has });
 
     return properties;
 }
@@ -2029,11 +2031,13 @@ void Element::invalidate_style_if_affected_by_has()
             affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator());
     }
 
-    if (affected_in_subject_position) {
-        set_needs_style_update(true);
-    }
-    if (affected_in_non_subject_position) {
-        auto properties = collect_non_subject_has_invalidation_properties(*this);
+    if (affected_in_subject_position || affected_in_non_subject_position) {
+        auto subject_properties = affected_in_subject_position
+            ? collect_has_invalidation_properties(*this, true)
+            : Vector<CSS::InvalidationSet::Property> {};
+        auto non_subject_properties = affected_in_non_subject_position
+            ? collect_has_invalidation_properties(*this, false)
+            : Vector<CSS::InvalidationSet::Property> {};
 
         auto& root = this->root();
         auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot&>(root).style_scope() : document().style_scope();
@@ -2043,12 +2047,18 @@ void Element::invalidate_style_if_affected_by_has()
                 shadow_style_scope = &element_shadow_root->style_scope();
         }
 
-        auto invalidate_for_style_scope = [&](CSS::StyleScope& current_style_scope, StringView scope_name) {
-            auto plan = document().style_computer().has_non_subject_invalidation_plan_for_properties(properties, current_style_scope);
-            auto selectors = current_style_scope.m_style_invalidation_data
-                ? current_style_scope.m_style_invalidation_data->debug_description_for_has_non_subject_properties(properties)
-                : "<none>"_string;
-            dbgln_if(LAYOUT_THRASH_DEBUG, ":has() non-subject invalidation for {} ({:p}) scope={} properties=[{}] plan={{ self={} whole_subtree={} descendant_rules={} sibling_rules={} }} selectors={{ {} }}",
+        auto invalidate_for_style_scope = [&](CSS::StyleScope& current_style_scope, StringView scope_name, Vector<CSS::InvalidationSet::Property> const& properties, bool is_subject_invalidation) {
+            auto plan = is_subject_invalidation
+                ? document().style_computer().has_subject_invalidation_plan_for_properties(properties, current_style_scope)
+                : document().style_computer().has_non_subject_invalidation_plan_for_properties(properties, current_style_scope);
+            auto selectors = "<none>"_string;
+            if (current_style_scope.m_style_invalidation_data) {
+                selectors = is_subject_invalidation
+                    ? current_style_scope.m_style_invalidation_data->debug_description_for_has_subject_properties(properties)
+                    : current_style_scope.m_style_invalidation_data->debug_description_for_has_non_subject_properties(properties);
+            }
+            dbgln_if(LAYOUT_THRASH_DEBUG, ":has() {} invalidation for {} ({:p}) scope={} properties=[{}] plan={{ self={} whole_subtree={} descendant_rules={} sibling_rules={} }} selectors={{ {} }}",
+                is_subject_invalidation ? "subject"sv : "non-subject"sv,
                 debug_description(),
                 this,
                 scope_name,
@@ -2058,13 +2068,32 @@ void Element::invalidate_style_if_affected_by_has()
                 plan->descendant_rules.size(),
                 plan->sibling_rules.size(),
                 selectors);
+
+            if (is_subject_invalidation && plan->is_empty()) {
+                dbgln_if(LAYOUT_THRASH_DEBUG, ":has() subject invalidation fallback for {} ({:p}) scope={} properties=[{}]",
+                    debug_description(),
+                    this,
+                    scope_name,
+                    format_invalidation_properties_for_debug(properties));
+                set_needs_style_update(true);
+                return false;
+            }
+
             return document().style_invalidator().enqueue_invalidation_plan(*this, StyleInvalidationReason::Other, *plan);
         };
 
-        if (invalidate_for_style_scope(style_scope, root.is_shadow_root() ? "shadow-root"sv : "document"sv))
+        auto invalidate_in_style_scopes = [&](Vector<CSS::InvalidationSet::Property> const& properties, bool is_subject_invalidation) {
+            if (invalidate_for_style_scope(style_scope, root.is_shadow_root() ? "shadow-root"sv : "document"sv, properties, is_subject_invalidation))
+                return true;
+            if (shadow_style_scope)
+                return invalidate_for_style_scope(*shadow_style_scope, "shadow-host"sv, properties, is_subject_invalidation);
+            return false;
+        };
+
+        if (affected_in_subject_position && invalidate_in_style_scopes(subject_properties, true))
             return;
-        if (shadow_style_scope)
-            (void)invalidate_for_style_scope(*shadow_style_scope, "shadow-host"sv);
+        if (affected_in_non_subject_position)
+            (void)invalidate_in_style_scopes(non_subject_properties, false);
     }
 }
 
