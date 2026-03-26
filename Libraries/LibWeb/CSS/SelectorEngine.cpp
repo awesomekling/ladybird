@@ -657,8 +657,11 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         }
         // These selectors should be relative selectors (https://drafts.csswg.org/selectors-4/#relative-selector)
         for (auto& selector : pseudo_class.argument_selector_list) {
-            if (matches_has_pseudo_class(selector, element, shadow_host, context, scope))
+            if (matches_has_pseudo_class(selector, element, shadow_host, context, scope)) {
+                if (context.collect_per_element_selector_involvement_metadata && &element == context.subject)
+                    const_cast<DOM::Element&>(element).set_matches_has_pseudo_class_in_subject_position(true);
                 return true;
+            }
         }
         return false;
     case CSS::PseudoClass::Is:

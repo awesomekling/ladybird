@@ -503,6 +503,8 @@ public:
 
     bool affected_by_has_pseudo_class_in_subject_position() const { return m_affected_by_has_pseudo_class_in_subject_position; }
     void set_affected_by_has_pseudo_class_in_subject_position(bool value) { m_affected_by_has_pseudo_class_in_subject_position = value; }
+    bool matches_has_pseudo_class_in_subject_position() const { return m_matches_has_pseudo_class_in_subject_position; }
+    void set_matches_has_pseudo_class_in_subject_position(bool value) { m_matches_has_pseudo_class_in_subject_position = value; }
 
     bool affected_by_has_pseudo_class_in_non_subject_position() const { return m_affected_by_has_pseudo_class_in_non_subject_position; }
     void set_affected_by_has_pseudo_class_in_non_subject_position(bool value) { m_affected_by_has_pseudo_class_in_non_subject_position = value; }
@@ -693,6 +695,7 @@ private:
     bool m_style_uses_inherit_css_function : 1 { false };
     bool m_child_style_uses_tree_counting_function : 1 { false };
     bool m_affected_by_has_pseudo_class_in_subject_position : 1 { false };
+    bool m_matches_has_pseudo_class_in_subject_position : 1 { false };
     bool m_affected_by_has_pseudo_class_in_non_subject_position : 1 { false };
     bool m_affected_by_direct_sibling_combinator : 1 { false };
     bool m_affected_by_indirect_sibling_combinator : 1 { false };
