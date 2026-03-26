@@ -649,6 +649,7 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
     auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
     auto property_filtered_nodes = move(m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has);
+    auto* shadow_root = as_if<DOM::ShadowRoot>(node());
     HasInvalidationStatistics statistics;
     auto invalidate_for_pending_node = [&](DOM::Node& pending_node, Vector<InvalidationSet::Property> const* trigger_properties) {
         ++statistics.pending_nodes;
@@ -679,6 +680,9 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
                 ++statistics.no_op_elements;
             }
             element.invalidate_style_if_affected_by_has(trigger_properties);
+
+            if (shadow_root && &element == shadow_root->host())
+                break;
 
             auto* parent = ancestor->parent_or_shadow_host();
             if (!parent)
