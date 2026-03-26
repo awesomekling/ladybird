@@ -509,9 +509,24 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     auto& style_scope = root().is_shadow_root() ? static_cast<ShadowRoot&>(root()).style_scope() : document().style_scope();
 
     if (style_scope.may_have_has_selectors()) {
+        enum class ScheduleHasInvalidationResult {
+            NoInvalidationNeeded,
+            Scheduled,
+            NeedGenericFallback,
+        };
+
+        auto style_scope_has_generic_has_invalidation = [](CSS::StyleScope const& current_style_scope) {
+            if (!current_style_scope.m_style_invalidation_data)
+                return true;
+            return !current_style_scope.m_style_invalidation_data->generic_has_subject_invalidation_plan->is_empty()
+                || !current_style_scope.m_style_invalidation_data->generic_has_non_subject_invalidation_plan->is_empty();
+        };
+
         auto schedule_property_filtered_has_invalidation_if_possible = [&](Node& node_to_schedule, Element const* changed_element) {
             if (!changed_element)
-                return false;
+                return style_scope_has_generic_has_invalidation(style_scope)
+                    ? ScheduleHasInvalidationResult::NeedGenericFallback
+                    : ScheduleHasInvalidationResult::NoInvalidationNeeded;
 
             Vector<CSS::InvalidationSet::Property> trigger_properties;
             for (auto const& property : changed_element->collect_has_invalidation_properties()) {
@@ -520,16 +535,19 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 if (!trigger_properties.contains_slow(property))
                     trigger_properties.append(property);
             }
-            if (trigger_properties.is_empty())
-                return false;
+            if (trigger_properties.is_empty()) {
+                return style_scope_has_generic_has_invalidation(style_scope)
+                    ? ScheduleHasInvalidationResult::NeedGenericFallback
+                    : ScheduleHasInvalidationResult::NoInvalidationNeeded;
+            }
 
             style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(node_to_schedule, trigger_properties);
-            return true;
+            return ScheduleHasInvalidationResult::Scheduled;
         };
 
         if (reason == StyleInvalidationReason::NodeRemove) {
             if (auto* parent = parent_or_shadow_host(); parent) {
-                if (!schedule_property_filtered_has_invalidation_if_possible(*parent, as_if<Element>(*this)))
+                if (schedule_property_filtered_has_invalidation_if_possible(*parent, as_if<Element>(*this)) == ScheduleHasInvalidationResult::NeedGenericFallback)
                     style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 parent->for_each_child_of_type<Element>([&](auto& element) {
                     if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
@@ -538,7 +556,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 });
             }
         } else if (reason_may_affect_has_selectors(reason)) {
-            if (!schedule_property_filtered_has_invalidation_if_possible(*this, as_if<Element>(*this)))
+            if (schedule_property_filtered_has_invalidation_if_possible(*this, as_if<Element>(*this)) == ScheduleHasInvalidationResult::NeedGenericFallback)
                 style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
         }
     }
