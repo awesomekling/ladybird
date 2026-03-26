@@ -31,6 +31,7 @@ GC::Ref<WebIDL::ObservableArray> create_adopted_style_sheets_list(Node& document
         style_sheet->add_owning_document_or_shadow_root(document_or_shadow_root);
 
         style_sheet->load_pending_image_resources(document_or_shadow_root.document());
+        style_sheet->evaluate_media_queries(document_or_shadow_root.document());
 
         auto& style_scope = document_or_shadow_root.is_shadow_root() ? as<DOM::ShadowRoot>(document_or_shadow_root).style_scope() : document_or_shadow_root.document().style_scope();
         style_scope.invalidate_rule_cache();
