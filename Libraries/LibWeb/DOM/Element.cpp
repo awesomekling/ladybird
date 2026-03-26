@@ -166,7 +166,7 @@ GC_DEFINE_ALLOCATOR(Element);
     return MUST(builder.to_string());
 }
 
-static Vector<CSS::InvalidationSet::Property> collect_has_invalidation_properties(Element const& element, bool include_has_pseudo_class)
+static Vector<CSS::InvalidationSet::Property> collect_has_invalidation_properties(Element const& element)
 {
     Vector<CSS::InvalidationSet::Property> properties;
     auto append_unique = [&](CSS::InvalidationSet::Property property) {
@@ -213,8 +213,6 @@ static Vector<CSS::InvalidationSet::Property> collect_has_invalidation_propertie
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Required });
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Optional });
     }
-    if (include_has_pseudo_class)
-        append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Has });
 
     return properties;
 }
@@ -2033,10 +2031,10 @@ void Element::invalidate_style_if_affected_by_has()
 
     if (affected_in_subject_position || affected_in_non_subject_position) {
         auto subject_properties = affected_in_subject_position
-            ? collect_has_invalidation_properties(*this, true)
+            ? collect_has_invalidation_properties(*this)
             : Vector<CSS::InvalidationSet::Property> {};
         auto non_subject_properties = affected_in_non_subject_position
-            ? collect_has_invalidation_properties(*this, false)
+            ? collect_has_invalidation_properties(*this)
             : Vector<CSS::InvalidationSet::Property> {};
 
         auto& root = this->root();

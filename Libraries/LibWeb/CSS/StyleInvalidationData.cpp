@@ -208,6 +208,14 @@ static void record_debug_selector_for_property_map(HashMap<InvalidationSet::Prop
     });
 }
 
+static void record_debug_selector_for_hash_table(HashTable<String>& target_debug_selectors, Selector const& selector)
+{
+    if (!LAYOUT_THRASH_DEBUG)
+        return;
+
+    target_debug_selectors.set(selector.serialize());
+}
+
 void StyleInvalidationData::record_debug_selector_for_properties(InvalidationSet const& invalidation_properties, Selector const& selector)
 {
     record_debug_selector_for_property_map(debug_selectors_by_invalidation_property, invalidation_properties, selector);
@@ -221,6 +229,18 @@ void StyleInvalidationData::record_debug_selector_for_has_subject_properties(Inv
 void StyleInvalidationData::record_debug_selector_for_has_non_subject_properties(InvalidationSet const& invalidation_properties, Selector const& selector)
 {
     record_debug_selector_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, invalidation_properties, selector);
+}
+
+void StyleInvalidationData::add_generic_has_subject_invalidation_plan(InvalidationPlan const& plan, Selector const& selector)
+{
+    generic_has_subject_invalidation_plan->include_all_from(plan);
+    record_debug_selector_for_hash_table(debug_selectors_for_generic_has_subject_invalidation, selector);
+}
+
+void StyleInvalidationData::add_generic_has_non_subject_invalidation_plan(InvalidationPlan const& plan, Selector const& selector)
+{
+    generic_has_non_subject_invalidation_plan->include_all_from(plan);
+    record_debug_selector_for_hash_table(debug_selectors_for_generic_has_non_subject_invalidation, selector);
 }
 
 static String debug_description_for_property_map(HashMap<InvalidationSet::Property, HashTable<String>> const& debug_selectors_by_property, Vector<InvalidationSet::Property> const& properties, size_t max_selectors)
@@ -261,6 +281,32 @@ static String debug_description_for_property_map(HashMap<InvalidationSet::Proper
     return MUST(builder.to_string());
 }
 
+static String debug_description_for_selector_hash_table(HashTable<String> const& selectors, StringView label, size_t max_selectors)
+{
+    if (!LAYOUT_THRASH_DEBUG)
+        return "<none>"_string;
+    if (selectors.is_empty())
+        return "<none>"_string;
+
+    StringBuilder builder;
+    builder.appendff("{}: count={} selectors=[", label, selectors.size());
+
+    size_t appended_selectors = 0;
+    for (auto const& selector_text : selectors) {
+        if (appended_selectors > 0)
+            builder.append(" | "sv);
+        builder.append(selector_text);
+        ++appended_selectors;
+        if (appended_selectors >= max_selectors)
+            break;
+    }
+
+    if (selectors.size() > appended_selectors)
+        builder.appendff(" | ... +{}", selectors.size() - appended_selectors);
+    builder.append(']');
+    return MUST(builder.to_string());
+}
+
 String StyleInvalidationData::debug_description_for_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
     return debug_description_for_property_map(debug_selectors_by_invalidation_property, properties, max_selectors);
@@ -268,12 +314,24 @@ String StyleInvalidationData::debug_description_for_properties(Vector<Invalidati
 
 String StyleInvalidationData::debug_description_for_has_subject_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
-    return debug_description_for_property_map(debug_selectors_by_has_subject_invalidation_property, properties, max_selectors);
+    auto description = debug_description_for_property_map(debug_selectors_by_has_subject_invalidation_property, properties, max_selectors);
+    auto generic_description = debug_description_for_selector_hash_table(debug_selectors_for_generic_has_subject_invalidation, "<generic-subject-has>"sv, max_selectors);
+    if (description == "<none>"sv)
+        return generic_description;
+    if (generic_description == "<none>"sv)
+        return description;
+    return MUST(String::formatted("{}; {}", description, generic_description));
 }
 
 String StyleInvalidationData::debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const& properties, size_t max_selectors) const
 {
-    return debug_description_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, properties, max_selectors);
+    auto description = debug_description_for_property_map(debug_selectors_by_has_non_subject_invalidation_property, properties, max_selectors);
+    auto generic_description = debug_description_for_selector_hash_table(debug_selectors_for_generic_has_non_subject_invalidation, "<generic-non-subject-has>"sv, max_selectors);
+    if (description == "<none>"sv)
+        return generic_description;
+    if (generic_description == "<none>"sv)
+        return description;
+    return MUST(String::formatted("{}; {}", description, generic_description));
 }
 
 struct SelectorRighthand {
@@ -413,6 +471,44 @@ static void add_invalidation_sets_to_cover_scope_leakage_of_relative_selector_in
     });
 }
 
+static InvalidationSet build_specific_has_subject_invalidation_set(InvalidationSet const& invalidation_set)
+{
+    InvalidationSet filtered_invalidation_set;
+    invalidation_set.for_each_property([&](auto const& property) {
+        if (property.type == InvalidationSet::Property::Type::PseudoClass && property.value.template get<PseudoClass>() == PseudoClass::Has)
+            return IterationDecision::Continue;
+
+        switch (property.type) {
+        case InvalidationSet::Property::Type::InvalidateSelf:
+            filtered_invalidation_set.set_needs_invalidate_self();
+            break;
+        case InvalidationSet::Property::Type::InvalidateWholeSubtree:
+            filtered_invalidation_set.set_needs_invalidate_whole_subtree();
+            break;
+        case InvalidationSet::Property::Type::Class:
+            filtered_invalidation_set.set_needs_invalidate_class(property.name());
+            break;
+        case InvalidationSet::Property::Type::Id:
+            filtered_invalidation_set.set_needs_invalidate_id(property.name());
+            break;
+        case InvalidationSet::Property::Type::TagName:
+            filtered_invalidation_set.set_needs_invalidate_tag_name(property.name());
+            break;
+        case InvalidationSet::Property::Type::Attribute:
+            filtered_invalidation_set.set_needs_invalidate_attribute(property.name());
+            break;
+        case InvalidationSet::Property::Type::PseudoClass:
+            filtered_invalidation_set.set_needs_invalidate_pseudo_class(property.value.template get<PseudoClass>());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        return IterationDecision::Continue;
+    });
+    return filtered_invalidation_set;
+}
+
 static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidationData& style_invalidation_data, Selector const& selector, InsideNthChildPseudoClass inside_nth_child_pseudo_class)
 {
     bool const selector_contains_has = selector.contains_pseudo_class(PseudoClass::Has);
@@ -437,6 +533,7 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
         }
 
         auto invalidation_properties = build_invalidation_set_for_simple_selectors(simple_selectors, ExcludePropertiesNestedInNotPseudoClass::No, style_invalidation_data, inside_nth_child_pseudo_class);
+        auto specific_has_subject_invalidation_properties = build_specific_has_subject_invalidation_set(invalidation_properties);
         auto subject_match_set = build_invalidation_set_for_simple_selectors(simple_selectors, ExcludePropertiesNestedInNotPseudoClass::Yes, style_invalidation_data, inside_nth_child_pseudo_class);
         bool subject_matches_any = subject_match_set.is_empty() && simple_selector_group_matches_any(simple_selectors);
 
@@ -458,8 +555,12 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *root_plan);
             style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
             if (simple_selector_group_contains_has) {
-                add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, invalidation_properties, *root_plan);
-                style_invalidation_data.record_debug_selector_for_has_subject_properties(invalidation_properties, selector);
+                if (specific_has_subject_invalidation_properties.has_properties()) {
+                    add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *root_plan);
+                    style_invalidation_data.record_debug_selector_for_has_subject_properties(specific_has_subject_invalidation_properties, selector);
+                } else {
+                    style_invalidation_data.add_generic_has_subject_invalidation_plan(*root_plan, selector);
+                }
             }
 
             invalidation_set_for_rightmost_selector = subject_match_set;
@@ -476,12 +577,20 @@ static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidati
             add_invalidation_plan_for_properties(style_invalidation_data.invalidation_plans, invalidation_properties, *plan);
             style_invalidation_data.record_debug_selector_for_properties(invalidation_properties, selector);
             if (simple_selector_group_contains_has) {
-                add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, invalidation_properties, *plan);
-                style_invalidation_data.record_debug_selector_for_has_subject_properties(invalidation_properties, selector);
+                if (specific_has_subject_invalidation_properties.has_properties()) {
+                    add_invalidation_plan_for_properties(style_invalidation_data.has_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan);
+                    style_invalidation_data.record_debug_selector_for_has_subject_properties(specific_has_subject_invalidation_properties, selector);
+                } else {
+                    style_invalidation_data.add_generic_has_subject_invalidation_plan(*plan, selector);
+                }
             }
             if (selector_contains_has) {
-                add_invalidation_plan_for_properties(style_invalidation_data.has_non_subject_invalidation_plans, invalidation_properties, *plan);
-                style_invalidation_data.record_debug_selector_for_has_non_subject_properties(invalidation_properties, selector);
+                if (specific_has_subject_invalidation_properties.has_properties()) {
+                    add_invalidation_plan_for_properties(style_invalidation_data.has_non_subject_invalidation_plans, specific_has_subject_invalidation_properties, *plan);
+                    style_invalidation_data.record_debug_selector_for_has_non_subject_properties(specific_has_subject_invalidation_properties, selector);
+                } else {
+                    style_invalidation_data.add_generic_has_non_subject_invalidation_plan(*plan, selector);
+                }
             }
 
             selector_righthand = SelectorRighthand {

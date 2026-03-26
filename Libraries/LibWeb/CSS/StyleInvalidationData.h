@@ -68,11 +68,15 @@ struct StyleInvalidationData {
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> invalidation_plans;
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_subject_invalidation_plans;
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_non_subject_invalidation_plans;
+    NonnullRefPtr<InvalidationPlan> generic_has_subject_invalidation_plan { InvalidationPlan::create() };
+    NonnullRefPtr<InvalidationPlan> generic_has_non_subject_invalidation_plan { InvalidationPlan::create() };
     HashTable<FlyString> ids_used_in_has_selectors;
     HashTable<FlyString> class_names_used_in_has_selectors;
     HashTable<FlyString> attribute_names_used_in_has_selectors;
     HashTable<FlyString> tag_names_used_in_has_selectors;
     HashTable<PseudoClass> pseudo_classes_used_in_has_selectors;
+    HashTable<String> debug_selectors_for_generic_has_subject_invalidation;
+    HashTable<String> debug_selectors_for_generic_has_non_subject_invalidation;
     HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_has_subject_invalidation_property;
     HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_invalidation_property;
     HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_has_non_subject_invalidation_property;
@@ -81,6 +85,8 @@ struct StyleInvalidationData {
     void record_debug_selector_for_properties(InvalidationSet const&, Selector const&);
     void record_debug_selector_for_has_subject_properties(InvalidationSet const&, Selector const&);
     void record_debug_selector_for_has_non_subject_properties(InvalidationSet const&, Selector const&);
+    void add_generic_has_subject_invalidation_plan(InvalidationPlan const&, Selector const&);
+    void add_generic_has_non_subject_invalidation_plan(InvalidationPlan const&, Selector const&);
     [[nodiscard]] String debug_description_for_has_subject_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
     [[nodiscard]] String debug_description_for_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
     [[nodiscard]] String debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    :has(#beacon[style*="display: none"]) .generic-target {
+        background-color: rgb(255, 0, 0);
+    }
+
+    body:is(:has(#beacon[style*="display: none"])) .body-target {
+        background-color: rgb(0, 128, 0);
+    }
+
+    head:is(:has(script[data-probe])) + body .head-target {
+        background-color: rgb(0, 0, 255);
+    }
+</style>
+<script id="probe"></script>
+<body>
+    <div id="beacon"></div>
+    <p class="generic-target">generic target</p>
+    <p class="body-target">body target</p>
+    <p class="head-target">head target</p>
+    <script>
+        test(() => {
+            let beacon = document.getElementById("beacon");
+            let probe = document.getElementById("probe");
+
+            function background_color(selector) {
+                return getComputedStyle(document.querySelector(selector)).backgroundColor;
+            }
+
+            function check_stage(stage, expectedGeneric, expectedBody, expectedHead) {
+                let actualGeneric = background_color(".generic-target");
+                let actualBody = background_color(".body-target");
+                let actualHead = background_color(".head-target");
+
+                if (actualGeneric === expectedGeneric && actualBody === expectedBody && actualHead === expectedHead) {
+                    println(`PASS: ${stage}`);
+                    return;
+                }
+
+                println(`FAIL: ${stage}`);
+                println(`  generic expected ${expectedGeneric}, got ${actualGeneric}`);
+                println(`  body expected ${expectedBody}, got ${actualBody}`);
+                println(`  head expected ${expectedHead}, got ${actualHead}`);
+            }
+
+            function apply_state(enabled) {
+                beacon.style.display = enabled ? "none" : "";
+                if (enabled)
+                    probe.setAttribute("data-probe", "yes");
+                else
+                    probe.removeAttribute("data-probe");
+                document.body.offsetWidth;
+            }
+
+            let transparent = "rgba(0, 0, 0, 0)";
+
+            apply_state(false);
+            check_stage("initial state", transparent, transparent, transparent);
+
+            apply_state(true);
+            check_stage("enabled state", "rgb(255, 0, 0)", "rgb(0, 128, 0)", "rgb(0, 0, 255)");
+
+            apply_state(false);
+            check_stage("disabled state", transparent, transparent, transparent);
+        });
+    </script>
+</body>
