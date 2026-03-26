@@ -108,6 +108,7 @@ public:
     void invalidate_style_of_elements_affected_by_has();
 
     void schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node);
+    void schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node, Vector<InvalidationSet::Property> const& trigger_properties);
 
     void visit_edges(GC::Cell::Visitor&);
 
@@ -122,6 +123,7 @@ public:
     GC::Ptr<CSSStyleSheet> m_user_style_sheet;
 
     GC::WeakHashSet<DOM::Node> m_pending_nodes_for_style_invalidation_due_to_presence_of_has;
+    HashMap<GC::Ptr<DOM::Node>, Vector<InvalidationSet::Property>> m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has;
 
     GC::Ref<DOM::Node> m_node;
 };

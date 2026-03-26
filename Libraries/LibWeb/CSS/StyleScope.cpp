@@ -70,6 +70,55 @@ namespace Web::CSS {
     return MUST(builder.to_string());
 }
 
+[[maybe_unused]] static String format_invalidation_properties_for_debug(Vector<CSS::InvalidationSet::Property> const& properties)
+{
+    if (properties.is_empty())
+        return "<none>"_string;
+
+    StringBuilder builder;
+    bool first = true;
+    for (auto const& property : properties) {
+        if (!first)
+            builder.append(", "sv);
+        builder.appendff("{}", property);
+        first = false;
+    }
+    return MUST(builder.to_string());
+}
+
+struct HasInvalidationStatistics {
+    u64 pending_nodes { 0 };
+    u64 property_filtered_pending_nodes { 0 };
+    u64 unique_elements_considered { 0 };
+    u64 affected_subject_only { 0 };
+    u64 affected_non_subject_only { 0 };
+    u64 affected_both { 0 };
+    u64 no_op_elements { 0 };
+    u64 sibling_relative_candidates { 0 };
+    Vector<String> sample_affected_elements;
+
+    void record_affected_element(DOM::Element const& element)
+    {
+        if (sample_affected_elements.size() >= 4)
+            return;
+        sample_affected_elements.append(element.debug_description());
+    }
+};
+
+static String format_debug_description_samples(Vector<String> const& samples)
+{
+    if (samples.is_empty())
+        return "<none>"_string;
+
+    StringBuilder builder;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (i > 0)
+            builder.append(", "sv);
+        builder.append(samples[i]);
+    }
+    return MUST(builder.to_string());
+}
+
 void RuleCaches::visit_edges(GC::Cell::Visitor& visitor)
 {
     main.visit_edges(visitor);
@@ -82,6 +131,8 @@ void StyleScope::visit_edges(GC::Cell::Visitor& visitor)
 {
     visitor.visit(m_node);
     visitor.visit(m_user_style_sheet);
+    for (auto& entry : m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has)
+        visitor.visit(entry.key);
     for (auto& cache : m_pseudo_class_rule_cache) {
         if (cache)
             cache->visit_edges(visitor);
@@ -530,24 +581,62 @@ void StyleScope::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleShee
 
 void StyleScope::schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node)
 {
-    dbgln_if(LAYOUT_THRASH_DEBUG, "Schedule :has() ancestor invalidation from {} ({:p}) stack={}",
-        node.debug_description(),
-        &node,
-        current_script_stack_for_debug(node.vm()));
-    m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
+    m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has.remove(&node);
+    if constexpr (LAYOUT_THRASH_DEBUG) {
+        bool queued_for_first_time = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has.contains(node);
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
+        if (queued_for_first_time) {
+            dbgln_if(LAYOUT_THRASH_DEBUG, "Schedule :has() ancestor invalidation from {} ({:p}) stack={}",
+                node.debug_description(),
+                &node,
+                current_script_stack_for_debug(node.vm()));
+        }
+    } else {
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
+    }
+    document().set_needs_invalidation_of_elements_affected_by_has();
+}
+
+void StyleScope::schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node, Vector<InvalidationSet::Property> const& trigger_properties)
+{
+    if (trigger_properties.is_empty())
+        return;
+
+    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.contains(node)) {
+        document().set_needs_invalidation_of_elements_affected_by_has();
+        return;
+    }
+
+    bool queued_for_first_time = false;
+    auto& stored_trigger_properties = m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has.ensure(&node, [&] {
+        queued_for_first_time = true;
+        return Vector<InvalidationSet::Property> {};
+    });
+    for (auto const& property : trigger_properties) {
+        if (!stored_trigger_properties.contains_slow(property))
+            stored_trigger_properties.append(property);
+    }
+
+    if (queued_for_first_time) {
+        dbgln_if(LAYOUT_THRASH_DEBUG, "Schedule property-filtered :has() ancestor invalidation from {} ({:p}) trigger_properties=[{}] stack={}",
+            node.debug_description(),
+            &node,
+            format_invalidation_properties_for_debug(stored_trigger_properties),
+            current_script_stack_for_debug(node.vm()));
+    }
+
     document().set_needs_invalidation_of_elements_affected_by_has();
 }
 
 void StyleScope::invalidate_style_of_elements_affected_by_has()
 {
-    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()) {
+    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty() && m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()) {
         return;
     }
 
-    dbgln_if(LAYOUT_THRASH_DEBUG, "Apply pending :has() invalidations");
-
     ScopeGuard clear_pending_nodes_guard = [&] {
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.clear();
+        m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has.clear();
     };
 
     // It's ok to call have_has_selectors() instead of may_have_has_selectors() here and force
@@ -559,8 +648,14 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
 
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
     auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
-    for (auto& node : nodes) {
-        for (auto* ancestor = &node; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+    auto property_filtered_nodes = move(m_pending_property_filtered_nodes_for_style_invalidation_due_to_presence_of_has);
+    HasInvalidationStatistics statistics;
+    auto invalidate_for_pending_node = [&](DOM::Node& pending_node, Vector<InvalidationSet::Property> const* trigger_properties) {
+        ++statistics.pending_nodes;
+        if (trigger_properties)
+            ++statistics.property_filtered_pending_nodes;
+
+        for (auto* ancestor = &pending_node; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
             if (!ancestor->is_element())
                 continue;
             auto& element = static_cast<DOM::Element&>(*ancestor);
@@ -568,11 +663,26 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
                 break;
 
-            element.invalidate_style_if_affected_by_has();
+            ++statistics.unique_elements_considered;
+            bool const affected_in_subject_position = element.affected_by_has_pseudo_class_in_subject_position();
+            bool const affected_in_non_subject_position = element.affected_by_has_pseudo_class_in_non_subject_position();
+            if (affected_in_subject_position && affected_in_non_subject_position) {
+                ++statistics.affected_both;
+                statistics.record_affected_element(element);
+            } else if (affected_in_subject_position) {
+                ++statistics.affected_subject_only;
+                statistics.record_affected_element(element);
+            } else if (affected_in_non_subject_position) {
+                ++statistics.affected_non_subject_only;
+                statistics.record_affected_element(element);
+            } else {
+                ++statistics.no_op_elements;
+            }
+            element.invalidate_style_if_affected_by_has(trigger_properties);
 
             auto* parent = ancestor->parent_or_shadow_host();
             if (!parent)
-                return;
+                break;
 
             // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
             // its style might be affected by the change in descendant node.
@@ -581,12 +691,51 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
                     if (elements_already_invalidated_for_has.set(&ancestor_sibling_element) != AK::HashSetResult::InsertedNewEntry)
                         return IterationDecision::Continue;
 
-                    ancestor_sibling_element.invalidate_style_if_affected_by_has();
+                    ++statistics.unique_elements_considered;
+                    ++statistics.sibling_relative_candidates;
+                    bool const affected_in_subject_position = ancestor_sibling_element.affected_by_has_pseudo_class_in_subject_position();
+                    bool const affected_in_non_subject_position = ancestor_sibling_element.affected_by_has_pseudo_class_in_non_subject_position();
+                    if (affected_in_subject_position && affected_in_non_subject_position) {
+                        ++statistics.affected_both;
+                        statistics.record_affected_element(ancestor_sibling_element);
+                    } else if (affected_in_subject_position) {
+                        ++statistics.affected_subject_only;
+                        statistics.record_affected_element(ancestor_sibling_element);
+                    } else if (affected_in_non_subject_position) {
+                        ++statistics.affected_non_subject_only;
+                        statistics.record_affected_element(ancestor_sibling_element);
+                    } else {
+                        ++statistics.no_op_elements;
+                    }
+                    ancestor_sibling_element.invalidate_style_if_affected_by_has(trigger_properties);
                 }
                 return IterationDecision::Continue;
             });
         }
+    };
+
+    for (auto& pending_node : nodes)
+        invalidate_for_pending_node(pending_node, nullptr);
+
+    for (auto& entry : property_filtered_nodes) {
+        if (!entry.key)
+            continue;
+        if (nodes.contains(*entry.key))
+            continue;
+        invalidate_for_pending_node(*entry.key, &entry.value);
     }
+
+    dbgln_if(LAYOUT_THRASH_DEBUG, "Apply pending :has() invalidations scope={} pending_nodes={} property_filtered_pending_nodes={} unique_elements={} affected={{subject_only={} non_subject_only={} both={} no_op={} sibling_candidates={}}} samples=[{}]",
+        node().debug_description(),
+        statistics.pending_nodes,
+        statistics.property_filtered_pending_nodes,
+        statistics.unique_elements_considered,
+        statistics.affected_subject_only,
+        statistics.affected_non_subject_only,
+        statistics.affected_both,
+        statistics.no_op_elements,
+        statistics.sibling_relative_candidates,
+        format_debug_description_samples(statistics.sample_affected_elements));
 }
 
 }

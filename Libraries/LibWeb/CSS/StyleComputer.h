@@ -110,6 +110,8 @@ public:
     NonnullRefPtr<InvalidationPlan> invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, StyleScope const&) const;
     NonnullRefPtr<InvalidationPlan> has_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, StyleScope const&) const;
     NonnullRefPtr<InvalidationPlan> has_non_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, StyleScope const&) const;
+    NonnullRefPtr<InvalidationPlan> has_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, Vector<InvalidationSet::Property> const& trigger_properties, StyleScope const&) const;
+    NonnullRefPtr<InvalidationPlan> has_non_subject_invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, Vector<InvalidationSet::Property> const& trigger_properties, StyleScope const&) const;
     bool invalidation_property_used_in_has_selector(InvalidationSet::Property const&, StyleScope const&) const;
 
     static CSSPixels default_user_font_size();

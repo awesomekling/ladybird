@@ -258,6 +258,31 @@ namespace Web::DOM {
     return MUST(builder.to_string());
 }
 
+struct StyleUpdateStatistics {
+    u64 visited_nodes { 0 };
+    u64 visited_elements { 0 };
+    u64 nodes_marked_for_style_update { 0 };
+    u64 nodes_with_child_needs_style_update { 0 };
+    u64 nodes_with_entire_subtree_needs_style_update { 0 };
+
+    u64 recompute_style_calls { 0 };
+    u64 recompute_inherited_style_calls { 0 };
+    u64 recompute_style_due_to_full_style_update { 0 };
+    u64 recompute_style_due_to_needs_style_update { 0 };
+    u64 recompute_style_due_to_parent_display_change { 0 };
+    u64 recompute_style_due_to_custom_properties { 0 };
+    u64 recompute_style_due_to_if_media { 0 };
+    u64 recompute_style_without_invalidation { 0 };
+    u64 recompute_inherited_style_without_invalidation { 0 };
+    u64 elements_with_display_none { 0 };
+
+    u64 invalidation_repaint_count { 0 };
+    u64 invalidation_rebuild_stacking_context_tree_count { 0 };
+    u64 invalidation_relayout_count { 0 };
+    u64 invalidation_rebuild_layout_tree_count { 0 };
+    u64 invalidation_rebuild_accumulated_visual_contexts_count { 0 };
+};
+
 GC_DEFINE_ALLOCATOR(Document);
 
 // https://html.spec.whatwg.org/multipage/origin.html#obtain-browsing-context-navigation
@@ -1714,13 +1739,23 @@ bool Document::layout_is_up_to_date() const
         && m_svg_roots_needing_relayout.is_empty();
 }
 
-[[nodiscard]] static CSS::RequiredInvalidationAfterStyleChange update_style_recursively(Node& node, CSS::StyleComputer& style_computer, bool needs_inherited_style_update, bool recompute_elements_depending_on_custom_properties, bool parent_display_changed)
+[[nodiscard]] static CSS::RequiredInvalidationAfterStyleChange update_style_recursively(Node& node, CSS::StyleComputer& style_computer, bool needs_inherited_style_update, bool recompute_elements_depending_on_custom_properties, bool parent_display_changed, StyleUpdateStatistics& statistics)
 {
+    ++statistics.visited_nodes;
+    if (node.needs_style_update())
+        ++statistics.nodes_marked_for_style_update;
+    if (node.child_needs_style_update())
+        ++statistics.nodes_with_child_needs_style_update;
+    if (node.entire_subtree_needs_style_update())
+        ++statistics.nodes_with_entire_subtree_needs_style_update;
+
     bool const needs_full_style_update = node.document().needs_full_style_update();
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
-    if (node.is_element())
+    if (node.is_element()) {
+        ++statistics.visited_elements;
         style_computer.push_ancestor(static_cast<Element const&>(node));
+    }
 
     // NOTE: If the current node has `display:none`, we can disregard all invalidation
     //       caused by its children, as they will not be rendered anyway.
@@ -1737,11 +1772,29 @@ bool Document::layout_is_up_to_date() const
         bool const needs_style_update_due_to_if_media = element.style_uses_if_css_function();
 
         if (needs_full_style_update || node.needs_style_update() || parent_display_changed || (recompute_elements_depending_on_custom_properties && (element.style_uses_var_css_function() || element.style_uses_inherit_css_function())) || needs_style_update_due_to_if_media) {
+            ++statistics.recompute_style_calls;
+            if (needs_full_style_update)
+                ++statistics.recompute_style_due_to_full_style_update;
+            if (node.needs_style_update())
+                ++statistics.recompute_style_due_to_needs_style_update;
+            if (parent_display_changed)
+                ++statistics.recompute_style_due_to_parent_display_change;
+            if (recompute_elements_depending_on_custom_properties && (element.style_uses_var_css_function() || element.style_uses_inherit_css_function()))
+                ++statistics.recompute_style_due_to_custom_properties;
+            if (needs_style_update_due_to_if_media)
+                ++statistics.recompute_style_due_to_if_media;
             node_invalidation = element.recompute_style(did_change_custom_properties);
+            if (node_invalidation.is_none())
+                ++statistics.recompute_style_without_invalidation;
         } else if (needs_inherited_style_update) {
+            ++statistics.recompute_inherited_style_calls;
             node_invalidation = element.recompute_inherited_style();
+            if (node_invalidation.is_none())
+                ++statistics.recompute_inherited_style_without_invalidation;
         }
         is_display_none = static_cast<Element&>(node).computed_properties()->display().is_none();
+        if (is_display_none)
+            ++statistics.elements_with_display_none;
 
         // If this is a slot element and its style changed, mark its assigned
         // (slotted) nodes as needing a style update. Slotted elements inherit
@@ -1769,6 +1822,16 @@ bool Document::layout_is_up_to_date() const
             node.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::StyleChange);
         }
     }
+    if (node_invalidation.repaint)
+        ++statistics.invalidation_repaint_count;
+    if (node_invalidation.rebuild_stacking_context_tree)
+        ++statistics.invalidation_rebuild_stacking_context_tree_count;
+    if (node_invalidation.relayout)
+        ++statistics.invalidation_relayout_count;
+    if (node_invalidation.rebuild_layout_tree)
+        ++statistics.invalidation_rebuild_layout_tree_count;
+    if (node_invalidation.rebuild_accumulated_visual_contexts)
+        ++statistics.invalidation_rebuild_accumulated_visual_contexts_count;
     node.set_needs_style_update(false);
     invalidation |= node_invalidation;
 
@@ -1784,7 +1847,7 @@ bool Document::layout_is_up_to_date() const
         if (node.is_element()) {
             if (auto shadow_root = static_cast<DOM::Element&>(node).shadow_root()) {
                 if (needs_full_style_update || shadow_root->needs_style_update() || shadow_root->child_needs_style_update()) {
-                    auto subtree_invalidation = update_style_recursively(*shadow_root, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute);
+                    auto subtree_invalidation = update_style_recursively(*shadow_root, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute, statistics);
                     if (!is_display_none)
                         invalidation |= subtree_invalidation;
                 }
@@ -1793,7 +1856,7 @@ bool Document::layout_is_up_to_date() const
 
         node.for_each_child([&](auto& child) {
             if (needs_full_style_update || child.needs_style_update() || children_need_inherited_style_update || child.child_needs_style_update() || recompute_elements_depending_on_custom_properties || children_need_full_style_recompute) {
-                auto subtree_invalidation = update_style_recursively(child, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute);
+                auto subtree_invalidation = update_style_recursively(child, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute, statistics);
                 if (!is_display_none)
                     invalidation |= subtree_invalidation;
             }
@@ -1818,6 +1881,17 @@ void Document::update_style()
 
     if (!browsing_context())
         return;
+
+    bool const had_pending_animated_style_update = m_needs_animated_style_update;
+    bool const had_pending_has_invalidation = m_needs_invalidation_of_elements_affected_by_has;
+    bool const had_pending_descendant_invalidations = m_style_invalidator->has_pending_invalidations();
+    bool const had_full_style_update = needs_full_style_update();
+    bool const had_needs_style_update = needs_style_update();
+    bool const had_child_needs_style_update = child_needs_style_update();
+
+    Optional<Core::ElapsedTimer> style_update_timer;
+    if constexpr (LAYOUT_THRASH_DEBUG)
+        style_update_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
 
     update_animated_style_if_needed();
 
@@ -1855,7 +1929,45 @@ void Document::update_style()
     // FIXME: We don't need to rebuild this cache on every style update, just if a @counter-style rule has changed.
     build_counter_style_cache();
 
-    auto invalidation = update_style_recursively(*this, style_computer(), false, false, false);
+    StyleUpdateStatistics statistics;
+    auto invalidation = update_style_recursively(*this, style_computer(), false, false, false, statistics);
+
+    if constexpr (LAYOUT_THRASH_DEBUG) {
+        dbgln("Style update summary triggers={{full={} style={} child={} animated={} pending_invalidations={} pending_has={}}} traversal={{nodes={} elements={} flagged_style={} flagged_child={} flagged_subtree={}}} recompute={{style={} inherited={} full={} direct={} parent_display={} custom_properties={} if_media={} no_change={} inherited_no_change={}}} invalidation_counts={{repaint={} stacking={} relayout={} layout_tree={} avc={} display_none={}}} result={{repaint={} stacking={} relayout={} layout_tree={} avc={}}} duration={} us",
+            had_full_style_update,
+            had_needs_style_update,
+            had_child_needs_style_update,
+            had_pending_animated_style_update,
+            had_pending_descendant_invalidations,
+            had_pending_has_invalidation,
+            statistics.visited_nodes,
+            statistics.visited_elements,
+            statistics.nodes_marked_for_style_update,
+            statistics.nodes_with_child_needs_style_update,
+            statistics.nodes_with_entire_subtree_needs_style_update,
+            statistics.recompute_style_calls,
+            statistics.recompute_inherited_style_calls,
+            statistics.recompute_style_due_to_full_style_update,
+            statistics.recompute_style_due_to_needs_style_update,
+            statistics.recompute_style_due_to_parent_display_change,
+            statistics.recompute_style_due_to_custom_properties,
+            statistics.recompute_style_due_to_if_media,
+            statistics.recompute_style_without_invalidation,
+            statistics.recompute_inherited_style_without_invalidation,
+            statistics.invalidation_repaint_count,
+            statistics.invalidation_rebuild_stacking_context_tree_count,
+            statistics.invalidation_relayout_count,
+            statistics.invalidation_rebuild_layout_tree_count,
+            statistics.invalidation_rebuild_accumulated_visual_contexts_count,
+            statistics.elements_with_display_none,
+            invalidation.repaint,
+            invalidation.rebuild_stacking_context_tree,
+            invalidation.relayout,
+            invalidation.rebuild_layout_tree,
+            invalidation.rebuild_accumulated_visual_contexts,
+            style_update_timer->elapsed_time().to_microseconds());
+    }
+
     if (!invalidation.is_none())
         invalidate_display_list();
 

@@ -66,6 +66,13 @@ struct SpecificHasInvalidationPlan {
     HashTable<String> debug_selectors;
 };
 
+struct TriggeredHasInvalidationPlan {
+    InvalidationSet trigger_set;
+    InvalidationSet match_set;
+    NonnullRefPtr<InvalidationPlan> plan;
+    HashTable<String> debug_selectors;
+};
+
 struct StyleInvalidationData;
 
 void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&, InvalidationSet&, ExcludePropertiesNestedInNotPseudoClass, StyleInvalidationData&, InsideNthChildPseudoClass);
@@ -76,6 +83,8 @@ struct StyleInvalidationData {
     HashMap<InvalidationSet::Property, NonnullRefPtr<InvalidationPlan>> has_non_subject_invalidation_plans;
     Vector<SpecificHasInvalidationPlan> specific_has_subject_invalidation_plans;
     Vector<SpecificHasInvalidationPlan> specific_has_non_subject_invalidation_plans;
+    Vector<TriggeredHasInvalidationPlan> triggered_has_subject_invalidation_plans;
+    Vector<TriggeredHasInvalidationPlan> triggered_has_non_subject_invalidation_plans;
     NonnullRefPtr<InvalidationPlan> generic_has_subject_invalidation_plan { InvalidationPlan::create() };
     NonnullRefPtr<InvalidationPlan> generic_has_non_subject_invalidation_plan { InvalidationPlan::create() };
     HashTable<FlyString> ids_used_in_has_selectors;
@@ -98,6 +107,8 @@ struct StyleInvalidationData {
     [[nodiscard]] String debug_description_for_has_subject_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
     [[nodiscard]] String debug_description_for_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
     [[nodiscard]] String debug_description_for_has_non_subject_properties(Vector<InvalidationSet::Property> const&, size_t max_selectors = 6) const;
+    [[nodiscard]] String debug_description_for_triggered_has_subject_properties(Vector<InvalidationSet::Property> const&, Vector<InvalidationSet::Property> const& trigger_properties, size_t max_selectors = 6) const;
+    [[nodiscard]] String debug_description_for_triggered_has_non_subject_properties(Vector<InvalidationSet::Property> const&, Vector<InvalidationSet::Property> const& trigger_properties, size_t max_selectors = 6) const;
 };
 
 }

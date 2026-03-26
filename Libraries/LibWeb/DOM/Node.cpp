@@ -106,17 +106,42 @@ static HashMap<UniqueNodeID, Node*> s_node_directory;
     return MUST(builder.to_string());
 }
 
-[[maybe_unused]] static void log_style_invalidation_plan_for_debug(Node const& node, StyleInvalidationReason reason, StringView scope_name, Vector<CSS::InvalidationSet::Property> const& properties, bool invalidate_self, bool uses_has, CSS::InvalidationPlan const& plan)
+[[maybe_unused]] static bool should_log_style_invalidation_sources_for_debug(Vector<CSS::InvalidationSet::Property> const& properties, CSS::InvalidationPlan const& plan)
 {
-    dbgln_if(LAYOUT_THRASH_DEBUG, "Invalidate style ({}) for {} ({:p}) scope={} properties=[{}] options={{invalidate_self={}}} uses_has={} plan={{ {} }}",
-        to_string(reason),
-        node.debug_description(),
-        &node,
-        scope_name,
-        format_style_invalidation_properties_for_debug(properties),
-        invalidate_self,
-        uses_has,
-        format_invalidation_plan_for_debug(plan));
+    if (plan.invalidate_whole_subtree || plan.descendant_rules.size() >= 8 || plan.sibling_rules.size() >= 4)
+        return true;
+
+    for (auto const& property : properties) {
+        if (property.type == CSS::InvalidationSet::Property::Type::PseudoClass && property.value.get<CSS::PseudoClass>() == CSS::PseudoClass::Has)
+            return true;
+    }
+    return false;
+}
+
+[[maybe_unused]] static void log_style_invalidation_plan_for_debug(Node const& node, CSS::StyleScope const& style_scope, StyleInvalidationReason reason, StringView scope_name, Vector<CSS::InvalidationSet::Property> const& properties, bool invalidate_self, bool uses_has, CSS::InvalidationPlan const& plan)
+{
+    if (should_log_style_invalidation_sources_for_debug(properties, plan) && style_scope.m_style_invalidation_data) {
+        dbgln_if(LAYOUT_THRASH_DEBUG, "Invalidate style ({}) for {} ({:p}) scope={} properties=[{}] options={{invalidate_self={}}} uses_has={} plan={{ {} }} selectors={{ {} }}",
+            to_string(reason),
+            node.debug_description(),
+            &node,
+            scope_name,
+            format_style_invalidation_properties_for_debug(properties),
+            invalidate_self,
+            uses_has,
+            format_invalidation_plan_for_debug(plan),
+            style_scope.m_style_invalidation_data->debug_description_for_properties(properties));
+    } else {
+        dbgln_if(LAYOUT_THRASH_DEBUG, "Invalidate style ({}) for {} ({:p}) scope={} properties=[{}] options={{invalidate_self={}}} uses_has={} plan={{ {} }}",
+            to_string(reason),
+            node.debug_description(),
+            &node,
+            scope_name,
+            format_style_invalidation_properties_for_debug(properties),
+            invalidate_self,
+            uses_has,
+            format_invalidation_plan_for_debug(plan));
+    }
 }
 
 static UniqueNodeID allocate_unique_id(Node* node)
@@ -484,9 +509,28 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     auto& style_scope = root().is_shadow_root() ? static_cast<ShadowRoot&>(root()).style_scope() : document().style_scope();
 
     if (style_scope.may_have_has_selectors()) {
+        auto schedule_property_filtered_has_invalidation_if_possible = [&](Node& node_to_schedule, Element const* changed_element) {
+            if (!changed_element)
+                return false;
+
+            Vector<CSS::InvalidationSet::Property> trigger_properties;
+            for (auto const& property : changed_element->collect_has_invalidation_properties()) {
+                if (!document().style_computer().invalidation_property_used_in_has_selector(property, style_scope))
+                    continue;
+                if (!trigger_properties.contains_slow(property))
+                    trigger_properties.append(property);
+            }
+            if (trigger_properties.is_empty())
+                return false;
+
+            style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(node_to_schedule, trigger_properties);
+            return true;
+        };
+
         if (reason == StyleInvalidationReason::NodeRemove) {
             if (auto* parent = parent_or_shadow_host(); parent) {
-                style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
+                if (!schedule_property_filtered_has_invalidation_if_possible(*parent, as_if<Element>(*this)))
+                    style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 parent->for_each_child_of_type<Element>([&](auto& element) {
                     if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
                         element.invalidate_style_if_affected_by_has();
@@ -494,7 +538,44 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 });
             }
         } else if (reason_may_affect_has_selectors(reason)) {
-            style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
+            if (!schedule_property_filtered_has_invalidation_if_possible(*this, as_if<Element>(*this)))
+                style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
+        }
+    }
+
+    if (AK::first_is_one_of(reason, StyleInvalidationReason::NodeInsertBefore, StyleInvalidationReason::NodeRemove)) {
+        if (auto* changed_element = as_if<Element>(*this)) {
+            auto properties = changed_element->collect_has_invalidation_properties();
+            if (!properties.is_empty()) {
+                bool has_targeted_has_invalidation = false;
+                for (auto const& property : properties) {
+                    if (document().style_computer().invalidation_property_used_in_has_selector(property, style_scope)) {
+                        has_targeted_has_invalidation = true;
+                        break;
+                    }
+                }
+
+                bool has_targeted_plan = !document().style_computer().invalidation_plan_for_properties(properties, style_scope)->is_empty();
+                if (auto* shadow_host = as_if<Element>(*this); shadow_host && shadow_host->is_shadow_host()) {
+                    if (auto element_shadow_root = shadow_host->shadow_root()) {
+                        if (!document().style_computer().invalidation_plan_for_properties(properties, element_shadow_root->style_scope())->is_empty())
+                            has_targeted_plan = true;
+                        if (!has_targeted_has_invalidation) {
+                            for (auto const& property : properties) {
+                                if (document().style_computer().invalidation_property_used_in_has_selector(property, element_shadow_root->style_scope())) {
+                                    has_targeted_has_invalidation = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (has_targeted_plan || has_targeted_has_invalidation) {
+                    invalidate_style(reason, properties, {});
+                    return;
+                }
+            }
         }
     }
 
@@ -583,24 +664,34 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
             shadow_style_scope = &element_shadow_root->style_scope();
     }
 
-    bool properties_used_in_has_selectors = false;
-    for (auto const& property : properties) {
-        properties_used_in_has_selectors |= document().style_computer().invalidation_property_used_in_has_selector(property, style_scope);
-        if (shadow_style_scope)
-            properties_used_in_has_selectors |= document().style_computer().invalidation_property_used_in_has_selector(property, *shadow_style_scope);
-    }
-    if (properties_used_in_has_selectors) {
-        style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
-        if (shadow_style_scope)
-            shadow_style_scope->schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
-    }
+    auto collect_trigger_properties_for_has_invalidation = [&](CSS::StyleScope const& current_style_scope) {
+        Vector<CSS::InvalidationSet::Property> trigger_properties;
+        for (auto const& property : properties) {
+            if (!document().style_computer().invalidation_property_used_in_has_selector(property, current_style_scope))
+                continue;
+            if (!trigger_properties.contains_slow(property))
+                trigger_properties.append(property);
+        }
+        return trigger_properties;
+    };
+
+    auto trigger_properties_for_document_style_scope = collect_trigger_properties_for_has_invalidation(style_scope);
+    Vector<CSS::InvalidationSet::Property> trigger_properties_for_shadow_style_scope;
+    if (shadow_style_scope)
+        trigger_properties_for_shadow_style_scope = collect_trigger_properties_for_has_invalidation(*shadow_style_scope);
+
+    bool const properties_used_in_has_selectors = !trigger_properties_for_document_style_scope.is_empty() || !trigger_properties_for_shadow_style_scope.is_empty();
+    if (!trigger_properties_for_document_style_scope.is_empty())
+        style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this, trigger_properties_for_document_style_scope);
+    if (shadow_style_scope && !trigger_properties_for_shadow_style_scope.is_empty())
+        shadow_style_scope->schedule_ancestors_style_invalidation_due_to_presence_of_has(*this, trigger_properties_for_shadow_style_scope);
 
     if (options.invalidate_self)
         set_needs_style_update(true);
 
     auto invalidate_for_style_scope = [this, reason, &properties, invalidate_self = options.invalidate_self, uses_has = properties_used_in_has_selectors](CSS::StyleScope& style_scope, StringView scope_name) {
         auto plan = document().style_computer().invalidation_plan_for_properties(properties, style_scope);
-        log_style_invalidation_plan_for_debug(*this, reason, scope_name, properties, invalidate_self, uses_has, *plan);
+        log_style_invalidation_plan_for_debug(*this, style_scope, reason, scope_name, properties, invalidate_self, uses_has, *plan);
         return document().style_invalidator().enqueue_invalidation_plan(*this, reason, *plan);
     };
 
@@ -1840,12 +1931,6 @@ void Node::set_needs_style_update(bool value)
     if (m_needs_style_update == value)
         return;
     m_needs_style_update = value;
-
-    if (m_needs_style_update) {
-        auto navigable = this->navigable();
-        if (navigable && navigable->active_document() == &document())
-            dbgln_if(LAYOUT_THRASH_DEBUG, "Need style update: {} ({:p})", debug_description(), this);
-    }
 
     if (m_needs_style_update) {
         for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
