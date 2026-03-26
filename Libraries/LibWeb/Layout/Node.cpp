@@ -1470,6 +1470,12 @@ void Node::set_needs_layout_update(DOM::SetNeedsLayoutReason reason)
             dbgln_if(UPDATE_LAYOUT_DEBUG, "NEED LAYOUT {}", DOM::to_string(reason));
     }
 
+    if constexpr (LAYOUT_THRASH_DEBUG) {
+        auto navigable = this->navigable();
+        if (navigable && navigable->active_document() == &document())
+            dbgln("Need layout ({}): {} ({:p})", DOM::to_string(reason), debug_description(), this);
+    }
+
     m_needs_layout_update = true;
 
     if (auto* box = as_if<Box>(this))

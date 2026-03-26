@@ -14,7 +14,6 @@
 #include <LibGC/DeferGC.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Encoder.h>
-#include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/NodePrototype.h>
@@ -77,6 +76,48 @@ namespace Web::DOM {
 
 static UniqueNodeID s_next_unique_id;
 static HashMap<UniqueNodeID, Node*> s_node_directory;
+
+[[maybe_unused]] static StringView to_string(StyleInvalidationReason reason);
+
+[[maybe_unused]] static String format_style_invalidation_properties_for_debug(Vector<CSS::InvalidationSet::Property> const& properties)
+{
+    if (properties.is_empty())
+        return "<none>"_string;
+
+    StringBuilder builder;
+    bool first = true;
+    for (auto const& property : properties) {
+        if (!first)
+            builder.append(", "sv);
+        builder.appendff("{}", property);
+        first = false;
+    }
+    return MUST(builder.to_string());
+}
+
+[[maybe_unused]] static String format_invalidation_plan_for_debug(CSS::InvalidationPlan const& plan)
+{
+    StringBuilder builder;
+    builder.appendff("self={} whole_subtree={} descendant_rules={} sibling_rules={}",
+        plan.invalidate_self,
+        plan.invalidate_whole_subtree,
+        plan.descendant_rules.size(),
+        plan.sibling_rules.size());
+    return MUST(builder.to_string());
+}
+
+[[maybe_unused]] static void log_style_invalidation_plan_for_debug(Node const& node, StyleInvalidationReason reason, StringView scope_name, Vector<CSS::InvalidationSet::Property> const& properties, bool invalidate_self, bool uses_has, CSS::InvalidationPlan const& plan)
+{
+    dbgln_if(LAYOUT_THRASH_DEBUG, "Invalidate style ({}) for {} ({:p}) scope={} properties=[{}] options={{invalidate_self={}}} uses_has={} plan={{ {} }}",
+        to_string(reason),
+        node.debug_description(),
+        &node,
+        scope_name,
+        format_style_invalidation_properties_for_debug(properties),
+        invalidate_self,
+        uses_has,
+        format_invalidation_plan_for_debug(plan));
+}
 
 static UniqueNodeID allocate_unique_id(Node* node)
 {
@@ -557,15 +598,16 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
     if (options.invalidate_self)
         set_needs_style_update(true);
 
-    auto invalidate_for_style_scope = [this, reason, &properties](CSS::StyleScope& style_scope) {
+    auto invalidate_for_style_scope = [this, reason, &properties, invalidate_self = options.invalidate_self, uses_has = properties_used_in_has_selectors](CSS::StyleScope& style_scope, StringView scope_name) {
         auto plan = document().style_computer().invalidation_plan_for_properties(properties, style_scope);
+        log_style_invalidation_plan_for_debug(*this, reason, scope_name, properties, invalidate_self, uses_has, *plan);
         return document().style_invalidator().enqueue_invalidation_plan(*this, reason, *plan);
     };
 
-    if (invalidate_for_style_scope(style_scope))
+    if (invalidate_for_style_scope(style_scope, root.is_shadow_root() ? "shadow-root"sv : "document"sv))
         return;
     if (shadow_style_scope)
-        (void)invalidate_for_style_scope(*shadow_style_scope);
+        (void)invalidate_for_style_scope(*shadow_style_scope, "shadow-host"sv);
 }
 
 Utf16String Node::child_text_content() const
@@ -1798,6 +1840,12 @@ void Node::set_needs_style_update(bool value)
     if (m_needs_style_update == value)
         return;
     m_needs_style_update = value;
+
+    if (m_needs_style_update) {
+        auto navigable = this->navigable();
+        if (navigable && navigable->active_document() == &document())
+            dbgln_if(LAYOUT_THRASH_DEBUG, "Need style update: {} ({:p})", debug_description(), this);
+    }
 
     if (m_needs_style_update) {
         for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {

@@ -16,7 +16,9 @@
 #include <AK/StringBuilder.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ImmutableBitmap.h>
+#include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibURL/Parser.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/Locale.h>
@@ -122,6 +124,110 @@
 namespace Web::DOM {
 
 GC_DEFINE_ALLOCATOR(Element);
+
+[[maybe_unused]] static String format_attribute_value_for_debug(Optional<String> const& value)
+{
+    if (!value.has_value())
+        return "<missing>"_string;
+
+    constexpr size_t max_length = 160;
+    StringBuilder builder;
+    size_t emitted_code_units = 0;
+    for (auto ch : value->bytes_as_string_view()) {
+        if (emitted_code_units >= max_length) {
+            builder.append("..."sv);
+            break;
+        }
+
+        if (ch == '\n' || ch == '\r' || ch == '\t')
+            builder.append(' ');
+        else
+            builder.append(ch);
+        ++emitted_code_units;
+    }
+
+    return MUST(builder.to_string());
+}
+
+[[maybe_unused]] static String current_script_stack_for_debug(JS::VM& vm, size_t max_frames = 5)
+{
+    auto stack_trace = vm.stack_trace();
+    if (stack_trace.is_empty())
+        return "<no JavaScript stack>"_string;
+
+    StringBuilder builder;
+    size_t frames_appended = 0;
+    for (auto const& element : stack_trace) {
+        auto* context = element.execution_context;
+        if (!context)
+            continue;
+
+        if (frames_appended > 0)
+            builder.append(" <- "sv);
+
+        auto function_name = (context->function ? context->function->name_for_call_stack() : ""_utf16);
+        if (function_name.is_empty())
+            builder.append("<global>"sv);
+        else
+            builder.append(function_name.to_utf8());
+
+        if (element.source_range.has_value()) {
+            auto const& source_range = *element.source_range;
+            if (!source_range.filename().is_empty())
+                builder.appendff(" @ {}:{}:{}", source_range.filename(), source_range.start.line, source_range.start.column);
+        }
+
+        ++frames_appended;
+        if (frames_appended >= max_frames)
+            break;
+    }
+
+    if (frames_appended == 0)
+        return "<no JavaScript stack>"_string;
+
+    if (stack_trace.size() > frames_appended)
+        builder.append(" <- ..."sv);
+
+    return MUST(builder.to_string());
+}
+
+[[maybe_unused]] static String format_class_delta_for_debug(Optional<String> const& old_value, Optional<String> const& new_value)
+{
+    Vector<StringView> old_classes;
+    Vector<StringView> new_classes;
+    if (old_value.has_value())
+        old_classes = old_value->bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
+    if (new_value.has_value())
+        new_classes = new_value->bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
+
+    Vector<StringView> added_classes;
+    for (auto const& class_name : new_classes) {
+        if (!old_classes.contains_slow(class_name))
+            added_classes.append(class_name);
+    }
+
+    Vector<StringView> removed_classes;
+    for (auto const& class_name : old_classes) {
+        if (!new_classes.contains_slow(class_name))
+            removed_classes.append(class_name);
+    }
+
+    StringBuilder builder;
+    builder.append("+["sv);
+    for (size_t i = 0; i < added_classes.size(); ++i) {
+        if (i > 0)
+            builder.append(", "sv);
+        builder.append(added_classes[i]);
+    }
+    builder.append("] -["sv);
+    for (size_t i = 0; i < removed_classes.size(); ++i) {
+        if (i > 0)
+            builder.append(", "sv);
+        builder.append(removed_classes[i]);
+    }
+    builder.append(']');
+    return MUST(builder.to_string());
+}
 
 Element::Element(Document& document, DOM::QualifiedName qualified_name)
     : ParentNode(document, NodeType::ELEMENT_NODE)
@@ -833,6 +939,18 @@ void Element::run_attribute_change_steps(FlyString const& local_name, Optional<S
     attribute_changed(local_name, old_value, value, namespace_);
 
     if (old_value != value) {
+        if constexpr (LAYOUT_THRASH_DEBUG) {
+            if (!namespace_.has_value() && local_name.is_one_of(HTML::AttributeNames::class_, HTML::AttributeNames::style)) {
+                dbgln("Attribute change {} on {} ({:p}): {} -> {}{} stack={}",
+                    local_name,
+                    debug_description(),
+                    this,
+                    format_attribute_value_for_debug(old_value),
+                    format_attribute_value_for_debug(value),
+                    local_name == HTML::AttributeNames::class_ ? MUST(String::formatted(" ({})", format_class_delta_for_debug(old_value, value))) : ""_string,
+                    current_script_stack_for_debug(vm()));
+            }
+        }
         invalidate_style_after_attribute_change(local_name, old_value, value);
         document().bump_dom_tree_version();
     }
@@ -1831,6 +1949,13 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
 
 void Element::invalidate_style_if_affected_by_has()
 {
+    dbgln_if(LAYOUT_THRASH_DEBUG, ":has() invalidation for {} ({:p}) subject={} non_subject={} sibling_relative={}",
+        debug_description(),
+        this,
+        affected_by_has_pseudo_class_in_subject_position(),
+        affected_by_has_pseudo_class_in_non_subject_position(),
+        affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator());
+
     if (affected_by_has_pseudo_class_in_subject_position()) {
         set_needs_style_update(true);
     }

@@ -29,6 +29,7 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibURL/Origin.h>
 #include <LibURL/Parser.h>
@@ -214,6 +215,48 @@
 #include <LibWeb/XPath/XPath.h>
 
 namespace Web::DOM {
+
+[[maybe_unused]] static String current_script_stack_for_debug(JS::VM& vm, size_t max_frames = 5)
+{
+    auto stack_trace = vm.stack_trace();
+    if (stack_trace.is_empty())
+        return "<no JavaScript stack>"_string;
+
+    StringBuilder builder;
+    size_t frames_appended = 0;
+    for (auto const& element : stack_trace) {
+        auto* context = element.execution_context;
+        if (!context)
+            continue;
+
+        if (frames_appended > 0)
+            builder.append(" <- "sv);
+
+        auto function_name = (context->function ? context->function->name_for_call_stack() : ""_utf16);
+        if (function_name.is_empty())
+            builder.append("<global>"sv);
+        else
+            builder.append(function_name.to_utf8());
+
+        if (element.source_range.has_value()) {
+            auto const& source_range = *element.source_range;
+            if (!source_range.filename().is_empty())
+                builder.appendff(" @ {}:{}:{}", source_range.filename(), source_range.start.line, source_range.start.column);
+        }
+
+        ++frames_appended;
+        if (frames_appended >= max_frames)
+            break;
+    }
+
+    if (frames_appended == 0)
+        return "<no JavaScript stack>"_string;
+
+    if (stack_trace.size() > frames_appended)
+        builder.append(" <- ..."sv);
+
+    return MUST(builder.to_string());
+}
 
 GC_DEFINE_ALLOCATOR(Document);
 
@@ -1465,8 +1508,36 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
 
 void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutReason reason)
 {
-    if (node.is_connected())
+    if (node.is_connected()) {
+        bool const needs_style_flush = needs_full_style_update()
+            || needs_style_update()
+            || child_needs_style_update()
+            || m_needs_animated_style_update
+            || m_needs_invalidation_of_elements_affected_by_has
+            || m_style_invalidator->has_pending_invalidations();
+        bool const needs_layout_flush = !layout_is_up_to_date();
+
+        if ((needs_style_flush || needs_layout_flush) && LAYOUT_THRASH_DEBUG) {
+            dbgln("Forced synchronous layout flush ({}) for {} ({:p}) node={{style={} child_style={} subtree_style={} layout_tree={} child_layout_tree={}}} document={{full_style={} style={} child_style={} animated_style={} pending_invalidations={} pending_has={} layout_up_to_date={}}} stack={}",
+                to_string(reason),
+                node.debug_description(),
+                &node,
+                node.needs_style_update(),
+                node.child_needs_style_update(),
+                node.entire_subtree_needs_style_update(),
+                node.needs_layout_tree_update(),
+                node.child_needs_layout_tree_update(),
+                needs_full_style_update(),
+                needs_style_update(),
+                child_needs_style_update(),
+                m_needs_animated_style_update,
+                m_style_invalidator->has_pending_invalidations(),
+                m_needs_invalidation_of_elements_affected_by_has,
+                layout_is_up_to_date(),
+                current_script_stack_for_debug(vm()));
+        }
         update_layout(reason);
+    }
 }
 
 void Document::update_layout(UpdateLayoutReason reason)

@@ -5,7 +5,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
+#include <AK/StringBuilder.h>
 #include <LibCore/ReportTime.h>
+#include <LibJS/Runtime/FunctionObject.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSKeyframesRule.h>
 #include <LibWeb/CSS/CSSLayerBlockRule.h>
@@ -23,6 +27,48 @@
 #include <LibWeb/Page/Page.h>
 
 namespace Web::CSS {
+
+[[maybe_unused]] static String current_script_stack_for_debug(JS::VM& vm, size_t max_frames = 5)
+{
+    auto stack_trace = vm.stack_trace();
+    if (stack_trace.is_empty())
+        return "<no JavaScript stack>"_string;
+
+    StringBuilder builder;
+    size_t frames_appended = 0;
+    for (auto const& element : stack_trace) {
+        auto* context = element.execution_context;
+        if (!context)
+            continue;
+
+        if (frames_appended > 0)
+            builder.append(" <- "sv);
+
+        auto function_name = (context->function ? context->function->name_for_call_stack() : ""_utf16);
+        if (function_name.is_empty())
+            builder.append("<global>"sv);
+        else
+            builder.append(function_name.to_utf8());
+
+        if (element.source_range.has_value()) {
+            auto const& source_range = *element.source_range;
+            if (!source_range.filename().is_empty())
+                builder.appendff(" @ {}:{}:{}", source_range.filename(), source_range.start.line, source_range.start.column);
+        }
+
+        ++frames_appended;
+        if (frames_appended >= max_frames)
+            break;
+    }
+
+    if (frames_appended == 0)
+        return "<no JavaScript stack>"_string;
+
+    if (stack_trace.size() > frames_appended)
+        builder.append(" <- ..."sv);
+
+    return MUST(builder.to_string());
+}
 
 void RuleCaches::visit_edges(GC::Cell::Visitor& visitor)
 {
@@ -484,6 +530,10 @@ void StyleScope::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleShee
 
 void StyleScope::schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node)
 {
+    dbgln_if(LAYOUT_THRASH_DEBUG, "Schedule :has() ancestor invalidation from {} ({:p}) stack={}",
+        node.debug_description(),
+        &node,
+        current_script_stack_for_debug(node.vm()));
     m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
     document().set_needs_invalidation_of_elements_affected_by_has();
 }
@@ -493,6 +543,8 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
     if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()) {
         return;
     }
+
+    dbgln_if(LAYOUT_THRASH_DEBUG, "Apply pending :has() invalidations");
 
     ScopeGuard clear_pending_nodes_guard = [&] {
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.clear();
