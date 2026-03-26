@@ -183,7 +183,10 @@ static bool element_matches_invalidation_property(Element const& element, CSS::I
     case CSS::InvalidationSet::Property::Type::PseudoClass:
         switch (property.value.get<CSS::PseudoClass>()) {
         case CSS::PseudoClass::Has:
-            return true;
+            // Descendant and sibling invalidation compounds that contain :has()
+            // are matching the subject element itself, so only consider elements
+            // previously observed in subject position for a :has() selector.
+            return element.affected_by_has_pseudo_class_in_subject_position();
         case CSS::PseudoClass::Enabled:
             return element.matches_enabled_pseudo_class();
         case CSS::PseudoClass::Disabled:
