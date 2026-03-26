@@ -14,6 +14,10 @@
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLSelectElement.h>
+#include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
@@ -90,8 +94,164 @@ GC::Ref<CSSStyleSheet> StyleSheetList::create_a_css_style_sheet(String const& cs
 struct StylesheetInvalidationSets {
     InvalidationSet direct_set;
     InvalidationSet subtree_root_set;
+    Vector<InvalidationSet> specific_direct_sets;
+    Vector<InvalidationSet> specific_subtree_root_sets;
     bool needs_invalidate_whole_document { false };
 };
+
+static InvalidationSet build_targeted_stylesheet_invalidation_set(InvalidationSet const& invalidation_set)
+{
+    InvalidationSet filtered_invalidation_set;
+    invalidation_set.for_each_property([&](auto const& property) {
+        if (property.type == InvalidationSet::Property::Type::PseudoClass && property.value.template get<PseudoClass>() == PseudoClass::Has)
+            return IterationDecision::Continue;
+
+        switch (property.type) {
+        case InvalidationSet::Property::Type::InvalidateSelf:
+            filtered_invalidation_set.set_needs_invalidate_self();
+            break;
+        case InvalidationSet::Property::Type::InvalidateWholeSubtree:
+            filtered_invalidation_set.set_needs_invalidate_whole_subtree();
+            break;
+        case InvalidationSet::Property::Type::Class:
+            filtered_invalidation_set.set_needs_invalidate_class(property.name());
+            break;
+        case InvalidationSet::Property::Type::Id:
+            filtered_invalidation_set.set_needs_invalidate_id(property.name());
+            break;
+        case InvalidationSet::Property::Type::TagName:
+            filtered_invalidation_set.set_needs_invalidate_tag_name(property.name());
+            break;
+        case InvalidationSet::Property::Type::Attribute:
+            filtered_invalidation_set.set_needs_invalidate_attribute(property.name());
+            break;
+        case InvalidationSet::Property::Type::PseudoClass:
+            filtered_invalidation_set.set_needs_invalidate_pseudo_class(property.value.template get<PseudoClass>());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        return IterationDecision::Continue;
+    });
+    return filtered_invalidation_set;
+}
+
+static size_t count_registered_stylesheet_invalidation_properties(InvalidationSet const& invalidation_set)
+{
+    size_t property_count = 0;
+    invalidation_set.for_each_property([&](auto const&) {
+        ++property_count;
+        return IterationDecision::Continue;
+    });
+    return property_count;
+}
+
+static bool invalidation_sets_have_same_properties(InvalidationSet const& a, InvalidationSet const& b)
+{
+    Vector<InvalidationSet::Property> a_properties;
+    a.for_each_property([&](auto const& property) {
+        a_properties.append(property);
+        return IterationDecision::Continue;
+    });
+
+    size_t b_property_count = 0;
+    bool has_all_properties = true;
+    b.for_each_property([&](auto const& property) {
+        ++b_property_count;
+        if (!a_properties.contains_slow(property)) {
+            has_all_properties = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+
+    return has_all_properties && a_properties.size() == b_property_count;
+}
+
+static void add_targeted_stylesheet_invalidation_set(InvalidationSet& generic_set, Vector<InvalidationSet>& specific_sets, InvalidationSet const& invalidation_set)
+{
+    auto targeted_set = build_targeted_stylesheet_invalidation_set(invalidation_set);
+    if (!targeted_set.has_properties())
+        return;
+
+    if (count_registered_stylesheet_invalidation_properties(targeted_set) <= 1) {
+        generic_set.include_all_from(targeted_set);
+        return;
+    }
+
+    for (auto const& existing_set : specific_sets) {
+        if (invalidation_sets_have_same_properties(existing_set, targeted_set))
+            return;
+    }
+
+    specific_sets.append(move(targeted_set));
+}
+
+static bool element_matches_stylesheet_invalidation_property(DOM::Element const& element, InvalidationSet::Property const& property)
+{
+    switch (property.type) {
+    case InvalidationSet::Property::Type::Class:
+        return element.has_class(property.name());
+    case InvalidationSet::Property::Type::Id:
+        return element.id() == property.name();
+    case InvalidationSet::Property::Type::TagName:
+        return element.local_name() == property.name();
+    case InvalidationSet::Property::Type::Attribute:
+        if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
+            return true;
+        return element.has_attribute(property.name());
+    case InvalidationSet::Property::Type::PseudoClass:
+        switch (property.value.get<PseudoClass>()) {
+        case PseudoClass::Has:
+            return false;
+        case PseudoClass::Enabled:
+            return element.matches_enabled_pseudo_class();
+        case PseudoClass::Disabled:
+            return element.matches_disabled_pseudo_class();
+        case PseudoClass::Defined:
+            return element.is_defined();
+        case PseudoClass::Checked:
+            return element.matches_checked_pseudo_class();
+        case PseudoClass::PlaceholderShown:
+            return element.matches_placeholder_shown_pseudo_class();
+        case PseudoClass::AnyLink:
+        case PseudoClass::Link:
+            return element.matches_link_pseudo_class();
+        case PseudoClass::LocalLink:
+            return element.matches_local_link_pseudo_class();
+        case PseudoClass::Root:
+            return is<HTML::HTMLHtmlElement>(element);
+        case PseudoClass::Host:
+            return element.is_shadow_host();
+        case PseudoClass::Required:
+        case PseudoClass::Optional:
+            return is<HTML::HTMLInputElement>(element) || is<HTML::HTMLSelectElement>(element) || is<HTML::HTMLTextAreaElement>(element);
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    case InvalidationSet::Property::Type::InvalidateSelf:
+        return false;
+    case InvalidationSet::Property::Type::InvalidateWholeSubtree:
+        return true;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+static bool element_matches_all_properties_in_stylesheet_invalidation_set(DOM::Element const& element, InvalidationSet const& invalidation_set)
+{
+    bool did_check_property = false;
+    bool matches_all = true;
+    invalidation_set.for_each_property([&](auto const& property) {
+        did_check_property = true;
+        if (!element_matches_stylesheet_invalidation_property(element, property)) {
+            matches_all = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return did_check_property && matches_all;
+}
 
 static InvalidationSet build_invalidation_set_for_compound_selector(Selector::CompoundSelector const& compound_selector, StyleInvalidationData& throwaway_data)
 {
@@ -121,16 +281,16 @@ static StylesheetInvalidationSets build_invalidation_sets_for_stylesheet(CSSStyl
                 continue;
 
             auto const& rightmost = compound_selectors.last();
-            auto rightmost_set = build_invalidation_set_for_compound_selector(rightmost, throwaway_data);
+            auto rightmost_set = build_targeted_stylesheet_invalidation_set(build_invalidation_set_for_compound_selector(rightmost, throwaway_data));
 
             if (!rightmost_set.has_properties()) {
                 bool found_subtree_root = false;
                 for (ssize_t compound_index = static_cast<ssize_t>(compound_selectors.size()) - 2; compound_index >= 0; --compound_index) {
-                    auto candidate_set = build_invalidation_set_for_compound_selector(compound_selectors[compound_index], throwaway_data);
+                    auto candidate_set = build_targeted_stylesheet_invalidation_set(build_invalidation_set_for_compound_selector(compound_selectors[compound_index], throwaway_data));
                     if (!candidate_set.has_properties())
                         continue;
 
-                    sets.subtree_root_set.include_all_from(candidate_set);
+                    add_targeted_stylesheet_invalidation_set(sets.subtree_root_set, sets.specific_subtree_root_sets, candidate_set);
                     found_subtree_root = true;
                     break;
                 }
@@ -146,7 +306,7 @@ static StylesheetInvalidationSets build_invalidation_sets_for_stylesheet(CSSStyl
                 return;
             }
 
-            sets.direct_set.include_all_from(rightmost_set);
+            add_targeted_stylesheet_invalidation_set(sets.direct_set, sets.specific_direct_sets, rightmost_set);
         }
     });
 
@@ -165,11 +325,24 @@ static StylesheetInvalidationSets build_invalidation_sets_for_stylesheet(CSSStyl
 static void invalidate_elements_matching_stylesheet_invalidation_sets(DOM::Node& root, StylesheetInvalidationSets const& sets)
 {
     root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
-        if (!sets.subtree_root_set.is_empty() && element.includes_properties_from_invalidation_set(sets.subtree_root_set)) {
+        bool matches_subtree_root_set = !sets.subtree_root_set.is_empty() && element.includes_properties_from_invalidation_set(sets.subtree_root_set);
+        if (!matches_subtree_root_set) {
+            matches_subtree_root_set = any_of(sets.specific_subtree_root_sets, [&](auto const& invalidation_set) {
+                return element_matches_all_properties_in_stylesheet_invalidation_set(element, invalidation_set);
+            });
+        }
+        if (matches_subtree_root_set) {
             element.set_needs_style_update(true);
             element.set_entire_subtree_needs_style_update(true);
         }
-        if (!sets.direct_set.is_empty() && element.includes_properties_from_invalidation_set(sets.direct_set))
+
+        bool matches_direct_set = !sets.direct_set.is_empty() && element.includes_properties_from_invalidation_set(sets.direct_set);
+        if (!matches_direct_set) {
+            matches_direct_set = any_of(sets.specific_direct_sets, [&](auto const& invalidation_set) {
+                return element_matches_all_properties_in_stylesheet_invalidation_set(element, invalidation_set);
+            });
+        }
+        if (matches_direct_set)
             element.set_needs_style_update(true);
         return TraversalDecision::Continue;
     });
