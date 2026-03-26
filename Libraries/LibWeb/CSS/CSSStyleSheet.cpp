@@ -28,6 +28,108 @@ namespace Web::CSS {
 
 GC_DEFINE_ALLOCATOR(CSSStyleSheet);
 
+struct MutatedStyleSheetInvalidationSets {
+    InvalidationSet direct_set;
+    InvalidationSet subtree_root_set;
+    bool needs_invalidate_whole_document { false };
+};
+
+static InvalidationSet build_invalidation_set_for_compound_selector(Selector::CompoundSelector const& compound_selector, StyleInvalidationData& throwaway_data)
+{
+    InvalidationSet set;
+    for (auto const& simple : compound_selector.simple_selectors)
+        build_invalidation_sets_for_simple_selector(simple, set, ExcludePropertiesNestedInNotPseudoClass::No, throwaway_data, InsideNthChildPseudoClass::No);
+    return set;
+}
+
+static MutatedStyleSheetInvalidationSets build_invalidation_sets_for_mutated_stylesheet(CSSStyleSheet const& sheet)
+{
+    MutatedStyleSheetInvalidationSets sets;
+    StyleInvalidationData throwaway_data;
+
+    sheet.for_each_effective_style_producing_rule([&](CSSRule const& rule) {
+        if (sets.needs_invalidate_whole_document)
+            return;
+
+        if (!is<CSSStyleRule>(rule))
+            return;
+
+        auto const& style_rule = as<CSSStyleRule>(rule);
+        for (auto const& selector : style_rule.absolutized_selectors()) {
+            auto const& compound_selectors = selector->compound_selectors();
+            if (compound_selectors.is_empty())
+                continue;
+
+            auto rightmost_set = build_invalidation_set_for_compound_selector(compound_selectors.last(), throwaway_data);
+            if (!rightmost_set.has_properties()) {
+                bool found_subtree_root = false;
+                for (ssize_t compound_index = static_cast<ssize_t>(compound_selectors.size()) - 2; compound_index >= 0; --compound_index) {
+                    auto candidate_set = build_invalidation_set_for_compound_selector(compound_selectors[compound_index], throwaway_data);
+                    if (!candidate_set.has_properties())
+                        continue;
+
+                    sets.subtree_root_set.include_all_from(candidate_set);
+                    found_subtree_root = true;
+                    break;
+                }
+
+                if (!found_subtree_root)
+                    sets.needs_invalidate_whole_document = true;
+                continue;
+            }
+
+            sets.direct_set.include_all_from(rightmost_set);
+        }
+    });
+
+    return sets;
+}
+
+static void invalidate_elements_matching_stylesheet_invalidation_sets(DOM::Node& root, MutatedStyleSheetInvalidationSets const& sets)
+{
+    root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
+        if (!sets.subtree_root_set.is_empty() && element.includes_properties_from_invalidation_set(sets.subtree_root_set)) {
+            element.set_needs_style_update(true);
+            element.set_entire_subtree_needs_style_update(true);
+        }
+        if (!sets.direct_set.is_empty() && element.includes_properties_from_invalidation_set(sets.direct_set))
+            element.set_needs_style_update(true);
+        return TraversalDecision::Continue;
+    });
+}
+
+static bool can_use_targeted_stylesheet_owner_invalidation(DOM::StyleInvalidationReason reason)
+{
+    return first_is_one_of(reason,
+        DOM::StyleInvalidationReason::CSSStylePropertiesRemoveProperty,
+        DOM::StyleInvalidationReason::CSSStylePropertiesSetProperty,
+        DOM::StyleInvalidationReason::CSSStylePropertiesSetPropertyStyleValue,
+        DOM::StyleInvalidationReason::CSSStylePropertiesTextChange,
+        DOM::StyleInvalidationReason::StyleSheetInsertRule);
+}
+
+static void invalidate_after_stylesheet_owner_change(DOM::Node& document_or_shadow_root, CSSStyleSheet const& sheet, DOM::StyleInvalidationReason reason)
+{
+    auto invalidate_root = [&](DOM::Node& root) {
+        if (root.entire_subtree_needs_style_update() || root.document().needs_full_style_update())
+            return;
+
+        auto invalidation_sets = build_invalidation_sets_for_mutated_stylesheet(sheet);
+        if (invalidation_sets.needs_invalidate_whole_document)
+            root.invalidate_style(reason);
+        else
+            invalidate_elements_matching_stylesheet_invalidation_sets(root, invalidation_sets);
+    };
+
+    if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root)) {
+        if (auto* host = shadow_root->host())
+            invalidate_root(*host);
+        return;
+    }
+
+    invalidate_root(document_or_shadow_root);
+}
+
 GC::Ref<CSSStyleSheet> CSSStyleSheet::create(JS::Realm& realm, CSSRuleList& rules, MediaList& media, Optional<::URL::URL> location)
 {
     return realm.create<CSSStyleSheet>(realm, rules, media, move(location));
@@ -366,9 +468,13 @@ void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
 {
     m_did_match = {};
     for (auto& document_or_shadow_root : m_owning_documents_or_shadow_roots) {
-        document_or_shadow_root->invalidate_style(reason);
         auto& style_scope = document_or_shadow_root->is_shadow_root() ? as<DOM::ShadowRoot>(*document_or_shadow_root).style_scope() : document_or_shadow_root->document().style_scope();
         style_scope.invalidate_rule_cache();
+
+        if (can_use_targeted_stylesheet_owner_invalidation(reason))
+            invalidate_after_stylesheet_owner_change(*document_or_shadow_root, *this, reason);
+        else
+            document_or_shadow_root->invalidate_style(reason);
     }
 }
 

@@ -1,0 +1,6 @@
+PASS: class selector
+PASS: id selector
+PASS: tag selector
+PASS: descendant universal selector
+PASS: direct child structural selector
+PASS: :has() with class

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="universal-scope"><span id="universal-descendant">universal descendant</span></div>
+<div id="universal-outside"><span id="universal-outside-descendant">universal outside descendant</span></div>
+<div id="first-child-scope" data-scope="yes"><span id="first-child-target">first child target</span><span id="first-child-non-target">first child non-target</span></div>
+<script>
+    function mutateSheetAndCheck(description, rule, checksWhilePresent, checksAfterRemoval) {
+        document.body.offsetWidth;
+        const style = document.createElement("style");
+        document.head.appendChild(style);
+        const index = style.sheet.insertRule(rule);
+
+        let pass = true;
+        for (const [id, property, expected] of checksWhilePresent) {
+            const actual = getComputedStyle(document.getElementById(id))[property];
+            if (actual !== expected) {
+                println(`FAIL: ${description} while present - ${id}: expected ${expected}, got ${actual}`);
+                pass = false;
+            }
+        }
+
+        style.sheet.deleteRule(index);
+
+        for (const [id, property, expected] of checksAfterRemoval) {
+            const actual = getComputedStyle(document.getElementById(id))[property];
+            if (actual !== expected) {
+                println(`FAIL: ${description} after removal - ${id}: expected ${expected}, got ${actual}`);
+                pass = false;
+            }
+        }
+
+        if (pass)
+            println(`PASS: ${description}`);
+
+        style.remove();
+    }
+
+    test(() => {
+        const BLACK = "rgb(0, 0, 0)";
+
+        mutateSheetAndCheck("descendant universal selector", "#universal-scope * { color: rgb(40, 120, 220); }", [
+            ["universal-descendant", "color", "rgb(40, 120, 220)"],
+            ["universal-outside-descendant", "color", BLACK],
+        ], [
+            ["universal-descendant", "color", BLACK],
+            ["universal-outside-descendant", "color", BLACK],
+        ]);
+
+        mutateSheetAndCheck("direct child structural selector", "[data-scope] > :first-child { color: rgb(200, 90, 40); }", [
+            ["first-child-target", "color", "rgb(200, 90, 40)"],
+            ["first-child-non-target", "color", BLACK],
+        ], [
+            ["first-child-target", "color", BLACK],
+            ["first-child-non-target", "color", BLACK],
+        ]);
+    });
+</script>

@@ -4,6 +4,8 @@ PASS: tag selector
 PASS: attr selector
 PASS: compound selector
 PASS: descendant selector
+PASS: descendant universal selector
+PASS: direct child structural selector
 PASS: multi selector
 PASS: link pseudo-class
 PASS: multi-rule sheet

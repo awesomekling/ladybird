@@ -1,0 +1,2 @@
+PASS: descendant universal selector
+PASS: direct child structural selector

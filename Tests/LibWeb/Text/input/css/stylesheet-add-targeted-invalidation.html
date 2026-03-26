@@ -21,6 +21,9 @@
 <div id="has-direct-match"><span class="direct-target">has direct child</span></div>
 <div id="has-direct-no-match"><b><span class="direct-target">has nested (not direct) child</span></b></div>
 <div id="nested-target"><span class="inner">nested target</span></div>
+<div id="universal-scope"><span id="universal-descendant">universal descendant</span></div>
+<div id="universal-outside"><span id="universal-outside-descendant">universal outside descendant</span></div>
+<div id="first-child-scope" data-scope="yes"><span id="first-child-target">first child target</span><span id="first-child-non-target">first child non-target</span></div>
 <div id="multi-selector-a" class="ms-a">multi-selector A</div>
 <div id="multi-selector-b" class="ms-b">multi-selector B</div>
 <div id="non-multi-selector" class="ms-c">multi-selector non-target</div>
@@ -75,6 +78,16 @@
 
         addSheetAndCheck("descendant selector", "div .inner { color: rgb(0, 255, 255); }", [
             ["nested-target", "color", BLACK],
+        ]);
+
+        addSheetAndCheck("descendant universal selector", "#universal-scope * { color: rgb(40, 120, 220); }", [
+            ["universal-descendant", "color", "rgb(40, 120, 220)"],
+            ["universal-outside-descendant", "color", BLACK],
+        ]);
+
+        addSheetAndCheck("direct child structural selector", "[data-scope] > :first-child { color: rgb(200, 90, 40); }", [
+            ["first-child-target", "color", "rgb(200, 90, 40)"],
+            ["first-child-non-target", "color", BLACK],
         ]);
 
         addSheetAndCheck("multi selector", ".ms-a, .ms-b { color: rgb(255, 0, 255); }", [

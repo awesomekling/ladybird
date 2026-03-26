@@ -87,13 +87,28 @@ GC::Ref<CSSStyleSheet> StyleSheetList::create_a_css_style_sheet(String const& cs
     return sheet;
 }
 
-static InvalidationSet build_invalidation_set_for_stylesheet(CSSStyleSheet const& sheet)
+struct StylesheetInvalidationSets {
+    InvalidationSet direct_set;
+    InvalidationSet subtree_root_set;
+    bool needs_invalidate_whole_document { false };
+};
+
+static InvalidationSet build_invalidation_set_for_compound_selector(Selector::CompoundSelector const& compound_selector, StyleInvalidationData& throwaway_data)
 {
     InvalidationSet set;
+    for (auto const& simple : compound_selector.simple_selectors)
+        build_invalidation_sets_for_simple_selector(simple, set, ExcludePropertiesNestedInNotPseudoClass::No, throwaway_data, InsideNthChildPseudoClass::No);
+    return set;
+}
+
+static StylesheetInvalidationSets build_invalidation_sets_for_stylesheet(CSSStyleSheet const& sheet)
+{
+    StylesheetInvalidationSets sets;
     StyleInvalidationData throwaway_data;
+    Optional<String> first_selector_requiring_whole_subtree_invalidation;
 
     sheet.for_each_effective_style_producing_rule([&](CSSRule const& rule) {
-        if (set.needs_invalidate_whole_subtree())
+        if (sets.needs_invalidate_whole_document)
             return;
 
         if (!is<CSSStyleRule>(rule))
@@ -106,31 +121,85 @@ static InvalidationSet build_invalidation_set_for_stylesheet(CSSStyleSheet const
                 continue;
 
             auto const& rightmost = compound_selectors.last();
-
-            InvalidationSet rightmost_set;
-            for (auto const& simple : rightmost.simple_selectors) {
-                build_invalidation_sets_for_simple_selector(simple, rightmost_set, ExcludePropertiesNestedInNotPseudoClass::No, throwaway_data, InsideNthChildPseudoClass::No);
-            }
+            auto rightmost_set = build_invalidation_set_for_compound_selector(rightmost, throwaway_data);
 
             if (!rightmost_set.has_properties()) {
-                set.set_needs_invalidate_whole_subtree();
+                bool found_subtree_root = false;
+                for (ssize_t compound_index = static_cast<ssize_t>(compound_selectors.size()) - 2; compound_index >= 0; --compound_index) {
+                    auto candidate_set = build_invalidation_set_for_compound_selector(compound_selectors[compound_index], throwaway_data);
+                    if (!candidate_set.has_properties())
+                        continue;
+
+                    sets.subtree_root_set.include_all_from(candidate_set);
+                    found_subtree_root = true;
+                    break;
+                }
+
+                if (found_subtree_root)
+                    continue;
+
+                if constexpr (LAYOUT_THRASH_DEBUG) {
+                    if (!first_selector_requiring_whole_subtree_invalidation.has_value())
+                        first_selector_requiring_whole_subtree_invalidation = selector->serialize();
+                }
+                sets.needs_invalidate_whole_document = true;
                 return;
             }
 
-            set.include_all_from(rightmost_set);
+            sets.direct_set.include_all_from(rightmost_set);
         }
     });
 
-    return set;
+    if constexpr (LAYOUT_THRASH_DEBUG) {
+        if (sets.needs_invalidate_whole_document) {
+            auto* owner_node = const_cast<CSSStyleSheet&>(sheet).owner_node();
+            dbgln("Stylesheet invalidation falls back to whole subtree: owner={} first_selector={}",
+                owner_node ? owner_node->debug_description() : "<no owner>"sv,
+                first_selector_requiring_whole_subtree_invalidation.value_or("<unknown>"_string));
+        }
+    }
+
+    return sets;
 }
 
-static void invalidate_elements_matching_invalidation_set(DOM::Node& root, InvalidationSet const& set)
+static void invalidate_elements_matching_stylesheet_invalidation_sets(DOM::Node& root, StylesheetInvalidationSets const& sets)
 {
     root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
-        if (element.includes_properties_from_invalidation_set(set))
+        if (!sets.subtree_root_set.is_empty() && element.includes_properties_from_invalidation_set(sets.subtree_root_set)) {
+            element.set_needs_style_update(true);
+            element.set_entire_subtree_needs_style_update(true);
+        }
+        if (!sets.direct_set.is_empty() && element.includes_properties_from_invalidation_set(sets.direct_set))
             element.set_needs_style_update(true);
         return TraversalDecision::Continue;
     });
+}
+
+static void invalidate_after_stylesheet_list_change(DOM::Node& document_or_shadow_root, CSSStyleSheet const& sheet, DOM::StyleInvalidationReason reason)
+{
+    if (sheet.rules().length() == 0)
+        return;
+
+    auto invalidate_root = [&](DOM::Node& root) {
+        if (root.entire_subtree_needs_style_update() || root.document().needs_full_style_update())
+            return;
+
+        auto invalidation_sets = build_invalidation_sets_for_stylesheet(sheet);
+        if (invalidation_sets.needs_invalidate_whole_document)
+            root.invalidate_style(reason);
+        else
+            invalidate_elements_matching_stylesheet_invalidation_sets(root, invalidation_sets);
+    };
+
+    if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root)) {
+        shadow_root->style_scope().invalidate_rule_cache();
+        if (auto* host = shadow_root->host())
+            invalidate_root(*host);
+        return;
+    }
+
+    document_or_shadow_root.document().style_scope().invalidate_rule_cache();
+    invalidate_root(document_or_shadow_root);
 }
 
 void StyleSheetList::add_sheet(CSSStyleSheet& sheet)
@@ -163,40 +232,7 @@ void StyleSheetList::add_sheet(CSSStyleSheet& sheet)
     //       If we don't do this, we invalidate now, and then again when Document updates media rules.
     sheet.evaluate_media_queries(document());
 
-    if (sheet.rules().length() == 0) {
-        // NOTE: If the added sheet has no rules, we don't have to invalidate anything.
-        return;
-    }
-
-    if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root())) {
-        shadow_root->style_scope().invalidate_rule_cache();
-    } else {
-        document_or_shadow_root().document().style_scope().invalidate_rule_cache();
-    }
-
-    if (document_or_shadow_root().entire_subtree_needs_style_update()) {
-        // NOTE: If the entire subtree is already marked for style update,
-        //       there's no point spending time building invalidation sets.
-        return;
-    }
-
-    auto invalidation_set = build_invalidation_set_for_stylesheet(sheet);
-
-    if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root())) {
-        if (auto* host = shadow_root->host()) {
-            if (invalidation_set.needs_invalidate_whole_subtree()) {
-                host->invalidate_style(DOM::StyleInvalidationReason::StyleSheetListAddSheet);
-            } else {
-                invalidate_elements_matching_invalidation_set(*host, invalidation_set);
-            }
-        }
-    } else {
-        if (invalidation_set.needs_invalidate_whole_subtree()) {
-            document_or_shadow_root().invalidate_style(DOM::StyleInvalidationReason::StyleSheetListAddSheet);
-        } else {
-            invalidate_elements_matching_invalidation_set(document_or_shadow_root(), invalidation_set);
-        }
-    }
+    invalidate_after_stylesheet_list_change(document_or_shadow_root(), sheet, DOM::StyleInvalidationReason::StyleSheetListAddSheet);
 }
 
 void StyleSheetList::remove_sheet(CSSStyleSheet& sheet)
@@ -205,20 +241,7 @@ void StyleSheetList::remove_sheet(CSSStyleSheet& sheet)
     bool did_remove = m_sheets.remove_first_matching([&](auto& entry) { return entry.ptr() == &sheet; });
     VERIFY(did_remove);
 
-    if (sheet.rules().length() == 0) {
-        // NOTE: If the removed sheet had no rules, we don't have to invalidate anything.
-        return;
-    }
-
-    if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root())) {
-        if (auto* host = shadow_root->host()) {
-            host->invalidate_style(DOM::StyleInvalidationReason::StyleSheetListRemoveSheet);
-        }
-        shadow_root->style_scope().invalidate_rule_cache();
-    } else {
-        document_or_shadow_root().invalidate_style(DOM::StyleInvalidationReason::StyleSheetListRemoveSheet);
-        document_or_shadow_root().document().style_scope().invalidate_rule_cache();
-    }
+    invalidate_after_stylesheet_list_change(document_or_shadow_root(), sheet, DOM::StyleInvalidationReason::StyleSheetListRemoveSheet);
 }
 
 GC::Ref<StyleSheetList> StyleSheetList::create(GC::Ref<DOM::Node> document_or_shadow_root)
