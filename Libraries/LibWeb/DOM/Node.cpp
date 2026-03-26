@@ -547,6 +547,8 @@ void Node::invalidate_style(StyleInvalidationReason reason)
         if (auto* changed_element = as_if<Element>(*this)) {
             auto properties = changed_element->collect_has_invalidation_properties();
             if (!properties.is_empty()) {
+                auto document_plan = document().style_computer().invalidation_plan_for_properties(properties, style_scope);
+                bool can_use_property_filtered_invalidation = document_plan->is_empty() || !document_plan->invalidate_whole_subtree;
                 bool has_targeted_has_invalidation = false;
                 for (auto const& property : properties) {
                     if (document().style_computer().invalidation_property_used_in_has_selector(property, style_scope)) {
@@ -555,11 +557,15 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                     }
                 }
 
-                bool has_targeted_plan = !document().style_computer().invalidation_plan_for_properties(properties, style_scope)->is_empty();
+                bool has_targeted_plan = !document_plan->is_empty() && !document_plan->invalidate_whole_subtree;
                 if (auto* shadow_host = as_if<Element>(*this); shadow_host && shadow_host->is_shadow_host()) {
                     if (auto element_shadow_root = shadow_host->shadow_root()) {
-                        if (!document().style_computer().invalidation_plan_for_properties(properties, element_shadow_root->style_scope())->is_empty())
+                        auto shadow_plan = document().style_computer().invalidation_plan_for_properties(properties, element_shadow_root->style_scope());
+                        if (shadow_plan->invalidate_whole_subtree) {
+                            can_use_property_filtered_invalidation = false;
+                        } else if (!shadow_plan->is_empty()) {
                             has_targeted_plan = true;
+                        }
                         if (!has_targeted_has_invalidation) {
                             for (auto const& property : properties) {
                                 if (document().style_computer().invalidation_property_used_in_has_selector(property, element_shadow_root->style_scope())) {
@@ -571,7 +577,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                     }
                 }
 
-                if (has_targeted_plan || has_targeted_has_invalidation) {
+                if (can_use_property_filtered_invalidation && (has_targeted_plan || has_targeted_has_invalidation)) {
                     invalidate_style(reason, properties, {});
                     return;
                 }
@@ -1948,7 +1954,16 @@ void Node::post_connection()
 void Node::inserted()
 {
     recompute_editable_subtree_flag();
-    set_needs_style_update(true);
+    if (!needs_style_update()) {
+        set_needs_style_update(true);
+        return;
+    }
+
+    for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+        if (ancestor->m_child_needs_style_update)
+            break;
+        ancestor->m_child_needs_style_update = true;
+    }
 }
 
 void Node::removed_from(Node*, Node&)
