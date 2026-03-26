@@ -107,31 +107,7 @@ static InvalidationSet build_targeted_stylesheet_invalidation_set(InvalidationSe
         if (property.type == InvalidationSet::Property::Type::PseudoClass && property.value.template get<PseudoClass>() == PseudoClass::Has)
             return IterationDecision::Continue;
 
-        switch (property.type) {
-        case InvalidationSet::Property::Type::InvalidateSelf:
-            filtered_invalidation_set.set_needs_invalidate_self();
-            break;
-        case InvalidationSet::Property::Type::InvalidateWholeSubtree:
-            filtered_invalidation_set.set_needs_invalidate_whole_subtree();
-            break;
-        case InvalidationSet::Property::Type::Class:
-            filtered_invalidation_set.set_needs_invalidate_class(property.name());
-            break;
-        case InvalidationSet::Property::Type::Id:
-            filtered_invalidation_set.set_needs_invalidate_id(property.name());
-            break;
-        case InvalidationSet::Property::Type::TagName:
-            filtered_invalidation_set.set_needs_invalidate_tag_name(property.name());
-            break;
-        case InvalidationSet::Property::Type::Attribute:
-            filtered_invalidation_set.set_needs_invalidate_attribute(property.name());
-            break;
-        case InvalidationSet::Property::Type::PseudoClass:
-            filtered_invalidation_set.set_needs_invalidate_pseudo_class(property.value.template get<PseudoClass>());
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        filtered_invalidation_set.include_property(property);
         return IterationDecision::Continue;
     });
     return filtered_invalidation_set;
@@ -198,9 +174,16 @@ static bool element_matches_stylesheet_invalidation_property(DOM::Element const&
     case InvalidationSet::Property::Type::TagName:
         return element.local_name() == property.name();
     case InvalidationSet::Property::Type::Attribute:
-        if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
-            return true;
         return element.has_attribute(property.name());
+    case InvalidationSet::Property::Type::ClassAttributeExactValue:
+    case InvalidationSet::Property::Type::ClassAttributeContainsWord:
+    case InvalidationSet::Property::Type::ClassAttributeContainsString:
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithSegment:
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithString:
+    case InvalidationSet::Property::Type::ClassAttributeEndsWithString: {
+        auto class_attribute_value = element.attribute(HTML::AttributeNames::class_);
+        return class_attribute_value.has_value() && matches_precise_class_attribute_invalidation_property(class_attribute_value->bytes_as_string_view(), property);
+    }
     case InvalidationSet::Property::Type::PseudoClass:
         switch (property.value.get<PseudoClass>()) {
         case PseudoClass::Has:

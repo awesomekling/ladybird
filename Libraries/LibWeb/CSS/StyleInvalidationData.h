@@ -87,11 +87,8 @@ struct StyleInvalidationData {
     Vector<TriggeredHasInvalidationPlan> triggered_has_non_subject_invalidation_plans;
     NonnullRefPtr<InvalidationPlan> generic_has_subject_invalidation_plan { InvalidationPlan::create() };
     NonnullRefPtr<InvalidationPlan> generic_has_non_subject_invalidation_plan { InvalidationPlan::create() };
-    HashTable<FlyString> ids_used_in_has_selectors;
-    HashTable<FlyString> class_names_used_in_has_selectors;
-    HashTable<FlyString> attribute_names_used_in_has_selectors;
-    HashTable<FlyString> tag_names_used_in_has_selectors;
-    HashTable<PseudoClass> pseudo_classes_used_in_has_selectors;
+    HashTable<InvalidationSet::Property> properties_used_in_has_selectors;
+    HashTable<InvalidationSet::Property> precise_class_attribute_invalidation_properties;
     HashTable<String> debug_selectors_for_generic_has_subject_invalidation;
     HashTable<String> debug_selectors_for_generic_has_non_subject_invalidation;
     HashMap<InvalidationSet::Property, HashTable<String>> debug_selectors_by_has_subject_invalidation_property;

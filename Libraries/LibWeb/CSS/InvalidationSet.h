@@ -10,6 +10,7 @@
 #include <AK/Format.h>
 #include <AK/Forward.h>
 #include <AK/HashTable.h>
+#include <AK/StringView.h>
 #include <AK/Traits.h>
 #include <LibWeb/CSS/PseudoClass.h>
 
@@ -25,6 +26,12 @@ public:
             Id,
             TagName,
             Attribute,
+            ClassAttributeExactValue,
+            ClassAttributeContainsWord,
+            ClassAttributeContainsString,
+            ClassAttributeStartsWithSegment,
+            ClassAttributeStartsWithString,
+            ClassAttributeEndsWithString,
             PseudoClass,
         };
 
@@ -44,10 +51,18 @@ public:
     bool needs_invalidate_whole_subtree() const { return m_needs_invalidate_whole_subtree; }
     void set_needs_invalidate_whole_subtree() { m_needs_invalidate_whole_subtree = true; }
 
+    void include_property(Property const&);
+
     void set_needs_invalidate_class(FlyString const& name) { m_properties.set({ Property::Type::Class, name }); }
     void set_needs_invalidate_id(FlyString const& name) { m_properties.set({ Property::Type::Id, name }); }
     void set_needs_invalidate_tag_name(FlyString const& name) { m_properties.set({ Property::Type::TagName, name }); }
     void set_needs_invalidate_attribute(FlyString const& name) { m_properties.set({ Property::Type::Attribute, name }); }
+    void set_needs_invalidate_class_attribute_exact_value(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeExactValue, value }); }
+    void set_needs_invalidate_class_attribute_contains_word(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeContainsWord, value }); }
+    void set_needs_invalidate_class_attribute_contains_string(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeContainsString, value }); }
+    void set_needs_invalidate_class_attribute_starts_with_segment(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeStartsWithSegment, value }); }
+    void set_needs_invalidate_class_attribute_starts_with_string(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeStartsWithString, value }); }
+    void set_needs_invalidate_class_attribute_ends_with_string(FlyString const& value) { m_properties.set({ Property::Type::ClassAttributeEndsWithString, value }); }
     void set_needs_invalidate_pseudo_class(PseudoClass pseudo_class) { m_properties.set({ Property::Type::PseudoClass, pseudo_class }); }
 
     bool is_empty() const;
@@ -59,6 +74,9 @@ private:
     bool m_needs_invalidate_whole_subtree { false };
     HashTable<Property> m_properties;
 };
+
+[[nodiscard]] bool is_precise_class_attribute_invalidation_property(InvalidationSet::Property const&);
+[[nodiscard]] bool matches_precise_class_attribute_invalidation_property(StringView class_attribute_value, InvalidationSet::Property const&);
 
 }
 

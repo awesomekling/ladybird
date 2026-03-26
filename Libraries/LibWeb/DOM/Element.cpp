@@ -166,6 +166,33 @@ GC_DEFINE_ALLOCATOR(Element);
     return MUST(builder.to_string());
 }
 
+template<typename Callback>
+static void for_each_relevant_style_scope_for_invalidation(Element const& element, Callback callback)
+{
+    auto& root = element.root();
+    auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot const&>(root).style_scope() : element.document().style_scope();
+    callback(style_scope);
+
+    if (!element.is_shadow_host())
+        return;
+
+    auto shadow_root = element.shadow_root();
+    if (!shadow_root)
+        return;
+
+    if (&shadow_root->style_scope() != &style_scope)
+        callback(shadow_root->style_scope());
+}
+
+static bool style_scope_uses_invalidation_property(CSS::StyleScope const& style_scope, CSS::InvalidationSet::Property const& property)
+{
+    if (!style_scope.m_style_invalidation_data)
+        return false;
+
+    return style_scope.m_style_invalidation_data->invalidation_plans.contains(property)
+        || style_scope.m_style_invalidation_data->properties_used_in_has_selectors.contains(property);
+}
+
 Vector<CSS::InvalidationSet::Property> Element::collect_has_invalidation_properties() const
 {
     Vector<CSS::InvalidationSet::Property> properties;
@@ -213,6 +240,30 @@ Vector<CSS::InvalidationSet::Property> Element::collect_has_invalidation_propert
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Required });
         append_unique({ CSS::InvalidationSet::Property::Type::PseudoClass, CSS::PseudoClass::Optional });
     }
+
+    auto class_attribute_value = attribute(HTML::AttributeNames::class_);
+    CSS::InvalidationSet::Property id_attribute_property { CSS::InvalidationSet::Property::Type::Attribute, HTML::AttributeNames::id };
+    CSS::InvalidationSet::Property class_attribute_property { CSS::InvalidationSet::Property::Type::Attribute, HTML::AttributeNames::class_ };
+    bool include_id_attribute_property = false;
+    bool include_class_attribute_property = false;
+
+    for_each_relevant_style_scope_for_invalidation(*this, [&](CSS::StyleScope const& style_scope) {
+        include_id_attribute_property |= id().has_value() && style_scope_uses_invalidation_property(style_scope, id_attribute_property);
+        include_class_attribute_property |= class_attribute_value.has_value() && style_scope_uses_invalidation_property(style_scope, class_attribute_property);
+
+        if (!class_attribute_value.has_value() || !style_scope.m_style_invalidation_data)
+            return;
+
+        for (auto const& property : style_scope.m_style_invalidation_data->precise_class_attribute_invalidation_properties) {
+            if (CSS::matches_precise_class_attribute_invalidation_property(class_attribute_value->bytes_as_string_view(), property))
+                append_unique(property);
+        }
+    });
+
+    if (include_id_attribute_property)
+        append_unique(id_attribute_property);
+    if (include_class_attribute_property)
+        append_unique(class_attribute_property);
 
     return properties;
 }
@@ -1956,9 +2007,16 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
         case CSS::InvalidationSet::Property::Type::TagName:
             return local_name() == property.name();
         case CSS::InvalidationSet::Property::Type::Attribute: {
-            if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
-                return true;
             return has_attribute(property.name());
+        }
+        case CSS::InvalidationSet::Property::Type::ClassAttributeExactValue:
+        case CSS::InvalidationSet::Property::Type::ClassAttributeContainsWord:
+        case CSS::InvalidationSet::Property::Type::ClassAttributeContainsString:
+        case CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithSegment:
+        case CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithString:
+        case CSS::InvalidationSet::Property::Type::ClassAttributeEndsWithString: {
+            auto class_attribute_value = attribute(HTML::AttributeNames::class_);
+            return class_attribute_value.has_value() && CSS::matches_precise_class_attribute_invalidation_property(class_attribute_value->bytes_as_string_view(), property);
         }
         case CSS::InvalidationSet::Property::Type::PseudoClass: {
             switch (property.value.get<CSS::PseudoClass>()) {
@@ -3185,6 +3243,10 @@ ENUMERATE_ARIA_ATTRIBUTES
 void Element::invalidate_style_after_attribute_change(FlyString const& attribute_name, Optional<String> const& old_value, Optional<String> const& new_value)
 {
     Vector<CSS::InvalidationSet::Property, 1> changed_properties;
+    auto append_changed_property = [&](CSS::InvalidationSet::Property property) {
+        if (!changed_properties.contains_slow(property))
+            changed_properties.append(move(property));
+    };
     StyleInvalidationOptions style_invalidation_options;
     if (is_presentational_hint(attribute_name) || style_uses_attr_css_function()) {
         style_invalidation_options.invalidate_self = true;
@@ -3201,32 +3263,51 @@ void Element::invalidate_style_after_attribute_change(FlyString const& attribute
             new_classes = new_value->bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
         for (auto& old_class : old_classes) {
             if (!new_classes.contains_slow(old_class)) {
-                changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Class, .value = FlyString::from_utf8_without_validation(old_class.bytes()) });
+                append_changed_property({ .type = CSS::InvalidationSet::Property::Type::Class, .value = FlyString::from_utf8_without_validation(old_class.bytes()) });
             }
         }
         for (auto& new_class : new_classes) {
             if (!old_classes.contains_slow(new_class)) {
-                changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Class, .value = FlyString::from_utf8_without_validation(new_class.bytes()) });
+                append_changed_property({ .type = CSS::InvalidationSet::Property::Type::Class, .value = FlyString::from_utf8_without_validation(new_class.bytes()) });
             }
         }
+
+        CSS::InvalidationSet::Property class_attribute_property { CSS::InvalidationSet::Property::Type::Attribute, HTML::AttributeNames::class_ };
+        bool include_class_attribute_property = false;
+        for_each_relevant_style_scope_for_invalidation(*this, [&](CSS::StyleScope const& style_scope) {
+            include_class_attribute_property |= style_scope_uses_invalidation_property(style_scope, class_attribute_property);
+
+            if (!style_scope.m_style_invalidation_data)
+                return;
+
+            for (auto const& property : style_scope.m_style_invalidation_data->precise_class_attribute_invalidation_properties) {
+                bool old_matches = old_value.has_value() && CSS::matches_precise_class_attribute_invalidation_property(old_value->bytes_as_string_view(), property);
+                bool new_matches = new_value.has_value() && CSS::matches_precise_class_attribute_invalidation_property(new_value->bytes_as_string_view(), property);
+                if (old_matches != new_matches)
+                    append_changed_property(property);
+            }
+        });
+        if (include_class_attribute_property)
+            append_changed_property(class_attribute_property);
     } else if (attribute_name == HTML::AttributeNames::id) {
         if (old_value.has_value())
-            changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Id, .value = FlyString(old_value.value()) });
+            append_changed_property({ .type = CSS::InvalidationSet::Property::Type::Id, .value = FlyString(old_value.value()) });
         if (new_value.has_value())
-            changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Id, .value = FlyString(new_value.value()) });
+            append_changed_property({ .type = CSS::InvalidationSet::Property::Type::Id, .value = FlyString(new_value.value()) });
     } else if (attribute_name == HTML::AttributeNames::disabled) {
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Disabled });
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Enabled });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Disabled });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Enabled });
     } else if (attribute_name == HTML::AttributeNames::placeholder) {
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::PlaceholderShown });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::PlaceholderShown });
     } else if (attribute_name == HTML::AttributeNames::value) {
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Checked });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Checked });
     } else if (attribute_name == HTML::AttributeNames::required) {
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Required });
-        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Optional });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Required });
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Optional });
     }
 
-    changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Attribute, .value = attribute_name });
+    if (attribute_name != HTML::AttributeNames::class_)
+        append_changed_property({ .type = CSS::InvalidationSet::Property::Type::Attribute, .value = attribute_name });
     invalidate_style(StyleInvalidationReason::ElementAttributeChange, changed_properties, style_invalidation_options);
 }
 

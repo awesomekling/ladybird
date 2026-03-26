@@ -5,8 +5,24 @@
  */
 
 #include <LibWeb/CSS/InvalidationSet.h>
+#include <LibWeb/Infra/CharacterTypes.h>
 
 namespace Web::CSS {
+
+void InvalidationSet::include_property(Property const& property)
+{
+    switch (property.type) {
+    case Property::Type::InvalidateSelf:
+        set_needs_invalidate_self();
+        break;
+    case Property::Type::InvalidateWholeSubtree:
+        set_needs_invalidate_whole_subtree();
+        break;
+    default:
+        m_properties.set(property);
+        break;
+    }
+}
 
 void InvalidationSet::include_all_from(InvalidationSet const& other)
 {
@@ -34,6 +50,42 @@ void InvalidationSet::for_each_property(Function<IterationDecision(Property cons
     for (auto const& property : m_properties) {
         if (callback(property) == IterationDecision::Break)
             return;
+    }
+}
+
+bool is_precise_class_attribute_invalidation_property(InvalidationSet::Property const& property)
+{
+    switch (property.type) {
+    case InvalidationSet::Property::Type::ClassAttributeExactValue:
+    case InvalidationSet::Property::Type::ClassAttributeContainsWord:
+    case InvalidationSet::Property::Type::ClassAttributeContainsString:
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithSegment:
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithString:
+    case InvalidationSet::Property::Type::ClassAttributeEndsWithString:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool matches_precise_class_attribute_invalidation_property(StringView class_attribute_value, InvalidationSet::Property const& property)
+{
+    switch (property.type) {
+    case InvalidationSet::Property::Type::ClassAttributeExactValue:
+        return class_attribute_value == property.name();
+    case InvalidationSet::Property::Type::ClassAttributeContainsWord:
+        return class_attribute_value.split_view_if(Infra::is_ascii_whitespace).contains_slow(property.name());
+    case InvalidationSet::Property::Type::ClassAttributeContainsString:
+        return class_attribute_value.contains(property.name());
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithSegment:
+        return class_attribute_value == property.name()
+            || class_attribute_value.starts_with(MUST(String::formatted("{}-", property.name())));
+    case InvalidationSet::Property::Type::ClassAttributeStartsWithString:
+        return class_attribute_value.starts_with(property.name());
+    case InvalidationSet::Property::Type::ClassAttributeEndsWithString:
+        return class_attribute_value.ends_with(property.name());
+    default:
+        VERIFY_NOT_REACHED();
     }
 }
 
@@ -75,6 +127,42 @@ ErrorOr<void> Formatter<Web::CSS::InvalidationSet::Property>::format(FormatBuild
         TRY(builder.put_string("["sv));
         TRY(builder.put_string(invalidation_set_property.name()));
         TRY(builder.put_string("]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeExactValue: {
+        TRY(builder.put_string("[class=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeContainsWord: {
+        TRY(builder.put_string("[class~=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeContainsString: {
+        TRY(builder.put_string("[class*=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithSegment: {
+        TRY(builder.put_string("[class|=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithString: {
+        TRY(builder.put_string("[class^=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
+        return {};
+    }
+    case Web::CSS::InvalidationSet::Property::Type::ClassAttributeEndsWithString: {
+        TRY(builder.put_string("[class$=\""sv));
+        TRY(builder.put_string(invalidation_set_property.name()));
+        TRY(builder.put_string("\"]"sv));
         return {};
     }
     case Web::CSS::InvalidationSet::Property::Type::PseudoClass: {

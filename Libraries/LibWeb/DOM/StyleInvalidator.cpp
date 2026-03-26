@@ -177,9 +177,16 @@ static bool element_matches_invalidation_property(Element const& element, CSS::I
     case CSS::InvalidationSet::Property::Type::TagName:
         return element.local_name() == property.name();
     case CSS::InvalidationSet::Property::Type::Attribute:
-        if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
-            return true;
         return element.has_attribute(property.name());
+    case CSS::InvalidationSet::Property::Type::ClassAttributeExactValue:
+    case CSS::InvalidationSet::Property::Type::ClassAttributeContainsWord:
+    case CSS::InvalidationSet::Property::Type::ClassAttributeContainsString:
+    case CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithSegment:
+    case CSS::InvalidationSet::Property::Type::ClassAttributeStartsWithString:
+    case CSS::InvalidationSet::Property::Type::ClassAttributeEndsWithString: {
+        auto class_attribute_value = element.attribute(HTML::AttributeNames::class_);
+        return class_attribute_value.has_value() && CSS::matches_precise_class_attribute_invalidation_property(class_attribute_value->bytes_as_string_view(), property);
+    }
     case CSS::InvalidationSet::Property::Type::PseudoClass:
         switch (property.value.get<CSS::PseudoClass>()) {
         case CSS::PseudoClass::Has:

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body:has([class]) #has-attr-target {
+        background-color: rgb(255, 165, 0);
+    }
+
+    body:has([class*="hot"]) #contains-string-target {
+        background-color: rgb(255, 0, 0);
+    }
+
+    body:has([class~="token"]) #contains-word-target {
+        background-color: rgb(0, 128, 0);
+    }
+
+    body:has([class="alpha beta"]) #exact-target {
+        background-color: rgb(0, 0, 255);
+    }
+
+    body:has([class|="lang"]) #starts-with-segment-target {
+        background-color: rgb(128, 0, 128);
+    }
+
+    body:has([class^="prefix"]) #starts-with-string-target {
+        background-color: rgb(255, 192, 203);
+    }
+
+    body:has([class$="suffix"]) #ends-with-string-target {
+        background-color: rgb(165, 42, 42);
+    }
+</style>
+<body>
+    <div id="fixture"></div>
+    <p id="has-attr-target">has attr</p>
+    <p id="contains-string-target">contains string</p>
+    <p id="contains-word-target">contains word</p>
+    <p id="exact-target">exact</p>
+    <p id="starts-with-segment-target">starts with segment</p>
+    <p id="starts-with-string-target">starts with string</p>
+    <p id="ends-with-string-target">ends with string</p>
+    <script>
+        test(() => {
+            let fixture = document.getElementById("fixture");
+            let probe = document.createElement("div");
+
+            function background_color(selector) {
+                return getComputedStyle(document.querySelector(selector)).backgroundColor;
+            }
+
+            function flush() {
+                document.body.offsetWidth;
+            }
+
+            function check_stage(stage, expectedHasAttr, expectedContainsString, expectedContainsWord, expectedExact, expectedStartsWithSegment, expectedStartsWithString, expectedEndsWithString) {
+                let actualHasAttr = background_color("#has-attr-target");
+                let actualContainsString = background_color("#contains-string-target");
+                let actualContainsWord = background_color("#contains-word-target");
+                let actualExact = background_color("#exact-target");
+                let actualStartsWithSegment = background_color("#starts-with-segment-target");
+                let actualStartsWithString = background_color("#starts-with-string-target");
+                let actualEndsWithString = background_color("#ends-with-string-target");
+
+                if (actualHasAttr === expectedHasAttr
+                    && actualContainsString === expectedContainsString
+                    && actualContainsWord === expectedContainsWord
+                    && actualExact === expectedExact
+                    && actualStartsWithSegment === expectedStartsWithSegment
+                    && actualStartsWithString === expectedStartsWithString
+                    && actualEndsWithString === expectedEndsWithString) {
+                    println(`PASS: ${stage}`);
+                    return;
+                }
+
+                println(`FAIL: ${stage}`);
+                println(`  has attr expected ${expectedHasAttr}, got ${actualHasAttr}`);
+                println(`  contains string expected ${expectedContainsString}, got ${actualContainsString}`);
+                println(`  contains word expected ${expectedContainsWord}, got ${actualContainsWord}`);
+                println(`  exact expected ${expectedExact}, got ${actualExact}`);
+                println(`  starts with segment expected ${expectedStartsWithSegment}, got ${actualStartsWithSegment}`);
+                println(`  starts with string expected ${expectedStartsWithString}, got ${actualStartsWithString}`);
+                println(`  ends with string expected ${expectedEndsWithString}, got ${actualEndsWithString}`);
+            }
+
+            let transparent = "rgba(0, 0, 0, 0)";
+            let orange = "rgb(255, 165, 0)";
+            let red = "rgb(255, 0, 0)";
+            let green = "rgb(0, 128, 0)";
+            let blue = "rgb(0, 0, 255)";
+            let purple = "rgb(128, 0, 128)";
+            let pink = "rgb(255, 192, 203)";
+            let brown = "rgb(165, 42, 42)";
+
+            flush();
+            check_stage("initial state", transparent, transparent, transparent, transparent, transparent, transparent, transparent);
+
+            probe.className = "pre-hot-post";
+            fixture.append(probe);
+            flush();
+            check_stage("after inserting contains-string probe", orange, red, transparent, transparent, transparent, transparent, transparent);
+
+            probe.className = "token";
+            flush();
+            check_stage("after contains-word mutation", orange, transparent, green, transparent, transparent, transparent, transparent);
+
+            probe.className = "alpha beta";
+            flush();
+            check_stage("after exact mutation", orange, transparent, transparent, blue, transparent, transparent, transparent);
+
+            probe.className = "lang-value";
+            flush();
+            check_stage("after starts-with-segment mutation", orange, transparent, transparent, transparent, purple, transparent, transparent);
+
+            probe.className = "prefix-value";
+            flush();
+            check_stage("after starts-with-string mutation", orange, transparent, transparent, transparent, transparent, pink, transparent);
+
+            probe.className = "value-suffix";
+            flush();
+            check_stage("after ends-with-string mutation", orange, transparent, transparent, transparent, transparent, transparent, brown);
+
+            probe.removeAttribute("class");
+            flush();
+            check_stage("after removing class attribute", transparent, transparent, transparent, transparent, transparent, transparent, transparent);
+
+            probe.className = "token";
+            flush();
+            check_stage("after restoring class attribute", orange, transparent, green, transparent, transparent, transparent, transparent);
+
+            fixture.removeChild(probe);
+            flush();
+            check_stage("after removing probe", transparent, transparent, transparent, transparent, transparent, transparent, transparent);
+        });
+    </script>
+</body>

@@ -1,0 +1,10 @@
+PASS: initial state
+PASS: after inserting contains-string probe
+PASS: after contains-word mutation
+PASS: after exact mutation
+PASS: after starts-with-segment mutation
+PASS: after starts-with-string mutation
+PASS: after ends-with-string mutation
+PASS: after removing class attribute
+PASS: after restoring class attribute
+PASS: after removing probe

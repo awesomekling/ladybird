@@ -10,6 +10,7 @@
 #include <AK/StringBuilder.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
+#include <LibWeb/HTML/AttributeNames.h>
 
 namespace Web::CSS {
 
@@ -65,37 +66,48 @@ static void for_each_consecutive_simple_selector_group(Selector const& selector,
         callback(simple_selectors, combinator, is_rightmost);
 }
 
-static void record_property_used_in_has(InvalidationSet::Property const& property, StyleInvalidationData& style_invalidation_data, InvalidationSet* selector_trigger_properties)
+static Optional<InvalidationSet::Property> precise_class_attribute_invalidation_property_for_selector(Selector::SimpleSelector::Attribute const& attribute)
 {
-    switch (property.type) {
-    case InvalidationSet::Property::Type::Id:
-        style_invalidation_data.ids_used_in_has_selectors.set(property.name());
-        if (selector_trigger_properties)
-            selector_trigger_properties->set_needs_invalidate_id(property.name());
-        break;
-    case InvalidationSet::Property::Type::Class:
-        style_invalidation_data.class_names_used_in_has_selectors.set(property.name());
-        if (selector_trigger_properties)
-            selector_trigger_properties->set_needs_invalidate_class(property.name());
-        break;
-    case InvalidationSet::Property::Type::Attribute:
-        style_invalidation_data.attribute_names_used_in_has_selectors.set(property.name());
-        if (selector_trigger_properties)
-            selector_trigger_properties->set_needs_invalidate_attribute(property.name());
-        break;
-    case InvalidationSet::Property::Type::TagName:
-        style_invalidation_data.tag_names_used_in_has_selectors.set(property.name());
-        if (selector_trigger_properties)
-            selector_trigger_properties->set_needs_invalidate_tag_name(property.name());
-        break;
-    case InvalidationSet::Property::Type::PseudoClass:
-        style_invalidation_data.pseudo_classes_used_in_has_selectors.set(property.value.get<PseudoClass>());
-        if (selector_trigger_properties)
-            selector_trigger_properties->set_needs_invalidate_pseudo_class(property.value.get<PseudoClass>());
-        break;
+    if (attribute.qualified_name.name.lowercase_name != HTML::AttributeNames::class_)
+        return {};
+    if (attribute.case_type == Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch)
+        return {};
+
+    auto value = FlyString(attribute.value);
+    switch (attribute.match_type) {
+    case Selector::SimpleSelector::Attribute::MatchType::HasAttribute:
+        return {};
+    case Selector::SimpleSelector::Attribute::MatchType::ExactValueMatch:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeExactValue, value };
+    case Selector::SimpleSelector::Attribute::MatchType::ContainsWord:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeContainsWord, value };
+    case Selector::SimpleSelector::Attribute::MatchType::ContainsString:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeContainsString, value };
+    case Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeStartsWithSegment, value };
+    case Selector::SimpleSelector::Attribute::MatchType::StartsWithString:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeStartsWithString, value };
+    case Selector::SimpleSelector::Attribute::MatchType::EndsWithString:
+        return InvalidationSet::Property { InvalidationSet::Property::Type::ClassAttributeEndsWithString, value };
     default:
         VERIFY_NOT_REACHED();
     }
+}
+
+static InvalidationSet::Property invalidation_property_for_attribute_selector(Selector::SimpleSelector::Attribute const& attribute)
+{
+    if (auto property = precise_class_attribute_invalidation_property_for_selector(attribute); property.has_value())
+        return *property;
+    return { InvalidationSet::Property::Type::Attribute, attribute.qualified_name.name.lowercase_name };
+}
+
+static void record_property_used_in_has(InvalidationSet::Property const& property, StyleInvalidationData& style_invalidation_data, InvalidationSet* selector_trigger_properties)
+{
+    style_invalidation_data.properties_used_in_has_selectors.set(property);
+    if (is_precise_class_attribute_invalidation_property(property))
+        style_invalidation_data.precise_class_attribute_invalidation_properties.set(property);
+    if (selector_trigger_properties)
+        selector_trigger_properties->include_property(property);
 }
 
 static void collect_properties_used_in_has(Selector::SimpleSelector const& selector, StyleInvalidationData& style_invalidation_data, bool in_has, InvalidationSet* selector_trigger_properties)
@@ -113,7 +125,7 @@ static void collect_properties_used_in_has(Selector::SimpleSelector const& selec
     }
     case Selector::SimpleSelector::Type::Attribute: {
         if (in_has)
-            record_property_used_in_has({ InvalidationSet::Property::Type::Attribute, selector.attribute().qualified_name.name.lowercase_name }, style_invalidation_data, selector_trigger_properties);
+            record_property_used_in_has(invalidation_property_for_attribute_selector(selector.attribute()), style_invalidation_data, selector_trigger_properties);
         break;
     }
     case Selector::SimpleSelector::Type::TagName: {
@@ -546,7 +558,9 @@ void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&
         invalidation_set.set_needs_invalidate_tag_name(selector.qualified_name().name.lowercase_name);
         break;
     case Selector::SimpleSelector::Type::Attribute:
-        invalidation_set.set_needs_invalidate_attribute(selector.attribute().qualified_name.name.lowercase_name);
+        invalidation_set.include_property(invalidation_property_for_attribute_selector(selector.attribute()));
+        if (auto property = precise_class_attribute_invalidation_property_for_selector(selector.attribute()); property.has_value())
+            style_invalidation_data.precise_class_attribute_invalidation_properties.set(*property);
         break;
     case Selector::SimpleSelector::Type::PseudoClass: {
         auto const& pseudo_class = selector.pseudo_class();
@@ -647,31 +661,7 @@ static InvalidationSet build_specific_has_subject_invalidation_set(InvalidationS
         if (property.type == InvalidationSet::Property::Type::PseudoClass && property.value.template get<PseudoClass>() == PseudoClass::Has)
             return IterationDecision::Continue;
 
-        switch (property.type) {
-        case InvalidationSet::Property::Type::InvalidateSelf:
-            filtered_invalidation_set.set_needs_invalidate_self();
-            break;
-        case InvalidationSet::Property::Type::InvalidateWholeSubtree:
-            filtered_invalidation_set.set_needs_invalidate_whole_subtree();
-            break;
-        case InvalidationSet::Property::Type::Class:
-            filtered_invalidation_set.set_needs_invalidate_class(property.name());
-            break;
-        case InvalidationSet::Property::Type::Id:
-            filtered_invalidation_set.set_needs_invalidate_id(property.name());
-            break;
-        case InvalidationSet::Property::Type::TagName:
-            filtered_invalidation_set.set_needs_invalidate_tag_name(property.name());
-            break;
-        case InvalidationSet::Property::Type::Attribute:
-            filtered_invalidation_set.set_needs_invalidate_attribute(property.name());
-            break;
-        case InvalidationSet::Property::Type::PseudoClass:
-            filtered_invalidation_set.set_needs_invalidate_pseudo_class(property.value.template get<PseudoClass>());
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        filtered_invalidation_set.include_property(property);
 
         return IterationDecision::Continue;
     });
