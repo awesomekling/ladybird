@@ -12,6 +12,10 @@
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/StyleInvalidator.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLSelectElement.h>
+#include <LibWeb/HTML/HTMLTextAreaElement.h>
 
 namespace Web::DOM {
 
@@ -163,9 +167,75 @@ static String format_top_descendant_rules_for_debug(DescendantInvalidationDebugS
     return MUST(builder.to_string());
 }
 
+static bool element_matches_invalidation_property(Element const& element, CSS::InvalidationSet::Property const& property)
+{
+    switch (property.type) {
+    case CSS::InvalidationSet::Property::Type::Class:
+        return element.has_class(property.name());
+    case CSS::InvalidationSet::Property::Type::Id:
+        return element.id() == property.name();
+    case CSS::InvalidationSet::Property::Type::TagName:
+        return element.local_name() == property.name();
+    case CSS::InvalidationSet::Property::Type::Attribute:
+        if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
+            return true;
+        return element.has_attribute(property.name());
+    case CSS::InvalidationSet::Property::Type::PseudoClass:
+        switch (property.value.get<CSS::PseudoClass>()) {
+        case CSS::PseudoClass::Has:
+            return true;
+        case CSS::PseudoClass::Enabled:
+            return element.matches_enabled_pseudo_class();
+        case CSS::PseudoClass::Disabled:
+            return element.matches_disabled_pseudo_class();
+        case CSS::PseudoClass::Defined:
+            return element.is_defined();
+        case CSS::PseudoClass::Checked:
+            return element.matches_checked_pseudo_class();
+        case CSS::PseudoClass::PlaceholderShown:
+            return element.matches_placeholder_shown_pseudo_class();
+        case CSS::PseudoClass::AnyLink:
+        case CSS::PseudoClass::Link:
+            return element.matches_link_pseudo_class();
+        case CSS::PseudoClass::LocalLink:
+            return element.matches_local_link_pseudo_class();
+        case CSS::PseudoClass::Root:
+            return is<HTML::HTMLHtmlElement>(element);
+        case CSS::PseudoClass::Host:
+            return element.is_shadow_host();
+        case CSS::PseudoClass::Required:
+        case CSS::PseudoClass::Optional:
+            return is<HTML::HTMLInputElement>(element) || is<HTML::HTMLSelectElement>(element) || is<HTML::HTMLTextAreaElement>(element);
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    case CSS::InvalidationSet::Property::Type::InvalidateSelf:
+        return false;
+    case CSS::InvalidationSet::Property::Type::InvalidateWholeSubtree:
+        return true;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+static bool element_matches_all_properties_in_invalidation_set(Element const& element, CSS::InvalidationSet const& match_set)
+{
+    bool did_check_property = false;
+    bool matches_all = true;
+    match_set.for_each_property([&](auto const& property) {
+        did_check_property = true;
+        if (!element_matches_invalidation_property(element, property)) {
+            matches_all = false;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return did_check_property && matches_all;
+}
+
 static bool element_matches_invalidation_rule(Element const& element, CSS::InvalidationSet const& match_set, bool match_any)
 {
-    return match_any || element.includes_properties_from_invalidation_set(match_set);
+    return match_any || element_matches_all_properties_in_invalidation_set(element, match_set);
 }
 
 void StyleInvalidator::visit_edges(Cell::Visitor& visitor)
