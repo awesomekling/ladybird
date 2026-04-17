@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .anchor:has(+ .match) { color: red; }
+</style>
+<div id="a1">
+    <div id="a2">
+        <span id="anchor" class="anchor">anchor</span>
+        <span id="target">target</span>
+    </div>
+</div>
+<script>
+    function printCounters(label) {
+        const c = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${c.hasAncestorWalkInvocations}`);
+        println(`  hasAncestorWalkVisits: ${c.hasAncestorWalkVisits}`);
+        println(`  hasMatchInvocations: ${c.hasMatchInvocations}`);
+        println(`  hasResultCacheHits: ${c.hasResultCacheHits}`);
+        println(`  hasResultCacheMisses: ${c.hasResultCacheMisses}`);
+        println(`  styleInvalidations: ${c.styleInvalidations}`);
+    }
+
+    test(() => {
+        getComputedStyle(document.getElementById("anchor")).color;
+        internals.resetStyleInvalidationCounters();
+
+        // Sibling combinator in :has(). Anchor has sibling-combinator flag,
+        // so invalidation must also walk siblings of each visited ancestor.
+        document.getElementById("target").classList.add("match");
+        getComputedStyle(document.getElementById("anchor")).color;
+        printCounters("after add .match on adjacent sibling");
+    });
+</script>

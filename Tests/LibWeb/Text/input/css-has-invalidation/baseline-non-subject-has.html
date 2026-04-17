@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .anchor:has(.match) .styled { color: red; }
+</style>
+<div id="a1">
+    <div id="a2" class="anchor">
+        <div id="a3">
+            <span id="styled" class="styled">styled</span>
+            <span id="target">target</span>
+        </div>
+    </div>
+</div>
+<script>
+    function printCounters(label) {
+        const c = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${c.hasAncestorWalkInvocations}`);
+        println(`  hasAncestorWalkVisits: ${c.hasAncestorWalkVisits}`);
+        println(`  hasMatchInvocations: ${c.hasMatchInvocations}`);
+        println(`  hasResultCacheHits: ${c.hasResultCacheHits}`);
+        println(`  hasResultCacheMisses: ${c.hasResultCacheMisses}`);
+        println(`  styleInvalidations: ${c.styleInvalidations}`);
+    }
+
+    test(() => {
+        getComputedStyle(document.getElementById("styled")).color;
+        internals.resetStyleInvalidationCounters();
+
+        // Non-subject :has(): the :has() qualifies an ancestor, styling descendants.
+        // Adding .match on target should invalidate the anchor path and re-style .styled.
+        document.getElementById("target").classList.add("match");
+        getComputedStyle(document.getElementById("styled")).color;
+        printCounters("after add .match on target");
+    });
+</script>
