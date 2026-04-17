@@ -1,0 +1,17 @@
+initial bg: rgba(0, 0, 0, 0)
+after style.display = none: rgb(0, 128, 0)
+[after style.display = none]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 4
+after style.display reset: rgba(0, 0, 0, 0)
+[after style.display reset]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 3
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 4

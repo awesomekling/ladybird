@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* The :has() argument uses an attribute substring matcher on the style attr,
+       a pattern that came up in real-world bugs (azure.com regression). */
+    body:has(#beacon[style*="display: none"]) .body-target {
+        background-color: rgb(0, 128, 0);
+    }
+</style>
+<div id="beacon"></div>
+<p class="body-target">target</p>
+<script>
+    test(() => {
+        println(`initial bg: ${getComputedStyle(document.querySelector(".body-target")).backgroundColor}`);
+        settleAndReset();
+
+        document.getElementById("beacon").style.display = "none";
+        println(`after style.display = none: ${getComputedStyle(document.querySelector(".body-target")).backgroundColor}`);
+        printCounters("after style.display = none");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("beacon").style.display = "";
+        println(`after style.display reset: ${getComputedStyle(document.querySelector(".body-target")).backgroundColor}`);
+        printCounters("after style.display reset");
+    });
+</script>

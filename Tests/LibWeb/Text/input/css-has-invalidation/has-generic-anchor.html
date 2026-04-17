@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* Generic (no left-side compound) :has(). Anchor is implicitly any element
+       whose subtree matches. The .target descendant is styled when ANY element
+       in its ancestor chain has a .flag descendant. */
+    :has(.flag) .target {
+        background-color: rgb(0, 128, 0);
+    }
+</style>
+<div id="container">
+    <div id="probe"></div>
+    <p class="target">target</p>
+</div>
+<script>
+    test(() => {
+        println(`initial bg: ${getComputedStyle(document.querySelector(".target")).backgroundColor}`);
+        settleAndReset();
+
+        document.getElementById("probe").classList.add("flag");
+        println(`after add .flag: ${getComputedStyle(document.querySelector(".target")).backgroundColor}`);
+        printCounters("after add .flag");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("probe").classList.remove("flag");
+        println(`after remove .flag: ${getComputedStyle(document.querySelector(".target")).backgroundColor}`);
+        printCounters("after remove .flag");
+    });
+</script>
