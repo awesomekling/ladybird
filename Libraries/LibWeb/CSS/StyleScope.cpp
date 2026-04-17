@@ -819,6 +819,12 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
     auto& counters = document().style_invalidation_counters();
     ++counters.has_ancestor_walk_invocations;
 
+    auto is_in_has_scope = [](DOM::Element const& element) {
+        return element.in_has_scope()
+            || element.affected_by_has_pseudo_class_in_subject_position()
+            || element.affected_by_has_pseudo_class_in_non_subject_position();
+    };
+
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
     auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
     for (auto& node : nodes) {
@@ -826,6 +832,12 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             if (!ancestor->is_element())
                 continue;
             auto& element = static_cast<DOM::Element&>(*ancestor);
+
+            // Terminate the upward walk once we reach an element that no :has()
+            // anchor has ever observed. Its style cannot be affected by a mutation
+            // further down the tree, so neither can anything above it.
+            if (!is_in_has_scope(element))
+                break;
 
             if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
                 break;

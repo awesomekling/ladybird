@@ -1,13 +1,13 @@
-[after add .match on target]
+[add .a (matches :is() branch)]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 4
+  hasAncestorWalkVisits: 3
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
   styleInvalidations: 1
-[after remove .match on target]
+[swap to .b (other :is() branch)]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 4
+  hasAncestorWalkVisits: 3
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1

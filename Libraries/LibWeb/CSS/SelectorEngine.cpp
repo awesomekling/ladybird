@@ -168,6 +168,8 @@ static inline bool matches_relative_selector(CSS::Selector const& selector, size
             if (!descendant.is_element())
                 return TraversalDecision::Continue;
             auto const& descendant_element = static_cast<DOM::Element const&>(descendant);
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(descendant_element).set_in_has_scope(true);
             if (matches(selector, descendant_element, shadow_host, context, scope, SelectorKind::Relative, anchor)) {
                 has = true;
                 matching_descendant = &descendant_element;
@@ -189,6 +191,8 @@ static inline bool matches_relative_selector(CSS::Selector const& selector, size
             if (!child.is_element())
                 return IterationDecision::Continue;
             auto const& child_element = static_cast<DOM::Element const&>(child);
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(child_element).set_in_has_scope(true);
             if (!matches_compound_selector(selector, compound_index, child_element, shadow_host, context, scope, SelectorKind::Relative, anchor))
                 return IterationDecision::Continue;
             if (matches_relative_selector(selector, compound_index + 1, child_element, shadow_host, context, anchor, scope)) {
@@ -206,6 +210,8 @@ static inline bool matches_relative_selector(CSS::Selector const& selector, size
         auto* sibling = element.next_element_sibling();
         if (!sibling)
             return false;
+        if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+            const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
         if (!matches_compound_selector(selector, compound_index, *sibling, shadow_host, context, scope, SelectorKind::Relative, anchor))
             return false;
         return matches_relative_selector(selector, compound_index + 1, *sibling, shadow_host, context, anchor, scope);
@@ -215,6 +221,8 @@ static inline bool matches_relative_selector(CSS::Selector const& selector, size
             const_cast<DOM::Element&>(*anchor).set_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator(true);
         }
         for (auto const* sibling = element.next_element_sibling(); sibling; sibling = sibling->next_element_sibling()) {
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
             if (!matches_compound_selector(selector, compound_index, *sibling, shadow_host, context, scope, SelectorKind::Relative, anchor))
                 continue;
             if (matches_relative_selector(selector, compound_index + 1, *sibling, shadow_host, context, anchor, scope))
@@ -241,6 +249,10 @@ static inline bool matches_has_pseudo_class(CSS::Selector const& selector, DOM::
         }
         ++counters.has_result_cache_misses;
     }
+
+    bool saved_inside_has = context.inside_has_argument_match;
+    context.inside_has_argument_match = true;
+    ScopeGuard restore_inside_has = [&] { context.inside_has_argument_match = saved_inside_has; };
 
     bool result = matches_relative_selector(selector, 0, anchor, shadow_host, context, anchor, scope);
 
@@ -1397,8 +1409,19 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
         }
     }
 
+    // Defer :has() until every other simple selector in the compound has matched.
+    // :has() has side effects (setting per-element flags used by invalidation) and
+    // is expensive, so running it at compounds that ultimately fail is both
+    // wasteful and produces spuriously permissive flags.
+    auto is_has_pseudo_class = [](CSS::Selector::SimpleSelector const& s) {
+        return s.type == CSS::Selector::SimpleSelector::Type::PseudoClass
+            && s.pseudo_class().type == CSS::PseudoClass::Has;
+    };
+
     auto element_for_compound_matching { target };
     for (auto& simple_selector : compound_selector.simple_selectors.in_reverse()) {
+        if (is_has_pseudo_class(simple_selector))
+            continue;
         if (!matches_simple_selector(simple_selector, element_for_compound_matching, shadow_host, context, scope, selector_kind, anchor)) {
             return false;
         }
@@ -1421,6 +1444,13 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
             }
         }
     }
+    for (auto& simple_selector : compound_selector.simple_selectors.in_reverse()) {
+        if (!is_has_pseudo_class(simple_selector))
+            continue;
+        if (!matches_simple_selector(simple_selector, element_for_compound_matching, shadow_host, context, scope, selector_kind, anchor)) {
+            return false;
+        }
+    }
     auto const& element = element_for_compound_matching;
 
     if (selector_kind == SelectorKind::Relative && component_list_index == 0) {
@@ -1440,6 +1470,8 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
                 continue;
             if (ancestor_element == anchor)
                 return false;
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(*ancestor_element).set_in_has_scope(true);
             if (matches_compound_selector(selector, component_list_index - 1, *ancestor_element, shadow_host, context, scope, selector_kind, anchor))
                 return true;
         }
@@ -1449,7 +1481,10 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
         auto parent = traverse_up(element, shadow_host);
         if (!parent || !parent->is_element())
             return false;
-        return matches_compound_selector(selector, component_list_index - 1, static_cast<DOM::Element const&>(*parent), shadow_host, context, scope, selector_kind, anchor);
+        auto& parent_element = static_cast<DOM::Element const&>(*parent);
+        if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+            const_cast<DOM::Element&>(parent_element).set_in_has_scope(true);
+        return matches_compound_selector(selector, component_list_index - 1, parent_element, shadow_host, context, scope, selector_kind, anchor);
     }
     case CSS::Selector::Combinator::NextSibling:
         if (context.collect_per_element_selector_involvement_metadata) {
@@ -1458,8 +1493,11 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
             const_cast<DOM::Element&>(element.element()).set_sibling_invalidation_distance(new_sibling_invalidation_distance);
         }
         VERIFY(component_list_index != 0);
-        if (auto* sibling = element.element().previous_element_sibling())
+        if (auto* sibling = element.element().previous_element_sibling()) {
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
             return matches_compound_selector(selector, component_list_index - 1, *sibling, shadow_host, context, scope, selector_kind, anchor);
+        }
         return false;
     case CSS::Selector::Combinator::SubsequentSibling:
         if (context.collect_per_element_selector_involvement_metadata) {
@@ -1467,6 +1505,8 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
         }
         VERIFY(component_list_index != 0);
         for (auto* sibling = element.element().previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+                const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
             if (matches_compound_selector(selector, component_list_index - 1, *sibling, shadow_host, context, scope, selector_kind, anchor))
                 return true;
         }
