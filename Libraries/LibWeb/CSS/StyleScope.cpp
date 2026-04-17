@@ -958,6 +958,8 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             if (!should_scan_ancestor_siblings || !is_in_subtree_of_has_relative_selector_with_sibling_combinator(element))
                 continue;
             parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
+                if (&ancestor_sibling_element == &element)
+                    return IterationDecision::Continue;
                 ++counters.has_ancestor_sibling_element_checks;
                 if (ancestor_sibling_element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator()) {
                     if (elements_already_invalidated_for_has.set(&ancestor_sibling_element) != AK::HashSetResult::InsertedNewEntry)
