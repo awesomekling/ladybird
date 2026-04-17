@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.target:first-child) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <div class="target" id="target">target</div>
+    <div>other</div>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Insert a sibling before .target. .target stops being :first-child.
+        const sibling = document.createElement("div");
+        document.getElementById("anchor").insertBefore(sibling, document.getElementById("target"));
+        println(`after insert before .target: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after insert before .target");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Remove the inserted sibling. .target becomes :first-child again.
+        sibling.remove();
+        println(`after remove inserted sibling: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove inserted sibling");
+    });
+</script>

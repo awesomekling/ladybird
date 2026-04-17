@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* Parent rule: when its anchor child is itself :empty, color the parent. */
+    .parent:has(.anchor:empty) { color: rgb(255, 0, 0); }
+</style>
+<div class="parent" id="parent">
+    <div class="anchor" id="anchor"></div>
+</div>
+<script>
+    test(() => {
+        // Initial: anchor is :empty, parent should be red.
+        println(`initial color: ${getComputedStyle(document.getElementById("parent")).color}`);
+        settleAndReset();
+
+        // Insert text directly into the anchor. Anchor stops being :empty.
+        document.getElementById("anchor").appendChild(document.createTextNode("text"));
+        println(`after text insert into anchor: ${getComputedStyle(document.getElementById("parent")).color}`);
+        printCounters("after text insert into anchor");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("anchor").firstChild.remove();
+        println(`after text removed: ${getComputedStyle(document.getElementById("parent")).color}`);
+        printCounters("after text removed");
+    });
+</script>

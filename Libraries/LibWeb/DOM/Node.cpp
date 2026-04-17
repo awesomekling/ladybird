@@ -433,8 +433,21 @@ static bool reason_may_affect_has_selectors(StyleInvalidationReason reason)
 
 void Node::invalidate_style(StyleInvalidationReason reason)
 {
-    if (is_character_data())
+    if (is_character_data()) {
+        // CharacterData nodes don't have their own computed style and would
+        // normally exit here. But inserting or removing one can flip the
+        // :empty state of its parent, which a :has() rule may depend on.
+        // Schedule the parent for a :has() walk when this happens.
+        if (reason == StyleInvalidationReason::NodeInsertBefore || reason == StyleInvalidationReason::NodeRemove) {
+            auto& root = this->root();
+            auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot&>(root).style_scope() : document().style_scope();
+            if (style_scope.may_have_has_selectors()) {
+                if (auto* parent = parent_or_shadow_host(); parent)
+                    style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
+            }
+        }
         return;
+    }
 
     auto& style_scope = root().is_shadow_root() ? static_cast<ShadowRoot&>(root()).style_scope() : document().style_scope();
 

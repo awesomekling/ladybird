@@ -1,0 +1,17 @@
+initial color: rgb(0, 0, 0)
+after remove only child: rgb(255, 0, 0)
+[after remove only child of target]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 4
+after re-insert child: rgb(0, 0, 0)
+[after re-insert child into target]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5

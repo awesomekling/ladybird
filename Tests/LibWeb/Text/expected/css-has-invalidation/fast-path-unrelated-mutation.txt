@@ -1,5 +1,5 @@
 [add unrelated class outside any :has() scope]
-  hasAncestorWalkInvocations: 1
+  hasAncestorWalkInvocations: 0
   hasAncestorWalkVisits: 0
   hasMatchInvocations: 0
   hasResultCacheHits: 0

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(:empty) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <div id="target"></div>
+</div>
+<script>
+    test(() => {
+        // Confirm initial match: target is empty, anchor should be red.
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        settleAndReset();
+
+        // Insert text into target. Target stops being :empty. Anchor must re-style.
+        document.getElementById("target").appendChild(document.createTextNode("x"));
+        println(`after text insert: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after text insert into empty descendant");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Remove the text. Target becomes :empty again.
+        document.getElementById("target").firstChild.remove();
+        println(`after text remove: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after text remove from descendant");
+    });
+</script>
