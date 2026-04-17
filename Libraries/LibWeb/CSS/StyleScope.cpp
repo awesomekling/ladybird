@@ -879,6 +879,11 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             || element.affected_by_has_pseudo_class_in_non_subject_position();
     };
 
+    auto is_in_subtree_of_has_relative_selector_with_sibling_combinator = [](DOM::Element const& element) {
+        return element.in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator()
+            || element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator();
+    };
+
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
     auto invalidate_anchor_if_needed = [&](DOM::Element& element) {
         if (!is_has_anchor_candidate(element))
@@ -950,7 +955,7 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
 
             // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
             // its style might be affected by the change in descendant node.
-            if (!should_scan_ancestor_siblings)
+            if (!should_scan_ancestor_siblings || !is_in_subtree_of_has_relative_selector_with_sibling_combinator(element))
                 continue;
             parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
                 ++counters.has_ancestor_sibling_element_checks;
