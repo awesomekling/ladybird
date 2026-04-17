@@ -2,7 +2,7 @@ initial bg: rgba(0, 0, 0, 0)
 after add .flag: rgb(0, 128, 0)
 [after add .flag]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 4
+  hasAncestorWalkVisits: 3
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
@@ -10,7 +10,7 @@ after add .flag: rgb(0, 128, 0)
 after remove .flag: rgba(0, 0, 0, 0)
 [after remove .flag]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 5
+  hasAncestorWalkVisits: 3
   hasMatchInvocations: 3
   hasResultCacheHits: 0
   hasResultCacheMisses: 3

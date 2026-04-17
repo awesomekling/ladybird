@@ -1,7 +1,7 @@
 anchor color (target detached): rgb(0, 0, 0)
 [after class add on detached element]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 0
   hasMatchInvocations: 0
   hasResultCacheHits: 0
   hasResultCacheMisses: 0

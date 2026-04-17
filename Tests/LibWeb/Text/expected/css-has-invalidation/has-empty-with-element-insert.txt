@@ -2,7 +2,7 @@ initial color: rgb(255, 0, 0)
 after element insert: rgb(255, 0, 0)
 [after element insert into empty target]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
@@ -10,7 +10,7 @@ after element insert: rgb(255, 0, 0)
 after element remove: rgb(255, 0, 0)
 [after element remove from target]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1

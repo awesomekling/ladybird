@@ -2,7 +2,7 @@ initial: rgb(0, 0, 0)
 after add .match (rule injected first): rgb(255, 0, 0)
 [after add .match (rule injected first)]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 2
   hasResultCacheHits: 0
   hasResultCacheMisses: 2
@@ -10,7 +10,7 @@ after add .match (rule injected first): rgb(255, 0, 0)
 after remove .match: rgb(0, 0, 0)
 [after remove .match]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1

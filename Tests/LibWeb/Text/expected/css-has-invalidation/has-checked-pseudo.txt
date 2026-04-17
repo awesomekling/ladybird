@@ -2,7 +2,7 @@ initial: rgb(0, 0, 0)
 after .checked = true: rgb(255, 0, 0)
 [after check]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
@@ -10,7 +10,7 @@ after .checked = true: rgb(255, 0, 0)
 after .checked = false: rgb(0, 0, 0)
 [after uncheck]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1

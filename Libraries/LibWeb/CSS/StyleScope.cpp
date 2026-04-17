@@ -943,11 +943,18 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             }
             reached_has_scope = true;
 
+            bool should_scan_element_siblings = should_scan_ancestor_siblings
+                && is_in_subtree_of_has_relative_selector_with_sibling_combinator(element);
+            if (!is_has_anchor_candidate(element) && !should_scan_element_siblings)
+                continue;
+
             if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
                 continue;
 
-            ++counters.has_ancestor_walk_visits;
-            element.invalidate_style_if_affected_by_has();
+            if (is_has_anchor_candidate(element)) {
+                ++counters.has_ancestor_walk_visits;
+                element.invalidate_style_if_affected_by_has();
+            }
 
             auto* parent = ancestor->parent_or_shadow_host();
             if (!parent)
@@ -955,7 +962,7 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
 
             // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
             // its style might be affected by the change in descendant node.
-            if (!should_scan_ancestor_siblings || !is_in_subtree_of_has_relative_selector_with_sibling_combinator(element))
+            if (!should_scan_element_siblings)
                 continue;
             parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
                 if (&ancestor_sibling_element == &element)

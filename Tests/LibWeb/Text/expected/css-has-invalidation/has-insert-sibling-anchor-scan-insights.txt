@@ -1,6 +1,6 @@
 [descendant-only insertion]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasAncestorSiblingElementChecks: 0
   hasSiblingAnchorInvalidationChecks: 0
   hasMatchInvocations: 1
