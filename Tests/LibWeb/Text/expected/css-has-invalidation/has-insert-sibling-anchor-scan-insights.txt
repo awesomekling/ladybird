@@ -1,0 +1,18 @@
+[descendant-only insertion]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasAncestorSiblingElementChecks: 0
+  hasSiblingAnchorInvalidationChecks: 0
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+[sibling-sensitive insertion]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 0
+  hasAncestorSiblingElementChecks: 0
+  hasSiblingAnchorInvalidationChecks: 3
+  hasMatchInvocations: 2
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 2
+  styleInvalidations: 3

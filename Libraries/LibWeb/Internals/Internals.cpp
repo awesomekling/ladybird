@@ -602,6 +602,7 @@ JS::Object* Internals::get_style_invalidation_counters()
     object->define_direct_property("hasAncestorWalkInvocations"_utf16_fly_string, JS::Value(counters.has_ancestor_walk_invocations), JS::default_attributes);
     object->define_direct_property("hasAncestorWalkVisits"_utf16_fly_string, JS::Value(counters.has_ancestor_walk_visits), JS::default_attributes);
     object->define_direct_property("hasAncestorSiblingElementChecks"_utf16_fly_string, JS::Value(counters.has_ancestor_sibling_element_checks), JS::default_attributes);
+    object->define_direct_property("hasSiblingAnchorInvalidationChecks"_utf16_fly_string, JS::Value(counters.has_sibling_anchor_invalidation_checks), JS::default_attributes);
     object->define_direct_property("hasInvalidationMetadataCandidates"_utf16_fly_string, JS::Value(counters.has_invalidation_metadata_candidates), JS::default_attributes);
     object->define_direct_property("hasMatchInvocations"_utf16_fly_string, JS::Value(counters.has_match_invocations), JS::default_attributes);
     object->define_direct_property("hasResultCacheHits"_utf16_fly_string, JS::Value(counters.has_result_cache_hits), JS::default_attributes);

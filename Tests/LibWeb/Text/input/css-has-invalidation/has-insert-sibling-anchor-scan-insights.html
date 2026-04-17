@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style id="test-style">
+    .anchor:has(.match) { color: red; }
+</style>
+<div id="outer">
+    <div id="anchor" class="anchor">
+        <div id="inner"></div>
+    </div>
+    <div id="sentinel"></div>
+</div>
+<script>
+    function printInsertionCounters(label) {
+        let counters = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${counters.hasAncestorWalkInvocations}`);
+        println(`  hasAncestorWalkVisits: ${counters.hasAncestorWalkVisits}`);
+        println(`  hasAncestorSiblingElementChecks: ${counters.hasAncestorSiblingElementChecks}`);
+        println(`  hasSiblingAnchorInvalidationChecks: ${counters.hasSiblingAnchorInvalidationChecks}`);
+        println(`  hasMatchInvocations: ${counters.hasMatchInvocations}`);
+        println(`  hasResultCacheHits: ${counters.hasResultCacheHits}`);
+        println(`  hasResultCacheMisses: ${counters.hasResultCacheMisses}`);
+        println(`  styleInvalidations: ${counters.styleInvalidations}`);
+    }
+
+    test(() => {
+        let anchor = document.getElementById("anchor");
+        let inner = document.getElementById("inner");
+        let style = document.getElementById("test-style");
+
+        settleAndReset(anchor);
+
+        let child = document.createElement("span");
+        child.className = "match";
+        inner.appendChild(child);
+        getComputedStyle(anchor).color;
+        printInsertionCounters("descendant-only insertion");
+
+        child.remove();
+        style.textContent += "\n.anchor:has(+ .match) { color: blue; }";
+        getComputedStyle(anchor).color;
+        internals.resetStyleInvalidationCounters();
+
+        let sibling = document.createElement("div");
+        sibling.className = "match";
+        anchor.after(sibling);
+        getComputedStyle(anchor).color;
+        printInsertionCounters("sibling-sensitive insertion");
+    });
+</script>
