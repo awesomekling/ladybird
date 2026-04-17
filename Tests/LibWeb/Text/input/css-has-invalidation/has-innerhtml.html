@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span class="match">x</span>
+</div>
+<script>
+    test(() => {
+        // Initially red because .match exists.
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Wipe innerHTML. .match disappears. Anchor should stop being red.
+        document.getElementById("anchor").innerHTML = "<span>plain</span>";
+        println(`after innerHTML wipe: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after innerHTML wipe");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Restore .match via innerHTML. Anchor should be red again.
+        document.getElementById("anchor").innerHTML = "<span class='match'>x</span>";
+        println(`after innerHTML restore: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after innerHTML restore");
+    });
+</script>

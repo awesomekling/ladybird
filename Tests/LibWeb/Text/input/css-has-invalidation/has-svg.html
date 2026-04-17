@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    svg.anchor:has(circle.match) { color: rgb(255, 0, 0); }
+</style>
+<svg class="anchor" id="anchor" width="20" height="20">
+    <circle id="circle" cx="10" cy="10" r="5"></circle>
+</svg>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        document.getElementById("circle").setAttribute("class", "match");
+        println(`after add .match to circle: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after add .match to circle");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("circle").setAttribute("class", "");
+        println(`after remove .match from circle: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove .match from circle");
+    });
+</script>

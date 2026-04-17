@@ -1,0 +1,9 @@
+initial color: rgb(0, 0, 0)
+after fragment insert: rgb(255, 0, 0)
+[after fragment insert]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 7

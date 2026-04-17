@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<!-- No :has() rule initially. -->
+<div class="anchor" id="anchor">
+    <span id="target">x</span>
+</div>
+<script>
+    test(() => {
+        // Initial: no rules involving :has().
+        println(`initial: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Inject a :has() rule at runtime.
+        const sheet = document.createElement("style");
+        sheet.textContent = ".anchor:has(.match) { color: rgb(255, 0, 0); }";
+        document.head.appendChild(sheet);
+        getComputedStyle(document.getElementById("anchor")).color;
+
+        // After stylesheet add, the class change should be picked up by :has().
+        document.getElementById("target").classList.add("match");
+        println(`after add .match (rule injected first): ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after add .match (rule injected first)");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("target").classList.remove("match");
+        println(`after remove .match: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove .match");
+    });
+</script>

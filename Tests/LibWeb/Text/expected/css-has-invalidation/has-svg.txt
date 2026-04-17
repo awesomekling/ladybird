@@ -1,0 +1,17 @@
+initial color: rgb(0, 0, 0)
+after add .match to circle: rgb(255, 0, 0)
+[after add .match to circle]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+after remove .match from circle: rgb(0, 0, 0)
+[after remove .match from circle]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3

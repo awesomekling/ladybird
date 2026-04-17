@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <div id="container">
+        <span id="target">target</span>
+    </div>
+</div>
+<script>
+    test(() => {
+        const container = document.getElementById("container");
+        const target = document.getElementById("target");
+        settleAndReset();
+
+        // Detach the container subtree.
+        container.remove();
+
+        // Mutating an element in the detached subtree must not crash and must
+        // not invalidate the still-attached anchor.
+        target.classList.add("match");
+        println(`anchor color (target detached): ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after class add on detached element");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Re-attach. Anchor should re-evaluate and become red.
+        document.getElementById("anchor").appendChild(container);
+        println(`anchor color (target re-attached): ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after re-attach with .match descendant");
+    });
+</script>

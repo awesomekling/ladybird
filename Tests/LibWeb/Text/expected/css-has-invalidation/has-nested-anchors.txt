@@ -1,0 +1,8 @@
+initial outer: color=rgb(0, 0, 0) bg=rgba(0, 0, 0, 0)
+initial inner: color=rgb(0, 0, 0) bg=rgba(0, 0, 0, 0)
+after add .x outer: color=rgb(255, 0, 0) bg=rgba(0, 0, 0, 0)
+after add .x inner: color=rgb(255, 0, 0) bg=rgba(0, 0, 0, 0)
+after add .y outer: color=rgb(255, 0, 0) bg=rgba(0, 0, 0, 0)
+after add .y inner: color=rgb(255, 0, 0) bg=rgb(0, 0, 255)
+after remove .x outer: color=rgb(0, 0, 0) bg=rgba(0, 0, 0, 0)
+after remove .x inner: color=rgb(0, 0, 0) bg=rgb(0, 0, 255)

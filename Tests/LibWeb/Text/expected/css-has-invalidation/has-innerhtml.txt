@@ -1,0 +1,17 @@
+initial color: rgb(255, 0, 0)
+after innerHTML wipe: rgb(0, 0, 0)
+[after innerHTML wipe]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5
+after innerHTML restore: rgb(255, 0, 0)
+[after innerHTML restore]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5

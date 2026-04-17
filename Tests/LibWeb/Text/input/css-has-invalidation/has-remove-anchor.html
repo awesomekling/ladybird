@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div id="parent">
+    <div class="anchor" id="anchor">
+        <span class="match">x</span>
+    </div>
+    <div class="anchor" id="other-anchor">
+        <span class="match">y</span>
+    </div>
+</div>
+<script>
+    test(() => {
+        println(`initial anchor color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        println(`initial other-anchor color: ${getComputedStyle(document.getElementById("other-anchor")).color}`);
+        settleAndReset();
+
+        // Remove the anchor itself. Should not crash. Other anchor unaffected.
+        document.getElementById("anchor").remove();
+        println(`after remove anchor, other-anchor color: ${getComputedStyle(document.getElementById("other-anchor")).color}`);
+        printCounters("after remove anchor");
+    });
+</script>

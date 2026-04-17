@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="target">target</span>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // replaceWith: remove old, insert new in one operation.
+        const replacement = document.createElement("span");
+        replacement.className = "match";
+        document.getElementById("target").replaceWith(replacement);
+        println(`after replaceWith matching span: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after replaceWith");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Replace back with non-matching.
+        const back = document.createElement("span");
+        replacement.replaceWith(back);
+        println(`after replaceWith non-matching: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after replaceWith back");
+    });
+</script>

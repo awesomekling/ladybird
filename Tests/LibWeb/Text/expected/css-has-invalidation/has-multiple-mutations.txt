@@ -1,0 +1,17 @@
+initial color: rgb(0, 0, 0)
+after batch 1 (only b matches): rgb(255, 0, 0)
+[after batch 1]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 3
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+after batch 2 (no matches): rgb(0, 0, 0)
+[after batch 2]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 3
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3

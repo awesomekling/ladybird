@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(:checked) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <input type="checkbox" id="cb">
+</div>
+<script>
+    test(() => {
+        println(`initial: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        document.getElementById("cb").checked = true;
+        println(`after .checked = true: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after check");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("cb").checked = false;
+        println(`after .checked = false: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after uncheck");
+    });
+</script>

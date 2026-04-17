@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(*) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor"></div>
+<script>
+    test(() => {
+        // Anchor has no children: :has(*) does not match.
+        println(`initial (empty) color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        const child = document.createElement("span");
+        document.getElementById("anchor").appendChild(child);
+        println(`after add child: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after add child");
+
+        internals.resetStyleInvalidationCounters();
+
+        child.remove();
+        println(`after remove child: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove child");
+    });
+</script>

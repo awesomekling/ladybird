@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="target" class="match">x</span>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Re-adding the same class should be cheap. No new invalidation work.
+        document.getElementById("target").classList.add("match");
+        getComputedStyle(document.getElementById("anchor")).color;
+        printCounters("after redundant classList.add('match')");
+
+        internals.resetStyleInvalidationCounters();
+
+        // setAttribute with the same value.
+        document.getElementById("target").setAttribute("class", "match");
+        getComputedStyle(document.getElementById("anchor")).color;
+        printCounters("after redundant setAttribute('class', 'match')");
+    });
+</script>

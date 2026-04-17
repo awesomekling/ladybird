@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has([data-state="open"]) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="target" data-state="closed">x</span>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Change attribute VALUE, not presence. :has([data-state="open"]) should
+        // re-evaluate.
+        document.getElementById("target").setAttribute("data-state", "open");
+        println(`after value change to 'open': ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after value change to 'open'");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("target").setAttribute("data-state", "closed");
+        println(`after value change to 'closed': ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after value change to 'closed'");
+    });
+</script>

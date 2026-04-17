@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="a">a</span>
+    <span id="b">b</span>
+    <span id="c">c</span>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Multiple mutations before reading style. Anchor should be red after if
+        // any descendant has .match by the time style is computed.
+        document.getElementById("a").classList.add("match");
+        document.getElementById("b").classList.add("match");
+        document.getElementById("a").classList.remove("match");
+        // Now only b has .match. Anchor should still be red.
+        println(`after batch 1 (only b matches): ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after batch 1");
+
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("b").classList.remove("match");
+        document.getElementById("c").classList.add("match");
+        document.getElementById("c").classList.remove("match");
+        // No matches. Anchor should NOT be red.
+        println(`after batch 2 (no matches): ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after batch 2");
+    });
+</script>

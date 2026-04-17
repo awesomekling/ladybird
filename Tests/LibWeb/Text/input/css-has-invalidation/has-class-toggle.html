@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="target">x</span>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        document.getElementById("target").classList.toggle("match");
+        println(`after toggle on: ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        document.getElementById("target").classList.toggle("match");
+        println(`after toggle off: ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        document.getElementById("target").classList.toggle("match", true);
+        println(`after toggle force-on: ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        document.getElementById("target").classList.toggle("match", false);
+        println(`after toggle force-off: ${getComputedStyle(document.getElementById("anchor")).color}`);
+    });
+</script>

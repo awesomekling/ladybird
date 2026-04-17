@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.a, .b) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <span id="t1">x</span>
+    <span id="t2">y</span>
+</div>
+<script>
+    test(() => {
+        println(`initial: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        document.getElementById("t1").classList.add("a");
+        println(`after add .a (matches first branch): ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        document.getElementById("t1").classList.remove("a");
+        document.getElementById("t2").classList.add("b");
+        println(`after swap to .b (matches second branch): ${getComputedStyle(document.getElementById("anchor")).color}`);
+
+        document.getElementById("t2").classList.remove("b");
+        println(`after both removed: ${getComputedStyle(document.getElementById("anchor")).color}`);
+    });
+</script>

@@ -1,0 +1,17 @@
+initial anchor color: rgb(0, 0, 0)
+after move into anchor: rgb(255, 0, 0)
+[after move into anchor]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 6
+after move back out: rgb(0, 0, 0)
+[after move back out]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 6

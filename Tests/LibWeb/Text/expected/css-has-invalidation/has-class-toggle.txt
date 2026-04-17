@@ -1,0 +1,5 @@
+initial color: rgb(0, 0, 0)
+after toggle on: rgb(255, 0, 0)
+after toggle off: rgb(0, 0, 0)
+after toggle force-on: rgb(255, 0, 0)
+after toggle force-off: rgb(0, 0, 0)

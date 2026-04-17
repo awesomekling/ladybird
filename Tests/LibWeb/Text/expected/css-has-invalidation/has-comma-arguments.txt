@@ -1,0 +1,4 @@
+initial: rgb(0, 0, 0)
+after add .a (matches first branch): rgb(255, 0, 0)
+after swap to .b (matches second branch): rgb(255, 0, 0)
+after both removed: rgb(0, 0, 0)

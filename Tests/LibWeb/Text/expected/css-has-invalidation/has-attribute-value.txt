@@ -1,0 +1,17 @@
+initial color: rgb(0, 0, 0)
+after value change to 'open': rgb(255, 0, 0)
+[after value change to 'open']
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+after value change to 'closed': rgb(0, 0, 0)
+[after value change to 'closed']
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3

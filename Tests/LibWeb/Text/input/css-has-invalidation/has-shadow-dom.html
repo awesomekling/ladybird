@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* :has() in the document scope. The argument should not pierce shadow trees. */
+    .host:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="host" id="host"></div>
+<script>
+    test(() => {
+        const root = document.getElementById("host").attachShadow({ mode: "open" });
+        root.innerHTML = "<style>.host:has(.match) { color: rgb(0, 0, 255); }</style><span id='inside'>shadow</span>";
+
+        // Light DOM is empty, so document-scope :has(.match) does not match.
+        println(`initial color: ${getComputedStyle(document.getElementById("host")).color}`);
+        settleAndReset();
+
+        // Add .match inside the shadow tree. The light-DOM rule should NOT
+        // start matching (host's children in light DOM remain empty).
+        root.getElementById("inside").classList.add("match");
+        println(`after add .match in shadow: ${getComputedStyle(document.getElementById("host")).color}`);
+        printCounters("after add .match in shadow");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Now add a light-DOM child with .match. The light-DOM :has(.match) rule
+        // should match.
+        const lightChild = document.createElement("span");
+        lightChild.className = "match";
+        document.getElementById("host").appendChild(lightChild);
+        println(`after add .match in light DOM: ${getComputedStyle(document.getElementById("host")).color}`);
+        printCounters("after add .match in light DOM");
+    });
+</script>

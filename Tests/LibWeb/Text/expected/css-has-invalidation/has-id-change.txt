@@ -1,0 +1,17 @@
+initial color: rgb(0, 0, 0)
+after id rename to 'target': rgb(255, 0, 0)
+[after id rename to 'target']
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+after id rename to 'other': rgb(0, 0, 0)
+[after id rename back to 'other']
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3

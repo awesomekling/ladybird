@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .outer:has(.x) { color: rgb(255, 0, 0); }
+    .inner:has(.y) { background-color: rgb(0, 0, 255); }
+</style>
+<div class="outer" id="outer">
+    <div class="inner" id="inner">
+        <span id="target">target</span>
+    </div>
+</div>
+<script>
+    function colors(el) {
+        const cs = getComputedStyle(el);
+        return `color=${cs.color} bg=${cs.backgroundColor}`;
+    }
+
+    test(() => {
+        println(`initial outer: ${colors(document.getElementById("outer"))}`);
+        println(`initial inner: ${colors(document.getElementById("inner"))}`);
+        settleAndReset();
+
+        // .x affects outer; .y affects inner. Neither should affect the other.
+        document.getElementById("target").classList.add("x");
+        println(`after add .x outer: ${colors(document.getElementById("outer"))}`);
+        println(`after add .x inner: ${colors(document.getElementById("inner"))}`);
+
+        document.getElementById("target").classList.add("y");
+        println(`after add .y outer: ${colors(document.getElementById("outer"))}`);
+        println(`after add .y inner: ${colors(document.getElementById("inner"))}`);
+
+        document.getElementById("target").classList.remove("x");
+        println(`after remove .x outer: ${colors(document.getElementById("outer"))}`);
+        println(`after remove .x inner: ${colors(document.getElementById("inner"))}`);
+    });
+</script>

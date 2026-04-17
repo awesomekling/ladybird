@@ -1,0 +1,16 @@
+anchor color (target detached): rgb(0, 0, 0)
+[after class add on detached element]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 3
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+anchor color (target re-attached): rgb(255, 0, 0)
+[after re-attach with .match descendant]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 8

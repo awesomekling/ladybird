@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor"></div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Build a DocumentFragment with multiple children including .match.
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < 3; i++)
+            frag.appendChild(document.createElement("span"));
+        const matched = document.createElement("span");
+        matched.className = "match";
+        frag.appendChild(matched);
+
+        document.getElementById("anchor").appendChild(frag);
+        println(`after fragment insert: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after fragment insert");
+    });
+</script>
