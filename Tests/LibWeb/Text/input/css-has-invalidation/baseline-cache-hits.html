@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <script src="../include.js"></script>
+<script src="_helpers.js"></script>
 <style>
     /* Many sibling anchors with the same :has() selector. Each sibling will be
        tested during a single style pass. The HasResultCache should absorb repeat
@@ -15,17 +16,6 @@
     <div class="anchor"><span class="match" id="target">x</span></div>
 </div>
 <script>
-    function printCounters(label) {
-        const c = internals.getStyleInvalidationCounters();
-        println(`[${label}]`);
-        println(`  hasAncestorWalkInvocations: ${c.hasAncestorWalkInvocations}`);
-        println(`  hasAncestorWalkVisits: ${c.hasAncestorWalkVisits}`);
-        println(`  hasMatchInvocations: ${c.hasMatchInvocations}`);
-        println(`  hasResultCacheHits: ${c.hasResultCacheHits}`);
-        println(`  hasResultCacheMisses: ${c.hasResultCacheMisses}`);
-        println(`  styleInvalidations: ${c.styleInvalidations}`);
-    }
-
     test(() => {
         getComputedStyle(document.getElementById("container")).color;
         internals.resetStyleInvalidationCounters();

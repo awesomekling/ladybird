@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <script src="../include.js"></script>
+<script src="_helpers.js"></script>
 <style>
     .anchor .descendant { color: red; }
 </style>
@@ -9,17 +10,6 @@
     </div>
 </div>
 <script>
-    function printCounters(label) {
-        const c = internals.getStyleInvalidationCounters();
-        println(`[${label}]`);
-        println(`  hasAncestorWalkInvocations: ${c.hasAncestorWalkInvocations}`);
-        println(`  hasAncestorWalkVisits: ${c.hasAncestorWalkVisits}`);
-        println(`  hasMatchInvocations: ${c.hasMatchInvocations}`);
-        println(`  hasResultCacheHits: ${c.hasResultCacheHits}`);
-        println(`  hasResultCacheMisses: ${c.hasResultCacheMisses}`);
-        println(`  styleInvalidations: ${c.styleInvalidations}`);
-    }
-
     test(() => {
         getComputedStyle(document.getElementById("target")).color;
         internals.resetStyleInvalidationCounters();
