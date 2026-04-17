@@ -15,11 +15,16 @@
         const target = document.getElementById("target");
         settleAndReset();
 
-        // Detach the container subtree.
+        // Detach the container subtree, then settle the resulting style pass
+        // before mutating the detached element. This isolates the two
+        // mutations into separate style passes so the counter readings are
+        // deterministic (the pending-node set order would otherwise vary).
         container.remove();
+        getComputedStyle(document.getElementById("anchor")).color;
+        internals.resetStyleInvalidationCounters();
 
-        // Mutating an element in the detached subtree must not crash and must
-        // not invalidate the still-attached anchor.
+        // Mutating an element in the detached subtree must not crash and
+        // must not change the still-attached anchor's style.
         target.classList.add("match");
         println(`anchor color (target detached): ${getComputedStyle(document.getElementById("anchor")).color}`);
         printCounters("after class add on detached element");

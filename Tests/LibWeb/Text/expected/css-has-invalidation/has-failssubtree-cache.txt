@@ -1,0 +1,7 @@
+[after toggle non-matching class]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 5
+  hasMatchInvocations: 4
+  hasResultCacheHits: 3
+  hasResultCacheMisses: 1
+  styleInvalidations: 4

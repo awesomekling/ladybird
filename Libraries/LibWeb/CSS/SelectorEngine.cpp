@@ -242,10 +242,32 @@ static inline bool matches_has_pseudo_class(CSS::Selector const& selector, DOM::
     auto& counters = anchor.document().style_invalidation_counters();
     ++counters.has_match_invocations;
 
+    // FailsSubtree caching is only sound when the :has() argument's leftmost
+    // combinator walks the anchor's descendants. For child-only or sibling
+    // arguments a descendant of the anchor would walk a different region.
+    bool argument_walks_descendants = !selector.compound_selectors().is_empty()
+        && selector.compound_selectors().first().combinator == CSS::Selector::Combinator::Descendant;
+
     if (context.has_result_cache) {
         if (auto cached = context.has_result_cache->get({ &selector, &anchor }); cached.has_value()) {
             ++counters.has_result_cache_hits;
             return cached.value() == HasMatchResult::Matched;
+        }
+        // Walk the anchor's ancestor chain looking for a FailsSubtree entry on
+        // this same selector. If any ancestor is known to have no match in its
+        // entire subtree, this anchor (a descendant) cannot match either.
+        if (argument_walks_descendants) {
+            for (auto ancestor = anchor.parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+                if (auto a_cached = context.has_result_cache->get({ &selector, ancestor.ptr() }); a_cached.has_value()) {
+                    if (a_cached.value() == HasMatchResult::FailsSubtree) {
+                        ++counters.has_result_cache_hits;
+                        return false;
+                    }
+                    // A non-FailsSubtree cache entry on an ancestor doesn't tell us
+                    // anything about this anchor's subtree. Stop the upward search.
+                    break;
+                }
+            }
         }
         ++counters.has_result_cache_misses;
     }
@@ -256,8 +278,16 @@ static inline bool matches_has_pseudo_class(CSS::Selector const& selector, DOM::
 
     bool result = matches_relative_selector(selector, 0, anchor, shadow_host, context, anchor, scope);
 
-    if (context.has_result_cache)
-        context.has_result_cache->set({ &selector, &anchor }, result ? HasMatchResult::Matched : HasMatchResult::NotMatched);
+    if (context.has_result_cache) {
+        HasMatchResult cache_value;
+        if (result)
+            cache_value = HasMatchResult::Matched;
+        else if (argument_walks_descendants)
+            cache_value = HasMatchResult::FailsSubtree;
+        else
+            cache_value = HasMatchResult::NotMatched;
+        context.has_result_cache->set({ &selector, &anchor }, cache_value);
+    }
 
     return result;
 }

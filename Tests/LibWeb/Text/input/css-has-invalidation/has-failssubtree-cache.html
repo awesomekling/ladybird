@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* The same :has() rule applies to nested .foo anchors. When the :has()
+       argument never matches, the cache should propagate the negative result
+       from the outer .foo down to inner .foo's so they don't all walk the
+       same subtree. */
+    .foo:has(.never-exists) { color: rgb(255, 0, 0); }
+</style>
+<div class="foo" id="outer">
+    <div class="foo">
+        <div class="foo">
+            <div class="foo">
+                <span id="probe">x</span>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    test(() => {
+        // Initial style pass already evaluated the four nested anchors. Settle
+        // and reset, then trigger another evaluation by changing a class on the
+        // probe (which shares no name with the rule, but the schedule path is
+        // gated by may_have_has_selectors so it forces a pass).
+        settleAndReset();
+
+        // Force a re-style of the outer .foo and its descendants by toggling a
+        // class that is used in :has(): adds outer.foo as pending and walks.
+        // The walker then re-matches :has() at every .foo anchor in the chain.
+        document.getElementById("probe").classList.add("never-exists");
+        document.getElementById("probe").classList.remove("never-exists");
+        getComputedStyle(document.getElementById("outer")).color;
+        printCounters("after toggle non-matching class");
+    });
+</script>

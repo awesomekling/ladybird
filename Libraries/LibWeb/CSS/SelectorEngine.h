@@ -20,6 +20,12 @@ enum class SelectorKind {
 enum class HasMatchResult : u8 {
     Matched,
     NotMatched,
+    // Walked the anchor's whole subtree without finding a match. Stronger than
+    // NotMatched: descendants of this anchor inherit the negative result for
+    // the same selector, so subsequent :has() queries against descendants can
+    // short-circuit. Only valid for :has() arguments whose leftmost combinator
+    // walks descendants.
+    FailsSubtree,
 };
 
 struct HasResultCacheKey {
