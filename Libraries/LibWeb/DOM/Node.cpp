@@ -555,24 +555,22 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
             shadow_style_scope = &element_shadow_root->style_scope();
     }
 
-    bool properties_used_in_has_selectors = false;
     auto& counters = document().style_invalidation_counters();
+    auto schedule_for_metadata = [&](CSS::StyleScope& scope, Vector<CSS::HasInvalidationMetadata> const& metadata) {
+        for (auto const& entry : metadata)
+            scope.schedule_style_invalidation_due_to_presence_of_has(*this, entry.scope);
+    };
     for (auto const& property : properties) {
         if (auto const* metadata = document().style_computer().has_invalidation_metadata_for_property(property, style_scope)) {
-            properties_used_in_has_selectors = true;
             counters.has_invalidation_metadata_candidates += metadata->size();
+            schedule_for_metadata(style_scope, *metadata);
         }
         if (shadow_style_scope) {
             if (auto const* metadata = document().style_computer().has_invalidation_metadata_for_property(property, *shadow_style_scope)) {
-                properties_used_in_has_selectors = true;
                 counters.has_invalidation_metadata_candidates += metadata->size();
+                schedule_for_metadata(*shadow_style_scope, *metadata);
             }
         }
-    }
-    if (properties_used_in_has_selectors) {
-        style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
-        if (shadow_style_scope)
-            shadow_style_scope->schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
     }
 
     if (options.invalidate_self)

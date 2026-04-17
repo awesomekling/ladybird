@@ -799,14 +799,40 @@ void StyleScope::schedule_ancestors_style_invalidation_due_to_presence_of_has(DO
     document().set_needs_invalidation_of_elements_affected_by_has();
 }
 
+void StyleScope::schedule_style_invalidation_due_to_presence_of_has(DOM::Node& node, HasArgumentScope scope)
+{
+    switch (scope) {
+    case HasArgumentScope::ChildrenOnly:
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.set(node);
+        break;
+    case HasArgumentScope::NextSiblingOnly:
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.set(node);
+        break;
+    case HasArgumentScope::AllFollowingSiblings:
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling.set(node);
+        break;
+    case HasArgumentScope::AllDescendants:
+    case HasArgumentScope::Complex:
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
+        break;
+    }
+    document().set_needs_invalidation_of_elements_affected_by_has();
+}
+
 void StyleScope::invalidate_style_of_elements_affected_by_has()
 {
-    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()) {
+    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()
+        && m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.is_empty()
+        && m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.is_empty()
+        && m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling.is_empty()) {
         return;
     }
 
     ScopeGuard clear_pending_nodes_guard = [&] {
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.clear();
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.clear();
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.clear();
+        m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling.clear();
     };
 
     // It's ok to call have_has_selectors() instead of may_have_has_selectors() here and force
@@ -817,7 +843,6 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
     }
 
     auto& counters = document().style_invalidation_counters();
-    ++counters.has_ancestor_walk_invocations;
 
     auto is_in_has_scope = [](DOM::Element const& element) {
         return element.in_has_scope()
@@ -825,9 +850,54 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             || element.affected_by_has_pseudo_class_in_non_subject_position();
     };
 
+    auto is_has_anchor_candidate = [](DOM::Element const& element) {
+        return element.affected_by_has_pseudo_class_in_subject_position()
+            || element.affected_by_has_pseudo_class_in_non_subject_position();
+    };
+
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
+    auto invalidate_anchor_if_needed = [&](DOM::Element& element) {
+        if (!is_has_anchor_candidate(element))
+            return;
+        if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
+            return;
+        element.invalidate_style_if_affected_by_has();
+    };
+
+    auto child_only_nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only);
+    for (auto& node : child_only_nodes) {
+        auto* parent = node.parent_or_shadow_host();
+        auto* parent_element = as_if<DOM::Element>(parent);
+        if (!parent_element)
+            continue;
+        invalidate_anchor_if_needed(*parent_element);
+    }
+
+    auto next_sibling_nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling);
+    for (auto& node : next_sibling_nodes) {
+        auto* node_element = as_if<DOM::Element>(node);
+        if (!node_element)
+            continue;
+        auto* previous_sibling = node_element->previous_element_sibling();
+        if (!previous_sibling)
+            continue;
+        invalidate_anchor_if_needed(*previous_sibling);
+    }
+
+    auto subsequent_sibling_nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling);
+    for (auto& node : subsequent_sibling_nodes) {
+        auto* node_element = as_if<DOM::Element>(node);
+        if (!node_element)
+            continue;
+        for (auto* previous_sibling = node_element->previous_element_sibling(); previous_sibling; previous_sibling = previous_sibling->previous_element_sibling())
+            invalidate_anchor_if_needed(*previous_sibling);
+    }
+
     auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
+    if (!nodes.is_empty())
+        ++counters.has_ancestor_walk_invocations;
     for (auto& node : nodes) {
+        bool reached_has_scope = false;
         for (auto* ancestor = &node; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
             if (!ancestor->is_element())
                 continue;
@@ -836,11 +906,15 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             // Terminate the upward walk once we reach an element that no :has()
             // anchor has ever observed. Its style cannot be affected by a mutation
             // further down the tree, so neither can anything above it.
-            if (!is_in_has_scope(element))
+            if (!is_in_has_scope(element)) {
+                if (!reached_has_scope)
+                    continue;
                 break;
+            }
+            reached_has_scope = true;
 
             if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
-                break;
+                continue;
 
             ++counters.has_ancestor_walk_visits;
             element.invalidate_style_if_affected_by_has();

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(> .match) { color: red; }
+</style>
+<div id="anchor" class="anchor">
+    <div id="child">child</div>
+</div>
+<script>
+    test(() => {
+        let anchor = document.getElementById("anchor");
+        let child = document.getElementById("child");
+
+        settleAndReset(anchor);
+
+        println(`initial color: ${getComputedStyle(anchor).color}`);
+
+        child.classList.add("match");
+        println(`after add .match: ${getComputedStyle(anchor).color}`);
+        printCounters("after add .match to direct child");
+
+        internals.resetStyleInvalidationCounters();
+
+        child.classList.remove("match");
+        println(`after remove .match: ${getComputedStyle(anchor).color}`);
+        printCounters("after remove .match from direct child");
+    });
+</script>

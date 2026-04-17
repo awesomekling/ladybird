@@ -114,6 +114,7 @@ public:
     RefPtr<CSS::CounterStyle const> get_registered_counter_style(FlyString const& name) const;
 
     void schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node);
+    void schedule_style_invalidation_due_to_presence_of_has(DOM::Node& node, HasArgumentScope scope);
 
     template<typename T>
     Optional<T> dereference_global_tree_scoped_reference(Function<Optional<T>(StyleScope const&)> const& callback) const;
@@ -131,6 +132,9 @@ public:
     GC::Ptr<CSSStyleSheet> m_user_style_sheet;
 
     GC::WeakHashSet<DOM::Node> m_pending_nodes_for_style_invalidation_due_to_presence_of_has;
+    GC::WeakHashSet<DOM::Node> m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only;
+    GC::WeakHashSet<DOM::Node> m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling;
+    GC::WeakHashSet<DOM::Node> m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling;
 
     bool m_needs_counter_style_cache_update : 1 { true };
     bool m_is_doing_counter_style_cache_update : 1 { false };

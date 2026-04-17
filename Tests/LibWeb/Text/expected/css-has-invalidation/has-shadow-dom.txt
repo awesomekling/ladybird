@@ -2,11 +2,11 @@ initial color: rgb(0, 0, 0)
 after add .match in shadow: rgb(0, 0, 0)
 [after add .match in shadow]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 0
-  hasMatchInvocations: 0
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
   hasResultCacheHits: 0
-  hasResultCacheMisses: 0
-  styleInvalidations: 2
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
 after add .match in light DOM: rgb(255, 0, 0)
 [after add .match in light DOM]
   hasAncestorWalkInvocations: 1

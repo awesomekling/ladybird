@@ -1,6 +1,6 @@
 [add .match to direct child]
-  hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkInvocations: 0
+  hasAncestorWalkVisits: 0
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
