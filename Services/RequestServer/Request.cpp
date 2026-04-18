@@ -36,11 +36,12 @@ NonnullOwnPtr<Request> Request::fetch(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    Optional<Core::AnonymousBuffer> request_body_buffer,
     HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
 {
-    auto request = adopt_own(*new Request { request_id, RequestType::Fetch, disk_cache, cache_mode, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), include_credentials, move(alt_svc_cache_path), proxy_data });
+    auto request = adopt_own(*new Request { request_id, RequestType::Fetch, disk_cache, cache_mode, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), move(request_body_buffer), include_credentials, move(alt_svc_cache_path), proxy_data });
     request->process();
 
     return request;
@@ -78,11 +79,12 @@ NonnullOwnPtr<Request> Request::revalidate(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    Optional<Core::AnonymousBuffer> request_body_buffer,
     HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
 {
-    auto request = adopt_own(*new Request { request_id, RequestType::BackgroundRevalidation, disk_cache, HTTP::CacheMode::Default, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), include_credentials, move(alt_svc_cache_path), proxy_data });
+    auto request = adopt_own(*new Request { request_id, RequestType::BackgroundRevalidation, disk_cache, HTTP::CacheMode::Default, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), move(request_body_buffer), include_credentials, move(alt_svc_cache_path), proxy_data });
     request->process();
 
     return request;
@@ -100,6 +102,7 @@ Request::Request(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    Optional<Core::AnonymousBuffer> request_body_buffer,
     HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
@@ -114,6 +117,7 @@ Request::Request(
     , m_method(move(method))
     , m_request_headers(move(request_headers))
     , m_request_body(move(request_body))
+    , m_request_body_buffer(move(request_body_buffer))
     , m_include_credentials(include_credentials)
     , m_alt_svc_cache_path(move(alt_svc_cache_path))
     , m_proxy_data(proxy_data)
@@ -272,7 +276,7 @@ void Request::handle_initial_state()
 
                     if (m_cache_entry_reader.has_value()) {
                         if (m_cache_entry_reader->revalidation_type() == HTTP::CacheEntryReader::RevalidationType::StaleWhileRevalidate)
-                            m_client.start_revalidation_request({}, m_method, m_url, m_request_headers, m_request_body, m_include_credentials, m_proxy_data);
+                            m_client.start_revalidation_request({}, m_method, m_url, m_request_headers, m_request_body, m_request_body_buffer, m_include_credentials, m_proxy_data);
 
                         if (is_revalidation_request())
                             transition_to_state(State::DNSLookup);
@@ -547,8 +551,9 @@ void Request::handle_fetch_state()
     curl_slist* curl_headers = nullptr;
 
     if (m_method.is_one_of("POST"sv, "PUT"sv, "PATCH"sv, "DELETE"sv)) {
-        set_option(CURLOPT_POSTFIELDSIZE, m_request_body.size());
-        set_option(CURLOPT_POSTFIELDS, m_request_body.data());
+        auto request_body = request_body_bytes();
+        set_option(CURLOPT_POSTFIELDSIZE, request_body.size());
+        set_option(CURLOPT_POSTFIELDS, request_body.data());
 
         // CURLOPT_POSTFIELDS automatically sets the Content-Type header. Tell curl to remove it by setting a blank
         // value if the headers passed in don't contain a content type.
@@ -656,6 +661,13 @@ void Request::handle_error_state()
     }
 
     m_client.request_complete({}, *this);
+}
+
+ReadonlyBytes Request::request_body_bytes() const
+{
+    if (m_request_body_buffer.has_value())
+        return m_request_body_buffer->bytes();
+    return m_request_body.bytes();
 }
 
 size_t Request::on_header_received(void* buffer, size_t size, size_t nmemb, void* user_data)

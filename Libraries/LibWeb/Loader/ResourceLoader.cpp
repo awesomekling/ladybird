@@ -32,6 +32,16 @@ namespace Web {
 
 static RefPtr<ResourceLoader> s_resource_loader;
 
+static ByteBuffer body_for_network_inspection(ReadonlyBytes request_body)
+{
+    constexpr size_t max_inspection_body_size = 1 * MiB;
+
+    if (request_body.size() > max_inspection_body_size)
+        return {};
+
+    return MUST(ByteBuffer::copy(request_body));
+}
+
 void ResourceLoader::initialize(GC::Heap& heap, NonnullRefPtr<Requests::RequestClient> request_client)
 {
     s_resource_loader = adopt_ref(*new ResourceLoader(heap, move(request_client)));
@@ -490,7 +500,8 @@ RefPtr<Requests::Request> ResourceLoader::start_network_request(LoadRequest cons
         Optional<String> initiator_type_string;
         if (request.initiator_type().has_value())
             initiator_type_string = Fetch::Infrastructure::initiator_type_to_string(request.initiator_type().value()).to_string();
-        page->client().page_did_start_network_request(protocol_request->id(), request.url().value(), request.method(), request.headers().headers(), request.body(), move(initiator_type_string));
+        auto inspection_body = body_for_network_inspection(request.body());
+        page->client().page_did_start_network_request(protocol_request->id(), request.url().value(), request.method(), request.headers().headers(), inspection_body.bytes(), move(initiator_type_string));
     }
 
     ++m_pending_loads;

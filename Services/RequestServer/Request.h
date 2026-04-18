@@ -11,6 +11,7 @@
 #include <AK/MemoryStream.h>
 #include <AK/Optional.h>
 #include <AK/Time.h>
+#include <LibCore/AnonymousBuffer.h>
 #include <LibCore/Proxy.h>
 #include <LibDNS/Resolver.h>
 #include <LibHTTP/Cache/CacheMode.h>
@@ -42,6 +43,7 @@ public:
         ByteString method,
         NonnullRefPtr<HTTP::HeaderList> request_headers,
         ByteBuffer request_body,
+        Optional<Core::AnonymousBuffer> request_body_buffer,
         HTTP::Cookie::IncludeCredentials include_credentials,
         ByteString alt_svc_cache_path,
         Core::ProxyData proxy_data);
@@ -64,6 +66,7 @@ public:
         ByteString method,
         NonnullRefPtr<HTTP::HeaderList> request_headers,
         ByteBuffer request_body,
+        Optional<Core::AnonymousBuffer> request_body_buffer,
         HTTP::Cookie::IncludeCredentials include_credentials,
         ByteString alt_svc_cache_path,
         Core::ProxyData proxy_data);
@@ -134,6 +137,7 @@ private:
         ByteString method,
         NonnullRefPtr<HTTP::HeaderList> request_headers,
         ByteBuffer request_body,
+        Optional<Core::AnonymousBuffer> request_body_buffer,
         HTTP::Cookie::IncludeCredentials include_credentials,
         ByteString alt_svc_cache_path,
         Core::ProxyData proxy_data);
@@ -168,6 +172,7 @@ private:
 
     virtual bool is_revalidation_request() const override;
     ErrorOr<void> revalidation_failed();
+    ReadonlyBytes request_body_bytes() const;
 
     bool is_cache_only_request() const;
 
@@ -196,6 +201,7 @@ private:
     UnixDateTime m_request_start_time { UnixDateTime::now() };
     NonnullRefPtr<HTTP::HeaderList> m_request_headers;
     ByteBuffer m_request_body;
+    Optional<Core::AnonymousBuffer> m_request_body_buffer;
 
     HTTP::Cookie::IncludeCredentials m_include_credentials { HTTP::Cookie::IncludeCredentials::Yes };
 

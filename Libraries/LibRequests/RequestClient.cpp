@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibCore/AnonymousBuffer.h>
 #include <LibCore/Promise.h>
 #include <LibCore/System.h>
 #include <LibRequests/Request.h>
@@ -34,10 +35,26 @@ void RequestClient::die()
 
 RefPtr<Request> RequestClient::start_request(ByteString const& method, URL::URL const& url, Optional<HTTP::HeaderList const&> request_headers, ReadonlyBytes request_body, HTTP::CacheMode cache_mode, HTTP::Cookie::IncludeCredentials include_credentials, Core::ProxyData const& proxy_data)
 {
+    // Keep request bodies well below the IPC payload limit so the rest of the
+    // request metadata still fits in the same message.
+    constexpr size_t max_inline_request_body_size = 32 * MiB;
+
     auto request_id = m_next_request_id++;
     auto headers = request_headers.map([](auto const& headers) { return headers.headers().span(); }).value_or({});
+    ByteBuffer inline_request_body;
+    Optional<Core::AnonymousBuffer> request_body_buffer;
 
-    IPCProxy::async_start_request(request_id, method, url, headers, request_body, cache_mode, include_credentials, proxy_data);
+    if (!request_body.is_empty()) {
+        if (request_body.size() > max_inline_request_body_size) {
+            auto shared_buffer = MUST(Core::AnonymousBuffer::create_with_size(request_body.size()));
+            request_body.copy_to(Bytes { shared_buffer.data<u8>(), shared_buffer.size() });
+            request_body_buffer = move(shared_buffer);
+        } else {
+            inline_request_body = MUST(ByteBuffer::copy(request_body));
+        }
+    }
+
+    IPCProxy::async_start_request(request_id, method, url, headers, inline_request_body.bytes(), move(request_body_buffer), cache_mode, include_credentials, proxy_data);
     auto request = Request::create_from_id({}, *this, request_id);
     m_requests.set(request_id, request);
     return request;
