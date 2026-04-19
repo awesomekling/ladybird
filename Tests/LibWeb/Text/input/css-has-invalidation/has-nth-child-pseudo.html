@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.target:nth-child(3)) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <div>a</div>
+    <div>b</div>
+    <div class="target" id="target">target</div>
+</div>
+<script>
+    test(() => {
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Insert before second sibling. .target moves from 3rd to 4th child.
+        const sibling = document.createElement("div");
+        document.getElementById("anchor").insertBefore(sibling, document.getElementById("anchor").firstElementChild);
+        println(`after insert at start: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after insert at start");
+
+        internals.resetStyleInvalidationCounters();
+
+        sibling.remove();
+        println(`after remove inserted: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove inserted");
+    });
+</script>

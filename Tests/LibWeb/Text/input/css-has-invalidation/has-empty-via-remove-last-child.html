@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.target:empty) { color: rgb(255, 0, 0); }
+</style>
+<div class="anchor" id="anchor">
+    <div class="target" id="target"><div id="only-child"></div></div>
+</div>
+<script>
+    test(() => {
+        // Initial: target has a child, so target is not :empty.
+        // Anchor should NOT be red.
+        println(`initial color: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        settleAndReset();
+
+        // Remove the only child of target. Target becomes :empty. Anchor should turn red.
+        document.getElementById("only-child").remove();
+        println(`after remove only child: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after remove only child of target");
+
+        internals.resetStyleInvalidationCounters();
+
+        // Insert a new child back in. Target stops being :empty. Anchor should stop being red.
+        document.getElementById("target").appendChild(document.createElement("div"));
+        println(`after re-insert child: ${getComputedStyle(document.getElementById("anchor")).color}`);
+        printCounters("after re-insert child into target");
+    });
+</script>

@@ -6,7 +6,7 @@
   hasResultCacheMisses: 1
   styleInvalidations: 1
 [add .match to grandchild (should not style anchor)]
-  hasAncestorWalkInvocations: 0
+  hasAncestorWalkInvocations: 1
   hasAncestorWalkVisits: 0
   hasMatchInvocations: 0
   hasResultCacheHits: 0

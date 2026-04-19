@@ -1,0 +1,17 @@
+initial color: rgb(255, 0, 0)
+after text insert: rgb(0, 0, 0)
+[after text insert into empty descendant]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5
+after text remove: rgb(255, 0, 0)
+[after text remove from descendant]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 4

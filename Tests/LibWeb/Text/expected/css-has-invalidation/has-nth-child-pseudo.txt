@@ -1,0 +1,17 @@
+initial color: rgb(255, 0, 0)
+after insert at start: rgb(0, 0, 0)
+[after insert at start]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 4
+after remove inserted: rgb(255, 0, 0)
+[after remove inserted]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
