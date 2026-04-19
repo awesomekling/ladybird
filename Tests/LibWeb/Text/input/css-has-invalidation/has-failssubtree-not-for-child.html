@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    /* Child-combinator :has(). The FailsSubtree cache must NOT inherit from
+       ancestor to descendant for this shape: an ancestor having no matching
+       direct child says nothing about a descendant's children. */
+    .foo:has(> .x) { color: rgb(255, 0, 0); }
+</style>
+<div class="foo" id="outer">
+    <div class="foo" id="inner">
+        <span class="x" id="probe">hit</span>
+    </div>
+</div>
+<script>
+    test(() => {
+        // outer has no direct .x child, inner does. The rule applies to inner.
+        // If FailsSubtree leaked from outer to inner (incorrectly), inner would
+        // wrongly report no match.
+        println(`outer color: ${getComputedStyle(document.getElementById("outer")).color}`);
+        println(`inner color: ${getComputedStyle(document.getElementById("inner")).color}`);
+    });
+</script>

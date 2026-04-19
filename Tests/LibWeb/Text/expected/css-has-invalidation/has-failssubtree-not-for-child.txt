@@ -1,0 +1,2 @@
+outer color: rgb(0, 0, 0)
+inner color: rgb(255, 0, 0)
