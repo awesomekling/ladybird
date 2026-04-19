@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor-subsequent:has(~ .wrapper .match) { color: red; }
+    .anchor-next:has(+ .wrapper .match) { background: green; }
+</style>
+<div id="outer">
+    <div id="anchor-subsequent" class="anchor-subsequent">anchor subsequent</div>
+    <div id="anchor-next" class="anchor-next">anchor next</div>
+    <div class="wrapper">
+        <div>
+            <div>
+                <span id="target">target</span>
+            </div>
+        </div>
+    </div>
+    <div>unrelated sibling</div>
+</div>
+<script>
+    test(() => {
+        let anchorNext = document.getElementById("anchor-next");
+        let anchorSubsequent = document.getElementById("anchor-subsequent");
+        let outer = document.getElementById("outer");
+        let target = document.getElementById("target");
+
+        getComputedStyle(outer).color;
+        internals.resetStyleInvalidationCounters();
+
+        target.classList.add("match");
+        getComputedStyle(outer).color;
+        println(`next background: ${getComputedStyle(anchorNext).backgroundColor}`);
+        println(`subsequent color: ${getComputedStyle(anchorSubsequent).color}`);
+        printSiblingScanCounters();
+    });
+</script>

@@ -1,0 +1,9 @@
+next background: rgb(0, 128, 0)
+subsequent color: rgb(255, 0, 0)
+hasAncestorWalkInvocations: 1
+hasAncestorWalkVisits: 2
+hasAncestorSiblingElementChecks: 2
+hasMatchInvocations: 2
+hasResultCacheHits: 0
+hasResultCacheMisses: 2
+styleInvalidations: 6

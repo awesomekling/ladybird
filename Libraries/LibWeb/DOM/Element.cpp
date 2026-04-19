@@ -902,6 +902,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     m_affected_by_has_pseudo_class_in_subject_position = false;
     m_affected_by_has_pseudo_class_in_non_subject_position = false;
     m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator = false;
+    m_affected_by_has_pseudo_class_with_relative_selector_that_has_next_sibling_combinator = false;
+    m_affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator = false;
     m_affected_by_direct_sibling_combinator = false;
     m_affected_by_indirect_sibling_combinator = false;
     m_affected_by_first_child_pseudo_class = false;

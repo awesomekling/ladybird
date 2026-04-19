@@ -853,9 +853,13 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             || element.affected_by_has_pseudo_class_in_non_subject_position();
     };
 
-    auto is_in_subtree_of_has_relative_selector_with_sibling_combinator = [](DOM::Element const& element) {
-        return element.in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator()
-            || element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator();
+    auto is_in_subtree_of_has_relative_selector_with_next_sibling_combinator = [](DOM::Element const& element) {
+        return element.in_subtree_of_has_pseudo_class_relative_selector_with_next_sibling_combinator()
+            || element.affected_by_has_pseudo_class_with_relative_selector_that_has_next_sibling_combinator();
+    };
+    auto is_in_subtree_of_has_relative_selector_with_subsequent_sibling_combinator = [](DOM::Element const& element) {
+        return element.in_subtree_of_has_pseudo_class_relative_selector_with_subsequent_sibling_combinator()
+            || element.affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator();
     };
 
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
@@ -881,7 +885,16 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             reached_has_scope = true;
 
             bool should_scan_element_siblings = should_scan_ancestor_siblings
-                && is_in_subtree_of_has_relative_selector_with_sibling_combinator(element);
+                && (element.in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator()
+                    || element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator());
+            bool should_scan_nested_siblings = should_scan_ancestor_siblings
+                && element.in_subtree_of_has_pseudo_class_relative_selector_with_nested_sibling_combinator();
+            bool should_scan_previous_sibling = !should_scan_nested_siblings
+                && should_scan_ancestor_siblings
+                && is_in_subtree_of_has_relative_selector_with_next_sibling_combinator(element);
+            bool should_scan_previous_siblings = !should_scan_nested_siblings
+                && should_scan_ancestor_siblings
+                && is_in_subtree_of_has_relative_selector_with_subsequent_sibling_combinator(element);
             if (!is_has_anchor_candidate(element) && !should_scan_element_siblings)
                 continue;
 
@@ -893,27 +906,45 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
                 element.invalidate_style_if_affected_by_has();
             }
 
-            auto* parent = ancestor->parent_or_shadow_host();
-            if (!parent)
-                return;
-
             // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
             // its style might be affected by the change in descendant node.
             if (!should_scan_element_siblings)
                 continue;
-            parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
-                if (&ancestor_sibling_element == &element)
-                    return IterationDecision::Continue;
+            auto* parent = ancestor->parent_or_shadow_host();
+            if (!parent)
+                return;
+
+            auto maybe_invalidate_ancestor_sibling = [&](DOM::Element& ancestor_sibling_element) {
                 ++counters.has_ancestor_sibling_element_checks;
                 if (ancestor_sibling_element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator()) {
                     if (elements_already_invalidated_for_has.set(&ancestor_sibling_element) != AK::HashSetResult::InsertedNewEntry)
-                        return IterationDecision::Continue;
+                        return;
 
                     ++counters.has_ancestor_walk_visits;
                     ancestor_sibling_element.invalidate_style_if_affected_by_has();
                 }
-                return IterationDecision::Continue;
-            });
+            };
+
+            if (should_scan_nested_siblings) {
+                parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
+                    if (&ancestor_sibling_element == &element)
+                        return IterationDecision::Continue;
+                    maybe_invalidate_ancestor_sibling(ancestor_sibling_element);
+                    return IterationDecision::Continue;
+                });
+                continue;
+            }
+
+            if (should_scan_previous_siblings) {
+                for (auto* previous_sibling = element.previous_element_sibling(); previous_sibling; previous_sibling = previous_sibling->previous_element_sibling())
+                    maybe_invalidate_ancestor_sibling(*previous_sibling);
+                continue;
+            }
+
+            if (should_scan_previous_sibling) {
+                if (auto* previous_sibling = element.previous_element_sibling())
+                    maybe_invalidate_ancestor_sibling(*previous_sibling);
+            }
         }
     }
 }
