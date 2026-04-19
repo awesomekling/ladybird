@@ -11,7 +11,7 @@
   hasAncestorWalkInvocations: 1
   hasAncestorWalkVisits: 0
   hasAncestorSiblingElementChecks: 0
-  hasSiblingAnchorInvalidationChecks: 3
+  hasSiblingAnchorInvalidationChecks: 1
   hasMatchInvocations: 2
   hasResultCacheHits: 0
   hasResultCacheMisses: 2

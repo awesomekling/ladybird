@@ -448,12 +448,55 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 if (style_scope.may_have_has_selectors_with_relative_selector_that_has_sibling_combinator()) {
                     auto& counters = document().style_invalidation_counters();
+                    bool needs_conservative_sibling_anchor_scan = false;
                     parent->for_each_child_of_type<Element>([&](auto& element) {
-                        ++counters.has_sibling_anchor_invalidation_checks;
-                        if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
-                            element.invalidate_style_if_affected_by_has();
-                        return IterationDecision::Continue;
+                        if (element.in_subtree_of_has_pseudo_class_relative_selector_with_nested_sibling_combinator()) {
+                            needs_conservative_sibling_anchor_scan = true;
+                            return IterationDecision::Break;
+                        }
+                        if (!element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
+                            return IterationDecision::Continue;
+                        if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_next_sibling_combinator()
+                            || element.affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator()) {
+                            return IterationDecision::Continue;
+                        }
+                        needs_conservative_sibling_anchor_scan = true;
+                        return IterationDecision::Break;
                     });
+
+                    if (reason == StyleInvalidationReason::NodeRemove || needs_conservative_sibling_anchor_scan) {
+                        parent->for_each_child_of_type<Element>([&](auto& element) {
+                            ++counters.has_sibling_anchor_invalidation_checks;
+                            if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
+                                element.invalidate_style_if_affected_by_has();
+                            return IterationDecision::Continue;
+                        });
+                    } else {
+                        auto previous_element_sibling = [&]() -> Element* {
+                            for (auto* sibling = previous_sibling(); sibling; sibling = sibling->previous_sibling()) {
+                                if (auto* element = as_if<Element>(sibling))
+                                    return element;
+                            }
+                            return nullptr;
+                        };
+                        auto maybe_invalidate_sibling_anchor = [&](Element& element) {
+                            ++counters.has_sibling_anchor_invalidation_checks;
+                            if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_next_sibling_combinator()
+                                || element.affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator()) {
+                                element.invalidate_style_if_affected_by_has();
+                            }
+                        };
+
+                        auto* previous_sibling = previous_element_sibling();
+                        if (previous_sibling) {
+                            maybe_invalidate_sibling_anchor(*previous_sibling);
+                            for (previous_sibling = previous_sibling->previous_element_sibling(); previous_sibling; previous_sibling = previous_sibling->previous_element_sibling()) {
+                                ++counters.has_sibling_anchor_invalidation_checks;
+                                if (previous_sibling->affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator())
+                                    previous_sibling->invalidate_style_if_affected_by_has();
+                            }
+                        }
+                    }
                 }
             }
         } else if (reason_may_affect_has_selectors(reason)) {

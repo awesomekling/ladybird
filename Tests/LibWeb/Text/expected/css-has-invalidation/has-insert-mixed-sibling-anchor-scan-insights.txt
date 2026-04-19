@@ -1,0 +1,9 @@
+[mixed sibling-sensitive insertion]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 0
+  hasAncestorSiblingElementChecks: 0
+  hasSiblingAnchorInvalidationChecks: 2
+  hasMatchInvocations: 2
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 2
+  styleInvalidations: 4

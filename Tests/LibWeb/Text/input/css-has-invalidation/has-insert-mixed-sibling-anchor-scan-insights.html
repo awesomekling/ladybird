@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor-subsequent:has(~ .match) { color: red; }
+    .anchor-next:has(+ .match) { background: green; }
+</style>
+<div id="outer">
+    <div id="anchor-subsequent" class="anchor-subsequent">anchor subsequent</div>
+    <div id="anchor-next" class="anchor-next">anchor next</div>
+    <div id="sentinel"></div>
+</div>
+<script>
+    test(() => {
+        let anchorNext = document.getElementById("anchor-next");
+        let anchorSubsequent = document.getElementById("anchor-subsequent");
+        let sentinel = document.getElementById("sentinel");
+
+        settleAndReset(anchorNext);
+
+        let sibling = document.createElement("div");
+        sibling.className = "match";
+        sentinel.before(sibling);
+        getComputedStyle(anchorNext).backgroundColor;
+        getComputedStyle(anchorSubsequent).color;
+        printInsertionCounters("mixed sibling-sensitive insertion");
+    });
+</script>
