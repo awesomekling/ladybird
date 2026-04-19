@@ -82,6 +82,7 @@ static CSS::Selector::CompoundSelector const* simple_has_descendant_tag_and_clas
 
     return &first;
 }
+
 static bool matches_has_child_tag_fast_path(CSS::Selector::SimpleSelector const& simple_selector, DOM::Element const& anchor, GC::Ptr<DOM::Element const> shadow_host, MatchContext& context)
 {
     bool has = false;
@@ -110,6 +111,8 @@ static bool matches_has_descendant_tag_and_class_fast_path(CSS::Selector const& 
             return TraversalDecision::Continue;
 
         auto const& descendant_element = static_cast<DOM::Element const&>(descendant);
+        if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+            const_cast<DOM::Element&>(descendant_element).set_in_has_scope(true);
         if (!fast_matches_compound_selector(compound_selector, descendant_element, shadow_host, context))
             return TraversalDecision::Continue;
 
@@ -353,10 +356,10 @@ static inline bool matches_has_pseudo_class(CSS::Selector const& selector, DOM::
     bool result;
     if (auto const* simple_selector = simple_has_child_tag_selector(selector)) {
         result = matches_has_child_tag_fast_path(*simple_selector, anchor, shadow_host, context);
-    } else if (context.collect_per_element_selector_involvement_metadata) {
-        result = matches_relative_selector(selector, 0, anchor, shadow_host, context, anchor, scope);
     } else if (auto const* compound_selector = simple_has_descendant_tag_and_class_compound(selector)) {
         result = matches_has_descendant_tag_and_class_fast_path(selector, *compound_selector, anchor, shadow_host, context);
+    } else if (context.collect_per_element_selector_involvement_metadata) {
+        result = matches_relative_selector(selector, 0, anchor, shadow_host, context, anchor, scope);
     } else {
         result = matches_relative_selector(selector, 0, anchor, shadow_host, context, anchor, scope);
     }
