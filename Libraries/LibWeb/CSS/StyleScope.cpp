@@ -841,11 +841,15 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
     }
 
     auto& counters = document().style_invalidation_counters();
-    ++counters.has_ancestor_walk_invocations;
 
     auto is_in_has_scope = [](DOM::Element const& element) {
         return element.in_has_scope()
             || element.affected_by_has_pseudo_class_in_subject_position()
+            || element.affected_by_has_pseudo_class_in_non_subject_position();
+    };
+
+    auto is_has_anchor_candidate = [](DOM::Element const& element) {
+        return element.affected_by_has_pseudo_class_in_subject_position()
             || element.affected_by_has_pseudo_class_in_non_subject_position();
     };
 
@@ -856,10 +860,11 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
 
     HashTable<DOM::Element*> elements_already_invalidated_for_has;
     auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
+    if (!nodes.is_empty())
+        ++counters.has_ancestor_walk_invocations;
     bool should_scan_ancestor_siblings = have_has_selectors_with_relative_selector_that_has_sibling_combinator();
     for (auto& node : nodes) {
-        Vector<DOM::Element*, 16> has_scope_ancestors;
-        bool should_delay_ancestor_sibling_scans = false;
+        bool reached_has_scope = false;
         for (auto* ancestor = &node; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
             if (!ancestor->is_element())
                 continue;
@@ -868,34 +873,36 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
             // Terminate the upward walk once we reach an element that no :has()
             // anchor has ever observed. Its style cannot be affected by a mutation
             // further down the tree, so neither can anything above it.
-            if (!is_in_has_scope(element))
+            if (!is_in_has_scope(element)) {
+                if (!reached_has_scope)
+                    continue;
                 break;
+            }
+            reached_has_scope = true;
 
-            has_scope_ancestors.append(&element);
-            should_delay_ancestor_sibling_scans |= is_in_subtree_of_has_relative_selector_with_sibling_combinator(element);
-        }
-
-        for (auto* element : has_scope_ancestors) {
-            VERIFY(element);
-
-            if (elements_already_invalidated_for_has.set(element) != AK::HashSetResult::InsertedNewEntry)
+            bool should_scan_element_siblings = should_scan_ancestor_siblings
+                && is_in_subtree_of_has_relative_selector_with_sibling_combinator(element);
+            if (!is_has_anchor_candidate(element) && !should_scan_element_siblings)
                 continue;
 
-            ++counters.has_ancestor_walk_visits;
-            element->invalidate_style_if_affected_by_has();
+            if (elements_already_invalidated_for_has.set(&element) != AK::HashSetResult::InsertedNewEntry)
+                continue;
 
-            auto* parent = element->parent_or_shadow_host();
+            if (is_has_anchor_candidate(element)) {
+                ++counters.has_ancestor_walk_visits;
+                element.invalidate_style_if_affected_by_has();
+            }
+
+            auto* parent = ancestor->parent_or_shadow_host();
             if (!parent)
                 return;
 
             // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
             // its style might be affected by the change in descendant node.
-            if (!should_scan_ancestor_siblings)
-                continue;
-            if (should_delay_ancestor_sibling_scans && !is_in_subtree_of_has_relative_selector_with_sibling_combinator(*element))
+            if (!should_scan_element_siblings)
                 continue;
             parent->for_each_child_of_type<DOM::Element>([&](auto& ancestor_sibling_element) {
-                if (&ancestor_sibling_element == element)
+                if (&ancestor_sibling_element == &element)
                     return IterationDecision::Continue;
                 ++counters.has_ancestor_sibling_element_checks;
                 if (ancestor_sibling_element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator()) {

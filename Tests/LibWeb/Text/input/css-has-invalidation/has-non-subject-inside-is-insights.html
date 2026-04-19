@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .outer :is(.anchor:has(.match)) .styled { color: red; }
+</style>
+<div class="outer" id="a1">
+    <div id="a2" class="anchor">
+        <div id="a3">
+            <span id="styled" class="styled">styled</span>
+            <span id="target">target</span>
+        </div>
+    </div>
+</div>
+<script>
+    test(() => {
+        getComputedStyle(document.getElementById("styled")).color;
+        internals.resetStyleInvalidationCounters();
+
+        document.getElementById("target").classList.add("match");
+        getComputedStyle(document.getElementById("styled")).color;
+        printCounters("after add .match on target");
+    });
+</script>

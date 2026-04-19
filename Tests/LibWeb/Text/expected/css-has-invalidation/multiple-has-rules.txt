@@ -1,13 +1,13 @@
 [add .red (only :has(.red) flips)]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 2
   hasResultCacheHits: 0
   hasResultCacheMisses: 2
   styleInvalidations: 1
 [add .blue (only :has(.blue) flips, .red stable)]
   hasAncestorWalkInvocations: 1
-  hasAncestorWalkVisits: 2
+  hasAncestorWalkVisits: 1
   hasMatchInvocations: 2
   hasResultCacheHits: 0
   hasResultCacheMisses: 2

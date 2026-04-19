@@ -1,5 +1,5 @@
 hasAncestorWalkInvocations: 1
-hasAncestorWalkVisits: 5
+hasAncestorWalkVisits: 1
 hasAncestorSiblingElementChecks: 2
 hasMatchInvocations: 1
 hasResultCacheHits: 0
