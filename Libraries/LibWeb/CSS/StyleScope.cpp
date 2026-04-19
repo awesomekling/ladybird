@@ -23,8 +23,27 @@
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Page/Page.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace Web::CSS {
+
+static bool should_log_style_invalidation(DOM::Document const& document)
+{
+    auto const* url_substring = getenv("LADYBIRD_STYLE_INVALIDATION_LOG_URL_SUBSTRING");
+    if (!url_substring || *url_substring == '\0')
+        return false;
+    return document.url().serialize().contains(StringView { url_substring, strlen(url_substring) });
+}
+
+template<typename T>
+static size_t weak_hash_set_size(GC::WeakHashSet<T> const& set)
+{
+    size_t size = 0;
+    for (auto const& _ : set)
+        ++size;
+    return size;
+}
 
 void RuleCaches::visit_edges(GC::Cell::Visitor& visitor)
 {
@@ -819,32 +838,48 @@ void StyleScope::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleShee
 
 void StyleScope::schedule_ancestors_style_invalidation_due_to_presence_of_has(DOM::Node& node)
 {
+    bool inserted_new_entry = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has.contains(node);
     m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
+    if (inserted_new_entry && should_log_style_invalidation(document())) {
+        dbgln("STYLE_INV has schedule scope=ancestors node={}", node.debug_description());
+    }
     document().set_needs_invalidation_of_elements_affected_by_has();
 }
 
 void StyleScope::schedule_style_invalidation_due_to_presence_of_has(DOM::Node& node, HasArgumentScope scope)
 {
+    bool inserted_new_entry = false;
     switch (scope) {
     case HasArgumentScope::ChildrenOnly:
+        inserted_new_entry = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.contains(node);
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.set(node);
         break;
     case HasArgumentScope::NextSiblingOnly:
+        inserted_new_entry = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.contains(node);
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.set(node);
         break;
     case HasArgumentScope::AllFollowingSiblings:
+        inserted_new_entry = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling.contains(node);
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling.set(node);
         break;
     case HasArgumentScope::AllDescendants:
     case HasArgumentScope::Complex:
+        inserted_new_entry = !m_pending_nodes_for_style_invalidation_due_to_presence_of_has.contains(node);
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
         break;
+    }
+    if (inserted_new_entry && should_log_style_invalidation(document())) {
+        dbgln("STYLE_INV has schedule scope={} node={}", to_underlying(scope), node.debug_description());
     }
     document().set_needs_invalidation_of_elements_affected_by_has();
 }
 
 void StyleScope::invalidate_style_of_elements_affected_by_has()
 {
+    size_t pending_full = weak_hash_set_size(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
+    size_t pending_children_only = weak_hash_set_size(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only);
+    size_t pending_next_sibling = weak_hash_set_size(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling);
+    size_t pending_subsequent_sibling = weak_hash_set_size(m_pending_nodes_for_style_invalidation_due_to_presence_of_has_subsequent_sibling);
     if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()
         && m_pending_nodes_for_style_invalidation_due_to_presence_of_has_children_only.is_empty()
         && m_pending_nodes_for_style_invalidation_due_to_presence_of_has_next_sibling.is_empty()
@@ -1008,6 +1043,19 @@ void StyleScope::invalidate_style_of_elements_affected_by_has()
                     maybe_invalidate_ancestor_sibling(*previous_sibling);
             }
         }
+    }
+
+    if (should_log_style_invalidation(document())) {
+        dbgln("STYLE_INV has flush pending_full={} pending_children={} pending_next={} pending_subsequent={} invalidated_anchors={} ancestor_walks={} ancestor_visits={} sibling_checks={} sibling_anchor_checks={}",
+            pending_full,
+            pending_children_only,
+            pending_next_sibling,
+            pending_subsequent_sibling,
+            elements_already_invalidated_for_has.size(),
+            counters.has_ancestor_walk_invocations,
+            counters.has_ancestor_walk_visits,
+            counters.has_ancestor_sibling_element_checks,
+            counters.has_sibling_anchor_invalidation_checks);
     }
 }
 

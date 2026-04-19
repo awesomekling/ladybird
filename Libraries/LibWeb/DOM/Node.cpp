@@ -73,11 +73,34 @@
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGTitleElement.h>
 #include <LibWeb/XLink/AttributeNames.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace Web::DOM {
 
 static UniqueNodeID s_next_unique_id;
 static HashMap<UniqueNodeID, Node*> s_node_directory;
+
+static bool should_log_style_invalidation(Document const& document)
+{
+    auto const* url_substring = getenv("LADYBIRD_STYLE_INVALIDATION_LOG_URL_SUBSTRING");
+    if (!url_substring || *url_substring == '\0')
+        return false;
+    return document.url().serialize().contains(StringView { url_substring, strlen(url_substring) });
+}
+
+static String describe_invalidation_properties(Vector<CSS::InvalidationSet::Property> const& properties)
+{
+    StringBuilder builder;
+    builder.append('[');
+    for (size_t i = 0; i < properties.size(); ++i) {
+        if (i != 0)
+            builder.append(", "sv);
+        builder.appendff("{}", properties[i]);
+    }
+    builder.append(']');
+    return MUST(builder.to_string());
+}
 
 static UniqueNodeID allocate_unique_id(Node* node)
 {
@@ -466,6 +489,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 if (style_scope.may_have_has_selectors_with_relative_selector_that_has_sibling_combinator()) {
                     auto& counters = document().style_invalidation_counters();
                     bool needs_conservative_sibling_anchor_scan = false;
+                    bool has_any_sibling_anchor_candidate = false;
                     parent->for_each_child_of_type<Element>([&](auto& element) {
                         if (element.in_subtree_of_has_pseudo_class_relative_selector_with_nested_sibling_combinator()) {
                             needs_conservative_sibling_anchor_scan = true;
@@ -473,6 +497,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                         }
                         if (!element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
                             return IterationDecision::Continue;
+                        has_any_sibling_anchor_candidate = true;
                         if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_next_sibling_combinator()
                             || element.affected_by_has_pseudo_class_with_relative_selector_that_has_subsequent_sibling_combinator()) {
                             return IterationDecision::Continue;
@@ -481,7 +506,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                         return IterationDecision::Break;
                     });
 
-                    if (reason == StyleInvalidationReason::NodeRemove || needs_conservative_sibling_anchor_scan) {
+                    if (has_any_sibling_anchor_candidate && needs_conservative_sibling_anchor_scan) {
                         parent->for_each_child_of_type<Element>([&](auto& element) {
                             ++counters.has_sibling_anchor_invalidation_checks;
                             if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
@@ -628,7 +653,32 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
         set_needs_style_update(true);
 
     auto invalidate_for_style_scope = [this, reason, &properties](CSS::StyleScope& style_scope) {
+        if (should_log_style_invalidation(document())) {
+            for (auto const& property : properties) {
+                auto property_plan = document().style_computer().invalidation_plan_for_properties({ property }, style_scope);
+                if (property_plan->invalidate_whole_subtree) {
+                    dbgln("STYLE_INV property_plan reason={} node={} property={} invalidate_self={} invalidate_whole_subtree={} descendant_rules={} sibling_rules={}",
+                        to_string(reason),
+                        debug_description(),
+                        property,
+                        property_plan->invalidate_self,
+                        property_plan->invalidate_whole_subtree,
+                        property_plan->descendant_rules.size(),
+                        property_plan->sibling_rules.size());
+                }
+            }
+        }
         auto plan = document().style_computer().invalidation_plan_for_properties(properties, style_scope);
+        if (should_log_style_invalidation(document())) {
+            dbgln("STYLE_INV plan reason={} node={} properties={} invalidate_self={} invalidate_whole_subtree={} descendant_rules={} sibling_rules={}",
+                to_string(reason),
+                debug_description(),
+                describe_invalidation_properties(properties),
+                plan->invalidate_self,
+                plan->invalidate_whole_subtree,
+                plan->descendant_rules.size(),
+                plan->sibling_rules.size());
+        }
         return document().style_invalidator().enqueue_invalidation_plan(*this, reason, *plan);
     };
 

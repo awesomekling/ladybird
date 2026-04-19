@@ -209,10 +209,50 @@
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/ObservableArray.h>
 #include <LibWeb/XPath/XPath.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace Web::DOM {
 
 GC_DEFINE_ALLOCATOR(Document);
+
+static bool should_log_style_invalidation(Document const& document)
+{
+    auto const* url_substring = getenv("LADYBIRD_STYLE_INVALIDATION_LOG_URL_SUBSTRING");
+    if (!url_substring || *url_substring == '\0')
+        return false;
+    return document.url().serialize().contains(StringView { url_substring, strlen(url_substring) });
+}
+
+struct StyleInvalidationDebugCounts {
+    size_t nodes { 0 };
+    size_t needs_style_update { 0 };
+    size_t child_needs_style_update { 0 };
+    size_t entire_subtree_needs_style_update { 0 };
+};
+
+static StyleInvalidationDebugCounts collect_style_invalidation_debug_counts(Node const& node)
+{
+    StyleInvalidationDebugCounts counts;
+    Function<void(Node const&)> visit = [&](Node const& current) {
+        ++counts.nodes;
+        if (current.needs_style_update())
+            ++counts.needs_style_update;
+        if (current.child_needs_style_update())
+            ++counts.child_needs_style_update;
+        if (current.entire_subtree_needs_style_update())
+            ++counts.entire_subtree_needs_style_update;
+        for (auto* child = current.first_child(); child; child = child->next_sibling())
+            visit(*child);
+        if (current.is_element()) {
+            auto const& element = static_cast<Element const&>(current);
+            if (auto shadow_root = element.shadow_root())
+                visit(*shadow_root);
+        }
+    };
+    visit(node);
+    return counts;
+}
 
 // https://html.spec.whatwg.org/multipage/origin.html#obtain-browsing-context-navigation
 static GC::Ref<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for_a_navigation_response(HTML::NavigationParams const& navigation_params)
@@ -1775,11 +1815,36 @@ void Document::update_style()
     if (!browsing_context())
         return;
 
+    if (!m_needs_animated_style_update
+        && !m_needs_invalidation_of_elements_affected_by_has
+        && !m_style_invalidator->has_pending_invalidations()
+        && !needs_full_style_update()
+        && !needs_style_update()
+        && !child_needs_style_update()) {
+        return;
+    }
+
     update_animated_style_if_needed();
 
     // Associated with each top-level browsing context is a current transition generation that is incremented on each
     // style change event. [CSS-Transitions-2]
     m_transition_generation++;
+
+    Optional<StyleInvalidationDebugCounts> counts_before;
+    if (should_log_style_invalidation(*this)) {
+        counts_before = collect_style_invalidation_debug_counts(*this);
+        dbgln("STYLE_INV update_style start url={} full={} self={} child={} has_pending={} pending_nodes={} nodes={} dirty={} child_dirty={} subtree_dirty={}",
+            url().serialize(),
+            needs_full_style_update(),
+            needs_style_update(),
+            child_needs_style_update(),
+            m_needs_invalidation_of_elements_affected_by_has,
+            m_style_invalidator->has_pending_invalidations(),
+            counts_before->nodes,
+            counts_before->needs_style_update,
+            counts_before->child_needs_style_update,
+            counts_before->entire_subtree_needs_style_update);
+    }
 
     if (m_needs_invalidation_of_elements_affected_by_has) {
         m_needs_invalidation_of_elements_affected_by_has = false;
@@ -1789,10 +1854,16 @@ void Document::update_style()
         });
     }
 
-    if (!m_style_invalidator->has_pending_invalidations() && !needs_full_style_update() && !needs_style_update() && !child_needs_style_update())
-        return;
-
     m_style_invalidator->invalidate(*this);
+
+    if (should_log_style_invalidation(*this)) {
+        auto counts_after_invalidator = collect_style_invalidation_debug_counts(*this);
+        dbgln("STYLE_INV update_style after_invalidator nodes={} dirty={} child_dirty={} subtree_dirty={}",
+            counts_after_invalidator.nodes,
+            counts_after_invalidator.needs_style_update,
+            counts_after_invalidator.child_needs_style_update,
+            counts_after_invalidator.entire_subtree_needs_style_update);
+    }
 
     // NOTE: If this is a document hosting <template> contents, style update is unnecessary.
     if (m_created_for_appropriate_template_contents)
@@ -1818,6 +1889,25 @@ void Document::update_style()
     if (invalidation.rebuild_stacking_context_tree)
         invalidate_stacking_context_tree();
     m_needs_full_style_update = false;
+
+    if (should_log_style_invalidation(*this)) {
+        auto const& counters = style_invalidation_counters();
+        auto counts_after = collect_style_invalidation_debug_counts(*this);
+        dbgln("STYLE_INV update_style end nodes={} dirty={} child_dirty={} subtree_dirty={} style_invalidations={} has_ancestor_walks={} has_ancestor_visits={} has_ancestor_sibling_checks={} has_sibling_anchor_checks={} has_metadata_candidates={} has_matches={} has_cache_hits={} has_cache_misses={}",
+            counts_after.nodes,
+            counts_after.needs_style_update,
+            counts_after.child_needs_style_update,
+            counts_after.entire_subtree_needs_style_update,
+            counters.style_invalidations,
+            counters.has_ancestor_walk_invocations,
+            counters.has_ancestor_walk_visits,
+            counters.has_ancestor_sibling_element_checks,
+            counters.has_sibling_anchor_invalidation_checks,
+            counters.has_invalidation_metadata_candidates,
+            counters.has_match_invocations,
+            counters.has_result_cache_hits,
+            counters.has_result_cache_misses);
+    }
 }
 
 void Document::update_style_if_needed_for_element(AbstractElement const& abstract_element)
