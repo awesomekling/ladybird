@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(.match) { color: red; }
+</style>
+<div id="wrapper">
+    <div class="anchor"><span class="match">a</span></div>
+    <div id="outside">
+        <div>
+            <div id="target"></div>
+        </div>
+    </div>
+</div>
+<script>
+    test(() => {
+        settleAndReset();
+
+        let child = document.createElement("span");
+        child.className = "match";
+        document.getElementById("target").appendChild(child);
+        getComputedStyle(document.getElementById("target")).color;
+        printInsertionCounters("insert .match outside any :has() scope");
+    });
+</script>

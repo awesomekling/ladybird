@@ -1,5 +1,5 @@
 [after add .match on adjacent sibling]
-  hasAncestorWalkInvocations: 1
+  hasAncestorWalkInvocations: 0
   hasAncestorWalkVisits: 0
   hasMatchInvocations: 1
   hasResultCacheHits: 0

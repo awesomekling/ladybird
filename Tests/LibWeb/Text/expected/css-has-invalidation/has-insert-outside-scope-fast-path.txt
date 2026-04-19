@@ -1,0 +1,9 @@
+[insert .match outside any :has() scope]
+  hasAncestorWalkInvocations: 0
+  hasAncestorWalkVisits: 0
+  hasAncestorSiblingElementChecks: 0
+  hasSiblingAnchorInvalidationChecks: 0
+  hasMatchInvocations: 0
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 0
+  styleInvalidations: 2

@@ -8,10 +8,10 @@
   hasResultCacheMisses: 1
   styleInvalidations: 3
 [sibling-sensitive insertion]
-  hasAncestorWalkInvocations: 1
+  hasAncestorWalkInvocations: 0
   hasAncestorWalkVisits: 0
   hasAncestorSiblingElementChecks: 0
-  hasSiblingAnchorInvalidationChecks: 1
+  hasSiblingAnchorInvalidationChecks: 2
   hasMatchInvocations: 2
   hasResultCacheHits: 0
   hasResultCacheMisses: 2
