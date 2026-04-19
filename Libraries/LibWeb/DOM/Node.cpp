@@ -446,11 +446,15 @@ void Node::invalidate_style(StyleInvalidationReason reason)
         if (reason == StyleInvalidationReason::NodeRemove || reason == StyleInvalidationReason::NodeInsertBefore) {
             if (auto* parent = parent_or_shadow_host(); parent) {
                 style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
-                parent->for_each_child_of_type<Element>([&](auto& element) {
-                    if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
-                        element.invalidate_style_if_affected_by_has();
-                    return IterationDecision::Continue;
-                });
+                if (style_scope.may_have_has_selectors_with_relative_selector_that_has_sibling_combinator()) {
+                    auto& counters = document().style_invalidation_counters();
+                    parent->for_each_child_of_type<Element>([&](auto& element) {
+                        ++counters.has_sibling_anchor_invalidation_checks;
+                        if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
+                            element.invalidate_style_if_affected_by_has();
+                        return IterationDecision::Continue;
+                    });
+                }
             }
         } else if (reason_may_affect_has_selectors(reason)) {
             style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
