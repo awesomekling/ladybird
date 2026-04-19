@@ -1,0 +1,18 @@
+initial next color: rgb(0, 0, 0)
+after add .match-next: rgb(255, 0, 0)
+[after add .match-next to next sibling]
+  hasAncestorWalkInvocations: 0
+  hasAncestorWalkVisits: 0
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5
+initial subsequent color: rgb(0, 0, 0)
+after add .match-subsequent: rgb(255, 0, 0)
+[after add .match-subsequent to following sibling]
+  hasAncestorWalkInvocations: 0
+  hasAncestorWalkVisits: 0
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 5

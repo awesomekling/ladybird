@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor-next:has(+ .match-next) { color: red; }
+    .anchor-subsequent:has(~ .match-subsequent) { color: red; }
+</style>
+<div>
+    <span id="anchor-next" class="anchor-next">a</span>
+    <span id="target-next">b</span>
+</div>
+<div>
+    <span id="anchor-subsequent" class="anchor-subsequent">a</span>
+    <span>gap</span>
+    <span id="target-subsequent">b</span>
+</div>
+<script>
+    test(() => {
+        let anchorNext = document.getElementById("anchor-next");
+        let targetNext = document.getElementById("target-next");
+        let anchorSubsequent = document.getElementById("anchor-subsequent");
+        let targetSubsequent = document.getElementById("target-subsequent");
+
+        settleAndReset(anchorNext);
+
+        println(`initial next color: ${getComputedStyle(anchorNext).color}`);
+        targetNext.classList.add("match-next");
+        println(`after add .match-next: ${getComputedStyle(anchorNext).color}`);
+        printCounters("after add .match-next to next sibling");
+
+        internals.resetStyleInvalidationCounters();
+
+        println(`initial subsequent color: ${getComputedStyle(anchorSubsequent).color}`);
+        targetSubsequent.classList.add("match-subsequent");
+        println(`after add .match-subsequent: ${getComputedStyle(anchorSubsequent).color}`);
+        printCounters("after add .match-subsequent to following sibling");
+    });
+</script>
