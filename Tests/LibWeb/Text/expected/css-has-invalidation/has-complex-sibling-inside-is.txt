@@ -1,0 +1,19 @@
+initial color: rgb(128, 128, 128)
+after add .f_has_scope: rgb(0, 0, 255)
+[after add .f_has_scope]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasAncestorSiblingElementChecks: 6
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3
+after remove .f_has_scope: rgb(128, 128, 128)
+[after remove .f_has_scope]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 2
+  hasAncestorSiblingElementChecks: 6
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 3

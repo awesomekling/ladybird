@@ -1605,8 +1605,10 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
         }
         VERIFY(component_list_index != 0);
         if (auto* sibling = element.element().previous_element_sibling()) {
-            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata) {
                 const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
+                const_cast<DOM::Element&>(*sibling).set_in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator(true);
+            }
             return matches_compound_selector(selector, component_list_index - 1, *sibling, shadow_host, context, scope, selector_kind, anchor);
         }
         return false;
@@ -1616,8 +1618,10 @@ bool matches_compound_selector(CSS::Selector const& selector, int component_list
         }
         VERIFY(component_list_index != 0);
         for (auto* sibling = element.element().previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
-            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata)
+            if (context.inside_has_argument_match && context.collect_per_element_selector_involvement_metadata) {
                 const_cast<DOM::Element&>(*sibling).set_in_has_scope(true);
+                const_cast<DOM::Element&>(*sibling).set_in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator(true);
+            }
             if (matches_compound_selector(selector, component_list_index - 1, *sibling, shadow_host, context, scope, selector_kind, anchor))
                 return true;
         }

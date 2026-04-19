@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    #has_scope {
+        color: rgb(128, 128, 128);
+    }
+
+    .blue:has(~ #indirect_next:is(.p + .f_has_scope ~ .g)) {
+        color: rgb(0, 0, 255);
+    }
+</style>
+<div id="has_scope" class="blue">anchor</div>
+<div id="direct_next" class="p">p</div>
+<div id="previous">middle</div>
+<div id="indirect_next" class="g">g</div>
+<script>
+    function printCounters(label) {
+        let counters = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${counters.hasAncestorWalkInvocations}`);
+        println(`  hasAncestorWalkVisits: ${counters.hasAncestorWalkVisits}`);
+        println(`  hasAncestorSiblingElementChecks: ${counters.hasAncestorSiblingElementChecks}`);
+        println(`  hasMatchInvocations: ${counters.hasMatchInvocations}`);
+        println(`  hasResultCacheHits: ${counters.hasResultCacheHits}`);
+        println(`  hasResultCacheMisses: ${counters.hasResultCacheMisses}`);
+        println(`  styleInvalidations: ${counters.styleInvalidations}`);
+    }
+
+    test(() => {
+        let anchor = document.getElementById("has_scope");
+        let previous = document.getElementById("previous");
+
+        println(`initial color: ${getComputedStyle(anchor).color}`);
+
+        internals.resetStyleInvalidationCounters();
+        previous.classList.add("f_has_scope");
+        println(`after add .f_has_scope: ${getComputedStyle(anchor).color}`);
+        printCounters("after add .f_has_scope");
+
+        internals.resetStyleInvalidationCounters();
+        previous.classList.remove("f_has_scope");
+        println(`after remove .f_has_scope: ${getComputedStyle(anchor).color}`);
+        printCounters("after remove .f_has_scope");
+    });
+</script>
