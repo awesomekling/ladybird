@@ -10,6 +10,9 @@
     <div id="target">hello</div>
     <div id="sibling">world</div>
 </div>
+<div class="pseudo-parent" id="pseudo-parent">
+    <div id="pseudo-target">descendant pseudo</div>
+</div>
 <div id="slot-host">
     <template shadowrootmode="open">
         <slot id="the-slot"></slot>
@@ -32,6 +35,7 @@
         const target = document.getElementById("target");
         const sibling = document.getElementById("sibling");
         const parent = document.getElementById("parent");
+        const pseudoTarget = document.getElementById("pseudo-target");
         const slottedChild = document.getElementById("slotted-child");
         const slotHost = document.getElementById("slot-host");
         const inheritParent = document.getElementById("inherit-parent");
@@ -82,6 +86,11 @@
         styleEl.textContent = "#target::before { content: 'X'; color: green; }";
         document.head.appendChild(styleEl);
         println(`7: ${getComputedStyle(target, "::before").color}`);
+
+        const descendantPseudoStyleEl = document.createElement("style");
+        descendantPseudoStyleEl.textContent = ".pseudo-parent ::before { content: 'Y'; color: red; }";
+        document.head.appendChild(descendantPseudoStyleEl);
+        println(`7b: ${getComputedStyle(pseudoTarget, "::before").color}`);
 
         // 8. Multiple reads without changes return consistent values.
         println(`8a: ${getComputedStyle(target).color}`);

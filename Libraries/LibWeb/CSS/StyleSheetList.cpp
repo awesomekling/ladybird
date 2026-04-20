@@ -9,11 +9,14 @@
 #include <LibWeb/Bindings/StyleSheetListPrototype.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/SelectorEngine.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
 #include <LibWeb/CSS/StyleSheetList.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/StyleInvalidator.h>
 #include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
@@ -87,15 +90,82 @@ GC::Ref<CSSStyleSheet> StyleSheetList::create_a_css_style_sheet(String const& cs
     return sheet;
 }
 
-static InvalidationSet build_invalidation_set_for_stylesheet(CSSStyleSheet const& sheet)
+struct StylesheetInvalidationRule {
+    InvalidationSet anchor_match_set;
+    bool anchor_matches_any { false };
+    NonnullRefPtr<InvalidationPlan> payload;
+};
+
+struct StylesheetInvalidation {
+    Vector<Selector const*> direct_selectors;
+    Vector<StylesheetInvalidationRule> anchor_rules;
+    bool invalidate_whole_subtree { false };
+};
+
+static bool simple_selector_group_matches_any(Vector<Selector::SimpleSelector> const& simple_selectors)
+{
+    return simple_selectors.size() == 1 && simple_selectors.first().type == Selector::SimpleSelector::Type::Universal;
+}
+
+static bool simple_selector_group_matches_any_element(Vector<Selector::SimpleSelector> const& simple_selectors)
+{
+    if (simple_selector_group_matches_any(simple_selectors))
+        return true;
+    return !simple_selectors.is_empty() && all_of(simple_selectors, [](auto const& simple_selector) {
+        return simple_selector.type == Selector::SimpleSelector::Type::Universal
+            || simple_selector.type == Selector::SimpleSelector::Type::PseudoElement;
+    });
+}
+
+static InvalidationSet build_subject_match_set_for_simple_selectors(Vector<Selector::SimpleSelector> const& simple_selectors, StyleInvalidationData& throwaway_data)
 {
     InvalidationSet set;
+    for (auto const& simple : simple_selectors)
+        build_invalidation_sets_for_simple_selector(simple, set, ExcludePropertiesNestedInNotPseudoClass::Yes, throwaway_data, InsideNthChildPseudoClass::No);
+    return set;
+}
+
+static NonnullRefPtr<InvalidationPlan> make_invalidate_self_invalidation()
+{
+    auto invalidation = InvalidationPlan::create();
+    invalidation->invalidate_self = true;
+    return invalidation;
+}
+
+static NonnullRefPtr<InvalidationPlan> build_invalidation_for_combinator(Selector::Combinator combinator, InvalidationSet const& subject_match_set, bool subject_matches_any)
+{
+    if (!subject_matches_any && subject_match_set.is_empty()) {
+        auto invalidation = InvalidationPlan::create();
+        invalidation->invalidate_whole_subtree = true;
+        return invalidation;
+    }
+
+    auto invalidation = InvalidationPlan::create();
+    auto payload = make_invalidate_self_invalidation();
+    switch (combinator) {
+    case Selector::Combinator::ImmediateChild:
+    case Selector::Combinator::Descendant:
+        invalidation->descendant_rules.append({ subject_match_set, subject_matches_any, payload });
+        break;
+    case Selector::Combinator::NextSibling:
+        invalidation->sibling_rules.append({ SiblingInvalidationReach::Adjacent, subject_match_set, subject_matches_any, payload });
+        break;
+    case Selector::Combinator::SubsequentSibling:
+        invalidation->sibling_rules.append({ SiblingInvalidationReach::Subsequent, subject_match_set, subject_matches_any, payload });
+        break;
+    default:
+        invalidation->invalidate_whole_subtree = true;
+        break;
+    }
+    return invalidation;
+}
+
+static StylesheetInvalidation build_invalidation_for_stylesheet(CSSStyleSheet const& sheet)
+{
+    StylesheetInvalidation invalidation;
     StyleInvalidationData throwaway_data;
 
     sheet.for_each_effective_style_producing_rule([&](CSSRule const& rule) {
-        if (set.needs_invalidate_whole_subtree())
-            return;
-
         if (!is<CSSStyleRule>(rule))
             return;
 
@@ -106,28 +176,58 @@ static InvalidationSet build_invalidation_set_for_stylesheet(CSSStyleSheet const
                 continue;
 
             auto const& rightmost = compound_selectors.last();
+            auto rightmost_subject_match_set = build_subject_match_set_for_simple_selectors(rightmost.simple_selectors, throwaway_data);
+            bool rightmost_matches_any = simple_selector_group_matches_any_element(rightmost.simple_selectors);
 
-            InvalidationSet rightmost_set;
-            for (auto const& simple : rightmost.simple_selectors) {
-                build_invalidation_sets_for_simple_selector(simple, rightmost_set, ExcludePropertiesNestedInNotPseudoClass::No, throwaway_data, InsideNthChildPseudoClass::No);
+            if (compound_selectors.size() == 1) {
+                if (rightmost_matches_any || !rightmost_subject_match_set.is_empty()) {
+                    invalidation.direct_selectors.append(selector.ptr());
+                    continue;
+                }
+            } else {
+                auto const& anchor = compound_selectors[compound_selectors.size() - 2];
+                auto anchor_match_set = build_subject_match_set_for_simple_selectors(anchor.simple_selectors, throwaway_data);
+                bool anchor_matches_any = simple_selector_group_matches_any(anchor.simple_selectors);
+                auto payload = build_invalidation_for_combinator(rightmost.combinator, rightmost_subject_match_set, rightmost_matches_any);
+                if ((anchor_matches_any || anchor_match_set.has_properties()) && !payload->invalidate_whole_subtree) {
+                    invalidation.anchor_rules.append({
+                        .anchor_match_set = move(anchor_match_set),
+                        .anchor_matches_any = anchor_matches_any,
+                        .payload = move(payload),
+                    });
+                    continue;
+                }
             }
 
-            if (!rightmost_set.has_properties()) {
-                set.set_needs_invalidate_whole_subtree();
-                return;
-            }
-
-            set.include_all_from(rightmost_set);
+            invalidation.invalidate_whole_subtree = true;
+            return;
         }
     });
 
-    return set;
+    return invalidation;
 }
 
-static void invalidate_elements_matching_invalidation_set(DOM::Node& root, InvalidationSet const& set)
+static void enqueue_stylesheet_invalidation_rule(DOM::Node& root, StylesheetInvalidationRule const& rule)
 {
+    auto& document = root.document();
     root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
-        if (element.includes_properties_from_invalidation_set(set))
+        if (!rule.anchor_matches_any && !element.includes_properties_from_invalidation_set(rule.anchor_match_set))
+            return TraversalDecision::Continue;
+        (void)document.style_invalidator().enqueue_invalidation_plan(element, DOM::StyleInvalidationReason::StyleSheetListAddSheet, *rule.payload);
+        return TraversalDecision::Continue;
+    });
+}
+
+static void invalidate_elements_matching_selector(DOM::Node& root, Selector const& selector)
+{
+    SelectorEngine::MatchContext context;
+    Optional<CSS::PseudoElement> pseudo_element;
+    if (selector.target_pseudo_element().has_value())
+        pseudo_element = selector.target_pseudo_element()->type();
+
+    root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
+        DOM::AbstractElement abstract_element { element, pseudo_element };
+        if (SelectorEngine::matches(selector, abstract_element, nullptr, context))
             element.set_needs_style_update(true);
         return TraversalDecision::Continue;
     });
@@ -174,27 +274,47 @@ void StyleSheetList::add_sheet(CSSStyleSheet& sheet)
         document_or_shadow_root().document().style_scope().invalidate_rule_cache();
     }
 
+    auto styles_have_been_computed_for_scope = [&]() {
+        if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root())) {
+            auto* host = shadow_root->host();
+            return host && host->computed_properties();
+        }
+        auto* document_element = document().document_element();
+        return document_element && document_element->computed_properties();
+    };
+
+    if (!styles_have_been_computed_for_scope()) {
+        // The first full style pass will already compute styles using this sheet.
+        // Avoid enqueuing extra targeted invalidations before any style exists.
+        return;
+    }
+
     if (document_or_shadow_root().entire_subtree_needs_style_update()) {
         // NOTE: If the entire subtree is already marked for style update,
         //       there's no point spending time building invalidation sets.
         return;
     }
 
-    auto invalidation_set = build_invalidation_set_for_stylesheet(sheet);
-
+    auto invalidation = build_invalidation_for_stylesheet(sheet);
     if (auto* shadow_root = as_if<DOM::ShadowRoot>(document_or_shadow_root())) {
         if (auto* host = shadow_root->host()) {
-            if (invalidation_set.needs_invalidate_whole_subtree()) {
+            if (invalidation.invalidate_whole_subtree) {
                 host->invalidate_style(DOM::StyleInvalidationReason::StyleSheetListAddSheet);
             } else {
-                invalidate_elements_matching_invalidation_set(*host, invalidation_set);
+                for (auto const* selector : invalidation.direct_selectors)
+                    invalidate_elements_matching_selector(*host, *selector);
+                for (auto const& rule : invalidation.anchor_rules)
+                    enqueue_stylesheet_invalidation_rule(*host, rule);
             }
         }
     } else {
-        if (invalidation_set.needs_invalidate_whole_subtree()) {
+        if (invalidation.invalidate_whole_subtree) {
             document_or_shadow_root().invalidate_style(DOM::StyleInvalidationReason::StyleSheetListAddSheet);
         } else {
-            invalidate_elements_matching_invalidation_set(document_or_shadow_root(), invalidation_set);
+            for (auto const* selector : invalidation.direct_selectors)
+                invalidate_elements_matching_selector(document_or_shadow_root(), *selector);
+            for (auto const& rule : invalidation.anchor_rules)
+                enqueue_stylesheet_invalidation_rule(document_or_shadow_root(), rule);
         }
     }
 }

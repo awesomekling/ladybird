@@ -1858,8 +1858,6 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
         case CSS::InvalidationSet::Property::Type::TagName:
             return local_name() == property.name();
         case CSS::InvalidationSet::Property::Type::Attribute: {
-            if (property.name() == HTML::AttributeNames::id || property.name() == HTML::AttributeNames::class_)
-                return true;
             return has_attribute(property.name());
         }
         case CSS::InvalidationSet::Property::Type::PseudoClass: {
@@ -1887,6 +1885,10 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
             case CSS::PseudoClass::LocalLink: {
                 return matches_local_link_pseudo_class();
             }
+            case CSS::PseudoClass::FirstChild:
+                return !previous_element_sibling();
+            case CSS::PseudoClass::LastChild:
+                return !next_element_sibling();
             case CSS::PseudoClass::Root:
                 return is<HTML::HTMLHtmlElement>(*this);
             case CSS::PseudoClass::Host:
