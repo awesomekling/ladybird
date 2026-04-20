@@ -3026,7 +3026,11 @@ ENUMERATE_ARIA_ATTRIBUTES
 void Element::invalidate_style_after_attribute_change(FlyString const& attribute_name, Optional<String> const& old_value, Optional<String> const& new_value)
 {
     Vector<CSS::InvalidationSet::Property, 1> changed_properties;
-    StyleInvalidationOptions style_invalidation_options;
+    StyleInvalidationOptions style_invalidation_options {
+        .changed_attribute_name = &attribute_name,
+        .changed_attribute_old_value = &old_value,
+        .changed_attribute_new_value = &new_value,
+    };
     if (is_presentational_hint(attribute_name) || style_uses_attr_css_function()) {
         style_invalidation_options.invalidate_self = true;
     }
@@ -3067,7 +3071,9 @@ void Element::invalidate_style_after_attribute_change(FlyString const& attribute
         changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Optional });
     }
 
-    changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Attribute, .value = attribute_name });
+    auto& style_scope = root().is_shadow_root() ? static_cast<ShadowRoot&>(root()).style_scope() : document().style_scope();
+    if (document().style_computer().attribute_value_change_requires_invalidation(attribute_name, old_value, new_value, style_scope))
+        changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::Attribute, .value = attribute_name });
     invalidate_style(StyleInvalidationReason::ElementAttributeChange, changed_properties, style_invalidation_options);
 }
 
@@ -3433,7 +3439,15 @@ void Element::set_custom_element_state(CustomElementState state)
 {
     if (m_custom_element_state == state)
         return;
+
+    bool const was_defined = is_defined();
     m_custom_element_state = state;
+    bool const is_now_defined = is_defined();
+
+    if (was_defined == is_now_defined)
+        return;
+    if (!is_connected())
+        return;
 
     Vector<CSS::InvalidationSet::Property, 1> changed_properties;
     changed_properties.append({ .type = CSS::InvalidationSet::Property::Type::PseudoClass, .value = CSS::PseudoClass::Defined });

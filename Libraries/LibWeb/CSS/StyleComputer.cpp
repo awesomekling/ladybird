@@ -9,6 +9,7 @@
 
 #include <AK/BinarySearch.h>
 #include <AK/Bitmap.h>
+#include <AK/CharacterTypes.h>
 #include <AK/Debug.h>
 #include <AK/Error.h>
 #include <AK/Find.h>
@@ -78,6 +79,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -239,6 +241,69 @@ Vector<HasInvalidationMetadata> const* StyleComputer::has_invalidation_metadata_
         break;
     }
     return nullptr;
+}
+
+static bool value_matches_attribute_invalidation_rule(StringView value, ValueSensitiveAttributeInvalidationRule const& rule)
+{
+    if (rule.case_type == Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch)
+        return true;
+
+    switch (rule.match_type) {
+    case Selector::SimpleSelector::Attribute::MatchType::HasAttribute:
+        return true;
+    case Selector::SimpleSelector::Attribute::MatchType::ExactValueMatch:
+        return value == rule.value;
+    case Selector::SimpleSelector::Attribute::MatchType::ContainsWord:
+        return value.split_view_if(is_ascii_space).contains_slow(rule.value);
+    case Selector::SimpleSelector::Attribute::MatchType::ContainsString:
+        return value.contains(rule.value);
+    case Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment:
+        return value == rule.value || value.starts_with(MUST(String::formatted("{}-", rule.value)));
+    case Selector::SimpleSelector::Attribute::MatchType::StartsWithString:
+        return value.starts_with(rule.value);
+    case Selector::SimpleSelector::Attribute::MatchType::EndsWithString:
+        return value.ends_with(rule.value);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+static bool attribute_value_change_matches_value_sensitive_rule(Optional<String> const& old_value, Optional<String> const& new_value, Vector<ValueSensitiveAttributeInvalidationRule> const& rules)
+{
+    for (auto const& rule : rules) {
+        bool const old_matches = old_value.has_value() && value_matches_attribute_invalidation_rule(*old_value, rule);
+        bool const new_matches = new_value.has_value() && value_matches_attribute_invalidation_rule(*new_value, rule);
+        if (old_matches != new_matches)
+            return true;
+    }
+    return false;
+}
+
+bool StyleComputer::attribute_value_change_requires_invalidation(FlyString const& attribute_name, Optional<String> const& old_value, Optional<String> const& new_value, StyleScope const& style_scope) const
+{
+    if (!style_scope.m_style_invalidation_data)
+        return true;
+
+    if (attribute_name == HTML::AttributeNames::class_) {
+        bool requires_invalidation = false;
+        if (old_value.has_value() != new_value.has_value()) {
+            requires_invalidation = style_scope.m_style_invalidation_data->presence_sensitive_attribute_names.contains(attribute_name)
+                || style_scope.m_style_invalidation_data->presence_sensitive_attribute_names_used_in_has_selectors.contains(attribute_name);
+        }
+
+        if (auto rules = style_scope.m_style_invalidation_data->value_sensitive_attribute_rules.get(attribute_name); rules.has_value())
+            requires_invalidation |= attribute_value_change_matches_value_sensitive_rule(old_value, new_value, *rules);
+        else
+            requires_invalidation |= style_scope.m_style_invalidation_data->value_sensitive_attribute_names.contains(attribute_name)
+                || style_scope.m_style_invalidation_data->value_sensitive_attribute_names_used_in_has_selectors.contains(attribute_name);
+        return requires_invalidation;
+    }
+
+    if (old_value.has_value() != new_value.has_value())
+        return true;
+
+    return style_scope.m_style_invalidation_data->value_sensitive_attribute_names.contains(attribute_name)
+        || style_scope.m_style_invalidation_data->value_sensitive_attribute_names_used_in_has_selectors.contains(attribute_name);
 }
 
 Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractElement abstract_element, CascadeOrigin cascade_origin, PseudoClassBitmap& attempted_pseudo_class_matches, Optional<FlyString const> qualified_layer_name) const

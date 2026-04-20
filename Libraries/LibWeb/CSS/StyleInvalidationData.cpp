@@ -8,6 +8,7 @@
 #include <AK/Optional.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
+#include <LibWeb/HTML/AttributeNames.h>
 
 namespace Web::CSS {
 
@@ -182,6 +183,20 @@ static void append_has_invalidation_metadata(HashMap<Key, Vector<HasInvalidation
         bucket.append(metadata);
 }
 
+static void append_value_sensitive_attribute_rule(StyleInvalidationData& style_invalidation_data, Selector::SimpleSelector::Attribute const& attribute)
+{
+    ValueSensitiveAttributeInvalidationRule rule {
+        .match_type = attribute.match_type,
+        .value = attribute.value,
+        .case_type = attribute.case_type,
+    };
+    auto& rules = style_invalidation_data.value_sensitive_attribute_rules.ensure(attribute.qualified_name.name.lowercase_name, [] {
+        return Vector<ValueSensitiveAttributeInvalidationRule> {};
+    });
+    if (!rules.contains_slow(rule))
+        rules.append(move(rule));
+}
+
 static void collect_properties_used_in_has(Selector::SimpleSelector const& selector, StyleInvalidationData& style_invalidation_data, Optional<HasInvalidationMetadata> metadata)
 {
     switch (selector.type) {
@@ -196,8 +211,22 @@ static void collect_properties_used_in_has(Selector::SimpleSelector const& selec
         break;
     }
     case Selector::SimpleSelector::Type::Attribute: {
+        auto const& attribute_name = selector.attribute().qualified_name.name.lowercase_name;
+        if (selector.attribute().match_type == Selector::SimpleSelector::Attribute::MatchType::HasAttribute) {
+            if (metadata.has_value())
+                style_invalidation_data.presence_sensitive_attribute_names_used_in_has_selectors.set(attribute_name);
+            else
+                style_invalidation_data.presence_sensitive_attribute_names.set(attribute_name);
+        } else {
+            if (attribute_name == HTML::AttributeNames::class_)
+                append_value_sensitive_attribute_rule(style_invalidation_data, selector.attribute());
+            if (metadata.has_value())
+                style_invalidation_data.value_sensitive_attribute_names_used_in_has_selectors.set(attribute_name);
+            else
+                style_invalidation_data.value_sensitive_attribute_names.set(attribute_name);
+        }
         if (metadata.has_value())
-            append_has_invalidation_metadata(style_invalidation_data.attribute_names_used_in_has_selectors, selector.attribute().qualified_name.name.lowercase_name, *metadata);
+            append_has_invalidation_metadata(style_invalidation_data.attribute_names_used_in_has_selectors, attribute_name, *metadata);
         break;
     }
     case Selector::SimpleSelector::Type::TagName: {

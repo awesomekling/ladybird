@@ -110,6 +110,7 @@ public:
 
     NonnullRefPtr<InvalidationPlan> invalidation_plan_for_properties(Vector<InvalidationSet::Property> const&, StyleScope const&) const;
     Vector<HasInvalidationMetadata> const* has_invalidation_metadata_for_property(InvalidationSet::Property const&, StyleScope const&) const;
+    bool attribute_value_change_requires_invalidation(FlyString const&, Optional<String> const& old_value, Optional<String> const& new_value, StyleScope const&) const;
 
     static CSSPixels default_user_font_size();
     static CSSPixels absolute_size_mapping(AbsoluteSize, CSSPixels default_font_size);

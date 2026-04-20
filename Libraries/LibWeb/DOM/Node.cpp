@@ -73,25 +73,28 @@
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGTitleElement.h>
 #include <LibWeb/XLink/AttributeNames.h>
-#include <cstdlib>
-#include <cstring>
 
 namespace Web::DOM {
 
 static UniqueNodeID s_next_unique_id;
 static HashMap<UniqueNodeID, Node*> s_node_directory;
 
-static bool should_log_style_invalidation(Document const& document)
+static Node const* parent_for_has_invalidation_in_scope(CSS::StyleScope const& style_scope, Node const& node)
 {
-    auto const* url_substring = getenv("LADYBIRD_STYLE_INVALIDATION_LOG_URL_SUBSTRING");
-    if (!url_substring || *url_substring == '\0')
-        return false;
-    return document.url().serialize().contains(StringView { url_substring, strlen(url_substring) });
+    if (!style_scope.node().is_shadow_root())
+        return node.parent_or_shadow_host();
+
+    auto const& shadow_root = as<ShadowRoot>(style_scope.node());
+    if (&node == shadow_root.host())
+        return nullptr;
+    if (&node == &shadow_root)
+        return shadow_root.host();
+    return node.parent();
 }
 
-static bool node_or_ancestors_may_be_affected_by_has(Node const& node)
+static bool node_or_ancestors_may_be_affected_by_has_in_scope(Node const& node, CSS::StyleScope const& style_scope)
 {
-    for (auto const* current = &node; current; current = current->parent_or_shadow_host()) {
+    for (auto const* current = &node; current; current = parent_for_has_invalidation_in_scope(style_scope, *current)) {
         auto const* element = as_if<Element>(current);
         if (!element)
             continue;
@@ -106,23 +109,75 @@ static bool node_or_ancestors_may_be_affected_by_has(Node const& node)
     return false;
 }
 
+static bool value_matches_attribute_selector(StringView value, CSS::Selector::SimpleSelector::Attribute const& attribute)
+{
+    if (attribute.case_type == CSS::Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch)
+        return true;
+
+    switch (attribute.match_type) {
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::HasAttribute:
+        return true;
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::ExactValueMatch:
+        return value == attribute.value;
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::ContainsWord:
+        return value.split_view_if(Infra::is_ascii_whitespace).contains_slow(attribute.value);
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::ContainsString:
+        return value.contains(attribute.value);
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment:
+        return value == attribute.value || value.starts_with(MUST(String::formatted("{}-", attribute.value)));
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithString:
+        return value.starts_with(attribute.value);
+    case CSS::Selector::SimpleSelector::Attribute::MatchType::EndsWithString:
+        return value.ends_with(attribute.value);
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+static bool attribute_change_may_affect_has_metadata(CSS::InvalidationSet::Property const& property, CSS::HasInvalidationMetadata const& entry, StyleInvalidationOptions const& options)
+{
+    if (property.type != CSS::InvalidationSet::Property::Type::Attribute)
+        return true;
+    if (!options.changed_attribute_name || !options.changed_attribute_old_value || !options.changed_attribute_new_value)
+        return true;
+    if (property.name() != *options.changed_attribute_name)
+        return true;
+    if (!entry.relative_selector)
+        return true;
+
+    bool saw_matching_attribute_selector = false;
+    bool old_present = options.changed_attribute_old_value->has_value();
+    bool new_present = options.changed_attribute_new_value->has_value();
+
+    for (auto const& compound_selector : entry.relative_selector->compound_selectors()) {
+        for (auto const& simple_selector : compound_selector.simple_selectors) {
+            if (simple_selector.type != CSS::Selector::SimpleSelector::Type::Attribute)
+                continue;
+            auto const& attribute = simple_selector.attribute();
+            if (attribute.qualified_name.name.lowercase_name != *options.changed_attribute_name)
+                continue;
+
+            saw_matching_attribute_selector = true;
+            if (attribute.match_type == CSS::Selector::SimpleSelector::Attribute::MatchType::HasAttribute) {
+                if (old_present != new_present)
+                    return true;
+                continue;
+            }
+
+            bool old_matches = old_present && value_matches_attribute_selector(options.changed_attribute_old_value->value(), attribute);
+            bool new_matches = new_present && value_matches_attribute_selector(options.changed_attribute_new_value->value(), attribute);
+            if (old_matches != new_matches)
+                return true;
+        }
+    }
+
+    return !saw_matching_attribute_selector;
+}
+
 static bool is_has_anchor_candidate(Element const& element)
 {
     return element.affected_by_has_pseudo_class_in_subject_position()
         || element.affected_by_has_pseudo_class_in_non_subject_position();
-}
-
-static String describe_invalidation_properties(Vector<CSS::InvalidationSet::Property> const& properties)
-{
-    StringBuilder builder;
-    builder.append('[');
-    for (size_t i = 0; i < properties.size(); ++i) {
-        if (i != 0)
-            builder.append(", "sv);
-        builder.appendff("{}", properties[i]);
-    }
-    builder.append(']');
-    return MUST(builder.to_string());
 }
 
 static UniqueNodeID allocate_unique_id(Node* node)
@@ -490,7 +545,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
             auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot&>(root).style_scope() : document().style_scope();
             if (!document().needs_full_style_update()) {
                 if (auto* parent = parent_or_shadow_host(); parent) {
-                    if (node_or_ancestors_may_be_affected_by_has(*parent))
+                    if (node_or_ancestors_may_be_affected_by_has_in_scope(*parent, style_scope))
                         style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
 
                     parent->set_needs_style_update(true);
@@ -515,7 +570,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
         // which was in scope before and reliably carries the correct flags.
         if (reason == StyleInvalidationReason::NodeRemove || reason == StyleInvalidationReason::NodeInsertBefore) {
             if (auto* parent = parent_or_shadow_host(); parent) {
-                if (node_or_ancestors_may_be_affected_by_has(*parent))
+                if (node_or_ancestors_may_be_affected_by_has_in_scope(*parent, style_scope))
                     style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 if (style_scope.may_have_has_selectors_with_relative_selector_that_has_sibling_combinator()) {
                     auto& counters = document().style_invalidation_counters();
@@ -591,7 +646,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                     }
                 }
             }
-        } else if (reason_may_affect_has_selectors(reason) && node_or_ancestors_may_be_affected_by_has(*this)) {
+        } else if (reason_may_affect_has_selectors(reason) && node_or_ancestors_may_be_affected_by_has_in_scope(*this, style_scope)) {
             style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
         }
     }
@@ -688,7 +743,7 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
     }
 
     auto& counters = document().style_invalidation_counters();
-    auto may_affect_has_scope = [this](CSS::HasArgumentScope scope) {
+    auto may_affect_has_scope = [this, &style_scope](CSS::HasArgumentScope scope) {
         switch (scope) {
         case CSS::HasArgumentScope::ChildrenOnly:
             if (auto* parent = parent_or_shadow_host())
@@ -712,13 +767,15 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
             return false;
         case CSS::HasArgumentScope::AllDescendants:
         case CSS::HasArgumentScope::Complex:
-            return node_or_ancestors_may_be_affected_by_has(*this);
+            return node_or_ancestors_may_be_affected_by_has_in_scope(*this, style_scope);
         }
         VERIFY_NOT_REACHED();
     };
-    auto schedule_for_metadata = [&](CSS::StyleScope& scope, Vector<CSS::HasInvalidationMetadata> const& metadata) {
+    auto schedule_for_metadata = [&](CSS::StyleScope& scope, CSS::InvalidationSet::Property const& property, Vector<CSS::HasInvalidationMetadata> const& metadata) {
         for (auto const& entry : metadata) {
             if (!may_affect_has_scope(entry.scope))
+                continue;
+            if (!attribute_change_may_affect_has_metadata(property, entry, options))
                 continue;
             scope.schedule_style_invalidation_due_to_presence_of_has(*this, entry.scope);
         }
@@ -726,12 +783,12 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
     for (auto const& property : properties) {
         if (auto const* metadata = document().style_computer().has_invalidation_metadata_for_property(property, style_scope)) {
             counters.has_invalidation_metadata_candidates += metadata->size();
-            schedule_for_metadata(style_scope, *metadata);
+            schedule_for_metadata(style_scope, property, *metadata);
         }
         if (shadow_style_scope) {
             if (auto const* metadata = document().style_computer().has_invalidation_metadata_for_property(property, *shadow_style_scope)) {
                 counters.has_invalidation_metadata_candidates += metadata->size();
-                schedule_for_metadata(*shadow_style_scope, *metadata);
+                schedule_for_metadata(*shadow_style_scope, property, *metadata);
             }
         }
     }

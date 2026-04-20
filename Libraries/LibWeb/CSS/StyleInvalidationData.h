@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/HashMap.h>
+#include <AK/HashTable.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/RefCounted.h>
 #include <AK/Vector.h>
@@ -78,6 +79,14 @@ struct HasInvalidationMetadata {
     bool operator==(HasInvalidationMetadata const&) const = default;
 };
 
+struct ValueSensitiveAttributeInvalidationRule {
+    Selector::SimpleSelector::Attribute::MatchType match_type;
+    String value;
+    Selector::SimpleSelector::Attribute::CaseType case_type { Selector::SimpleSelector::Attribute::CaseType::DefaultMatch };
+
+    bool operator==(ValueSensitiveAttributeInvalidationRule const&) const = default;
+};
+
 struct StyleInvalidationData;
 
 void build_invalidation_sets_for_simple_selector(Selector::SimpleSelector const&, InvalidationSet&, ExcludePropertiesNestedInNotPseudoClass, StyleInvalidationData&, InsideNthChildPseudoClass);
@@ -87,6 +96,11 @@ struct StyleInvalidationData {
     HashMap<FlyString, Vector<HasInvalidationMetadata>> ids_used_in_has_selectors;
     HashMap<FlyString, Vector<HasInvalidationMetadata>> class_names_used_in_has_selectors;
     HashMap<FlyString, Vector<HasInvalidationMetadata>> attribute_names_used_in_has_selectors;
+    HashTable<FlyString> presence_sensitive_attribute_names;
+    HashTable<FlyString> presence_sensitive_attribute_names_used_in_has_selectors;
+    HashTable<FlyString> value_sensitive_attribute_names;
+    HashTable<FlyString> value_sensitive_attribute_names_used_in_has_selectors;
+    HashMap<FlyString, Vector<ValueSensitiveAttributeInvalidationRule>> value_sensitive_attribute_rules;
     HashMap<FlyString, Vector<HasInvalidationMetadata>> tag_names_used_in_has_selectors;
     HashMap<PseudoClass, Vector<HasInvalidationMetadata>> pseudo_classes_used_in_has_selectors;
 

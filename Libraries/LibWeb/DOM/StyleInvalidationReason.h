@@ -6,6 +6,11 @@
 
 #pragma once
 
+#include <AK/FlyString.h>
+#include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/StringView.h>
+
 namespace Web::DOM {
 
 #define ENUMERATE_STYLE_INVALIDATION_REASONS(X)     \
@@ -62,6 +67,9 @@ enum class StyleInvalidationReason {
 
 struct StyleInvalidationOptions {
     bool invalidate_self { false };
+    FlyString const* changed_attribute_name { nullptr };
+    Optional<String> const* changed_attribute_old_value { nullptr };
+    Optional<String> const* changed_attribute_new_value { nullptr };
 };
 
 }

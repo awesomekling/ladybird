@@ -1,0 +1,15 @@
+[regular [class*=value] ignores unrelated class value change]
+  hasAncestorWalkInvocations: 0
+  hasMatchInvocations: 0
+  styleInvalidations: 0
+[:has([class*=value]) ignores unrelated class value change]
+  hasAncestorWalkInvocations: 0
+  hasMatchInvocations: 0
+  styleInvalidations: 0
+[:has([class~=value]) still invalidates when the match flips]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 1

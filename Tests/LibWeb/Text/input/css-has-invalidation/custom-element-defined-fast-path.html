@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .anchor:has(widget-box:defined) { color: red; }
+</style>
+<div class="anchor" id="anchor">
+    <widget-box id="target"></widget-box>
+</div>
+<script>
+    test(() => {
+        settleAndReset(document.getElementById("anchor"));
+
+        customElements.define("widget-box", class extends HTMLElement {});
+        getComputedStyle(document.getElementById("anchor")).color;
+        printCounters("custom element upgrade invalidates :defined once");
+    });
+</script>

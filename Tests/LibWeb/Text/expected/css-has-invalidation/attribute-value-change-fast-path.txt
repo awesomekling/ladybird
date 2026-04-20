@@ -1,0 +1,15 @@
+[presence-only selector ignores value change]
+  hasAncestorWalkInvocations: 0
+  hasMatchInvocations: 0
+  styleInvalidations: 1
+[:has([attr]) ignores value change]
+  hasAncestorWalkInvocations: 0
+  hasMatchInvocations: 0
+  styleInvalidations: 0
+[:has([attr="value"]) still invalidates on value change]
+  hasAncestorWalkInvocations: 1
+  hasAncestorWalkVisits: 1
+  hasMatchInvocations: 1
+  hasResultCacheHits: 0
+  hasResultCacheMisses: 1
+  styleInvalidations: 1

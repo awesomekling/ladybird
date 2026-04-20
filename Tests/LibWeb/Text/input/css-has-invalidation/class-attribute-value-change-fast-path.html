@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .regular-anchor[class*="hot"] .regular-child { color: red; }
+    .has-anchor:has([class*="hot"]) { color: red; }
+    .exact-anchor:has([class~="hot"]) { color: blue; }
+</style>
+<div class="regular-anchor cold" id="regular-anchor">
+    <span class="regular-child" id="regular-child">regular child</span>
+</div>
+<div class="has-anchor" id="has-anchor">
+    <span class="cold" id="has-target">has target</span>
+</div>
+<div class="exact-anchor" id="exact-anchor">
+    <span class="cold" id="exact-target">exact target</span>
+</div>
+<script>
+    function printZeroWorkCounters(label) {
+        const counters = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${counters.hasAncestorWalkInvocations}`);
+        println(`  hasMatchInvocations: ${counters.hasMatchInvocations}`);
+        println(`  styleInvalidations: ${counters.styleInvalidations}`);
+    }
+
+    test(() => {
+        settleAndReset(document.getElementById("regular-child"));
+
+        document.getElementById("regular-anchor").className = "regular-anchor warm";
+        getComputedStyle(document.getElementById("regular-child")).color;
+        printZeroWorkCounters("regular [class*=value] ignores unrelated class value change");
+
+        settleAndReset(document.getElementById("has-anchor"));
+
+        document.getElementById("has-target").className = "warm";
+        getComputedStyle(document.getElementById("has-anchor")).color;
+        printZeroWorkCounters(":has([class*=value]) ignores unrelated class value change");
+
+        settleAndReset(document.getElementById("exact-anchor"));
+
+        document.getElementById("exact-target").className = "cold hot";
+        getComputedStyle(document.getElementById("exact-anchor")).color;
+        printCounters(":has([class~=value]) still invalidates when the match flips");
+    });
+</script>

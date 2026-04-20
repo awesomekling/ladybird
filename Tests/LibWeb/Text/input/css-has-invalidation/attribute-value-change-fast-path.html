@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script src="_helpers.js"></script>
+<style>
+    .regular-anchor[data-state] .regular-child { color: red; }
+    .has-anchor:has([data-state]) { color: red; }
+    .exact-anchor:has([data-state="hot"]) { color: blue; }
+</style>
+<div class="regular-anchor" data-state="cold" id="regular-anchor">
+    <span class="regular-child" id="regular-child">regular child</span>
+</div>
+<div class="has-anchor" id="has-anchor">
+    <span data-state="cold" id="has-target">has target</span>
+</div>
+<div class="exact-anchor" id="exact-anchor">
+    <span data-state="cold" id="exact-target">exact target</span>
+</div>
+<script>
+    function printZeroWorkCounters(label) {
+        const counters = internals.getStyleInvalidationCounters();
+        println(`[${label}]`);
+        println(`  hasAncestorWalkInvocations: ${counters.hasAncestorWalkInvocations}`);
+        println(`  hasMatchInvocations: ${counters.hasMatchInvocations}`);
+        println(`  styleInvalidations: ${counters.styleInvalidations}`);
+    }
+
+    test(() => {
+        settleAndReset(document.getElementById("regular-child"));
+
+        document.getElementById("regular-anchor").setAttribute("data-state", "warm");
+        getComputedStyle(document.getElementById("regular-child")).color;
+        printZeroWorkCounters("presence-only selector ignores value change");
+
+        settleAndReset(document.getElementById("has-anchor"));
+
+        document.getElementById("has-target").setAttribute("data-state", "warm");
+        getComputedStyle(document.getElementById("has-anchor")).color;
+        printZeroWorkCounters(":has([attr]) ignores value change");
+
+        settleAndReset(document.getElementById("exact-anchor"));
+
+        document.getElementById("exact-target").setAttribute("data-state", "hot");
+        getComputedStyle(document.getElementById("exact-anchor")).color;
+        printCounters(":has([attr=\"value\"]) still invalidates on value change");
+    });
+</script>
