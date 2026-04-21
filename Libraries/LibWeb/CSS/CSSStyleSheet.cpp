@@ -389,11 +389,17 @@ void CSSStyleSheet::for_each_owning_style_scope(Function<void(StyleScope&)> cons
 
 void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
 {
-    m_did_match = {};
+    if (reason == DOM::StyleInvalidationReason::MediaListSetMediaText
+        || reason == DOM::StyleInvalidationReason::MediaListAppendMedium
+        || reason == DOM::StyleInvalidationReason::MediaListDeleteMedium) {
+        m_did_match = {};
+    }
 
     for_each_owning_style_scope([&](StyleScope& style_scope) {
         style_scope.invalidate_rule_cache();
         style_scope.node().invalidate_style(reason);
+        if (auto* shadow_root = as_if<DOM::ShadowRoot>(style_scope.node()); shadow_root && shadow_root->host())
+            shadow_root->host()->set_needs_style_update(true);
     });
 }
 

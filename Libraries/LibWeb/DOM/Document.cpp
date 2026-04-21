@@ -1673,6 +1673,7 @@ bool Document::layout_is_up_to_date() const
 [[nodiscard]] static CSS::RequiredInvalidationAfterStyleChange update_style_recursively(Node& node, CSS::StyleComputer& style_computer, bool needs_inherited_style_update, bool recompute_elements_depending_on_custom_properties, bool parent_display_changed)
 {
     bool const needs_full_style_update = node.document().needs_full_style_update();
+    bool const non_element_scope_needs_full_style_recompute = node.needs_style_update() && !node.is_element();
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
     if (node.is_element())
@@ -1735,7 +1736,7 @@ bool Document::layout_is_up_to_date() const
     bool children_need_inherited_style_update = !invalidation.is_none();
     // NB: When display changes to/from flex/grid/contents, children may need to be blockified or un-blockified.
     //     This requires a full style recompute, not just inherited style update.
-    bool children_need_full_style_recompute = node_invalidation.rebuild_layout_tree;
+    bool children_need_full_style_recompute = node_invalidation.rebuild_layout_tree || non_element_scope_needs_full_style_recompute;
     if (needs_full_style_update || node.child_needs_style_update() || children_need_inherited_style_update || recompute_elements_depending_on_custom_properties || children_need_full_style_recompute) {
         if (node.is_element()) {
             if (auto shadow_root = static_cast<DOM::Element&>(node).shadow_root()) {
@@ -1837,6 +1838,18 @@ bool Document::element_needs_style_update(AbstractElement const& abstract_elemen
         return true;
     if (m_style_invalidator->has_pending_invalidations())
         return true;
+    if (needs_style_update())
+        return true;
+    if (child_needs_style_update())
+        return true;
+
+    auto& root = abstract_element.element().root();
+    if (auto* shadow_root = as_if<ShadowRoot>(root)) {
+        if (shadow_root->needs_style_update())
+            return true;
+        if (shadow_root->child_needs_style_update())
+            return true;
+    }
 
     // Check the element itself.
     if (abstract_element.element().needs_style_update())

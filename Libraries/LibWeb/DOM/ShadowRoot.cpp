@@ -222,6 +222,14 @@ WebIDL::ExceptionOr<void> ShadowRoot::set_adopted_style_sheets(JS::Value new_val
     return {};
 }
 
+void ShadowRoot::clear_adopted_style_sheets_for_new_document()
+{
+    if (!m_adopted_style_sheets)
+        return;
+
+    m_adopted_style_sheets->clear();
+}
+
 void ShadowRoot::for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const
 {
     for (auto& style_sheet : style_sheets().sheets())

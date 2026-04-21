@@ -1647,9 +1647,13 @@ void Node::set_document(Document& document)
     if (m_document.ptr() == &document)
         return;
 
+    if (auto* shadow_root = as_if<ShadowRoot>(*this))
+        shadow_root->clear_adopted_style_sheets_for_new_document();
+
+    bool const node_needs_style_update = needs_style_update();
     m_document = &document;
 
-    if (needs_style_update() || child_needs_style_update()) {
+    if (node_needs_style_update) {
         // NOTE: We unset and reset the "needs style update" flag here.
         //       This ensures that there's a pending style update in the new document
         //       that will eventually assign some style to this node if needed.
