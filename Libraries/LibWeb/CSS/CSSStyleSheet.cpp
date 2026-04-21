@@ -11,17 +11,22 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSCounterStyleRule.h>
 #include <LibWeb/CSS/CSSImportRule.h>
+#include <LibWeb/CSS/CSSKeyframesRule.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleInvalidationData.h>
 #include <LibWeb/CSS/StyleSheetList.h>
+#include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/StyleElementBase.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
+#include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -67,27 +72,90 @@ static void invalidate_elements_matching_invalidation_set(DOM::Node& root, Inval
     });
 }
 
-static void invalidate_shadow_host_for_shadow_root_stylesheet_change(DOM::Node& root)
+template<typename Callback>
+static void for_each_tree_affected_by_shadow_root_stylesheet_change(DOM::Node& root, Callback&& callback)
 {
+    callback(root);
+
     if (auto* shadow_root = as_if<DOM::ShadowRoot>(root)) {
-        // The shadow host sits outside the shadow root subtree but can still be
-        // affected by rules such as :host or :host::before from this stylesheet.
+        // A shadow-root stylesheet can also affect the host and light-DOM nodes
+        // matched by selectors such as :host(...) or ::slotted(...).
         if (auto* host = shadow_root->host())
-            host->set_needs_style_update(true);
+            callback(*host);
     }
 }
 
 static void invalidate_root_for_inserted_style_rule(DOM::Node& root, InvalidationSet const& invalidation_set, DOM::StyleInvalidationReason reason)
 {
-    // The owning root may be either a Document or a ShadowRoot. Targeting that
-    // root directly ensures we visit shadow descendants instead of stopping at
-    // the host element.
-    invalidate_shadow_host_for_shadow_root_stylesheet_change(root);
-    if (invalidation_set.needs_invalidate_whole_subtree())
-        root.invalidate_style(reason);
-    else
-        invalidate_elements_matching_invalidation_set(root, invalidation_set);
+    if (invalidation_set.needs_invalidate_whole_subtree()) {
+        for_each_tree_affected_by_shadow_root_stylesheet_change(root, [&](DOM::Node& affected_root) {
+            affected_root.invalidate_style(reason);
+        });
+        return;
+    }
+
+    for_each_tree_affected_by_shadow_root_stylesheet_change(root, [&](DOM::Node& affected_root) {
+        invalidate_elements_matching_invalidation_set(affected_root, invalidation_set);
+    });
 }
+
+static bool style_value_references_animation_name(StyleValue const& value, FlyString const& animation_name)
+{
+    if (value.is_custom_ident())
+        return value.as_custom_ident().custom_ident() == animation_name;
+
+    if (!value.is_value_list())
+        return false;
+
+    for (auto const& item : value.as_value_list().values()) {
+        if (item->is_custom_ident() && item->as_custom_ident().custom_ident() == animation_name)
+            return true;
+    }
+
+    return false;
+}
+
+static bool element_or_pseudo_references_animation_name(DOM::Element const& element, FlyString const& animation_name)
+{
+    auto references_animation_name_in_properties = [&](CSS::ComputedProperties const& computed_properties) {
+        return style_value_references_animation_name(computed_properties.property(PropertyID::AnimationName), animation_name);
+    };
+
+    if (auto computed_properties = element.computed_properties(); computed_properties && references_animation_name_in_properties(*computed_properties))
+        return true;
+
+    for (u8 i = 0; i < to_underlying(CSS::PseudoElement::KnownPseudoElementCount); ++i) {
+        auto pseudo_element = static_cast<CSS::PseudoElement>(i);
+        if (auto computed_properties = element.computed_properties(pseudo_element); computed_properties && references_animation_name_in_properties(*computed_properties))
+            return true;
+    }
+
+    return false;
+}
+
+static void invalidate_elements_affected_by_inserted_keyframes_rule(DOM::Node& root, FlyString const& animation_name)
+{
+    root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
+        // A new @keyframes rule only matters for elements or pseudo-elements
+        // that were already referencing the inserted animation-name.
+        if (element_or_pseudo_references_animation_name(element, animation_name))
+            element.set_needs_style_update(true);
+        return TraversalDecision::Continue;
+    });
+}
+
+static void invalidate_assigned_elements_for_shadow_root_keyframes_rule(DOM::ShadowRoot& shadow_root)
+{
+    shadow_root.for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([](HTML::HTMLSlotElement& slot) {
+        // Slotted light-DOM elements live outside the shadow subtree, so the
+        // generic shadow-root walk above will never reach them through the
+        // slot itself. Mark the flattened assignees explicitly.
+        for (auto const& assigned_element : slot.assigned_elements({ .flatten = true }))
+            assigned_element->set_needs_style_update(true);
+        return TraversalDecision::Continue;
+    });
+}
+
 static bool invalidate_owners_for_inserted_style_rule(CSSStyleSheet const& style_sheet, CSSStyleRule const& style_rule, DOM::StyleInvalidationReason reason)
 {
     auto invalidation_set = build_invalidation_set_for_inserted_style_rule(style_rule);
@@ -105,6 +173,26 @@ static bool invalidate_owners_for_inserted_style_rule(CSSStyleSheet const& style
     }
 
     return !invalidation_set.needs_invalidate_whole_subtree();
+}
+
+static void invalidate_owners_for_inserted_keyframes_rule(CSSStyleSheet const& style_sheet, CSSKeyframesRule const& keyframes_rule)
+{
+    for (auto& document_or_shadow_root : style_sheet.owning_documents_or_shadow_roots()) {
+        auto& style_scope = document_or_shadow_root->is_shadow_root()
+            ? as<DOM::ShadowRoot>(*document_or_shadow_root).style_scope()
+            : document_or_shadow_root->document().style_scope();
+        style_scope.invalidate_rule_cache();
+
+        if (document_or_shadow_root->entire_subtree_needs_style_update())
+            continue;
+
+        for_each_tree_affected_by_shadow_root_stylesheet_change(*document_or_shadow_root, [&](DOM::Node& affected_root) {
+            invalidate_elements_affected_by_inserted_keyframes_rule(affected_root, keyframes_rule.name());
+        });
+
+        if (auto* shadow_root = as_if<DOM::ShadowRoot>(*document_or_shadow_root))
+            invalidate_assigned_elements_for_shadow_root_keyframes_rule(*shadow_root);
+    }
 }
 
 GC::Ref<CSSStyleSheet> CSSStyleSheet::create(JS::Realm& realm, CSSRuleList& rules, MediaList& media, Optional<::URL::URL> location)
@@ -242,7 +330,9 @@ WebIDL::ExceptionOr<unsigned> CSSStyleSheet::insert_rule(StringView rule, unsign
         // NOTE: The spec doesn't say where to set the parent style sheet, so we'll do it here.
         parsed_rule->set_parent_style_sheet(this);
 
-        if (!constructed() && owner_node() && owner_node()->is_html_style_element() && parsed_rule->type() == CSSRule::Type::Style)
+        if (!constructed() && owner_node() && owner_node()->is_html_style_element() && parsed_rule->type() == CSSRule::Type::Keyframes)
+            invalidate_owners_for_inserted_keyframes_rule(*this, as<CSSKeyframesRule>(*parsed_rule));
+        else if (!constructed() && owner_node() && owner_node()->is_html_style_element() && parsed_rule->type() == CSSRule::Type::Style)
             invalidate_owners_for_inserted_style_rule(*this, as<CSSStyleRule>(*parsed_rule), DOM::StyleInvalidationReason::StyleSheetInsertRule);
         else
             invalidate_owners(DOM::StyleInvalidationReason::StyleSheetInsertRule);

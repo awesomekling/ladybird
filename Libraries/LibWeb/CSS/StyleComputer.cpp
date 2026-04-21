@@ -888,7 +888,24 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
 }
 
 // https://drafts.csswg.org/css-animations-1/#animations
-void StyleComputer::process_animation_definitions(ComputedProperties const& computed_properties, DOM::AbstractElement& abstract_element) const
+static bool declaration_belongs_to_shadow_root_stylesheet(CSSStyleDeclaration const& declaration, DOM::ShadowRoot const& shadow_root)
+{
+    auto parent_rule = declaration.parent_rule();
+    if (!parent_rule)
+        return false;
+
+    auto parent_style_sheet = parent_rule->parent_style_sheet();
+    if (!parent_style_sheet)
+        return false;
+
+    for (auto const& owner : parent_style_sheet->owning_documents_or_shadow_roots()) {
+        if (owner.ptr() == &shadow_root)
+            return true;
+    }
+    return false;
+}
+
+void StyleComputer::process_animation_definitions(ComputedProperties const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element) const
 {
     auto const& animation_definitions = computed_properties.animations(abstract_element);
 
@@ -905,9 +922,44 @@ void StyleComputer::process_animation_definitions(ComputedProperties const& comp
     for (auto const& animation_properties : animation_definitions) {
         defined_animation_names.set(animation_properties.name);
 
+        auto find_keyframes = [&](GC::Ptr<DOM::ShadowRoot const> shadow_root) -> RefPtr<Animations::KeyframeEffect::KeyFrameSet const> {
+            if (auto const* rule_cache = rule_cache_for_cascade_origin(CascadeOrigin::Author, {}, shadow_root)) {
+                if (auto keyframe_set = rule_cache->rules_by_animation_keyframes.get(animation_properties.name); keyframe_set.has_value())
+                    return keyframe_set.value();
+            }
+            return {};
+        };
+
+        auto resolve_keyframes = [&]() -> RefPtr<Animations::KeyframeEffect::KeyFrameSet const> {
+            if (auto shadow_root = as_if<DOM::ShadowRoot>(abstract_element.element().root())) {
+                if (auto keyframe_set = find_keyframes(shadow_root))
+                    return keyframe_set;
+            }
+
+            if (auto animation_name_source = cascaded_properties.property_source(PropertyID::AnimationName)) {
+                // Slotted elements can pick up animation-name from ::slotted(...)
+                // rules that live in an ancestor shadow root. Only search those
+                // shadow roots when the winning animation-name declaration
+                // actually came from one of their stylesheets; otherwise a
+                // document-scoped animation-name should keep resolving against
+                // document-scoped @keyframes even if the element is slotted.
+                for (auto slot = abstract_element.element().assigned_slot_internal(); slot; slot = slot->assigned_slot_internal()) {
+                    if (auto const* slot_shadow_root = as_if<DOM::ShadowRoot>(slot->root())) {
+                        if (!declaration_belongs_to_shadow_root_stylesheet(*animation_name_source, *slot_shadow_root))
+                            continue;
+                        if (auto keyframe_set = find_keyframes(slot_shadow_root))
+                            return keyframe_set;
+                    }
+                }
+            }
+
+            return find_keyframes(nullptr);
+        };
+
         // Changes to the values of animation properties while the animation is running apply as if the animation had
         // those values from when it began
         if (auto const& existing_animation = element_animations->get(animation_properties.name); existing_animation.has_value()) {
+            as<Animations::KeyframeEffect>(*existing_animation.value()->effect()).set_key_frame_set(resolve_keyframes());
             existing_animation.value()->apply_css_properties(animation_properties);
             return;
         }
@@ -923,19 +975,7 @@ void StyleComputer::process_animation_definitions(ComputedProperties const& comp
 
         animation->apply_css_properties(animation_properties);
 
-        auto find_keyframes = [&](GC::Ptr<DOM::ShadowRoot const> shadow_root) -> RefPtr<Animations::KeyframeEffect::KeyFrameSet const> {
-            if (auto const* rule_cache = rule_cache_for_cascade_origin(CascadeOrigin::Author, {}, shadow_root)) {
-                if (auto keyframe_set = rule_cache->rules_by_animation_keyframes.get(animation_properties.name); keyframe_set.has_value())
-                    return keyframe_set.value();
-            }
-            return {};
-        };
-
-        // Look up @keyframes in the element's shadow root first, then fall back to the document-level rules.
-        if (auto shadow_root = as_if<DOM::ShadowRoot>(abstract_element.element().root()))
-            effect->set_key_frame_set(find_keyframes(shadow_root));
-        if (!effect->key_frame_set())
-            effect->set_key_frame_set(find_keyframes(nullptr));
+        effect->set_key_frame_set(resolve_keyframes());
 
         effect->set_target(abstract_element);
         abstract_element.set_has_css_defined_animations();
@@ -2116,7 +2156,7 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
     clear_computation_context_caches();
 
     // Add or modify CSS-defined animations
-    process_animation_definitions(computed_style, abstract_element);
+    process_animation_definitions(computed_style, cascaded_properties, abstract_element);
 
     auto animations = abstract_element.element().get_animations_internal(
         Animations::Animatable::GetAnimationsSorted::Yes,
