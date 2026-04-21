@@ -11,12 +11,15 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSCounterStyleRule.h>
 #include <LibWeb/CSS/CSSImportRule.h>
+#include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleInvalidationData.h>
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/StyleElementBase.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
@@ -27,6 +30,82 @@
 namespace Web::CSS {
 
 GC_DEFINE_ALLOCATOR(CSSStyleSheet);
+
+static InvalidationSet build_invalidation_set_for_inserted_style_rule(CSSStyleRule const& style_rule)
+{
+    InvalidationSet set;
+    StyleInvalidationData throwaway_data;
+
+    for (auto const& selector : style_rule.absolutized_selectors()) {
+        auto const& compound_selectors = selector->compound_selectors();
+        if (compound_selectors.is_empty())
+            continue;
+
+        auto const& rightmost = compound_selectors.last();
+
+        InvalidationSet rightmost_set;
+        for (auto const& simple : rightmost.simple_selectors)
+            build_invalidation_sets_for_simple_selector(simple, rightmost_set, ExcludePropertiesNestedInNotPseudoClass::No, throwaway_data, InsideNthChildPseudoClass::No);
+
+        if (!rightmost_set.has_properties()) {
+            set.set_needs_invalidate_whole_subtree();
+            return set;
+        }
+
+        set.include_all_from(rightmost_set);
+    }
+
+    return set;
+}
+
+static void invalidate_elements_matching_invalidation_set(DOM::Node& root, InvalidationSet const& set)
+{
+    root.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
+        if (element.includes_properties_from_invalidation_set(set))
+            element.set_needs_style_update(true);
+        return TraversalDecision::Continue;
+    });
+}
+
+static void invalidate_shadow_host_for_shadow_root_stylesheet_change(DOM::Node& root)
+{
+    if (auto* shadow_root = as_if<DOM::ShadowRoot>(root)) {
+        // The shadow host sits outside the shadow root subtree but can still be
+        // affected by rules such as :host or :host::before from this stylesheet.
+        if (auto* host = shadow_root->host())
+            host->set_needs_style_update(true);
+    }
+}
+
+static void invalidate_root_for_inserted_style_rule(DOM::Node& root, InvalidationSet const& invalidation_set, DOM::StyleInvalidationReason reason)
+{
+    // The owning root may be either a Document or a ShadowRoot. Targeting that
+    // root directly ensures we visit shadow descendants instead of stopping at
+    // the host element.
+    invalidate_shadow_host_for_shadow_root_stylesheet_change(root);
+    if (invalidation_set.needs_invalidate_whole_subtree())
+        root.invalidate_style(reason);
+    else
+        invalidate_elements_matching_invalidation_set(root, invalidation_set);
+}
+static bool invalidate_owners_for_inserted_style_rule(CSSStyleSheet const& style_sheet, CSSStyleRule const& style_rule, DOM::StyleInvalidationReason reason)
+{
+    auto invalidation_set = build_invalidation_set_for_inserted_style_rule(style_rule);
+
+    for (auto& document_or_shadow_root : style_sheet.owning_documents_or_shadow_roots()) {
+        auto& style_scope = document_or_shadow_root->is_shadow_root()
+            ? as<DOM::ShadowRoot>(*document_or_shadow_root).style_scope()
+            : document_or_shadow_root->document().style_scope();
+        style_scope.invalidate_rule_cache();
+
+        if (document_or_shadow_root->entire_subtree_needs_style_update())
+            continue;
+
+        invalidate_root_for_inserted_style_rule(*document_or_shadow_root, invalidation_set, reason);
+    }
+
+    return !invalidation_set.needs_invalidate_whole_subtree();
+}
 
 GC::Ref<CSSStyleSheet> CSSStyleSheet::create(JS::Realm& realm, CSSRuleList& rules, MediaList& media, Optional<::URL::URL> location)
 {
@@ -163,7 +242,10 @@ WebIDL::ExceptionOr<unsigned> CSSStyleSheet::insert_rule(StringView rule, unsign
         // NOTE: The spec doesn't say where to set the parent style sheet, so we'll do it here.
         parsed_rule->set_parent_style_sheet(this);
 
-        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetInsertRule);
+        if (!constructed() && owner_node() && owner_node()->is_html_style_element() && parsed_rule->type() == CSSRule::Type::Style)
+            invalidate_owners_for_inserted_style_rule(*this, as<CSSStyleRule>(*parsed_rule), DOM::StyleInvalidationReason::StyleSheetInsertRule);
+        else
+            invalidate_owners(DOM::StyleInvalidationReason::StyleSheetInsertRule);
     }
 
     return result;

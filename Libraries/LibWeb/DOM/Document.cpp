@@ -1840,18 +1840,18 @@ bool Document::element_needs_style_update(AbstractElement const& abstract_elemen
         return true;
     if (needs_style_update())
         return true;
-    if (child_needs_style_update())
-        return true;
 
     auto& root = abstract_element.element().root();
     if (auto* shadow_root = as_if<ShadowRoot>(root)) {
         if (shadow_root->needs_style_update())
             return true;
-        if (shadow_root->child_needs_style_update())
-            return true;
     }
 
     // Check the element itself.
+    // NB: `child_needs_style_update()` is ancestor-propagated bookkeeping that
+    // tells update_style() there is work somewhere below this node. Treating it
+    // as "this element needs style" would make any targeted descendant
+    // invalidation look like a tree-wide recompute trigger.
     if (abstract_element.element().needs_style_update())
         return true;
     if (abstract_element.element().entire_subtree_needs_style_update())
