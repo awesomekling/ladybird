@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="host"><span class="item">slotted</span></div>
+<script>
+    test(() => {
+        const host = document.getElementById("host");
+        const slotted = host.firstElementChild;
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = "<slot></slot>";
+
+        println(`host before add: ${getComputedStyle(host).color}`);
+
+        const broadStyle = document.createElement("style");
+        broadStyle.textContent = `
+            @keyframes noop {}
+            :host { color: rgb(255, 0, 0); }
+        `;
+        shadowRoot.appendChild(broadStyle);
+
+        println(`host after add: ${getComputedStyle(host).color}`);
+
+        broadStyle.remove();
+
+        println(`host after remove: ${getComputedStyle(host).color}`);
+
+        println(`slotted before add: ${getComputedStyle(slotted).color}`);
+
+        const targetedStyle = document.createElement("style");
+        targetedStyle.textContent = "::slotted(.item) { color: rgb(0, 0, 255); }";
+        shadowRoot.appendChild(targetedStyle);
+
+        println(`slotted after add: ${getComputedStyle(slotted).color}`);
+
+        targetedStyle.remove();
+
+        println(`slotted after remove: ${getComputedStyle(slotted).color}`);
+    });
+</script>

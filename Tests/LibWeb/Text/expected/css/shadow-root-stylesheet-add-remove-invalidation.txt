@@ -1,0 +1,6 @@
+host before add: rgb(0, 0, 0)
+host after add: rgb(255, 0, 0)
+host after remove: rgb(0, 0, 0)
+slotted before add: rgb(0, 0, 0)
+slotted after add: rgb(0, 0, 255)
+slotted after remove: rgb(0, 0, 0)
