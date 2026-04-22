@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitForAnimationFrames(count) {
+        for (let i = 0; i < count; ++i)
+            await animationFrame();
+    }
+
+    promiseTest(async () => {
+        const grandchildSheetText = `
+            @font-face {
+                font-family: "NestedNonMatchingImportedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            body {
+                font-family: "NestedNonMatchingImportedFont";
+            }
+        `;
+
+        const middleSheetText = `
+            @import "data:text/css;base64,${btoa(grandchildSheetText)}" print;
+        `;
+
+        const style = document.createElement("style");
+        document.head.appendChild(style);
+        const topSheet = style.sheet;
+        topSheet.disabled = true;
+        topSheet.insertRule(`@import "data:text/css;base64,${btoa(middleSheetText)}";`, 0);
+
+        await waitForAnimationFrames(2);
+        println(`while top disabled font count: ${document.fonts.size}`);
+
+        topSheet.disabled = false;
+        await waitForAnimationFrames(8);
+        println(`after re-enable nested print import font count: ${document.fonts.size}`);
+    });
+</script>

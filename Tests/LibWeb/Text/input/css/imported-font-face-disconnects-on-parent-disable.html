@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitUntil(condition) {
+        for (let i = 0; i < 50; ++i) {
+            if (condition())
+                return;
+            await animationFrame();
+        }
+        throw new Error("Timed out waiting for condition");
+    }
+
+    promiseTest(async () => {
+        const importedSheetText = `
+            @font-face {
+                font-family: "ImportedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            body {
+                font-family: "ImportedFont";
+            }
+        `;
+
+        const style = document.createElement("style");
+        style.textContent = `@import "data:text/css;base64,${btoa(importedSheetText)}";`;
+        document.head.appendChild(style);
+
+        await waitUntil(() => document.fonts.size === 1);
+        println(`after import font count: ${document.fonts.size}`);
+
+        document.styleSheets[0].disabled = true;
+        await animationFrame();
+        println(`after disable font count: ${document.fonts.size}`);
+
+        document.styleSheets[0].disabled = false;
+        await waitUntil(() => document.fonts.size === 1);
+        println(`after re-enable font count: ${document.fonts.size}`);
+    });
+</script>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitForAnimationFrames(count) {
+        for (let i = 0; i < count; ++i)
+            await animationFrame();
+    }
+
+    promiseTest(async () => {
+        const importedSheetText = `
+            @font-face {
+                font-family: "NonMatchingImportedOnLoadFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            body {
+                font-family: "NonMatchingImportedOnLoadFont";
+            }
+        `;
+
+        const style = document.createElement("style");
+        style.textContent = `@import "data:text/css;base64,${btoa(importedSheetText)}" print;`;
+        document.head.appendChild(style);
+
+        await waitForAnimationFrames(8);
+        println(`after load with print import font count: ${document.fonts.size}`);
+    });
+</script>

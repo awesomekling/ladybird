@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitForAnimationFrames(count) {
+        for (let i = 0; i < count; ++i)
+            await animationFrame();
+    }
+
+    promiseTest(async () => {
+        const importedSheetText = `
+            @font-face {
+                font-family: "NonMatchingImportedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            body {
+                font-family: "NonMatchingImportedFont";
+            }
+        `;
+
+        const style = document.createElement("style");
+        document.head.appendChild(style);
+        const sheet = style.sheet;
+        sheet.disabled = true;
+        sheet.insertRule(`@import "data:text/css;base64,${btoa(importedSheetText)}" print;`, 0);
+
+        await waitForAnimationFrames(2);
+        println(`while disabled font count: ${document.fonts.size}`);
+
+        sheet.disabled = false;
+        await waitForAnimationFrames(8);
+        println(`after re-enable with print import font count: ${document.fonts.size}`);
+    });
+</script>

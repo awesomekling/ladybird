@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitUntil(condition) {
+        for (let i = 0; i < 50; ++i) {
+            if (condition())
+                return;
+            await animationFrame();
+        }
+        throw new Error("Timed out waiting for condition");
+    }
+
+    async function waitForAnimationFrames(count) {
+        for (let i = 0; i < count; ++i)
+            await animationFrame();
+    }
+
+    promiseTest(async () => {
+        const grandchildSheetText = `
+            @font-face {
+                font-family: "GrandchildImportedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            body {
+                font-family: "GrandchildImportedFont";
+            }
+        `;
+
+        const middleSheetText = `
+            @import "data:text/css;base64,${btoa(grandchildSheetText)}";
+        `;
+
+        const style = document.createElement("style");
+        style.textContent = `@import "data:text/css;base64,${btoa(middleSheetText)}";`;
+        document.head.appendChild(style);
+
+        await waitUntil(() => document.fonts.size === 1);
+        println(`after nested import font count: ${document.fonts.size}`);
+
+        const topSheet = document.styleSheets[0];
+        const middleSheet = topSheet.cssRules[0].styleSheet;
+
+        middleSheet.disabled = true;
+        await waitUntil(() => document.fonts.size === 0);
+        println(`after disabling middle import font count: ${document.fonts.size}`);
+
+        topSheet.disabled = true;
+        await waitForAnimationFrames(2);
+        println(`after disabling top sheet font count: ${document.fonts.size}`);
+
+        topSheet.disabled = false;
+        await waitForAnimationFrames(8);
+        println(`after re-enabling top sheet font count: ${document.fonts.size}`);
+    });
+</script>

@@ -615,6 +615,11 @@ void CSSStyleSheet::for_each_effective_counter_style_at_rule(Function<void(CSSCo
 
 void CSSStyleSheet::add_owning_document_or_shadow_root(DOM::Node& document_or_shadow_root)
 {
+    add_owning_document_or_shadow_root(document_or_shadow_root, true, true);
+}
+
+void CSSStyleSheet::add_owning_document_or_shadow_root(DOM::Node& document_or_shadow_root, bool make_sheet_observable, bool recurse_into_imports)
+{
     VERIFY(document_or_shadow_root.is_document() || document_or_shadow_root.is_shadow_root());
     m_owning_documents_or_shadow_roots.set(document_or_shadow_root);
 
@@ -622,12 +627,83 @@ void CSSStyleSheet::add_owning_document_or_shadow_root(DOM::Node& document_or_sh
     // set, so ownership alone should not make a disabled sheet observable in
     // the destination document. Delay CSS-connected font activation until the
     // sheet actually becomes enabled.
-    if (!disabled() && this->owning_documents_or_shadow_roots().size() == 1)
+    if (make_sheet_observable && !disabled() && this->owning_documents_or_shadow_roots().size() == 1)
         document_or_shadow_root.document().font_computer().load_fonts_from_sheet(*this);
 
+    // CSSOM's "add a CSS style sheet" algorithm returns immediately once the
+    // disabled flag is set. Imported children must therefore stay out of the
+    // owner graph too, otherwise they could activate @font-face rules or
+    // pending resources even while the parent sheet is meant to stay inert.
+    if (disabled() || !recurse_into_imports)
+        return;
+
     for (auto const& import_rule : m_import_rules) {
-        if (import_rule->loaded_style_sheet())
-            import_rule->loaded_style_sheet()->add_owning_document_or_shadow_root(document_or_shadow_root);
+        if (auto* imported_sheet = import_rule->loaded_style_sheet()) {
+            imported_sheet->add_owning_document_or_shadow_root(document_or_shadow_root);
+            if (auto document = imported_sheet->owning_document())
+                imported_sheet->load_pending_image_resources(*document);
+        }
+    }
+}
+
+void CSSStyleSheet::attach_active_imported_style_sheets_for_owner(DOM::Node& owner)
+{
+    for (auto const& import_rule : import_rules()) {
+        auto* imported_sheet = import_rule->loaded_style_sheet();
+        if (!imported_sheet)
+            continue;
+
+        // Imported sheets can have their own media queries. Re-evaluating
+        // them before attaching prevents nested @import chains from reviving
+        // grandchildren whose media still does not match.
+        imported_sheet->evaluate_media_queries(owner.document());
+        if (!imported_sheet->m_did_match.value_or(true))
+            continue;
+
+        // Record the owner before touching imported descendants, but keep the
+        // recursion manual so each nested import gets its own media query
+        // check first. That prevents A -> B -> C print from reviving C just
+        // because B matched when its parent sheet was re-enabled.
+        imported_sheet->add_owning_document_or_shadow_root(owner, true, false);
+        if (!imported_sheet->owning_documents_or_shadow_roots().contains(owner) || imported_sheet->disabled())
+            continue;
+
+        if (auto document = imported_sheet->owning_document())
+            imported_sheet->load_pending_image_resources(*document);
+        imported_sheet->attach_active_imported_style_sheets_for_owner(owner);
+    }
+}
+
+void CSSStyleSheet::detach_imported_style_sheets_for_owner(DOM::Node& owner)
+{
+    for (auto const& import_rule : import_rules()) {
+        auto* imported_sheet = import_rule->loaded_style_sheet();
+        if (!imported_sheet || !imported_sheet->owning_documents_or_shadow_roots().contains(owner))
+            continue;
+
+        imported_sheet->remove_owning_document_or_shadow_root(owner);
+        imported_sheet->detach_imported_style_sheets_for_owner(owner);
+    }
+}
+
+void CSSStyleSheet::update_owner_observability_for_current_media_match()
+{
+    if (disabled() || owning_documents_or_shadow_roots().is_empty())
+        return;
+
+    auto* document = &(*owning_documents_or_shadow_roots().begin())->document();
+    if (!document)
+        return;
+
+    if (m_did_match.value_or(true)) {
+        for (auto& owner : owning_documents_or_shadow_roots())
+            attach_active_imported_style_sheets_for_owner(*owner);
+        document->font_computer().load_fonts_from_sheet(*this);
+        load_pending_image_resources(*document);
+    } else {
+        document->font_computer().unload_fonts_from_sheet(*this);
+        for (auto& owner : owning_documents_or_shadow_roots())
+            detach_imported_style_sheets_for_owner(*owner);
     }
 }
 
@@ -641,8 +717,8 @@ void CSSStyleSheet::remove_owning_document_or_shadow_root(DOM::Node& document_or
         document_or_shadow_root.document().font_computer().unload_fonts_from_sheet(*this);
 
     for (auto const& import_rule : m_import_rules) {
-        if (import_rule->loaded_style_sheet())
-            import_rule->loaded_style_sheet()->remove_owning_document_or_shadow_root(document_or_shadow_root);
+        if (auto* imported_sheet = import_rule->loaded_style_sheet(); imported_sheet && imported_sheet->owning_documents_or_shadow_roots().contains(document_or_shadow_root))
+            imported_sheet->remove_owning_document_or_shadow_root(document_or_shadow_root);
     }
 }
 
@@ -652,7 +728,6 @@ void CSSStyleSheet::set_disabled(bool disabled)
         return;
 
     auto previous_shadow_root_owner_invalidation = snapshot_shadow_root_owner_invalidation();
-    auto document = owning_document();
     // When a stylesheet is disabled we stop evaluating its media queries, so
     // both the cached top-level match bit and the MediaList's internal state
     // can go stale across viewport changes. Clear the cache for both
@@ -661,14 +736,37 @@ void CSSStyleSheet::set_disabled(bool disabled)
     m_did_match = {};
     StyleSheet::set_disabled(disabled);
 
-    if (!disabled) {
-        if (document) {
-            evaluate_media_queries(*document);
-            document->font_computer().load_fonts_from_sheet(*this);
-            load_pending_image_resources(*document);
+    auto update_import_sheet_ownership = [&](auto&& recurse, CSSStyleSheet& sheet, DOM::Node& owner) -> void {
+        for (auto const& import_rule : sheet.import_rules()) {
+            auto* imported_sheet = import_rule->loaded_style_sheet();
+            if (!imported_sheet)
+                continue;
+
+            if (disabled) {
+                if (!imported_sheet->owning_documents_or_shadow_roots().contains(owner))
+                    continue;
+
+                imported_sheet->remove_owning_document_or_shadow_root(owner);
+                recurse(recurse, *imported_sheet, owner);
+                continue;
+            }
         }
-    } else if (document) {
-        document->font_computer().unload_fonts_from_sheet(*this);
+    };
+
+    if (!disabled) {
+        if (!owning_documents_or_shadow_roots().is_empty()) {
+            auto* document = &(*owning_documents_or_shadow_roots().begin())->document();
+            if (document) {
+                evaluate_media_queries(*document);
+                update_owner_observability_for_current_media_match();
+            }
+        }
+    } else if (!owning_documents_or_shadow_roots().is_empty()) {
+        auto* document = &(*owning_documents_or_shadow_roots().begin())->document();
+        if (document)
+            document->font_computer().unload_fonts_from_sheet(*this);
+        for (auto& owner : owning_documents_or_shadow_roots())
+            update_import_sheet_ownership(update_import_sheet_ownership, *this, *owner);
     }
 
     invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDisabledStateChange, &previous_shadow_root_owner_invalidation);
@@ -714,6 +812,7 @@ void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason, Vecto
         || reason == DOM::StyleInvalidationReason::MediaListAppendMedium
         || reason == DOM::StyleInvalidationReason::MediaListDeleteMedium) {
         m_did_match = {};
+        m_needs_owner_observability_update_after_next_media_query_evaluation = true;
     }
 
     for_each_owning_style_scope([&](StyleScope& style_scope) {
@@ -826,6 +925,7 @@ bool CSSStyleSheet::evaluate_media_queries(DOM::Document const& document)
 {
     bool any_media_queries_changed_match_state = false;
 
+    auto previous_match = m_did_match;
     bool now_matches = m_media->evaluate(document);
     if (!m_did_match.has_value() || m_did_match.value() != now_matches)
         any_media_queries_changed_match_state = true;
@@ -833,6 +933,15 @@ bool CSSStyleSheet::evaluate_media_queries(DOM::Document const& document)
         any_media_queries_changed_match_state = true;
 
     m_did_match = now_matches;
+
+    // Media-list edits clear m_did_match up front, so restoring the current
+    // activation state has to happen both for true state transitions and for
+    // the first reevaluation after that explicit cache reset.
+    if ((previous_match.has_value() && previous_match.value() != now_matches)
+        || m_needs_owner_observability_update_after_next_media_query_evaluation) {
+        update_owner_observability_for_current_media_match();
+        m_needs_owner_observability_update_after_next_media_query_evaluation = false;
+    }
 
     return any_media_queries_changed_match_state;
 }

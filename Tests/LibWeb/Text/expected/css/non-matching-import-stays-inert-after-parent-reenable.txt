@@ -1,0 +1,2 @@
+while disabled font count: 0
+after re-enable with print import font count: 0

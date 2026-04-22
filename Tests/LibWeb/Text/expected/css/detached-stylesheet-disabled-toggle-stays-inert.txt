@@ -1,0 +1,2 @@
+while attached and disabled font count: 0
+after detached re-enable font count: 0

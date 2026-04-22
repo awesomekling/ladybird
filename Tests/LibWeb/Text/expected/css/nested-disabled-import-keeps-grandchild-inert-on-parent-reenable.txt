@@ -1,0 +1,4 @@
+after nested import font count: 1
+after disabling middle import font count: 0
+after disabling top sheet font count: 0
+after re-enabling top sheet font count: 0

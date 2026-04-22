@@ -1,0 +1,3 @@
+while disabled font count: 0
+after re-enable with print media font count: 0
+after media matches font count: 1

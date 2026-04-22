@@ -1,0 +1,3 @@
+after import font count: 1
+after disable font count: 0
+after re-enable font count: 1

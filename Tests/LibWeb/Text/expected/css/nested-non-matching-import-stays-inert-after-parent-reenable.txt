@@ -1,0 +1,2 @@
+while top disabled font count: 0
+after re-enable nested print import font count: 0

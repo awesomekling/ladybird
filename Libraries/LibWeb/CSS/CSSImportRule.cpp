@@ -74,9 +74,17 @@ void CSSImportRule::set_parent_style_sheet(CSSStyleSheet* parent_style_sheet)
     if (m_parent_style_sheet)
         m_parent_style_sheet->add_critical_subresource(*this);
 
-    if (m_style_sheet && parent_style_sheet) {
-        for (auto owning_document_or_shadow_root : parent_style_sheet->owning_documents_or_shadow_roots())
-            m_style_sheet->add_owning_document_or_shadow_root(*owning_document_or_shadow_root);
+    if (m_style_sheet && parent_style_sheet && !parent_style_sheet->disabled()) {
+        for (auto owning_document_or_shadow_root : parent_style_sheet->owning_documents_or_shadow_roots()) {
+            m_style_sheet->evaluate_media_queries(owning_document_or_shadow_root->document());
+            if (!m_style_sheet->m_did_match.value_or(true))
+                continue;
+
+            m_style_sheet->add_owning_document_or_shadow_root(*owning_document_or_shadow_root, true, false);
+            if (auto document = m_style_sheet->owning_document())
+                m_style_sheet->load_pending_image_resources(*document);
+            m_style_sheet->attach_active_imported_style_sheets_for_owner(*owning_document_or_shadow_root);
+        }
     }
 
     if (loading_state() != CSSStyleSheet::LoadingState::Unloaded)
@@ -220,13 +228,18 @@ void CSSImportRule::set_style_sheet(GC::Ref<CSSStyleSheet> style_sheet)
     m_style_sheet = style_sheet;
     m_style_sheet->set_owner_css_rule(this);
 
-    if (m_parent_style_sheet) {
-        for (auto owning_document_or_shadow_root : m_parent_style_sheet->owning_documents_or_shadow_roots())
-            m_style_sheet->add_owning_document_or_shadow_root(*owning_document_or_shadow_root);
-    }
+    if (m_parent_style_sheet && !m_parent_style_sheet->disabled()) {
+        for (auto owning_document_or_shadow_root : m_parent_style_sheet->owning_documents_or_shadow_roots()) {
+            m_style_sheet->evaluate_media_queries(owning_document_or_shadow_root->document());
+            if (!m_style_sheet->m_did_match.value_or(true))
+                continue;
 
-    if (auto document = m_style_sheet->owning_document())
-        m_style_sheet->load_pending_image_resources(*document);
+            m_style_sheet->add_owning_document_or_shadow_root(*owning_document_or_shadow_root, true, false);
+            if (auto document = m_style_sheet->owning_document())
+                m_style_sheet->load_pending_image_resources(*document);
+            m_style_sheet->attach_active_imported_style_sheets_for_owner(*owning_document_or_shadow_root);
+        }
+    }
 
     m_style_sheet->invalidate_owners(DOM::StyleInvalidationReason::CSSImportRule);
 }

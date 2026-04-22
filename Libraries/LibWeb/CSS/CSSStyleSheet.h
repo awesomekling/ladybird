@@ -33,6 +33,7 @@ struct CSSStyleSheetInit {
 class WEB_API CSSStyleSheet final : public StyleSheet {
     WEB_PLATFORM_OBJECT(CSSStyleSheet, StyleSheet);
     GC_DECLARE_ALLOCATOR(CSSStyleSheet);
+    friend class CSSImportRule;
 
 public:
     struct ShadowRootOwnerInvalidationSnapshot {
@@ -143,6 +144,10 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     void recalculate_rule_caches();
+    void add_owning_document_or_shadow_root(DOM::Node&, bool make_sheet_observable, bool recurse_into_imports);
+    void attach_active_imported_style_sheets_for_owner(DOM::Node&);
+    void detach_imported_style_sheets_for_owner(DOM::Node&);
+    void update_owner_observability_for_current_media_match();
 
     void set_constructed(bool constructed) { m_constructed = constructed; }
     void set_disallow_modification(bool disallow_modification) { m_disallow_modification = disallow_modification; }
@@ -164,6 +169,7 @@ private:
     bool m_constructed { false };
     bool m_disallow_modification { false };
     Optional<bool> m_did_match;
+    bool m_needs_owner_observability_update_after_next_media_query_evaluation { false };
 
     Vector<Subresource&> m_critical_subresources;
 

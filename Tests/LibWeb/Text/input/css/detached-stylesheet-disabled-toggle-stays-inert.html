@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    async function waitForAnimationFrames(count) {
+        for (let i = 0; i < count; ++i)
+            await animationFrame();
+    }
+
+    promiseTest(async () => {
+        const style = document.createElement("style");
+        document.head.appendChild(style);
+
+        const sheet = style.sheet;
+        sheet.disabled = true;
+        sheet.insertRule(`
+            @font-face {
+                font-family: "DetachedInactiveFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+        `, 0);
+        sheet.insertRule(`body { font-family: "DetachedInactiveFont"; }`, 1);
+
+        await waitForAnimationFrames(2);
+        println(`while attached and disabled font count: ${document.fonts.size}`);
+
+        style.remove();
+        sheet.disabled = false;
+        await waitForAnimationFrames(8);
+        println(`after detached re-enable font count: ${document.fonts.size}`);
+    });
+</script>

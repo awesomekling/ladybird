@@ -1,0 +1,1 @@
+after load with print import font count: 0

@@ -1,0 +1,2 @@
+while disabled font count: 0
+after enable font count: 1
