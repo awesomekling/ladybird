@@ -592,6 +592,14 @@ static void cascade_custom_properties(DOM::AbstractElement abstract_element, Vec
     custom_properties.update(important_custom_properties);
 }
 
+static RefPtr<CustomPropertyData const> inheritable_custom_property_data(DOM::AbstractElement abstract_element)
+{
+    auto data = abstract_element.custom_property_data();
+    if (!data)
+        return nullptr;
+    return data->inheritable(abstract_element.document());
+}
+
 static Optional<CSS::EasingFunction> resolve_keyframe_easing(CSS::StyleValue const& style_value, DOM::AbstractElement abstract_element)
 {
     RefPtr<CSS::StyleValue const> resolved = style_value;
@@ -1858,7 +1866,7 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
         RefPtr<CustomPropertyData const> parent_data;
         auto inherit_from = abstract_element.element_to_inherit_style_from();
         if (inherit_from.has_value())
-            parent_data = inherit_from->custom_property_data();
+            parent_data = inheritable_custom_property_data(*inherit_from);
 
         // Build own_values with only properties that differ from the parent.
         // We build a fresh map instead of removing from cascaded_all,
@@ -2269,7 +2277,7 @@ void StyleComputer::compute_custom_properties(ComputedProperties&, DOM::Abstract
     // which would leave an oversized bucket array.
     RefPtr<CustomPropertyData const> parent_data;
     if (inherit_from.has_value())
-        parent_data = inherit_from->custom_property_data();
+        parent_data = inheritable_custom_property_data(*inherit_from);
 
     OrderedHashMap<FlyString, StyleProperty> resolved_own;
     for (auto const& [name, style_property] : data->own_values()) {
