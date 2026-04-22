@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = `<div id="target">target</div>`;
+
+        const sheet = new CSSStyleSheet({ disabled: true });
+        sheet.replaceSync(`
+            @font-face {
+                font-family: "MovedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            #target {
+                font-family: "MovedFont";
+            }
+        `);
+        shadowRoot.adoptedStyleSheets = [sheet];
+
+        println(`before adopt source font count: ${document.fonts.size}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.adoptNode(host);
+        iframe.contentDocument.body.appendChild(host);
+
+        println(`after adopt destination font count: ${iframe.contentDocument.fonts.size}`);
+        shadowRoot.adoptedStyleSheets[0].disabled = false;
+        println(`after enable destination font count: ${iframe.contentDocument.fonts.size}`);
+    });
+</script>

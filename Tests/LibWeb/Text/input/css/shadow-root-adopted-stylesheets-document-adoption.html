@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    asyncTest(async done => {
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = `<div id="target">target</div>`;
+        const target = shadowRoot.getElementById("target");
+
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`
+            @font-face {
+                font-family: TestAdoptedFont;
+                src: url("does-not-exist-1.woff");
+            }
+
+            #target {
+                color: rgb(255, 0, 0);
+                font-family: TestAdoptedFont;
+            }
+        `);
+        shadowRoot.adoptedStyleSheets = [sheet];
+
+        println(`before adopt length: ${shadowRoot.adoptedStyleSheets.length}`);
+        println(`before adopt same sheet: ${shadowRoot.adoptedStyleSheets[0] === sheet}`);
+        println(`before adopt color: ${getComputedStyle(target).color}`);
+        println(`before adopt document.fonts.size: ${document.fonts.size}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        println(`before adopt iframe document.fonts.size: ${iframe.contentDocument.fonts.size}`);
+        iframe.contentDocument.adoptNode(host);
+        iframe.contentDocument.body.appendChild(host);
+
+        println(`after adopt length: ${shadowRoot.adoptedStyleSheets.length}`);
+        println(`after adopt same sheet: ${shadowRoot.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt color: ${iframe.contentWindow.getComputedStyle(target).color}`);
+        println(`after adopt old document.fonts.size: ${document.fonts.size}`);
+        println(`after adopt new document.fonts.size: ${iframe.contentDocument.fonts.size}`);
+        done();
+    });
+</script>

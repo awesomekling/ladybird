@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    asyncTest(async done => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`
+            @font-face {
+                font-family: "MovedFont";
+                src: url("../../Assets/HashSans.woff");
+            }
+
+            #target {
+                font-family: "MovedFont";
+            }
+        `);
+
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+        const shadow = host.attachShadow({ mode: "open" });
+        shadow.innerHTML = `<div id="target">moved</div>`;
+        shadow.adoptedStyleSheets = [sheet];
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.adoptNode(host);
+        iframe.contentDocument.body.appendChild(host);
+
+        println(`after adopt destination font count: ${iframe.contentDocument.fonts.size}`);
+
+        // Re-assigning the moved sheet should not attach it a second time. If
+        // adoption accidentally routes back through the observable-array setter,
+        // the same clone would be added again and duplicate CSS-connected font
+        // faces would accumulate in the destination document.
+        shadow.adoptedStyleSheets = [shadow.adoptedStyleSheets[0]];
+        println(`after reassign destination font count: ${iframe.contentDocument.fonts.size}`);
+        done();
+    });
+</script>

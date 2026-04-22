@@ -1,0 +1,2 @@
+after adopt destination font count: 1
+after reassign destination font count: 1

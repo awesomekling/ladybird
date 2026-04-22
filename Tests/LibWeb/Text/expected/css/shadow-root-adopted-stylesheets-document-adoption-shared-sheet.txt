@@ -1,0 +1,13 @@
+before adopt original same sheet: true
+before adopt moving same sheet: true
+before adopt original color: rgb(0, 128, 0)
+before adopt moving color: rgb(0, 128, 0)
+after adopt original same sheet: true
+after adopt moving same sheet: false
+after adopt original color: rgb(0, 128, 0)
+after adopt moving color: rgb(0, 128, 0)
+after adopt reassign same moved sheet: ok
+after source mutation original color: rgb(255, 0, 0)
+after source mutation moving color: rgb(0, 128, 0)
+after clone mutation original color: rgb(255, 0, 0)
+after clone mutation moving color: rgb(0, 0, 255)

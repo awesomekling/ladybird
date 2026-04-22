@@ -479,6 +479,7 @@ public:
     WebIDL::ExceptionOr<GC::Ref<Node>> import_node(GC::Ref<Node> node, Variant<bool, ImportNodeOptions>);
     void adopt_node(Node&);
     WebIDL::ExceptionOr<GC::Ref<Node>> adopt_node_binding(GC::Ref<Node>);
+    WebIDL::ExceptionOr<GC::Ref<CSS::CSSStyleSheet>> clone_constructed_style_sheet_for_adoption(CSS::CSSStyleSheet&);
 
     DocumentType const* doctype() const;
     String const& compat_mode() const;
@@ -1501,6 +1502,8 @@ private:
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-dynamic-view-transition-style-sheet
     GC::Ptr<CSS::CSSStyleSheet> m_dynamic_view_transition_style_sheet;
+    HashMap<GC::Ptr<CSS::CSSStyleSheet>, GC::Ptr<CSS::CSSStyleSheet>> m_constructed_style_sheet_clones_for_active_adoption;
+    size_t m_active_node_adoption_depth { 0 };
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-show-view-transition-tree
     bool m_show_view_transition_tree { false };

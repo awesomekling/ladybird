@@ -1,0 +1,3 @@
+before adopt source font count: 0
+after adopt destination font count: 0
+after enable destination font count: 1

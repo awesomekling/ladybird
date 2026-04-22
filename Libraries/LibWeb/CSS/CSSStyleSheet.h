@@ -94,6 +94,7 @@ public:
     void remove_owning_document_or_shadow_root(DOM::Node& document_or_shadow_root);
     void invalidate_owners(DOM::StyleInvalidationReason);
     GC::Ptr<DOM::Document> owning_document() const;
+    WebIDL::ExceptionOr<GC::Ref<CSSStyleSheet>> clone_constructed_for_document(DOM::Document&) const;
     virtual void set_disabled(bool) override;
     void for_each_owning_style_scope(Function<void(StyleScope&)> const&) const;
 

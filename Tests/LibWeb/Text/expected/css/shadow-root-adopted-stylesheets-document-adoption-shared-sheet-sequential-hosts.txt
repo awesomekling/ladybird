@@ -1,0 +1,4 @@
+after first adopt color: rgb(255, 0, 0)
+after source mutation first moved color: rgb(255, 0, 0)
+after second adopt color: rgb(0, 128, 0)
+moved hosts share sheet after separate adoptions: false

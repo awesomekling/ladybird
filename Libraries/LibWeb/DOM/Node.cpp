@@ -1647,7 +1647,13 @@ void Node::set_document(Document& document)
     if (m_document.ptr() == &document)
         return;
 
+    if (auto* shadow_root = as_if<ShadowRoot>(*this))
+        shadow_root->remove_adopted_style_sheet_ownership_before_document_change();
+
     m_document = &document;
+
+    if (auto* shadow_root = as_if<ShadowRoot>(*this))
+        shadow_root->restore_adopted_style_sheet_ownership_after_document_change();
 
     if (needs_style_update() || child_needs_style_update()) {
         // NOTE: We unset and reset the "needs style update" flag here.

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    asyncTest(async done => {
+        const host = document.createElement("div");
+        const slotted = document.createElement("span");
+        slotted.className = "slotted";
+        slotted.textContent = "slotted";
+        host.appendChild(slotted);
+        document.body.appendChild(host);
+
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = `<slot></slot>`;
+
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`
+            :host {
+                color: rgb(255, 0, 0);
+            }
+
+            ::slotted(.slotted) {
+                color: rgb(0, 128, 0);
+            }
+        `);
+        shadowRoot.adoptedStyleSheets = [sheet];
+
+        println(`before adopt host color: ${getComputedStyle(host).color}`);
+        println(`before adopt slotted color: ${getComputedStyle(slotted).color}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.adoptNode(host);
+        iframe.contentDocument.body.appendChild(host);
+
+        println(`after adopt host color: ${iframe.contentWindow.getComputedStyle(host).color}`);
+        println(`after adopt slotted color: ${iframe.contentWindow.getComputedStyle(slotted).color}`);
+        done();
+    });
+</script>

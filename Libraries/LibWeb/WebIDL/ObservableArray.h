@@ -31,6 +31,7 @@ public:
 
     JS::ThrowCompletionOr<void> append(JS::Value value);
     void clear();
+    void replace_indexed_value_without_callbacks(u32 index, JS::Value value);
 
     template<typename T, typename Callback>
     void for_each(Callback callback)

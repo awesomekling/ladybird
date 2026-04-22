@@ -663,6 +663,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
 
     visitor.visit(m_active_view_transition);
     visitor.visit(m_dynamic_view_transition_style_sheet);
+    visitor.visit(m_constructed_style_sheet_clones_for_active_adoption);
 
     for (auto& view_transition : m_update_callback_queue)
         visitor.visit(view_transition);
@@ -2729,6 +2730,8 @@ void Document::adopt_node(Node& node)
 
     // 3. If document is not oldDocument, then:
     if (&old_document != this) {
+        ++m_active_node_adoption_depth;
+
         // 1. For each inclusiveDescendant in node’s shadow-including inclusive descendants:
         node.for_each_shadow_including_inclusive_descendant([&](DOM::Node& inclusive_descendant) {
             // 1. Set inclusiveDescendant’s node document to document.
@@ -2761,6 +2764,9 @@ void Document::adopt_node(Node& node)
 
             return TraversalDecision::Continue;
         });
+
+        if (--m_active_node_adoption_depth == 0)
+            m_constructed_style_sheet_clones_for_active_adoption.clear();
 
         // 2. For each inclusiveDescendant in node’s shadow-including inclusive descendants that is custom, in
         //    shadow-including tree order:
@@ -2800,6 +2806,24 @@ void Document::adopt_node(Node& node)
             m_node_iterators.set(&node_iterator);
         }
     }
+}
+
+WebIDL::ExceptionOr<GC::Ref<CSS::CSSStyleSheet>> Document::clone_constructed_style_sheet_for_adoption(CSS::CSSStyleSheet& style_sheet)
+{
+    VERIFY(style_sheet.constructed());
+
+    if (auto clone = m_constructed_style_sheet_clones_for_active_adoption.get(&style_sheet); clone.has_value())
+        return GC::Ref { *clone.value() };
+
+    auto clone = TRY(style_sheet.clone_constructed_for_document(*this));
+
+    // This cache is intentionally scoped to the current adoptNode() walk. That
+    // keeps shadow roots moved together sharing one clone, but avoids holding
+    // onto target documents or stale clone contents after the adoption finishes.
+    if (m_active_node_adoption_depth > 0)
+        m_constructed_style_sheet_clones_for_active_adoption.set(&style_sheet, clone);
+
+    return clone;
 }
 
 // https://dom.spec.whatwg.org/#dom-document-adoptnode

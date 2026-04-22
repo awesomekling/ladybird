@@ -222,6 +222,58 @@ WebIDL::ExceptionOr<void> ShadowRoot::set_adopted_style_sheets(JS::Value new_val
     return {};
 }
 
+void ShadowRoot::remove_adopted_style_sheet_ownership_before_document_change()
+{
+    if (!m_adopted_style_sheets)
+        return;
+
+    m_adopted_style_sheets->for_each<CSS::CSSStyleSheet>([&](auto& style_sheet) {
+        style_sheet.remove_owning_document_or_shadow_root(*this);
+    });
+}
+
+void ShadowRoot::restore_adopted_style_sheet_ownership_after_document_change()
+{
+    if (!m_adopted_style_sheets)
+        return;
+
+    for (u32 i = 0; i < m_adopted_style_sheets->indexed_array_like_size(); ++i) {
+        auto value_and_attributes = m_adopted_style_sheets->indexed_get(i);
+        if (!value_and_attributes.has_value())
+            continue;
+
+        auto& style_sheet = as<CSS::CSSStyleSheet>(value_and_attributes->value.as_object());
+        auto sheet_to_restore = GC::Ref { style_sheet };
+
+        // Constructable sheets are only assignable to adoptedStyleSheets in
+        // their constructor document. After cross-document adoption we must
+        // therefore replace any foreign-constructed sheet with a target-
+        // document clone, even if the sheet is no longer owned by the old
+        // document (e.g. this shadow root was its only owner). The per-
+        // adoption cache on Document keeps moved shadow roots sharing one
+        // clone when they move together.
+        if (style_sheet.constructed() && style_sheet.constructor_document().ptr() != &document())
+            sheet_to_restore = MUST(document().clone_constructed_style_sheet_for_adoption(style_sheet));
+
+        sheet_to_restore->add_owning_document_or_shadow_root(*this);
+        sheet_to_restore->load_pending_image_resources(document());
+
+        if (sheet_to_restore.ptr() != &style_sheet)
+            m_adopted_style_sheets->replace_indexed_value_without_callbacks(i, sheet_to_restore);
+    }
+
+    style_scope().invalidate_rule_cache();
+    invalidate_style(DOM::StyleInvalidationReason::AdoptedStyleSheetsList);
+
+    if (auto* shadow_host = host()) {
+        // A restored adopted sheet can style outside the shadow subtree via
+        // :host(...) or ::slotted(...). Reaching only the shadow root leaves
+        // the host-side tree with stale computed style after cross-document
+        // adoption until some unrelated restyle happens.
+        shadow_host->root().invalidate_style(DOM::StyleInvalidationReason::AdoptedStyleSheetsList);
+    }
+}
+
 void ShadowRoot::for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const
 {
     for (auto& style_sheet : style_sheets().sheets())

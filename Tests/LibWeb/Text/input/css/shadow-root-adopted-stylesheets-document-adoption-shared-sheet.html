@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    asyncTest(async done => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`#target { color: rgb(255, 0, 0); }`);
+        // Mutate via CSSOM insertRule/deleteRule so the sheet's final state
+        // only exists in the rule tree, not in the stored source text. The
+        // cross-document clone has to reproduce these mutations too.
+        sheet.deleteRule(0);
+        sheet.insertRule(`#target { color: rgb(0, 128, 0); }`);
+
+        const originalHost = document.createElement("div");
+        document.body.appendChild(originalHost);
+        const originalShadow = originalHost.attachShadow({ mode: "open" });
+        originalShadow.innerHTML = `<div id="target">original</div>`;
+        const originalTarget = originalShadow.getElementById("target");
+
+        const movingHost = document.createElement("div");
+        document.body.appendChild(movingHost);
+        const movingShadow = movingHost.attachShadow({ mode: "open" });
+        movingShadow.innerHTML = `<div id="target">moving</div>`;
+        const movingTarget = movingShadow.getElementById("target");
+
+        originalShadow.adoptedStyleSheets = [sheet];
+        movingShadow.adoptedStyleSheets = [sheet];
+
+        println(`before adopt original same sheet: ${originalShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`before adopt moving same sheet: ${movingShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`before adopt original color: ${getComputedStyle(originalTarget).color}`);
+        println(`before adopt moving color: ${getComputedStyle(movingTarget).color}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.adoptNode(movingHost);
+        iframe.contentDocument.body.appendChild(movingHost);
+
+        println(`after adopt original same sheet: ${originalShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt moving same sheet: ${movingShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt original color: ${getComputedStyle(originalTarget).color}`);
+        println(`after adopt moving color: ${iframe.contentWindow.getComputedStyle(movingTarget).color}`);
+        // Reassigning the moved shadow's adoptedStyleSheets must succeed.
+        // That only works if the clone is owned by the new document (which
+        // requires keying the clone on the sheet's constructor document, not
+        // the previous owning document).
+        try {
+            movingShadow.adoptedStyleSheets = [movingShadow.adoptedStyleSheets[0]];
+            println(`after adopt reassign same moved sheet: ok`);
+        } catch (error) {
+            println(`after adopt reassign same moved sheet: ${error.name}`);
+        }
+
+        sheet.replaceSync(`#target { color: rgb(255, 0, 0); }`);
+        println(`after source mutation original color: ${getComputedStyle(originalTarget).color}`);
+        println(`after source mutation moving color: ${iframe.contentWindow.getComputedStyle(movingTarget).color}`);
+
+        movingShadow.adoptedStyleSheets[0].replaceSync(`#target { color: rgb(0, 0, 255); }`);
+        println(`after clone mutation original color: ${getComputedStyle(originalTarget).color}`);
+        println(`after clone mutation moving color: ${iframe.contentWindow.getComputedStyle(movingTarget).color}`);
+        done();
+    });
+</script>

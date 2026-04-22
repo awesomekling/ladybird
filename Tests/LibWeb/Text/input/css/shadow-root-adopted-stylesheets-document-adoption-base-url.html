@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    function currentLocation() {
+        const sections = location.href.split("/");
+        sections.pop();
+        return sections.join("/");
+    }
+
+    test(() => {
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = `<div id="target">target</div>`;
+        const target = shadowRoot.getElementById("target");
+
+        const relativeURL = "../../Ref/data/smiley.png";
+        const absoluteURL = new URL(relativeURL, `${currentLocation()}/shadow-root-adopted-stylesheets-document-adoption-base-url.html`).href;
+        const expectedBackground = `url("${absoluteURL}")`;
+
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`#target { background-image: url("${relativeURL}"); }`);
+        shadowRoot.adoptedStyleSheets = [sheet];
+
+        const beforeAdoptBackground = getComputedStyle(target).backgroundImage;
+        println(`before adopt same sheet: ${shadowRoot.adoptedStyleSheets[0] === sheet}`);
+        println(`before adopt matches original base: ${beforeAdoptBackground === expectedBackground}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(`<!DOCTYPE html><base href="file:///definitely-different-base/"><body></body>`);
+        iframe.contentDocument.close();
+
+        iframe.contentDocument.adoptNode(host);
+        iframe.contentDocument.body.appendChild(host);
+
+        const afterAdoptBackground = iframe.contentWindow.getComputedStyle(target).backgroundImage;
+        println(`after adopt same sheet: ${shadowRoot.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt matches original base: ${afterAdoptBackground === expectedBackground}`);
+        println(`after adopt preserved background value: ${afterAdoptBackground === beforeAdoptBackground}`);
+    });
+</script>

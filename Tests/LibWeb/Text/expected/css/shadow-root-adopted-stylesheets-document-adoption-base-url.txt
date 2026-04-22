@@ -1,0 +1,5 @@
+before adopt same sheet: true
+before adopt matches original base: true
+after adopt same sheet: false
+after adopt matches original base: true
+after adopt preserved background value: true

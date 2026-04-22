@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    asyncTest(async done => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(`#target { color: rgb(255, 0, 0); }`);
+
+        const movingContainer = document.createElement("div");
+        document.body.appendChild(movingContainer);
+
+        const firstHost = document.createElement("div");
+        movingContainer.appendChild(firstHost);
+        const firstShadow = firstHost.attachShadow({ mode: "open" });
+        firstShadow.innerHTML = `<div id="target">first</div>`;
+        const firstTarget = firstShadow.getElementById("target");
+
+        const secondHost = document.createElement("div");
+        movingContainer.appendChild(secondHost);
+        const secondShadow = secondHost.attachShadow({ mode: "open" });
+        secondShadow.innerHTML = `<div id="target">second</div>`;
+        const secondTarget = secondShadow.getElementById("target");
+
+        firstShadow.adoptedStyleSheets = [sheet];
+        secondShadow.adoptedStyleSheets = [sheet];
+
+        println(`before adopt shared source sheet: ${firstShadow.adoptedStyleSheets[0] === secondShadow.adoptedStyleSheets[0]}`);
+        println(`before adopt first color: ${getComputedStyle(firstTarget).color}`);
+        println(`before adopt second color: ${getComputedStyle(secondTarget).color}`);
+
+        const iframe = document.createElement("iframe");
+        document.body.appendChild(iframe);
+        iframe.contentDocument.adoptNode(movingContainer);
+        iframe.contentDocument.body.appendChild(movingContainer);
+
+        println(`after adopt first shares source sheet: ${firstShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt second shares source sheet: ${secondShadow.adoptedStyleSheets[0] === sheet}`);
+        println(`after adopt shared moved sheet: ${firstShadow.adoptedStyleSheets[0] === secondShadow.adoptedStyleSheets[0]}`);
+        println(`after adopt first color: ${iframe.contentWindow.getComputedStyle(firstTarget).color}`);
+        println(`after adopt second color: ${iframe.contentWindow.getComputedStyle(secondTarget).color}`);
+
+        firstShadow.adoptedStyleSheets[0].replaceSync(`#target { color: rgb(0, 0, 255); }`);
+        println(`after moved clone mutation first color: ${iframe.contentWindow.getComputedStyle(firstTarget).color}`);
+        println(`after moved clone mutation second color: ${iframe.contentWindow.getComputedStyle(secondTarget).color}`);
+        done();
+    });
+</script>

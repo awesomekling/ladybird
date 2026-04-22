@@ -72,6 +72,8 @@ public:
 
     GC::Ref<WebIDL::ObservableArray> adopted_style_sheets() const;
     WebIDL::ExceptionOr<void> set_adopted_style_sheets(JS::Value);
+    void remove_adopted_style_sheet_ownership_before_document_change();
+    void restore_adopted_style_sheet_ownership_after_document_change();
 
     void for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
     void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)> const& callback) const;

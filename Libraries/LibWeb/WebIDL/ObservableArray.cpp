@@ -75,4 +75,14 @@ void ObservableArray::clear()
     }
 }
 
+void ObservableArray::replace_indexed_value_without_callbacks(u32 index, JS::Value value)
+{
+    // Shadow-root document adoption sometimes has to swap in a document-local
+    // clone of an adopted stylesheet. That is an internal bookkeeping update,
+    // not an observable adoptedStyleSheets mutation, so it must not re-run the
+    // set-indexed-value callback and its ownership/resource side effects.
+    VERIFY(indexed_has(index));
+    indexed_put(index, value);
+}
+
 }

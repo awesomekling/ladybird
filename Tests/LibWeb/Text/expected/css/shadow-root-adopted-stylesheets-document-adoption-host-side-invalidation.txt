@@ -1,0 +1,4 @@
+before adopt host color: rgb(255, 0, 0)
+before adopt slotted color: rgb(0, 128, 0)
+after adopt host color: rgb(255, 0, 0)
+after adopt slotted color: rgb(0, 128, 0)

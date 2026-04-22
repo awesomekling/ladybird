@@ -432,6 +432,48 @@ GC::Ptr<DOM::Document> CSSStyleSheet::owning_document() const
     return nullptr;
 }
 
+static String serialize_rule_list(CSSRuleList const& rules)
+{
+    StringBuilder builder;
+    bool first = true;
+    for (auto& rule : rules) {
+        if (!first)
+            builder.append('\n');
+        first = false;
+        builder.append(rule->css_text());
+    }
+    return MUST(builder.to_string());
+}
+
+WebIDL::ExceptionOr<GC::Ref<CSSStyleSheet>> CSSStyleSheet::clone_constructed_for_document(DOM::Document& document) const
+{
+    VERIFY(constructed());
+
+    CSSStyleSheetInit options;
+    options.media = m_media->media_text();
+    options.disabled = disabled();
+    if (auto effective_base_url = m_base_url.value_or_lazy_evaluated_optional([&]() { return location(); }); effective_base_url.has_value()) {
+        // construct_impl() only persists an explicit CSSStyleSheetInit.baseURL
+        // in m_base_url. Sheets that rely on the constructor document's
+        // default base keep that effective base in location() instead. When we
+        // clone across documents we need to preserve whichever base the source
+        // sheet was actually resolving against, otherwise relative url(...)
+        // references would silently retarget to the destination document.
+        options.base_url = effective_base_url->serialize();
+    }
+
+    auto clone = TRY(CSSStyleSheet::construct_impl(document.realm(), options));
+
+    // Rebuild the clone from the live rule list instead of m_source_text.
+    // CSSOM mutations like insertRule()/deleteRule() update the rule tree but
+    // intentionally do not round-trip through source text, so cloning from the
+    // serialized live rules is the only way to preserve the sheet's actual
+    // observable state across cross-document adoption.
+    TRY(clone->replace_sync(serialize_rule_list(rules())));
+
+    return clone;
+}
+
 void CSSStyleSheet::load_pending_image_resources(DOM::Document& document)
 {
     if (disabled())

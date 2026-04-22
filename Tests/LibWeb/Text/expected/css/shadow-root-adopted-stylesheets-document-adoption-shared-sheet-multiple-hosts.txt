@@ -1,0 +1,10 @@
+before adopt shared source sheet: true
+before adopt first color: rgb(255, 0, 0)
+before adopt second color: rgb(255, 0, 0)
+after adopt first shares source sheet: false
+after adopt second shares source sheet: false
+after adopt shared moved sheet: true
+after adopt first color: rgb(255, 0, 0)
+after adopt second color: rgb(255, 0, 0)
+after moved clone mutation first color: rgb(0, 0, 255)
+after moved clone mutation second color: rgb(0, 0, 255)
