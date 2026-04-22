@@ -152,11 +152,15 @@ void CSSStyleRule::set_selector_text(StringView selector_text)
 
     // 2. If the algorithm returns a non-null value replace the associated group of selectors with the returned value.
     if (parsed_selectors.has_value()) {
+        Optional<Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot>> previous_shadow_root_owner_invalidation;
+        if (auto* sheet = parent_style_sheet())
+            previous_shadow_root_owner_invalidation = sheet->snapshot_shadow_root_owner_invalidation();
+
         // NOTE: If we have a parent style rule, we need to update the selectors to add any implicit `&`s
 
         m_selectors = parsed_selectors.release_value();
         if (auto* sheet = parent_style_sheet()) {
-            sheet->invalidate_owners(DOM::StyleInvalidationReason::SetSelectorText);
+            sheet->invalidate_owners(DOM::StyleInvalidationReason::SetSelectorText, previous_shadow_root_owner_invalidation.has_value() ? &*previous_shadow_root_owner_invalidation : nullptr);
         }
     }
 

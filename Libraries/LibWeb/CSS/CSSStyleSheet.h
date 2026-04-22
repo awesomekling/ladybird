@@ -35,6 +35,14 @@ class WEB_API CSSStyleSheet final : public StyleSheet {
     GC_DECLARE_ALLOCATOR(CSSStyleSheet);
 
 public:
+    struct ShadowRootOwnerInvalidationSnapshot {
+        GC::Ptr<DOM::ShadowRoot> shadow_root;
+        bool may_match_shadow_host { false };
+        bool may_match_light_dom_under_shadow_host { false };
+        bool may_affect_assigned_nodes_via_slots { false };
+        Vector<FlyString> keyframe_names;
+    };
+
     enum class LoadingState : u8 {
         Unloaded,
         Loading,
@@ -92,7 +100,8 @@ public:
     HashTable<GC::Ptr<DOM::Node>> owning_documents_or_shadow_roots() const { return m_owning_documents_or_shadow_roots; }
     void add_owning_document_or_shadow_root(DOM::Node& document_or_shadow_root);
     void remove_owning_document_or_shadow_root(DOM::Node& document_or_shadow_root);
-    void invalidate_owners(DOM::StyleInvalidationReason);
+    [[nodiscard]] Vector<ShadowRootOwnerInvalidationSnapshot> snapshot_shadow_root_owner_invalidation() const;
+    void invalidate_owners(DOM::StyleInvalidationReason, Vector<ShadowRootOwnerInvalidationSnapshot> const* previous_shadow_root_owner_invalidation = nullptr);
     GC::Ptr<DOM::Document> owning_document() const;
     WebIDL::ExceptionOr<GC::Ref<CSSStyleSheet>> clone_constructed_for_document(DOM::Document&) const;
     virtual void set_disabled(bool) override;

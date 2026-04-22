@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="host"><span class="item">slotted</span></div>
+<script>
+    test(() => {
+        const host = document.getElementById("host");
+        const slotted = host.firstElementChild;
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = "<slot></slot>";
+        const target = document.createElement("div");
+        target.className = "target";
+        target.textContent = "target";
+        shadowRoot.appendChild(target);
+        const inheritingChild = document.createElement("div");
+        inheritingChild.textContent = "inheriting child";
+        shadowRoot.appendChild(inheritingChild);
+
+        println(`host before add: ${getComputedStyle(host).color}`);
+        println(`inheriting child before add: ${getComputedStyle(inheritingChild).color}`);
+        println(`target before broad add: ${getComputedStyle(target).borderTopColor}`);
+
+        const broadStyle = document.createElement("style");
+        broadStyle.textContent = `
+            @keyframes noop {}
+            :host { color: rgb(255, 0, 0); }
+            .target { border-top-color: rgb(255, 0, 255); }
+        `;
+        shadowRoot.appendChild(broadStyle);
+
+        println(`host after add: ${getComputedStyle(host).color}`);
+        println(`inheriting child after add: ${getComputedStyle(inheritingChild).color}`);
+        println(`target after broad add: ${getComputedStyle(target).borderTopColor}`);
+
+        broadStyle.remove();
+
+        println(`host after remove: ${getComputedStyle(host).color}`);
+        println(`inheriting child after remove: ${getComputedStyle(inheritingChild).color}`);
+        println(`target after broad remove: ${getComputedStyle(target).borderTopColor}`);
+
+        println(`slotted before add: ${getComputedStyle(slotted).color}`);
+
+        const targetedStyle = document.createElement("style");
+        targetedStyle.textContent = "::slotted(.item) { color: rgb(0, 0, 255); }";
+        shadowRoot.appendChild(targetedStyle);
+
+        println(`slotted after add: ${getComputedStyle(slotted).color}`);
+
+        targetedStyle.remove();
+
+        println(`slotted after remove: ${getComputedStyle(slotted).color}`);
+
+        println(`target before add: ${getComputedStyle(target).color}`);
+
+        const hostAnchoredStyle = document.createElement("style");
+        hostAnchoredStyle.textContent = ":host > * { color: rgb(0, 128, 0); }";
+        shadowRoot.appendChild(hostAnchoredStyle);
+
+        println(`target after add: ${getComputedStyle(target).color}`);
+
+        hostAnchoredStyle.remove();
+
+        println(`target after remove: ${getComputedStyle(target).color}`);
+
+        shadowRoot.appendChild(document.createElement("b"));
+
+        println(`host before dirty add: ${getComputedStyle(host).backgroundColor}`);
+        println(`slotted before dirty add: ${getComputedStyle(slotted).backgroundColor}`);
+
+        const dirtyStyle = document.createElement("style");
+        dirtyStyle.textContent = `
+            :host { background-color: rgb(255, 255, 0); }
+            ::slotted(.item) { background-color: rgb(0, 255, 255); }
+        `;
+        shadowRoot.appendChild(dirtyStyle);
+
+        println(`host after dirty add: ${getComputedStyle(host).backgroundColor}`);
+        println(`slotted after dirty add: ${getComputedStyle(slotted).backgroundColor}`);
+
+        shadowRoot.appendChild(document.createElement("i"));
+        dirtyStyle.remove();
+
+        println(`host after dirty remove: ${getComputedStyle(host).backgroundColor}`);
+        println(`slotted after dirty remove: ${getComputedStyle(slotted).backgroundColor}`);
+    });
+</script>

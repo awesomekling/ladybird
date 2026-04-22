@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    function createHostWithConstructedSheet(options = {}) {
+        const host = document.createElement("div");
+        const slotted = document.createElement("span");
+        slotted.className = "item";
+        slotted.textContent = "slotted";
+        host.appendChild(slotted);
+        document.body.appendChild(host);
+
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = "<slot></slot>";
+
+        const sheet = new CSSStyleSheet(options);
+        sheet.replaceSync(`
+            :host {
+                color: rgb(255, 0, 0);
+                animation-name: fade;
+                animation-duration: 1s;
+                animation-fill-mode: both;
+            }
+
+            ::slotted(.item) {
+                background-color: rgb(0, 0, 255);
+            }
+
+            @keyframes fade {
+                from { opacity: 0.25; }
+                to { opacity: 0.25; }
+            }
+        `);
+        shadowRoot.adoptedStyleSheets = [sheet];
+        return { host, slotted, shadowRoot, sheet };
+    }
+
+    function dumpStyles(prefix, host, slotted) {
+        println(`${prefix} host color: ${getComputedStyle(host).color}`);
+        println(`${prefix} host opacity: ${getComputedStyle(host).opacity}`);
+        println(`${prefix} slotted background: ${getComputedStyle(slotted).backgroundColor}`);
+    }
+
+    test(() => {
+        const { host, slotted, sheet } = createHostWithConstructedSheet();
+        dumpStyles("before replaceSync", host, slotted);
+        sheet.replaceSync("");
+        dumpStyles("after replaceSync", host, slotted);
+
+        const mediaCase = createHostWithConstructedSheet({ media: "all" });
+        const mediaHost = mediaCase.host;
+        const mediaSlotted = mediaCase.slotted;
+        const mediaSheet = mediaCase.sheet;
+        dumpStyles("before media off", mediaHost, mediaSlotted);
+        mediaSheet.media.mediaText = "not all";
+        dumpStyles("after media off", mediaHost, mediaSlotted);
+
+        const disableCase = createHostWithConstructedSheet();
+        const disableHost = disableCase.host;
+        const disableSlotted = disableCase.slotted;
+        const disableSheet = disableCase.sheet;
+        dumpStyles("before disable", disableHost, disableSlotted);
+        disableSheet.disabled = true;
+        dumpStyles("after disable", disableHost, disableSlotted);
+    });
+</script>

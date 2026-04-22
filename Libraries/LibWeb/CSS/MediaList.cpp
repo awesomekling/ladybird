@@ -51,9 +51,13 @@ String MediaList::media_text() const
 // https://www.w3.org/TR/cssom-1/#dom-medialist-mediatext
 void MediaList::set_media_text(StringView text)
 {
+    Optional<Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot>> previous_shadow_root_owner_invalidation;
+    if (m_associated_style_sheet)
+        previous_shadow_root_owner_invalidation = as<CSS::CSSStyleSheet>(*m_associated_style_sheet).snapshot_shadow_root_owner_invalidation();
+
     ScopeGuard guard = [&] {
         if (m_associated_style_sheet)
-            as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListSetMediaText);
+            as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListSetMediaText, previous_shadow_root_owner_invalidation.has_value() ? &*previous_shadow_root_owner_invalidation : nullptr);
     };
 
     m_media.clear();
@@ -74,6 +78,10 @@ Optional<String> MediaList::item(u32 index) const
 // https://www.w3.org/TR/cssom-1/#dom-medialist-appendmedium
 void MediaList::append_medium(StringView medium)
 {
+    Optional<Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot>> previous_shadow_root_owner_invalidation;
+    if (m_associated_style_sheet)
+        previous_shadow_root_owner_invalidation = as<CSS::CSSStyleSheet>(*m_associated_style_sheet).snapshot_shadow_root_owner_invalidation();
+
     // 1. Let m be the result of parsing the given value.
     auto m = parse_media_query(Parser::ParsingParams { realm() }, medium);
 
@@ -92,12 +100,16 @@ void MediaList::append_medium(StringView medium)
     m_media.append(m.release_nonnull());
 
     if (m_associated_style_sheet)
-        as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListAppendMedium);
+        as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListAppendMedium, previous_shadow_root_owner_invalidation.has_value() ? &*previous_shadow_root_owner_invalidation : nullptr);
 }
 
 // https://www.w3.org/TR/cssom-1/#dom-medialist-deletemedium
 WebIDL::ExceptionOr<void> MediaList::delete_medium(StringView medium)
 {
+    Optional<Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot>> previous_shadow_root_owner_invalidation;
+    if (m_associated_style_sheet)
+        previous_shadow_root_owner_invalidation = as<CSS::CSSStyleSheet>(*m_associated_style_sheet).snapshot_shadow_root_owner_invalidation();
+
     // 1. Let m be the result of parsing the given value.
     auto m = parse_media_query(Parser::ParsingParams { realm() }, medium);
 
@@ -114,7 +126,7 @@ WebIDL::ExceptionOr<void> MediaList::delete_medium(StringView medium)
         return WebIDL::NotFoundError::create(realm(), "Media query not found in list"_utf16);
 
     if (m_associated_style_sheet)
-        as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListDeleteMedium);
+        as<CSS::CSSStyleSheet>(*m_associated_style_sheet).invalidate_owners(DOM::StyleInvalidationReason::MediaListDeleteMedium, previous_shadow_root_owner_invalidation.has_value() ? &*previous_shadow_root_owner_invalidation : nullptr);
 
     return {};
 }

@@ -39,15 +39,26 @@ namespace Web::CSS {
 GC_DEFINE_ALLOCATOR(CSSStyleSheet);
 
 template<typename Callback>
-static void for_each_tree_affected_by_shadow_root_stylesheet_change(DOM::Node& root, Callback&& callback)
+static void for_each_tree_affected_by_shadow_root_stylesheet_change(
+    DOM::Node& root,
+    bool include_host,
+    bool include_light_dom_under_shadow_host,
+    Callback&& callback)
 {
     callback(root);
 
     if (auto* shadow_root = as_if<DOM::ShadowRoot>(root)) {
-        // A shadow-root stylesheet can also affect host-side nodes outside the
-        // host subtree, for example via :host + .foo / :host ~ .foo. Walk the
-        // entire host root for those cases instead of stopping at the host.
-        if (auto* host = shadow_root->host())
+        auto* host = shadow_root->host();
+        if (!host)
+            return;
+
+        if (include_host)
+            callback(*host);
+
+        // Only selectors that can escape the shadow tree should fan out to
+        // the host root. Purely shadow-local mutations must not restyle
+        // unrelated light-DOM nodes just because they share an animation name.
+        if (include_light_dom_under_shadow_host)
             callback(host->root());
     }
 }
@@ -115,6 +126,14 @@ static void invalidate_elements_affected_by_inserted_keyframes_rule(DOM::Node& r
     root.for_each_in_inclusive_subtree_of_type<DOM::Element>(invalidate_matching_element);
 }
 
+struct ShadowRootStylesheetEffects {
+    bool may_match_shadow_host { false };
+    bool may_match_light_dom_under_shadow_host { false };
+    bool may_affect_assigned_nodes_via_slots { false };
+};
+
+static ShadowRootStylesheetEffects determine_shadow_root_stylesheet_effects(CSSStyleSheet const&, DOM::ShadowRoot const&);
+
 static void invalidate_owners_for_inserted_style_rule(CSSStyleSheet const& style_sheet, CSSStyleRule const& style_rule, DOM::StyleInvalidationReason reason)
 {
     StyleSheetInvalidationSet invalidation_set;
@@ -144,37 +163,56 @@ static void invalidate_owners_for_inserted_keyframes_rule(CSSStyleSheet const& s
         if (!document_or_shadow_root->is_shadow_root() && document_or_shadow_root->entire_subtree_needs_style_update())
             continue;
 
-        for_each_tree_affected_by_shadow_root_stylesheet_change(*document_or_shadow_root, [&](DOM::Node& affected_root) {
-            invalidate_elements_affected_by_inserted_keyframes_rule(affected_root, keyframes_rule.name());
-        });
+        bool include_host = false;
+        bool include_light_dom_under_shadow_host = false;
+        if (auto* shadow_root = as_if<DOM::ShadowRoot>(*document_or_shadow_root)) {
+            auto effects = determine_shadow_root_stylesheet_effects(style_sheet, *shadow_root);
+            include_host = effects.may_match_shadow_host;
+            include_light_dom_under_shadow_host = effects.may_match_light_dom_under_shadow_host;
+        }
+
+        for_each_tree_affected_by_shadow_root_stylesheet_change(
+            *document_or_shadow_root,
+            include_host,
+            include_light_dom_under_shadow_host,
+            [&](DOM::Node& affected_root) {
+                invalidate_elements_affected_by_inserted_keyframes_rule(affected_root, keyframes_rule.name());
+            });
     }
 }
 
-static bool stylesheet_has_effective_keyframes_rules(CSSStyleSheet const& style_sheet)
+static Vector<FlyString> collect_effective_keyframe_rule_names(CSSStyleSheet const& style_sheet)
 {
-    bool has_keyframes_rules = false;
-    style_sheet.for_each_effective_keyframes_at_rule([&](CSSKeyframesRule const&) {
-        has_keyframes_rules = true;
+    Vector<FlyString> keyframe_names;
+    style_sheet.for_each_effective_keyframes_at_rule([&](CSSKeyframesRule const& keyframes_rule) {
+        if (!keyframe_names.contains_slow(keyframes_rule.name()))
+            keyframe_names.append(keyframes_rule.name());
     });
-    return has_keyframes_rules;
+    return keyframe_names;
 }
 
-static void invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(CSSStyleSheet const& style_sheet, DOM::ShadowRoot& shadow_root)
+static void invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(
+    Vector<FlyString> const& keyframe_names,
+    DOM::ShadowRoot& shadow_root,
+    bool include_host,
+    bool include_light_dom_under_shadow_host)
 {
     auto* host = shadow_root.host();
     if (!host)
         return;
 
-    style_sheet.for_each_effective_keyframes_at_rule([&](CSSKeyframesRule const& keyframes_rule) {
-        invalidate_elements_affected_by_inserted_keyframes_rule(*host, keyframes_rule.name());
-    });
-}
+    for (auto const& keyframe_name : keyframe_names) {
+        if (include_host)
+            invalidate_elements_affected_by_inserted_keyframes_rule(*host, keyframe_name);
 
-struct ShadowRootStylesheetEffects {
-    bool may_match_shadow_host { false };
-    bool may_match_light_dom_under_shadow_host { false };
-    bool may_affect_assigned_nodes_via_slots { false };
-};
+        // The animation-name declaration that references these shadow-scoped
+        // keyframes can reach siblings of the host via selectors such as
+        // :host + .animated, but only when the stylesheet actually contains a
+        // selector that escapes the shadow tree.
+        if (include_light_dom_under_shadow_host)
+            invalidate_elements_affected_by_inserted_keyframes_rule(host->root(), keyframe_name);
+    }
+}
 
 static ShadowRootStylesheetEffects determine_shadow_root_stylesheet_effects(CSSStyleSheet const& style_sheet, DOM::ShadowRoot const& shadow_root)
 {
@@ -218,6 +256,35 @@ static ShadowRootStylesheetEffects determine_shadow_root_stylesheet_effects(CSSS
     });
 
     return effects;
+}
+
+static CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot merge_shadow_root_owner_invalidation_snapshots(
+    CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot const& current,
+    CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot const* previous)
+{
+    auto merged = current;
+    if (!previous)
+        return merged;
+
+    merged.may_match_shadow_host |= previous->may_match_shadow_host;
+    merged.may_match_light_dom_under_shadow_host |= previous->may_match_light_dom_under_shadow_host;
+    merged.may_affect_assigned_nodes_via_slots |= previous->may_affect_assigned_nodes_via_slots;
+    for (auto const& keyframe_name : previous->keyframe_names) {
+        if (!merged.keyframe_names.contains_slow(keyframe_name))
+            merged.keyframe_names.append(keyframe_name);
+    }
+    return merged;
+}
+
+static CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot const* find_shadow_root_owner_invalidation_snapshot(
+    Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot> const& snapshots,
+    DOM::ShadowRoot const& shadow_root)
+{
+    for (auto const& snapshot : snapshots) {
+        if (snapshot.shadow_root == &shadow_root)
+            return &snapshot;
+    }
+    return nullptr;
 }
 
 static void invalidate_assigned_elements_for_shadow_root_slots(DOM::ShadowRoot& shadow_root)
@@ -385,9 +452,10 @@ WebIDL::ExceptionOr<void> CSSStyleSheet::delete_rule(unsigned index)
         return WebIDL::NotAllowedError::create(realm(), "Can't call delete_rule() on non-modifiable stylesheets."_utf16);
 
     // 3. Remove a CSS rule in the CSS rules at index.
+    auto previous_shadow_root_owner_invalidation = snapshot_shadow_root_owner_invalidation();
     auto result = m_rules->remove_a_css_rule(index);
     if (!result.is_exception()) {
-        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDeleteRule);
+        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDeleteRule, &previous_shadow_root_owner_invalidation);
     }
     return result;
 }
@@ -417,6 +485,7 @@ GC::Ref<WebIDL::Promise> CSSStyleSheet::replace(String text)
     // 4. In parallel, do these steps:
     Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, this, text = move(text), promise = GC::Root(promise)] {
         HTML::TemporaryExecutionContext execution_context { realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+        auto previous_shadow_root_owner_invalidation = snapshot_shadow_root_owner_invalidation();
 
         // 1. Let rules be the result of running parse a stylesheet’s contents from text.
         auto rules = CSS::Parser::Parser::create(make_parsing_params(), text).parse_as_stylesheet_contents();
@@ -434,7 +503,7 @@ GC::Ref<WebIDL::Promise> CSSStyleSheet::replace(String text)
 
         // 3. Set sheet’s CSS rules to rules.
         m_rules->set_rules({}, rules_without_import);
-        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetReplace);
+        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetReplace, &previous_shadow_root_owner_invalidation);
 
         // 4. Unset sheet’s disallow modification flag.
         set_disallow_modification(false);
@@ -455,6 +524,8 @@ WebIDL::ExceptionOr<void> CSSStyleSheet::replace_sync(StringView text)
     if (disallow_modification())
         return WebIDL::NotAllowedError::create(realm(), "Can't call replaceSync() on non-modifiable stylesheets"_utf16);
 
+    auto previous_shadow_root_owner_invalidation = snapshot_shadow_root_owner_invalidation();
+
     // 2. Let rules be the result of running parse a stylesheet’s contents from text.
     auto rules = CSS::Parser::Parser::create(make_parsing_params(), text).parse_as_stylesheet_contents();
 
@@ -472,7 +543,7 @@ WebIDL::ExceptionOr<void> CSSStyleSheet::replace_sync(StringView text)
 
     // 4. Set sheet’s CSS rules to rules.
     m_rules->set_rules({}, rules_without_import);
-    invalidate_owners(DOM::StyleInvalidationReason::StyleSheetReplace);
+    invalidate_owners(DOM::StyleInvalidationReason::StyleSheetReplace, &previous_shadow_root_owner_invalidation);
 
     return {};
 }
@@ -580,6 +651,7 @@ void CSSStyleSheet::set_disabled(bool disabled)
     if (this->disabled() == disabled)
         return;
 
+    auto previous_shadow_root_owner_invalidation = snapshot_shadow_root_owner_invalidation();
     auto document = owning_document();
     // When a stylesheet is disabled we stop evaluating its media queries, so
     // both the cached top-level match bit and the MediaList's internal state
@@ -599,7 +671,7 @@ void CSSStyleSheet::set_disabled(bool disabled)
         document->font_computer().unload_fonts_from_sheet(*this);
     }
 
-    invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDisabledStateChange);
+    invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDisabledStateChange, &previous_shadow_root_owner_invalidation);
 }
 
 void CSSStyleSheet::for_each_owning_style_scope(Function<void(StyleScope&)> const& callback) const
@@ -613,7 +685,30 @@ void CSSStyleSheet::for_each_owning_style_scope(Function<void(StyleScope&)> cons
     }
 }
 
-void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
+Vector<CSSStyleSheet::ShadowRootOwnerInvalidationSnapshot> CSSStyleSheet::snapshot_shadow_root_owner_invalidation() const
+{
+    Vector<ShadowRootOwnerInvalidationSnapshot> snapshots;
+    auto keyframe_names = collect_effective_keyframe_rule_names(*this);
+
+    for (auto& document_or_shadow_root : m_owning_documents_or_shadow_roots) {
+        auto* shadow_root = as_if<DOM::ShadowRoot>(*document_or_shadow_root);
+        if (!shadow_root)
+            continue;
+
+        auto effects = determine_shadow_root_stylesheet_effects(*this, *shadow_root);
+        snapshots.append({
+            .shadow_root = shadow_root,
+            .may_match_shadow_host = effects.may_match_shadow_host,
+            .may_match_light_dom_under_shadow_host = effects.may_match_light_dom_under_shadow_host,
+            .may_affect_assigned_nodes_via_slots = effects.may_affect_assigned_nodes_via_slots,
+            .keyframe_names = keyframe_names,
+        });
+    }
+
+    return snapshots;
+}
+
+void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason, Vector<ShadowRootOwnerInvalidationSnapshot> const* previous_shadow_root_owner_invalidation)
 {
     if (reason == DOM::StyleInvalidationReason::MediaListSetMediaText
         || reason == DOM::StyleInvalidationReason::MediaListAppendMedium
@@ -626,22 +721,36 @@ void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
         style_scope.node().invalidate_style(reason);
 
         if (auto* shadow_root = as_if<DOM::ShadowRoot>(style_scope.node())) {
-            auto effects = determine_shadow_root_stylesheet_effects(*this, *shadow_root);
+            auto current_effects = determine_shadow_root_stylesheet_effects(*this, *shadow_root);
+            auto current_snapshot = ShadowRootOwnerInvalidationSnapshot {
+                .shadow_root = shadow_root,
+                .may_match_shadow_host = current_effects.may_match_shadow_host,
+                .may_match_light_dom_under_shadow_host = current_effects.may_match_light_dom_under_shadow_host,
+                .may_affect_assigned_nodes_via_slots = current_effects.may_affect_assigned_nodes_via_slots,
+                .keyframe_names = collect_effective_keyframe_rule_names(*this),
+            };
+            auto merged_snapshot = merge_shadow_root_owner_invalidation_snapshots(
+                current_snapshot,
+                previous_shadow_root_owner_invalidation ? find_shadow_root_owner_invalidation_snapshot(*previous_shadow_root_owner_invalidation, *shadow_root) : nullptr);
 
-            if (effects.may_affect_assigned_nodes_via_slots)
+            if (merged_snapshot.may_affect_assigned_nodes_via_slots)
                 invalidate_assigned_elements_for_shadow_root_slots(*shadow_root);
 
-            if (stylesheet_has_effective_keyframes_rules(*this))
-                invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(*this, *shadow_root);
+            if (!merged_snapshot.keyframe_names.is_empty())
+                invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(
+                    merged_snapshot.keyframe_names,
+                    *shadow_root,
+                    merged_snapshot.may_match_shadow_host,
+                    merged_snapshot.may_match_light_dom_under_shadow_host);
 
             if (auto* host = shadow_root->host()) {
                 // Broad owner invalidation still has to fan out to the host
                 // side for selectors that can escape the shadow tree, but we
                 // keep purely shadow-local mutations from restyling unrelated
                 // light-DOM descendants.
-                if (effects.may_match_light_dom_under_shadow_host)
+                if (merged_snapshot.may_match_light_dom_under_shadow_host)
                     host->root().invalidate_style(reason);
-                else if (effects.may_match_shadow_host)
+                else if (merged_snapshot.may_match_shadow_host)
                     host->set_needs_style_update(true);
             }
         }

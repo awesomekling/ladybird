@@ -1,0 +1,18 @@
+before replaceSync host color: rgb(255, 0, 0)
+before replaceSync host opacity: 0.25
+before replaceSync slotted background: rgb(0, 0, 255)
+after replaceSync host color: rgb(0, 0, 0)
+after replaceSync host opacity: 1
+after replaceSync slotted background: rgba(0, 0, 0, 0)
+before media off host color: rgb(255, 0, 0)
+before media off host opacity: 0.25
+before media off slotted background: rgb(0, 0, 255)
+after media off host color: rgb(0, 0, 0)
+after media off host opacity: 1
+after media off slotted background: rgba(0, 0, 0, 0)
+before disable host color: rgb(255, 0, 0)
+before disable host opacity: 0.25
+before disable slotted background: rgb(0, 0, 255)
+after disable host color: rgb(0, 0, 0)
+after disable host opacity: 1
+after disable slotted background: rgba(0, 0, 0, 0)
