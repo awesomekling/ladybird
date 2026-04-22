@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/SelectorEngine.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
 #include <LibWeb/CSS/StyleSheetList.h>
@@ -27,6 +28,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/StyleElementBase.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
+#include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -146,6 +148,85 @@ static void invalidate_owners_for_inserted_keyframes_rule(CSSStyleSheet const& s
             invalidate_elements_affected_by_inserted_keyframes_rule(affected_root, keyframes_rule.name());
         });
     }
+}
+
+static bool stylesheet_has_effective_keyframes_rules(CSSStyleSheet const& style_sheet)
+{
+    bool has_keyframes_rules = false;
+    style_sheet.for_each_effective_keyframes_at_rule([&](CSSKeyframesRule const&) {
+        has_keyframes_rules = true;
+    });
+    return has_keyframes_rules;
+}
+
+static void invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(CSSStyleSheet const& style_sheet, DOM::ShadowRoot& shadow_root)
+{
+    auto* host = shadow_root.host();
+    if (!host)
+        return;
+
+    style_sheet.for_each_effective_keyframes_at_rule([&](CSSKeyframesRule const& keyframes_rule) {
+        invalidate_elements_affected_by_inserted_keyframes_rule(*host, keyframes_rule.name());
+    });
+}
+
+struct ShadowRootStylesheetEffects {
+    bool may_match_shadow_host { false };
+    bool may_match_light_dom_under_shadow_host { false };
+    bool may_affect_assigned_nodes_via_slots { false };
+};
+
+static ShadowRootStylesheetEffects determine_shadow_root_stylesheet_effects(CSSStyleSheet const& style_sheet, DOM::ShadowRoot const& shadow_root)
+{
+    ShadowRootStylesheetEffects effects;
+
+    Vector<GC::Ptr<HTML::HTMLSlotElement const>> slots;
+    shadow_root.for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](HTML::HTMLSlotElement const& slot) {
+        slots.append(slot);
+        return TraversalDecision::Continue;
+    });
+
+    style_sheet.for_each_effective_style_producing_rule([&](CSSRule const& rule) {
+        if (effects.may_match_shadow_host && effects.may_match_light_dom_under_shadow_host && effects.may_affect_assigned_nodes_via_slots)
+            return;
+
+        if (!is<CSSStyleRule>(rule))
+            return;
+
+        auto const& style_rule = as<CSSStyleRule>(rule);
+        for (auto const& selector : style_rule.absolutized_selectors()) {
+            effects.may_match_shadow_host |= selector->contains_pseudo_class(PseudoClass::Host);
+            effects.may_match_light_dom_under_shadow_host |= selector_may_match_light_dom_under_shadow_host(*selector);
+
+            if (!effects.may_affect_assigned_nodes_via_slots && !slots.is_empty()) {
+                for (auto const& slot : slots) {
+                    SelectorEngine::MatchContext context {
+                        .style_sheet_for_rule = style_sheet,
+                        .subject = *slot,
+                        .rule_shadow_root = &shadow_root,
+                    };
+                    if (SelectorEngine::matches(*selector, *slot, shadow_root.host(), context)) {
+                        effects.may_affect_assigned_nodes_via_slots = true;
+                        break;
+                    }
+                }
+            }
+
+            if (effects.may_match_shadow_host && effects.may_match_light_dom_under_shadow_host && effects.may_affect_assigned_nodes_via_slots)
+                return;
+        }
+    });
+
+    return effects;
+}
+
+static void invalidate_assigned_elements_for_shadow_root_slots(DOM::ShadowRoot& shadow_root)
+{
+    shadow_root.for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([](HTML::HTMLSlotElement& slot) {
+        for (auto const& assigned_element : slot.assigned_elements({ .flatten = true }))
+            assigned_element->set_needs_style_update(true);
+        return TraversalDecision::Continue;
+    });
 }
 
 GC::Ref<CSSStyleSheet> CSSStyleSheet::create(JS::Realm& realm, CSSRuleList& rules, MediaList& media, Optional<::URL::URL> location)
@@ -543,6 +624,27 @@ void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
     for_each_owning_style_scope([&](StyleScope& style_scope) {
         style_scope.invalidate_rule_cache();
         style_scope.node().invalidate_style(reason);
+
+        if (auto* shadow_root = as_if<DOM::ShadowRoot>(style_scope.node())) {
+            auto effects = determine_shadow_root_stylesheet_effects(*this, *shadow_root);
+
+            if (effects.may_affect_assigned_nodes_via_slots)
+                invalidate_assigned_elements_for_shadow_root_slots(*shadow_root);
+
+            if (stylesheet_has_effective_keyframes_rules(*this))
+                invalidate_host_side_nodes_affected_by_shadow_root_keyframes_rules(*this, *shadow_root);
+
+            if (auto* host = shadow_root->host()) {
+                // Broad owner invalidation still has to fan out to the host
+                // side for selectors that can escape the shadow tree, but we
+                // keep purely shadow-local mutations from restyling unrelated
+                // light-DOM descendants.
+                if (effects.may_match_light_dom_under_shadow_host)
+                    host->root().invalidate_style(reason);
+                else if (effects.may_match_shadow_host)
+                    host->set_needs_style_update(true);
+            }
+        }
     });
 }
 
