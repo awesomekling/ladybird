@@ -11,12 +11,15 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSCounterStyleRule.h>
 #include <LibWeb/CSS/CSSImportRule.h>
+#include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleSheetInvalidation.h>
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/StyleElementBase.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
@@ -27,6 +30,24 @@
 namespace Web::CSS {
 
 GC_DEFINE_ALLOCATOR(CSSStyleSheet);
+
+static void invalidate_owners_for_inserted_style_rule(CSSStyleSheet const& style_sheet, CSSStyleRule const& style_rule, DOM::StyleInvalidationReason reason)
+{
+    StyleSheetInvalidationSet invalidation_set;
+    extend_style_sheet_invalidation_set_with_style_rule(invalidation_set, style_rule);
+
+    for (auto& document_or_shadow_root : style_sheet.owning_documents_or_shadow_roots()) {
+        auto& style_scope = document_or_shadow_root->is_shadow_root()
+            ? as<DOM::ShadowRoot>(*document_or_shadow_root).style_scope()
+            : document_or_shadow_root->document().style_scope();
+        style_scope.invalidate_rule_cache();
+
+        // A dirty shadow subtree can still need follow-up invalidation on the
+        // host side for :host(...) and ::slotted(...) matches, so we don't
+        // skip shadow roots even when their entire subtree is already marked.
+        invalidate_root_for_style_sheet_change(*document_or_shadow_root, invalidation_set, reason);
+    }
+}
 
 GC::Ref<CSSStyleSheet> CSSStyleSheet::create(JS::Realm& realm, CSSRuleList& rules, MediaList& media, Optional<::URL::URL> location)
 {
@@ -163,7 +184,10 @@ WebIDL::ExceptionOr<unsigned> CSSStyleSheet::insert_rule(StringView rule, unsign
         // NOTE: The spec doesn't say where to set the parent style sheet, so we'll do it here.
         parsed_rule->set_parent_style_sheet(this);
 
-        invalidate_owners(DOM::StyleInvalidationReason::StyleSheetInsertRule);
+        if (!constructed() && owner_node() && owner_node()->is_html_style_element() && parsed_rule->type() == CSSRule::Type::Style)
+            invalidate_owners_for_inserted_style_rule(*this, as<CSSStyleRule>(*parsed_rule), DOM::StyleInvalidationReason::StyleSheetInsertRule);
+        else
+            invalidate_owners(DOM::StyleInvalidationReason::StyleSheetInsertRule);
     }
 
     return result;
