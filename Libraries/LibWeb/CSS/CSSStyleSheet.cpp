@@ -372,7 +372,19 @@ void CSSStyleSheet::set_disabled(bool disabled)
     if (this->disabled() == disabled)
         return;
 
+    // When a stylesheet is disabled we stop evaluating its media queries, so
+    // both the cached top-level match bit and the MediaList's internal state
+    // can go stale across viewport changes. Clear the cache for both
+    // directions, and eagerly refresh on re-enable so subsequent rule-cache
+    // rebuilds see the current media state instead of the pre-disable one.
+    m_did_match = {};
     StyleSheet::set_disabled(disabled);
+
+    if (!disabled) {
+        if (auto document = owning_document())
+            evaluate_media_queries(*document);
+    }
+
     invalidate_owners(DOM::StyleInvalidationReason::StyleSheetDisabledStateChange);
 }
 
@@ -389,7 +401,11 @@ void CSSStyleSheet::for_each_owning_style_scope(Function<void(StyleScope&)> cons
 
 void CSSStyleSheet::invalidate_owners(DOM::StyleInvalidationReason reason)
 {
-    m_did_match = {};
+    if (reason == DOM::StyleInvalidationReason::MediaListSetMediaText
+        || reason == DOM::StyleInvalidationReason::MediaListAppendMedium
+        || reason == DOM::StyleInvalidationReason::MediaListDeleteMedium) {
+        m_did_match = {};
+    }
 
     for_each_owning_style_scope([&](StyleScope& style_scope) {
         style_scope.invalidate_rule_cache();
