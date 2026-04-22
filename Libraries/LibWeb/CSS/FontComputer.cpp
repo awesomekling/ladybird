@@ -743,9 +743,18 @@ void FontComputer::unload_fonts_from_sheet(CSSStyleSheet& sheet)
     // If a @font-face rule is removed from the document, its connected FontFace object is no longer CSS-connected.
     for (auto const& rule : sheet.rules()) {
         if (auto* font_face_rule = as_if<CSSFontFaceRule>(*rule)) {
-            if (auto font_face = font_face_rule->css_connected_font_face())
+            auto font_face = font_face_rule->css_connected_font_face();
+            if (font_face)
                 unregister_font_face(*font_face);
             font_face_rule->disconnect_font_face();
+            // CSSFontFaceRule::disconnect_font_face() only removes the face
+            // from the document's FontFaceSet when the sheet still reports an
+            // owning document. We are called from ownership removal, so the
+            // sheet's owner list is already empty by now; finalize the removal
+            // here using our own document so the FontFaceSet doesn't leak the
+            // face across ownership toggles.
+            if (font_face)
+                document().fonts()->delete_(font_face);
         }
 
         if (auto* font_feature_values_rule = as_if<CSSFontFeatureValuesRule>(*rule))

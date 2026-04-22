@@ -6,5 +6,5 @@ before adopt iframe document.fonts.size: 0
 after adopt length: 1
 after adopt same sheet: false
 after adopt color: rgb(255, 0, 0)
-after adopt old document.fonts.size: 1
+after adopt old document.fonts.size: 0
 after adopt new document.fonts.size: 1
