@@ -21,6 +21,7 @@ public:
 
     // This is nonnull as it is only called after resolving keywords
     NonnullRefPtr<StyleValue const> offset() const { return *m_properties.offset; }
+    RefPtr<StyleValue const> offset_or_null() const { return m_properties.offset; }
 
     bool is_center(SerializationMode) const;
 

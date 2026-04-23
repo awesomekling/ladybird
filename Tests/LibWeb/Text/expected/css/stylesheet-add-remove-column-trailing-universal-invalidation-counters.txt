@@ -1,1 +1,1 @@
-column trailing-universal add invalidations: 5
+column trailing-universal add invalidations: 2

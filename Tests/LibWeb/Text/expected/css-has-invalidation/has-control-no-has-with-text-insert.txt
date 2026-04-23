@@ -4,4 +4,4 @@
   hasMatchInvocations: 0
   hasResultCacheHits: 0
   hasResultCacheMisses: 0
-  styleInvalidations: 2
+  styleInvalidations: 0

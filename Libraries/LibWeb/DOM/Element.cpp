@@ -37,6 +37,7 @@
 #include <LibWeb/CSS/StylePropertyMap.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
+#include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
@@ -1691,7 +1692,20 @@ void Element::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancest
 void Element::children_changed(ChildrenChangedMetadata const& metadata)
 {
     Node::children_changed(metadata);
-    set_needs_style_update(true);
+    auto reason = metadata.type == ChildrenChangedMetadata::Type::Inserted ? StyleInvalidationReason::NodeInsertBefore
+        : metadata.type == ChildrenChangedMetadata::Type::Removal          ? StyleInvalidationReason::NodeRemove
+                                                                           : StyleInvalidationReason::NodeSetTextContent;
+    if (!computed_properties()
+        || affected_by_pseudo_class(CSS::PseudoClass::Empty)
+        || affected_by_pseudo_class(CSS::PseudoClass::Valid)
+        || affected_by_pseudo_class(CSS::PseudoClass::Invalid)) {
+        if (reason == StyleInvalidationReason::NodeInsertBefore) {
+            if (is_connected() || computed_properties())
+                set_needs_style_update(true);
+        } else {
+            set_needs_style_update(true);
+        }
+    }
 
     if (child_style_uses_tree_counting_function()) {
         for_each_child_of_type<Element>([&](Element& element) {
@@ -4410,12 +4424,19 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
         if (m_class_list)
             m_class_list->associated_attribute_changed(value_or_empty);
     } else if (local_name == HTML::AttributeNames::style) {
+        if (old_value == value)
+            return;
+
         // https://drafts.csswg.org/cssom/#ref-for-cssstyledeclaration-updating-flag
         if (m_inline_style && m_inline_style->is_updating())
             return;
         if (!m_inline_style)
             m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, {}, {});
+        auto old_properties = m_inline_style->properties();
+        auto old_custom_properties = m_inline_style->custom_properties();
         m_inline_style->set_declarations_from_text(value.value_or(""_string));
+        if (m_inline_style->properties() == old_properties && m_inline_style->custom_properties() == old_custom_properties)
+            return;
         prefetch_inline_style_image_resources(*m_inline_style, document());
         set_needs_style_update(true);
     } else if (local_name == HTML::AttributeNames::dir) {
