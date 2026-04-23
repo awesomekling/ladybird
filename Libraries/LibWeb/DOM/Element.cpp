@@ -909,6 +909,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     m_affected_by_last_child_pseudo_class = false;
     m_affected_by_forward_positional_pseudo_class = false;
     m_affected_by_backward_positional_pseudo_class = false;
+    m_affected_by_forward_of_type_positional_pseudo_class = false;
+    m_affected_by_backward_of_type_positional_pseudo_class = false;
+    m_affected_by_last_of_type_pseudo_class = false;
+    m_affected_by_only_of_type_pseudo_class = false;
     m_sibling_invalidation_distance = 0;
 
     auto& style_computer = document().style_computer();

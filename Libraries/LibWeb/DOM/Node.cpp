@@ -79,6 +79,16 @@ namespace Web::DOM {
 static UniqueNodeID s_next_unique_id;
 static HashMap<UniqueNodeID, Node*> s_node_directory;
 
+enum class PreviousSiblingInvalidationCause : u8 {
+    None = 0,
+    BackwardPositionalPseudoClass = 1 << 0,
+    BackwardNthLastOfTypePseudoClass = 1 << 1,
+    LastOfTypePseudoClass = 1 << 2,
+    OnlyOfTypePseudoClass = 1 << 3,
+    LastChildPseudoClass = 1 << 4,
+};
+AK_ENUM_BITWISE_OPERATORS(PreviousSiblingInvalidationCause);
+
 static UniqueNodeID allocate_unique_id(Node* node)
 {
     auto id = s_next_unique_id;
@@ -492,16 +502,60 @@ void Node::invalidate_style(StyleInvalidationReason reason)
 
     mark_entire_subtree_for_style_update(*this);
 
-    auto previous_sibling_needs_structural_invalidation = [reason, inserted_at_end = !next_sibling()](Element const& element, bool is_immediate_previous_sibling) {
+    auto mutated_root_element_local_name = [this, reason]() -> Optional<FlyString> {
+        if (reason != StyleInvalidationReason::NodeInsertBefore && reason != StyleInvalidationReason::NodeRemove)
+            return {};
+        if (auto* element = as_if<Element>(*this))
+            return element->local_name();
+        return {};
+    }();
+
+    Element const* nearest_previous_same_type_element_sibling = nullptr;
+    if (reason == StyleInvalidationReason::NodeInsertBefore && mutated_root_element_local_name.has_value()) {
+        bool has_following_same_type_element_sibling = false;
+        for (auto* sibling = next_sibling(); sibling; sibling = sibling->next_sibling()) {
+            auto* element = as_if<Element>(sibling);
+            if (element && element->local_name() == *mutated_root_element_local_name) {
+                has_following_same_type_element_sibling = true;
+                break;
+            }
+        }
+
+        if (!has_following_same_type_element_sibling) {
+            for (auto* sibling = previous_sibling(); sibling; sibling = sibling->previous_sibling()) {
+                auto* element = as_if<Element>(sibling);
+                if (element && element->local_name() == *mutated_root_element_local_name) {
+                    nearest_previous_same_type_element_sibling = element;
+                    break;
+                }
+            }
+        }
+    }
+
+    auto previous_sibling_needs_structural_invalidation = [reason, inserted_at_end = !next_sibling(), mutated_root_element_local_name, nearest_previous_same_type_element_sibling](Element const& element, bool is_immediate_previous_sibling) {
         if (reason != StyleInvalidationReason::NodeInsertBefore)
             return element.affected_by_backward_structural_changes();
+
+        PreviousSiblingInvalidationCause causes = PreviousSiblingInvalidationCause::None;
         if (element.affected_by_backward_positional_pseudo_class())
-            return true;
-        return inserted_at_end && is_immediate_previous_sibling && element.affected_by_last_child_pseudo_class();
+            causes |= PreviousSiblingInvalidationCause::BackwardPositionalPseudoClass;
+        if (mutated_root_element_local_name.has_value() && *mutated_root_element_local_name == element.local_name()) {
+            if (element.affected_by_backward_nth_last_of_type_pseudo_class())
+                causes |= PreviousSiblingInvalidationCause::BackwardNthLastOfTypePseudoClass;
+            if (&element == nearest_previous_same_type_element_sibling && element.affected_by_last_of_type_pseudo_class())
+                causes |= PreviousSiblingInvalidationCause::LastOfTypePseudoClass;
+            if (&element == nearest_previous_same_type_element_sibling && element.affected_by_only_of_type_pseudo_class())
+                causes |= PreviousSiblingInvalidationCause::OnlyOfTypePseudoClass;
+        }
+        if (inserted_at_end && is_immediate_previous_sibling && element.affected_by_last_child_pseudo_class())
+            causes |= PreviousSiblingInvalidationCause::LastChildPseudoClass;
+        return causes != PreviousSiblingInvalidationCause::None;
     };
 
-    auto next_sibling_needs_structural_invalidation = [](Element const& element, size_t current_sibling_distance) {
+    auto next_sibling_needs_structural_invalidation = [mutated_root_element_local_name](Element const& element, size_t current_sibling_distance) {
         if (element.affected_by_indirect_sibling_combinator() || element.affected_by_first_child_pseudo_class() || element.affected_by_forward_positional_pseudo_class())
+            return true;
+        if (mutated_root_element_local_name.has_value() && *mutated_root_element_local_name == element.local_name() && element.affected_by_forward_of_type_positional_pseudo_class())
             return true;
         return element.affected_by_direct_sibling_combinator() && current_sibling_distance <= element.sibling_invalidation_distance();
     };

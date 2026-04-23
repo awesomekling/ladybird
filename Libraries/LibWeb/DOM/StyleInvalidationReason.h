@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include <AK/EnumBits.h>
+#include <AK/FlyString.h>
+#include <AK/StringView.h>
+
 namespace Web::DOM {
 
 #define ENUMERATE_STYLE_INVALIDATION_REASONS(X)     \
@@ -63,5 +67,18 @@ enum class StyleInvalidationReason {
 struct StyleInvalidationOptions {
     bool invalidate_self { false };
 };
+
+enum class StyleDirtyingSource : u8 {
+    None = 0,
+    DirectSetNeedsStyleUpdate = 1 << 0,
+    EntireSubtreeRoot = 1 << 1,
+    EntireSubtreePreviousSibling = 1 << 2,
+    EntireSubtreeNextSibling = 1 << 3,
+    ChildrenChangedParent = 1 << 4,
+};
+AK_ENUM_BITWISE_OPERATORS(StyleDirtyingSource);
+
+[[nodiscard]] FlyString style_dirtying_source_name(StyleDirtyingSource);
+[[nodiscard]] FlyString style_dirtying_source_combination_name(StyleDirtyingSource);
 
 }

@@ -10,6 +10,18 @@
     #nth-last-child-parent .item:nth-last-child(2) {
         color: rgb(0, 128, 0);
     }
+    #last-of-type-parent span:last-of-type {
+        color: rgb(255, 0, 0);
+    }
+    #last-of-type-insert-before-div-parent span:last-of-type {
+        color: rgb(255, 0, 0);
+    }
+    #nth-last-of-type-parent span:nth-last-of-type(2) {
+        color: rgb(0, 128, 0);
+    }
+    #only-of-type-parent span:only-of-type {
+        color: rgb(255, 0, 0);
+    }
 </style>
 <div id="last-child-parent">
     <span class="item" id="last-a">a</span>
@@ -18,6 +30,26 @@
 <div id="nth-last-child-parent">
     <span class="item" id="nth-a">a</span>
     <span class="item" id="nth-b">b</span>
+</div>
+<div id="last-of-type-parent">
+    <span class="item" id="last-type-a">a</span>
+    <div id="last-type-divider"></div>
+    <span class="item" id="last-type-b">b</span>
+</div>
+<div id="nth-last-of-type-parent">
+    <span class="item" id="nth-type-a">a</span>
+    <div id="nth-type-divider"></div>
+    <span class="item" id="nth-type-b">b</span>
+</div>
+<div id="last-of-type-insert-before-div-parent">
+    <span class="item" id="last-type-insert-a">a</span>
+    <div id="last-type-insert-divider"></div>
+    <span class="item" id="last-type-insert-b">b</span>
+    <div id="last-type-insert-trailing-div"></div>
+</div>
+<div id="only-of-type-parent">
+    <span class="item" id="only-type-a">a</span>
+    <div id="only-type-divider"></div>
 </div>
 <script>
     function color(id) {
@@ -58,5 +90,62 @@
         println(`nth-a after append: ${color("nth-a")}`);
         println(`nth-b after append: ${color("nth-b")}`);
         println(`nth-c after append: ${color("nth-c")}`);
+
+        println(`last-type-b before div append: ${color("last-type-b")}`);
+
+        const trailingDiv = document.createElement("div");
+        trailingDiv.id = "last-type-trailing-div";
+        document.getElementById("last-of-type-parent").appendChild(trailingDiv);
+
+        println(`last-type-b after div append: ${color("last-type-b")}`);
+
+        const trailingSpan = document.createElement("span");
+        trailingSpan.className = "item";
+        trailingSpan.id = "last-type-c";
+        trailingSpan.textContent = "c";
+        document.getElementById("last-of-type-parent").appendChild(trailingSpan);
+
+        println(`last-type-b after span append: ${color("last-type-b")}`);
+        println(`last-type-c after span append: ${color("last-type-c")}`);
+
+        println(`last-type-insert-b before insert-before-div: ${color("last-type-insert-b")}`);
+
+        const beforeTrailingDivSpan = document.createElement("span");
+        beforeTrailingDivSpan.className = "item";
+        beforeTrailingDivSpan.id = "last-type-inserted-before-div";
+        beforeTrailingDivSpan.textContent = "inserted";
+        document.getElementById("last-of-type-insert-before-div-parent").insertBefore(beforeTrailingDivSpan, document.getElementById("last-type-insert-trailing-div"));
+
+        println(`last-type-insert-b after insert-before-div: ${color("last-type-insert-b")}`);
+        println(`last-type-inserted-before-div after insert-before-div: ${color("last-type-inserted-before-div")}`);
+
+        println(`nth-type-a before div append: ${color("nth-type-a")}`);
+
+        const nthTrailingDiv = document.createElement("div");
+        nthTrailingDiv.id = "nth-type-trailing-div";
+        document.getElementById("nth-last-of-type-parent").appendChild(nthTrailingDiv);
+
+        println(`nth-type-a after div append: ${color("nth-type-a")}`);
+
+        const nthTrailingSpan = document.createElement("span");
+        nthTrailingSpan.className = "item";
+        nthTrailingSpan.id = "nth-type-c";
+        nthTrailingSpan.textContent = "c";
+        document.getElementById("nth-last-of-type-parent").appendChild(nthTrailingSpan);
+
+        println(`nth-type-a after span append: ${color("nth-type-a")}`);
+        println(`nth-type-b after span append: ${color("nth-type-b")}`);
+        println(`nth-type-c after span append: ${color("nth-type-c")}`);
+
+        println(`only-type-a before insert: ${color("only-type-a")}`);
+
+        const onlyTypeInserted = document.createElement("span");
+        onlyTypeInserted.className = "item";
+        onlyTypeInserted.id = "only-type-b";
+        onlyTypeInserted.textContent = "b";
+        document.getElementById("only-of-type-parent").insertBefore(onlyTypeInserted, document.getElementById("only-type-divider"));
+
+        println(`only-type-a after insert: ${color("only-type-a")}`);
+        println(`only-type-b after insert: ${color("only-type-b")}`);
     });
 </script>

@@ -541,17 +541,28 @@ public:
     bool affected_by_backward_positional_pseudo_class() const { return m_affected_by_backward_positional_pseudo_class; }
     void set_affected_by_backward_positional_pseudo_class(bool value) { m_affected_by_backward_positional_pseudo_class = value; }
 
+    bool affected_by_forward_of_type_positional_pseudo_class() const { return m_affected_by_forward_of_type_positional_pseudo_class; }
+    void set_affected_by_forward_of_type_positional_pseudo_class(bool value) { m_affected_by_forward_of_type_positional_pseudo_class = value; }
+
+    bool affected_by_backward_of_type_positional_pseudo_class() const { return m_affected_by_backward_of_type_positional_pseudo_class || m_affected_by_last_of_type_pseudo_class || m_affected_by_only_of_type_pseudo_class; }
+    void set_affected_by_backward_of_type_positional_pseudo_class(bool value) { m_affected_by_backward_of_type_positional_pseudo_class = value; }
+    bool affected_by_backward_nth_last_of_type_pseudo_class() const { return m_affected_by_backward_of_type_positional_pseudo_class; }
+    bool affected_by_last_of_type_pseudo_class() const { return m_affected_by_last_of_type_pseudo_class; }
+    void set_affected_by_last_of_type_pseudo_class(bool value) { m_affected_by_last_of_type_pseudo_class = value; }
+    bool affected_by_only_of_type_pseudo_class() const { return m_affected_by_only_of_type_pseudo_class; }
+    void set_affected_by_only_of_type_pseudo_class(bool value) { m_affected_by_only_of_type_pseudo_class = value; }
+
     size_t sibling_invalidation_distance() const { return m_sibling_invalidation_distance; }
     void set_sibling_invalidation_distance(size_t value) { m_sibling_invalidation_distance = value; }
 
     bool affected_by_forward_structural_changes() const
     {
-        return affected_by_direct_sibling_combinator() || affected_by_indirect_sibling_combinator() || affected_by_first_child_pseudo_class() || affected_by_forward_positional_pseudo_class();
+        return affected_by_direct_sibling_combinator() || affected_by_indirect_sibling_combinator() || affected_by_first_child_pseudo_class() || affected_by_forward_positional_pseudo_class() || affected_by_forward_of_type_positional_pseudo_class();
     }
 
     bool affected_by_backward_structural_changes() const
     {
-        return affected_by_last_child_pseudo_class() || affected_by_backward_positional_pseudo_class();
+        return affected_by_last_child_pseudo_class() || affected_by_backward_positional_pseudo_class() || affected_by_backward_of_type_positional_pseudo_class();
     }
 
     i32 number_of_owned_list_items() const;
@@ -719,6 +730,10 @@ private:
     bool m_affected_by_last_child_pseudo_class : 1 { false };
     bool m_affected_by_forward_positional_pseudo_class : 1 { false };
     bool m_affected_by_backward_positional_pseudo_class : 1 { false };
+    bool m_affected_by_forward_of_type_positional_pseudo_class : 1 { false };
+    bool m_affected_by_backward_of_type_positional_pseudo_class : 1 { false };
+    bool m_affected_by_last_of_type_pseudo_class : 1 { false };
+    bool m_affected_by_only_of_type_pseudo_class : 1 { false };
     bool m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator : 1 { false };
     bool m_in_subtree_of_has_pseudo_class_relative_selector_with_sibling_combinator : 1 { false };
     bool m_in_has_scope : 1 { false };
