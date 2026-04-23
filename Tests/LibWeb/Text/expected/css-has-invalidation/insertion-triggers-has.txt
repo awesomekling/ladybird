@@ -4,7 +4,7 @@
   hasMatchInvocations: 1
   hasResultCacheHits: 0
   hasResultCacheMisses: 1
-  styleInvalidations: 2
+  styleInvalidations: 1
 [remove the matching span]
   hasAncestorWalkInvocations: 1
   hasAncestorWalkVisits: 2

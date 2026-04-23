@@ -781,7 +781,15 @@ void Node::insert_before(GC::Ref<Node> node, GC::Ptr<Node> child, bool suppress_
         // 6. Run assign slottables for a tree with node’s root.
         assign_slottables_for_a_tree(node_to_insert->root());
 
-        node_to_insert->invalidate_style(StyleInvalidationReason::NodeInsertBefore);
+        bool inserted_subtree_has_existing_computed_style = false;
+        node_to_insert->for_each_shadow_including_inclusive_descendant([&](Node& inclusive_descendant) {
+            if (auto* element = as_if<Element>(inclusive_descendant); element && element->computed_properties())
+                inserted_subtree_has_existing_computed_style = true;
+            return TraversalDecision::Continue;
+        });
+
+        if (is_connected() || inserted_subtree_has_existing_computed_style)
+            node_to_insert->invalidate_style(StyleInvalidationReason::NodeInsertBefore);
 
         // 7. For each shadow-including inclusive descendant inclusiveDescendant of node, in shadow-including tree order:
         node_to_insert->for_each_shadow_including_inclusive_descendant([&](Node& inclusive_descendant) {
@@ -1892,7 +1900,6 @@ void Node::inserted()
         m_is_connected = parent()->is_connected();
 
     recompute_editable_subtree_flag();
-    set_needs_style_update(true);
 }
 
 void Node::removed_from(IsSubtreeRoot, Node*, Node&)
