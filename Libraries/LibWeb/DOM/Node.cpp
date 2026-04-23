@@ -492,8 +492,12 @@ void Node::invalidate_style(StyleInvalidationReason reason)
 
     mark_entire_subtree_for_style_update(*this);
 
-    auto previous_sibling_needs_structural_invalidation = [](Element const& element) {
-        return element.affected_by_backward_structural_changes();
+    auto previous_sibling_needs_structural_invalidation = [reason, inserted_at_end = !next_sibling()](Element const& element, bool is_immediate_previous_sibling) {
+        if (reason != StyleInvalidationReason::NodeInsertBefore)
+            return element.affected_by_backward_structural_changes();
+        if (element.affected_by_backward_positional_pseudo_class())
+            return true;
+        return inserted_at_end && is_immediate_previous_sibling && element.affected_by_last_child_pseudo_class();
     };
 
     auto next_sibling_needs_structural_invalidation = [](Element const& element, size_t current_sibling_distance) {
@@ -503,9 +507,13 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     };
 
     if (reason == StyleInvalidationReason::NodeInsertBefore || reason == StyleInvalidationReason::NodeRemove) {
+        bool is_immediate_previous_element_sibling = true;
         for (auto* sibling = previous_sibling(); sibling; sibling = sibling->previous_sibling()) {
-            if (auto* element = as_if<Element>(sibling); element && previous_sibling_needs_structural_invalidation(*element))
-                mark_entire_subtree_for_style_update(*element);
+            if (auto* element = as_if<Element>(sibling)) {
+                if (previous_sibling_needs_structural_invalidation(*element, is_immediate_previous_element_sibling))
+                    mark_entire_subtree_for_style_update(*element);
+                is_immediate_previous_element_sibling = false;
+            }
         }
     }
 

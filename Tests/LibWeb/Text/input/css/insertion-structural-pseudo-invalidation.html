@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .item {
+        color: black;
+    }
+    #last-child-parent .item:last-child {
+        color: rgb(255, 0, 0);
+    }
+    #nth-last-child-parent .item:nth-last-child(2) {
+        color: rgb(0, 128, 0);
+    }
+</style>
+<div id="last-child-parent">
+    <span class="item" id="last-a">a</span>
+    <span class="item" id="last-b">b</span>
+</div>
+<div id="nth-last-child-parent">
+    <span class="item" id="nth-a">a</span>
+    <span class="item" id="nth-b">b</span>
+</div>
+<script>
+    function color(id) {
+        return getComputedStyle(document.getElementById(id)).color;
+    }
+
+    test(() => {
+        println(`last-a before append: ${color("last-a")}`);
+        println(`last-b before append: ${color("last-b")}`);
+
+        const lastC = document.createElement("span");
+        lastC.className = "item";
+        lastC.id = "last-c";
+        lastC.textContent = "c";
+        document.getElementById("last-child-parent").appendChild(lastC);
+
+        println(`last-b after append: ${color("last-b")}`);
+        println(`last-c after append: ${color("last-c")}`);
+
+        const lastInserted = document.createElement("span");
+        lastInserted.className = "item";
+        lastInserted.id = "last-inserted";
+        lastInserted.textContent = "inserted";
+        document.getElementById("last-child-parent").insertBefore(lastInserted, lastC);
+
+        println(`last-inserted after insert-before-last: ${color("last-inserted")}`);
+        println(`last-c after insert-before-last: ${color("last-c")}`);
+
+        println(`nth-a before append: ${color("nth-a")}`);
+        println(`nth-b before append: ${color("nth-b")}`);
+
+        const nthC = document.createElement("span");
+        nthC.className = "item";
+        nthC.id = "nth-c";
+        nthC.textContent = "c";
+        document.getElementById("nth-last-child-parent").appendChild(nthC);
+
+        println(`nth-a after append: ${color("nth-a")}`);
+        println(`nth-b after append: ${color("nth-b")}`);
+        println(`nth-c after append: ${color("nth-c")}`);
+    });
+</script>
