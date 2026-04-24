@@ -30,7 +30,7 @@ TEST_CASE(read_after_aborted_blocking_read)
     auto stream = Media::IncrementallyPopulatedStream::create_empty();
     auto initial_chunk_size = file_data.size() / 4;
     stream->set_expected_size(file_data.size());
-    stream->add_chunk_at(0, file_data.bytes().trim(initial_chunk_size));
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(file_data.bytes().trim(initial_chunk_size))));
 
     // Create the demuxer from the partial stream.
     IGNORE_USE_IN_ESCAPING_LAMBDA auto demuxer = MUST(Media::FFmpeg::FFmpegDemuxer::from_stream(stream));
@@ -85,7 +85,7 @@ TEST_CASE(read_after_aborted_blocking_read)
 
     // Reset the abort state and provide the rest of the file data.
     demuxer->reset_blocking_reads_aborted_for_track(track);
-    stream->add_chunk_at(initial_chunk_size, file_data.bytes().slice(initial_chunk_size));
+    stream->add_chunk_at(initial_chunk_size, MUST(ByteBuffer::copy(file_data.bytes().slice(initial_chunk_size))));
     stream->close();
 
     // Wait for the reader thread to finish. It should successfully read all remaining frames

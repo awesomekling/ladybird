@@ -1298,8 +1298,9 @@ void HTMLMediaElement::load_remote_resource(ByteRange const& byte_range)
                 // 6. Update the media data with the contents of response's unsafe response obtained in this fashion. response can be CORS-same-origin or
                 //    CORS-cross-origin; this affects whether subtitles referenced in the media data are exposed in the API and, for video elements, whether
                 //    a canvas gets tainted when the video is drawn on it.
-                fetch_data->stream->add_chunk_at(fetch_data->offset, media_data.bytes());
-                fetch_data->offset += media_data.size();
+                auto size = media_data.size();
+                fetch_data->stream->add_chunk_at(fetch_data->offset, move(media_data));
+                fetch_data->offset += size;
 
                 weak_self->queue_a_media_element_task([self = weak_self.as_nonnull()] {
                     self->process_media_data(FetchingStatus::Ongoing);

@@ -38,7 +38,7 @@ public:
     using DataRequestCallback = Function<void(u64 offset)>;
     void set_data_request_callback(DataRequestCallback);
 
-    void add_chunk_at(u64 offset, ReadonlyBytes);
+    void add_chunk_at(u64 offset, ByteBuffer);
     u64 next_chunk_start() const { return m_last_chunk_end; }
 
     void close();
@@ -80,21 +80,41 @@ private:
     public:
         DataChunk(u64 offset, ByteBuffer&& data)
             : m_offset(offset)
-            , m_data(move(data))
+            , m_size(data.size())
         {
+            auto fragment_size = data.size();
+            m_fragments.append(move(data));
+            m_fragment_ends.append(fragment_size);
         }
 
         u64 offset() const { return m_offset; }
-        u64 size() const { return m_data.size(); }
-        u64 end() const { return offset() + size(); }
-        ByteBuffer& data() { return m_data; }
-        ByteBuffer const& data() const { return m_data; }
+        u64 size() const { return m_size; }
+        u64 end() const { return m_offset + m_size; }
+        Vector<ByteBuffer> const& fragments() const { return m_fragments; }
+        Vector<u64> const& fragment_ends() const { return m_fragment_ends; }
+
+        // Appends a fragment to the end of this chunk. Caller must ensure that
+        // the fragment abuts the current end of the chunk. This does not copy
+        // any existing data.
+        void append_fragment(ByteBuffer&& fragment)
+        {
+            m_size += fragment.size();
+            m_fragments.append(move(fragment));
+            m_fragment_ends.append(m_size);
+        }
+
         bool contains(u64 position) const { return position >= m_offset && position < end(); }
-        bool overlaps(DataChunk const& chunk) const { return offset() < chunk.end() && chunk.offset() < end(); }
 
     private:
-        size_t m_offset { 0 };
-        ByteBuffer m_data;
+        u64 m_offset { 0 };
+        u64 m_size { 0 };
+        // Data is stored as a list of fragments so that sequential arrivals can be
+        // recorded without any memcpy of previously accumulated data. m_fragment_ends
+        // stores the cumulative size (relative to m_offset) at the end of each
+        // fragment, so we can binary-search to find the fragment covering any
+        // position in O(log F).
+        Vector<ByteBuffer> m_fragments;
+        Vector<u64> m_fragment_ends;
     };
 
     IncrementallyPopulatedStream();

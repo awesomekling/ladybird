@@ -22,9 +22,10 @@ NonnullRefPtr<IncrementallyPopulatedStream> IncrementallyPopulatedStream::create
 NonnullRefPtr<IncrementallyPopulatedStream> IncrementallyPopulatedStream::create_from_data(ReadonlyBytes data)
 {
     auto stream = create_empty();
-    stream->add_chunk_at(0, data);
+    auto size = data.size();
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(data)));
     stream->close();
-    VERIFY(stream->size() == data.size());
+    VERIFY(stream->size() == size);
     return stream;
 }
 
@@ -51,9 +52,8 @@ void IncrementallyPopulatedStream::set_data_request_callback(DataRequestCallback
     m_data_request_callback = move(callback);
 }
 
-void IncrementallyPopulatedStream::add_chunk_at(u64 offset, ReadonlyBytes data)
+void IncrementallyPopulatedStream::add_chunk_at(u64 offset, ByteBuffer data)
 {
-    VERIFY(!data.is_null());
     VERIFY(!data.is_empty());
     auto new_chunk_end = offset + data.size();
     m_last_chunk_end = new_chunk_end;
@@ -62,40 +62,70 @@ void IncrementallyPopulatedStream::add_chunk_at(u64 offset, ReadonlyBytes data)
 
     auto previous_chunk_iter = m_chunks.find_largest_not_above_iterator(offset);
 
-    // Add a new chunk to the collection if there are none.
-    if (previous_chunk_iter.is_end() || previous_chunk_iter->end() < offset) {
-        DataChunk new_chunk { offset, MUST(ByteBuffer::copy(data)) };
-        m_chunks.insert(offset, move(new_chunk));
-        m_state_changed.broadcast();
-        return;
+    if (!previous_chunk_iter.is_end() && previous_chunk_iter->end() == offset) {
+        // Hot path: the new data is a direct continuation of the previous chunk. Append
+        // it as a fragment without copying any existing data.
+        previous_chunk_iter->append_fragment(move(data));
+    } else if (previous_chunk_iter.is_end() || previous_chunk_iter->end() < offset) {
+        // No previous chunk, or the previous chunk ends before our start with a gap.
+        // Insert a new chunk.
+        m_chunks.insert(offset, DataChunk { offset, move(data) });
+    } else {
+        // The previous chunk overlaps this new data. Rare path: typically only happens
+        // when a pre-fetched range races with a new arrival.
+        if (previous_chunk_iter->end() >= new_chunk_end) {
+            // Already fully covered.
+            begin_new_request_while_locked(previous_chunk_iter->end());
+            return;
+        }
+        // Append just the non-overlapping suffix as a new fragment.
+        auto suffix_start_in_data = previous_chunk_iter->end() - offset;
+        auto suffix = MUST(ByteBuffer::copy(data.span().slice(suffix_start_in_data)));
+        previous_chunk_iter->append_fragment(move(suffix));
     }
 
-    auto& chunk = *previous_chunk_iter;
-    auto& buffer = chunk.data();
+    // After insertion/extension, merge with the next chunk if it now abuts or
+    // overlaps. Rare: only happens for pre-fetched ranges meeting new arrivals.
+    auto chunk_iter = m_chunks.find_largest_not_above_iterator(offset);
+    VERIFY(!chunk_iter.is_end());
+    auto next_iter = chunk_iter;
+    ++next_iter;
+    while (!next_iter.is_end() && next_iter->offset() <= chunk_iter->end()) {
+        auto next_offset = next_iter->offset();
+        auto next_end = next_iter->end();
 
-    if (chunk.size() >= new_chunk_end) {
-        // The chunk is fully covered by the existing chunk, skip until after it.
-        begin_new_request_while_locked(chunk.end());
-        return;
-    }
+        if (next_end > chunk_iter->end()) {
+            // Copy only the tail of next_chunk that extends beyond chunk_iter,
+            // assembled from the relevant fragments.
+            auto gap_start = chunk_iter->end();
+            auto tail_size = next_end - gap_start;
+            auto tail = MUST(ByteBuffer::create_uninitialized(tail_size));
+            auto tail_bytes = tail.bytes();
+            u64 local_pos = gap_start - next_offset;
+            u64 bytes_needed = tail_size;
+            u64 out = 0;
+            auto const& frags = next_iter->fragments();
+            auto const& frag_ends = next_iter->fragment_ends();
+            for (size_t i = 0; i < frags.size() && bytes_needed > 0; ++i) {
+                auto frag_start = (i == 0) ? u64 { 0 } : frag_ends[i - 1];
+                auto frag_end = frag_ends[i];
+                if (frag_end <= local_pos)
+                    continue;
+                auto start_in_frag = local_pos - frag_start;
+                auto available = frag_end - local_pos;
+                auto to_copy = min<u64>(available, bytes_needed);
+                frags[i].span().slice(start_in_frag, to_copy).copy_to(tail_bytes.slice(out, to_copy));
+                out += to_copy;
+                local_pos += to_copy;
+                bytes_needed -= to_copy;
+            }
+            chunk_iter->append_fragment(move(tail));
+        }
 
-    // Expand the existing chunk to contain this new data.
-    buffer.resize(new_chunk_end - chunk.offset());
-    data.copy_to(buffer.bytes().slice(offset - chunk.offset()));
-
-    // Join the chunk to the next one if they intersect.
-    auto next_chunk_iter = previous_chunk_iter;
-    ++next_chunk_iter;
-
-    if (!next_chunk_iter.is_end() && next_chunk_iter->offset() <= previous_chunk_iter->end()) {
-        auto& next_chunk = *next_chunk_iter;
-
-        buffer.resize(next_chunk.end() - chunk.offset());
-        next_chunk.data().bytes().copy_to(buffer.bytes().slice(next_chunk.offset() - chunk.offset()));
-
-        VERIFY(m_chunks.remove(next_chunk.offset()));
-
-        begin_new_request_while_locked(chunk.end());
+        VERIFY(m_chunks.remove(next_offset));
+        next_iter = chunk_iter;
+        ++next_iter;
+        begin_new_request_while_locked(chunk_iter->end());
     }
 
     m_state_changed.broadcast();
@@ -193,20 +223,46 @@ size_t IncrementallyPopulatedStream::read_from_chunks_while_locked(u64 position,
 {
     auto chunk_iterator = m_chunks.find_largest_not_above_iterator(position);
     VERIFY(!chunk_iterator.is_end());
-    auto const& chunk = *chunk_iterator;
-    VERIFY(position >= chunk.offset());
-    auto end = position + bytes.size();
-    auto copy_size = bytes.size();
-    if (end > chunk.end()) {
-        VERIFY(m_expected_size.has_value());
-        VERIFY(chunk.end() == m_expected_size.value());
-        end = chunk.end();
-        copy_size = end - position;
+    auto const* chunk = &*chunk_iterator;
+    VERIFY(position >= chunk->offset());
+
+    u64 read_end = position + bytes.size();
+    if (m_closed && m_expected_size.has_value() && read_end > m_expected_size.value())
+        read_end = m_expected_size.value();
+
+    u64 copy_size = read_end > chunk->end() ? chunk->end() - position : read_end - position;
+
+    // Binary-search for the fragment containing `position` within the chunk. After
+    // that we just walk fragments forward until copy_size is satisfied.
+    u64 local_pos = position - chunk->offset();
+    auto const& fragments = chunk->fragments();
+    auto const& fragment_ends = chunk->fragment_ends();
+
+    size_t lo = 0;
+    size_t hi = fragments.size();
+    while (lo < hi) {
+        auto mid = lo + (hi - lo) / 2;
+        if (fragment_ends[mid] <= local_pos)
+            lo = mid + 1;
+        else
+            hi = mid;
     }
 
-    u64 offset_in_chunk = position - chunk.offset();
-    auto source = chunk.data().span().slice(offset_in_chunk, copy_size);
-    source.copy_to(bytes);
+    u64 remaining = copy_size;
+    u64 out = 0;
+    for (size_t i = lo; i < fragments.size() && remaining > 0; ++i) {
+        auto frag_start = (i == 0) ? u64 { 0 } : fragment_ends[i - 1];
+        auto frag_end = fragment_ends[i];
+        auto start_in_frag = local_pos - frag_start;
+        auto available = frag_end - local_pos;
+        auto to_copy = min<u64>(available, remaining);
+        fragments[i].span().slice(start_in_frag, to_copy).copy_to(bytes.slice(out, to_copy));
+        out += to_copy;
+        local_pos += to_copy;
+        remaining -= to_copy;
+    }
+    VERIFY(remaining == 0);
+
     return copy_size;
 }
 

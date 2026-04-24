@@ -140,9 +140,9 @@ TEST_CASE(add_chunks_incrementally)
 
     constexpr size_t data_size = 100;
     auto data = make_test_data(data_size);
-    stream->add_chunk_at(0, data.bytes().trim(50));
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(data.bytes().trim(50))));
 
-    stream->add_chunk_at(50, data.bytes().slice(50));
+    stream->add_chunk_at(50, MUST(ByteBuffer::copy(data.bytes().slice(50))));
     stream->close();
 
     EXPECT(stream->expected_size().has_value());
@@ -163,8 +163,8 @@ TEST_CASE(add_overlapping_chunks)
 
     constexpr size_t data_size = 100;
     auto data = make_test_data(data_size);
-    stream->add_chunk_at(0, data.bytes().trim(50));
-    stream->add_chunk_at(40, data.bytes().slice(40));
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(data.bytes().trim(50))));
+    stream->add_chunk_at(40, MUST(ByteBuffer::copy(data.bytes().slice(40))));
 
     auto cursor = stream->create_cursor();
     Array<u8, data_size> buffer;
@@ -184,8 +184,8 @@ TEST_CASE(add_chunk_at_offset)
     stream->set_data_request_callback([](u64) { });
 
     auto data = make_test_data(80);
-    stream->add_chunk_at(0, data.bytes().trim(30));
-    stream->add_chunk_at(50, data.bytes().slice(50));
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(data.bytes().trim(30))));
+    stream->add_chunk_at(50, MUST(ByteBuffer::copy(data.bytes().slice(50))));
 
     auto cursor = stream->create_cursor();
     MUST(cursor->seek(50, SeekMode::SetPosition));
@@ -234,7 +234,7 @@ TEST_CASE(cursor_abort_and_reset)
     // After aborting a read, reset_abort() should allow us to read again.
     cursor->reset_abort();
     auto data = make_test_data(100);
-    stream->add_chunk_at(0, data.bytes());
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(data.bytes())));
 
     Array<u8, 10> buffer;
     auto result = cursor->read_into(buffer);
@@ -256,14 +256,14 @@ TEST_CASE(data_request_callback_invoked)
 
     // Add initial chunk so the callback logic can be triggered
     auto initial_data = make_test_data(initial_chunk_size);
-    stream->add_chunk_at(0, initial_data.bytes());
+    stream->add_chunk_at(0, MUST(ByteBuffer::copy(initial_data.bytes())));
 
     bool callback_invoked { false };
     u64 requested_offset { 0 };
 
     stream->set_data_request_callback([&](u64 offset) {
         auto data = make_test_data(100);
-        stream->add_chunk_at(seek_position, data.bytes());
+        stream->add_chunk_at(seek_position, MUST(ByteBuffer::copy(data.bytes())));
         callback_invoked = true;
         requested_offset = offset;
     });
