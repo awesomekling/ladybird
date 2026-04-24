@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/ByteBuffer.h>
+#include <AK/Vector.h>
 #include <LibGC/CellAllocator.h>
 #include <LibHTTP/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -42,8 +43,7 @@ private:
     void pull_bytes_into_stream();
     void close_stream();
 
-    bool buffer_is_eof() const { return m_pulled_bytes == m_buffer.size(); }
-    ByteBuffer copy_unpulled_bytes();
+    bool buffer_is_eof() const { return m_pending_chunks.is_empty(); }
 
     GC::Ref<Infrastructure::FetchParams const> m_fetch_params;
     GC::Ptr<Fetch::Infrastructure::Response const> m_response;
@@ -54,8 +54,15 @@ private:
 
     RefPtr<HTTP::MemoryCache> m_http_cache;
 
-    ByteBuffer m_buffer;
-    size_t m_pulled_bytes { 0 };
+    // FIFO of chunks waiting to be pulled into the stream. Each chunk is a fresh,
+    // right-sized allocation, avoiding the O(N^2) reallocation of a single growing
+    // buffer.
+    Vector<ByteBuffer> m_pending_chunks;
+
+    // Accumulated response body for the HTTP memory cache. Only populated when
+    // caching is active for this fetch.
+    ByteBuffer m_cache_body;
+    bool m_accumulate_for_cache { false };
 
     enum class LifecycleState {
         Receiving,

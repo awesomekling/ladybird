@@ -9,6 +9,7 @@
 #include <LibHTTP/Cache/MemoryCache.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Fetch/Fetching/FetchedDataReceiver.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
 #include <LibWeb/Fetch/Infrastructure/FetchParams.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
@@ -26,6 +27,7 @@ FetchedDataReceiver::FetchedDataReceiver(GC::Ref<Infrastructure::FetchParams con
     : m_fetch_params(fetch_params)
     , m_stream(stream)
     , m_http_cache(move(http_cache))
+    , m_accumulate_for_cache(m_http_cache && http_memory_cache_enabled())
 {
 }
 
@@ -35,8 +37,8 @@ void FetchedDataReceiver::set_body(GC::Ref<Fetch::Infrastructure::Body> body)
 {
     m_body = body;
     // Flush any bytes that were buffered before the body was set
-    if (!m_buffer.is_empty())
-        m_body->append_sniff_bytes(m_buffer);
+    for (auto const& chunk : m_pending_chunks)
+        m_body->append_sniff_bytes(chunk);
     // If the stream already completed before the body was set,
     // we missed the set_sniff_bytes_complete() call in handle_network_bytes.
     if (m_lifecycle_state != LifecycleState::Receiving)
@@ -81,7 +83,10 @@ void FetchedDataReceiver::handle_network_bytes(ReadonlyBytes bytes, NetworkState
     }
 
     if (state == NetworkState::Ongoing) {
-        m_buffer.append(bytes);
+        auto chunk = MUST(ByteBuffer::copy(bytes));
+        if (m_accumulate_for_cache)
+            m_cache_body.append(chunk);
+        m_pending_chunks.append(move(chunk));
         // Capture bytes for MIME sniffing
         if (m_body)
             m_body->append_sniff_bytes(bytes);
@@ -128,9 +133,10 @@ void FetchedDataReceiver::pull_bytes_into_stream()
     //           is suspended, resume the fetch.
 
     // 2. Wait until buffer is not empty.
-    // NB: It would be nice to avoid a copy here, but ReadableStream::pull_from_bytes currently requires an allocated
-    //     ByteBuffer to create a JS::ArrayBuffer.
-    auto bytes = copy_unpulled_bytes();
+    // Move the oldest pending chunk out; each chunk is already a right-sized
+    // allocation, so no copy is needed to hand it to the stream.
+    VERIFY(!m_pending_chunks.is_empty());
+    auto bytes = m_pending_chunks.take_first();
     VERIFY(!bytes.is_empty());
 
     // 3. Queue a fetch task to run the following steps, with fetchParams’s task destination.
@@ -184,18 +190,10 @@ void FetchedDataReceiver::close_stream()
         auto request = m_fetch_params->request();
 
         if (m_response && request->cache_mode() != HTTP::CacheMode::NoStore)
-            m_http_cache->finalize_entry(request->current_url(), request->method(), request->header_list(), m_response->status(), m_response->header_list(), move(m_buffer));
+            m_http_cache->finalize_entry(request->current_url(), request->method(), request->header_list(), m_response->status(), m_response->header_list(), move(m_cache_body));
 
         m_http_cache.clear();
     }
-}
-
-ByteBuffer FetchedDataReceiver::copy_unpulled_bytes()
-{
-    auto bytes = MUST(m_buffer.slice(m_pulled_bytes, m_buffer.size() - m_pulled_bytes));
-    m_pulled_bytes += bytes.size();
-
-    return bytes;
 }
 
 }
