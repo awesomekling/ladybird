@@ -7,6 +7,7 @@
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/Fetch/Infrastructure/IncrementalReadLoopReadRequest.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/Streams/AbstractOperations.h>
 
 namespace Web::Fetch::Infrastructure {
 
@@ -30,7 +31,25 @@ void IncrementalReadLoopReadRequest::on_chunk(JS::Value chunk)
     else {
         // 1. Let bytes be a copy of chunk.
         // NOTE: Implementations are strongly encouraged to use an implementation strategy that avoids this copy where possible.
-        auto bytes = MUST(ByteBuffer::copy(uint8_array->data()));
+        // When the Uint8Array fully covers a transferable, fixed-length ArrayBuffer,
+        // steal its underlying bytes and detach the source. This is observably
+        // equivalent to a copy for any remaining holder: cached TypedArray data
+        // pointers are nulled out by the detach before any further code can run.
+        ByteBuffer bytes;
+        auto& array_buffer = *uint8_array->viewed_array_buffer();
+        auto const& view_byte_length = uint8_array->byte_length();
+        bool can_steal = !view_byte_length.is_auto()
+            && !view_byte_length.is_detached()
+            && uint8_array->byte_offset() == 0
+            && view_byte_length.length() == array_buffer.byte_length()
+            && array_buffer.is_fixed_length()
+            && Streams::can_transfer_array_buffer(array_buffer);
+        if (can_steal) {
+            bytes = array_buffer.take_or_copy_buffer_for_transfer();
+            MUST(JS::detach_array_buffer(realm.vm(), array_buffer));
+        } else {
+            bytes = MUST(ByteBuffer::copy(uint8_array->data()));
+        }
         // 2. Set continueAlgorithm to these steps:
         continue_algorithm = GC::create_function(realm.heap(), [bytes = move(bytes), body = m_body, reader = m_reader, task_destination = m_task_destination, process_body_chunk = m_process_body_chunk, process_end_of_body = m_process_end_of_body, process_body_error = m_process_body_error] {
             HTML::TemporaryExecutionContext execution_context { reader->realm(), HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
