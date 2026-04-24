@@ -464,7 +464,11 @@ WebIDL::ExceptionOr<GC::Ref<JS::ArrayBuffer>> transfer_array_buffer(JS::Realm& r
 
     // 2. Let arrayBufferData be O.[[ArrayBufferData]].
     // 3. Let arrayBufferByteLength be O.[[ArrayBufferByteLength]].
-    auto array_buffer = buffer.buffer();
+    // NB: We steal the underlying bytes so the transfer is zero-copy. This leaves
+    //     `buffer` in a moved-from state, which is made consistent again by the
+    //     DetachArrayBuffer call immediately below. The detach also nulls out any
+    //     cached TypedArray data pointers into the old storage.
+    auto array_buffer = buffer.take_or_copy_buffer_for_transfer();
 
     // 4. Perform ? DetachArrayBuffer(O).
     TRY(JS::detach_array_buffer(vm, buffer));

@@ -87,6 +87,20 @@ public:
     ByteBuffer& buffer() { return m_data_block.buffer(); }
     ByteBuffer const& buffer() const { return m_data_block.buffer(); }
 
+    // Extracts the underlying bytes so they can be moved into a new ArrayBuffer
+    // during a TransferArrayBuffer-like operation. For externally-owned buffers
+    // (e.g. Wasm memory), copies instead since we must not steal from the owner.
+    // After calling this, the ArrayBuffer is in a moved-from state; the caller
+    // MUST immediately detach it so cached TypedArray data pointers into the
+    // old storage are invalidated before anything can observe them.
+    ByteBuffer take_or_copy_buffer_for_transfer()
+    {
+        return m_data_block.byte_buffer.visit(
+            [](Empty) -> ByteBuffer { VERIFY_NOT_REACHED(); },
+            [](ByteBuffer& value) -> ByteBuffer { return move(value); },
+            [](DataBlock::UnownedFixedLengthByteBuffer& value) -> ByteBuffer { return MUST(ByteBuffer::copy(value.buffer->span())); });
+    }
+
     // [[ArrayBufferMaxByteLength]]
     size_t max_byte_length() const { return m_max_byte_length.value(); }
     void set_max_byte_length(size_t max_byte_length) { m_max_byte_length = max_byte_length; }
