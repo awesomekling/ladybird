@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="structural-matrix.js"></script>
+<script>
+    test(() => {
+        const style = addStyle(
+            document.head,
+            `
+                .moved:first-child { --root-position: first; }
+                .moved:first-child { border-top: 3px solid rgb(4, 5, 6); }
+                .descendant { color: rgb(1, 2, 3); }
+            `
+        );
+        const fixture = makeElement("section");
+        document.body.appendChild(fixture);
+
+        const moved = makeElement("div", { className: "moved" });
+        for (let i = 0; i < 50; ++i)
+            moved.appendChild(makeElement("span", { className: "descendant", text: `item ${i}` }));
+        const before = makeElement("div");
+        fixture.append(before, moved);
+
+        document.body.offsetWidth;
+        resetStyleCounters();
+
+        fixture.moveBefore(moved, before);
+        assertEqual("moved root became first child", getComputedStyle(moved).getPropertyValue("--root-position").trim(), "first");
+        assertEqual("moved root non-inherited style changed", getComputedStyle(moved).borderTopWidth, "3px");
+        assertEqual("descendant style stayed valid", getComputedStyle(moved.lastChild).color, "rgb(1, 2, 3)");
+        printPassWithCounters("same-parent move preserves unchanged descendant styles");
+
+        style.remove();
+        fixture.remove();
+
+        function runMovedAncestorDescendantCase(name, cssText, setup, mutate, expectedAfter) {
+            const style = addStyle(document.head, cssText);
+            const fixture = makeElement("section");
+            document.body.appendChild(fixture);
+            const context = setup(fixture);
+
+            document.body.offsetWidth;
+            resetStyleCounters();
+
+            mutate(context, fixture);
+            assertEqual(name, readProbe(context.target), expectedAfter);
+            println(`PASS: same-parent move invalidates descendants: ${name}`);
+
+            style.remove();
+            fixture.remove();
+        }
+
+        runMovedAncestorDescendantCase(
+            "first-child descendant begins matching",
+            `.moved:first-child .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "first-child child combinator begins matching",
+            `.moved:first-child > .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "first-child descendant stops matching",
+            `.moved:first-child .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const moved = makeElement("div", { className: "moved" });
+                const after = makeElement("div");
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(moved, after);
+                return { after, moved, target };
+            },
+            ({ after, moved }, fixture) => fixture.moveBefore(moved, after.nextSibling),
+            BASE
+        );
+
+        runMovedAncestorDescendantCase(
+            "last-child descendant begins matching",
+            `.moved:last-child .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const moved = makeElement("div", { className: "moved" });
+                const after = makeElement("div");
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(moved, after);
+                return { after, moved, target };
+            },
+            ({ after, moved }, fixture) => fixture.moveBefore(moved, after.nextSibling),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "last-child descendant stops matching",
+            `.moved:last-child .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            BASE
+        );
+
+        runMovedAncestorDescendantCase(
+            "nth-child descendant begins matching",
+            `.moved:nth-child(2) .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const first = makeElement("div");
+                const second = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(first, second, moved);
+                return { second, moved, target };
+            },
+            ({ second, moved }, fixture) => fixture.moveBefore(moved, second),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "nth-last-child descendant begins matching",
+            `.moved:nth-last-child(2) .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const moved = makeElement("div", { className: "moved" });
+                const middle = makeElement("div");
+                const last = makeElement("div");
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(moved, middle, last);
+                return { last, moved, target };
+            },
+            ({ last, moved }, fixture) => fixture.moveBefore(moved, last),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "first-of-type descendant begins matching",
+            `.moved:first-of-type .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const spacer = makeElement("span");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, spacer, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "last-of-type descendant begins matching",
+            `.moved:last-of-type .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const moved = makeElement("div", { className: "moved" });
+                const spacer = makeElement("span");
+                const after = makeElement("div");
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(moved, spacer, after);
+                return { after, moved, target };
+            },
+            ({ after, moved }, fixture) => fixture.moveBefore(moved, after.nextSibling),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "not first-child descendant stops matching",
+            `.moved:not(:first-child) .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            BASE
+        );
+
+        runMovedAncestorDescendantCase(
+            "is first-child descendant begins matching",
+            `.moved:is(:first-child, .fallback) .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { className: "moved" });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            MATCH
+        );
+
+        runMovedAncestorDescendantCase(
+            "where first-child descendant begins matching with id and attribute",
+            `.moved#subject[data-kind="primary"]:where(:first-child) .target { ${MATCH_DECLARATION} }`,
+            fixture => {
+                const before = makeElement("div");
+                const moved = makeElement("div", { id: "subject", className: "moved", attributes: { "data-kind": "primary" } });
+                const target = makeElement("span", { className: "target" });
+                moved.appendChild(target);
+                fixture.append(before, moved);
+                return { before, moved, target };
+            },
+            ({ before, moved }, fixture) => fixture.moveBefore(moved, before),
+            MATCH
+        );
+    });
+</script>
