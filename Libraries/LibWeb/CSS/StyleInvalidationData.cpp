@@ -182,6 +182,8 @@ static void append_has_invalidation_metadata(HashMap<Key, Vector<HasInvalidation
         bucket.append(metadata);
 }
 
+static bool selector_contains_featureless_subtree_sensitive_selector(Selector const&);
+
 static void collect_properties_used_in_has(Selector::SimpleSelector const& selector, StyleInvalidationData& style_invalidation_data, Optional<HasInvalidationMetadata> metadata)
 {
     switch (selector.type) {
@@ -232,6 +234,11 @@ static void collect_properties_used_in_has(Selector::SimpleSelector const& selec
                     .relative_selector = child_selector.ptr(),
                     .scope = classify_has_argument_scope(*child_selector),
                 };
+                // These selectors can match because a featureless node is inserted, removed, or moved.
+                // Since there is no concrete tag/class/id/attribute/pseudo-class feature to compare against
+                // later, structural invalidation must keep walking conservatively for them.
+                if (selector_contains_featureless_subtree_sensitive_selector(*child_selector))
+                    style_invalidation_data.has_selectors_sensitive_to_featureless_subtree_changes = true;
             }
             for (auto const& compound_selector : child_selector->compound_selectors()) {
                 for (auto const& simple_selector : compound_selector.simple_selectors)
@@ -255,6 +262,54 @@ static void collect_properties_used_in_has(Selector::SimpleSelector const& selec
     default:
         break;
     }
+}
+
+static bool simple_selector_is_featureless_subtree_sensitive(Selector::SimpleSelector const& selector)
+{
+    switch (selector.type) {
+    case Selector::SimpleSelector::Type::Universal:
+        return true;
+    case Selector::SimpleSelector::Type::PseudoClass: {
+        auto const& pseudo_class = selector.pseudo_class();
+        switch (pseudo_class.type) {
+        case PseudoClass::Not:
+        case PseudoClass::Empty:
+        case PseudoClass::FirstChild:
+        case PseudoClass::LastChild:
+        case PseudoClass::OnlyChild:
+        case PseudoClass::FirstOfType:
+        case PseudoClass::LastOfType:
+        case PseudoClass::OnlyOfType:
+        case PseudoClass::NthChild:
+        case PseudoClass::NthLastChild:
+        case PseudoClass::NthOfType:
+        case PseudoClass::NthLastOfType:
+            return true;
+        case PseudoClass::Is:
+        case PseudoClass::Where:
+            for (auto const& child_selector : pseudo_class.argument_selector_list) {
+                if (selector_contains_featureless_subtree_sensitive_selector(*child_selector))
+                    return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+    default:
+        return false;
+    }
+}
+
+static bool selector_contains_featureless_subtree_sensitive_selector(Selector const& selector)
+{
+    for (auto const& compound_selector : selector.compound_selectors()) {
+        for (auto const& simple_selector : compound_selector.simple_selectors) {
+            if (simple_selector_is_featureless_subtree_sensitive(simple_selector))
+                return true;
+        }
+    }
+    return false;
 }
 
 static InvalidationSet build_invalidation_sets_for_selector_impl(StyleInvalidationData& style_invalidation_data, Selector const& selector, InsideNthChildPseudoClass inside_nth_child_pseudo_class);
