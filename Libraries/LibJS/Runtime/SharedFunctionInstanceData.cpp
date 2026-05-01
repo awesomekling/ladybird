@@ -11,6 +11,53 @@ namespace JS {
 
 GC_DEFINE_ALLOCATOR(SharedFunctionInstanceData);
 
+class SharedFunctionInstanceData::FunctionBytecodeInput {
+public:
+    explicit FunctionBytecodeInput(void* rust_function_ast)
+        : m_input(rust_function_ast)
+    {
+    }
+
+    explicit FunctionBytecodeInput(FFI::PrecompiledFunction* precompiled)
+        : m_input(precompiled)
+    {
+    }
+
+    ~FunctionBytecodeInput()
+    {
+        m_input.visit(
+            [](Empty) {},
+            [](void* rust_function_ast) { RustIntegration::free_function_ast(rust_function_ast); },
+            [](FFI::PrecompiledFunction* precompiled) { RustIntegration::free_precompiled_function(precompiled); });
+    }
+
+    void set_precompiled(FFI::PrecompiledFunction* precompiled)
+    {
+        m_input = precompiled;
+    }
+
+    FFI::PrecompiledFunction* take_precompiled()
+    {
+        if (!m_input.has<FFI::PrecompiledFunction*>())
+            return nullptr;
+        auto* precompiled = m_input.get<FFI::PrecompiledFunction*>();
+        m_input = Empty {};
+        return precompiled;
+    }
+
+    void* take_rust_function_ast()
+    {
+        if (!m_input.has<void*>())
+            return nullptr;
+        auto* rust_function_ast = m_input.get<void*>();
+        m_input = Empty {};
+        return rust_function_ast;
+    }
+
+private:
+    Variant<Empty, void*, FFI::PrecompiledFunction*> m_input;
+};
+
 SharedFunctionInstanceData::SharedFunctionInstanceData(
     VM&,
     FunctionKind kind,
@@ -30,9 +77,11 @@ SharedFunctionInstanceData::SharedFunctionInstanceData(
     , m_strict(strict)
     , m_is_arrow_function(is_arrow_function)
     , m_has_simple_parameter_list(has_simple_parameter_list)
-    , m_rust_function_ast(rust_function_ast)
     , m_use_rust_compilation(true)
 {
+    if (rust_function_ast)
+        m_bytecode_input = make<FunctionBytecodeInput>(rust_function_ast);
+
     if (m_is_arrow_function)
         m_this_mode = ThisMode::Lexical;
     else if (m_strict)
@@ -82,8 +131,30 @@ void SharedFunctionInstanceData::update_asm_call_metadata()
 void SharedFunctionInstanceData::finalize()
 {
     Base::finalize();
-    RustIntegration::free_function_ast(m_rust_function_ast);
-    m_rust_function_ast = nullptr;
+    m_bytecode_input = nullptr;
+}
+
+void SharedFunctionInstanceData::set_precompiled_bytecode(FFI::PrecompiledFunction* precompiled)
+{
+    VERIFY(precompiled);
+    if (!m_bytecode_input)
+        m_bytecode_input = make<FunctionBytecodeInput>(precompiled);
+    else
+        m_bytecode_input->set_precompiled(precompiled);
+}
+
+FFI::PrecompiledFunction* SharedFunctionInstanceData::take_precompiled_bytecode()
+{
+    if (!m_bytecode_input)
+        return nullptr;
+    return m_bytecode_input->take_precompiled();
+}
+
+void* SharedFunctionInstanceData::take_rust_function_ast()
+{
+    if (!m_bytecode_input)
+        return nullptr;
+    return m_bytecode_input->take_rust_function_ast();
 }
 
 void SharedFunctionInstanceData::clear_compile_inputs()
@@ -92,8 +163,7 @@ void SharedFunctionInstanceData::clear_compile_inputs()
     m_functions_to_initialize.clear();
     m_var_names_to_initialize_binding.clear();
     m_lexical_bindings.clear();
-    RustIntegration::free_function_ast(m_rust_function_ast);
-    m_rust_function_ast = nullptr;
+    m_bytecode_input = nullptr;
 }
 
 void SharedFunctionInstanceData::update_can_inline_call()

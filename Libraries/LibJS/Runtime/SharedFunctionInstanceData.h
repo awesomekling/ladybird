@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/OwnPtr.h>
 #include <LibGC/Cell.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
@@ -15,6 +16,12 @@
 #include <LibJS/Runtime/PropertyKey.h>
 
 namespace JS {
+
+namespace FFI {
+
+struct PrecompiledFunction;
+
+}
 
 // NB: This mirrors Identifier::Local from AST.h, defined here to avoid
 //     including the full AST header in this file.
@@ -144,11 +151,11 @@ public:
     ConstructorKind m_constructor_kind : 1 { ConstructorKind::Base };        // [[ConstructorKind]]
     bool m_is_class_constructor : 1 { false };                               // [[IsClassConstructor]]
 
-    // NB: When non-null, points to a Rust Box<FunctionData> used for
-    //     lazy compilation through the Rust pipeline.
-    void* m_rust_function_ast { nullptr };
     bool m_use_rust_compilation { false };
 
+    void set_precompiled_bytecode(FFI::PrecompiledFunction*);
+    FFI::PrecompiledFunction* take_precompiled_bytecode();
+    void* take_rust_function_ast();
     void clear_compile_inputs();
 
 private:
@@ -156,6 +163,9 @@ private:
     void update_can_inline_call();
 
     bool m_can_inline_call { false };
+
+    class FunctionBytecodeInput;
+    OwnPtr<FunctionBytecodeInput> m_bytecode_input;
 };
 
 }

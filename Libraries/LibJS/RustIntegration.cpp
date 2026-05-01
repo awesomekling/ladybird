@@ -665,18 +665,20 @@ GC::Ptr<Bytecode::Executable> compile_function(VM& vm, SharedFunctionInstanceDat
     if (!shared_data.m_use_rust_compilation)
         return nullptr;
 
-    VERIFY(shared_data.m_rust_function_ast);
+    if (auto* precompiled = shared_data.take_precompiled_bytecode())
+        return materialize_precompiled_function(vm, *shared_data.m_source_code, shared_data, precompiled);
+
+    auto* rust_function_ast = shared_data.take_rust_function_ast();
+    VERIFY(rust_function_ast);
     GC::DeferGC defer_gc(vm.heap());
-    auto const* source_ptr = shared_data.m_source_code->utf16_data();
     auto* exec = static_cast<Bytecode::Executable*>(rust_compile_function(
         &vm,
         shared_data.m_source_code.ptr(),
-        source_ptr,
+        shared_data.m_source_code->utf16_data(),
         shared_data.m_source_code->length_in_code_units(),
         &shared_data,
-        shared_data.m_rust_function_ast,
+        rust_function_ast,
         builtin_abstract_operations_enabled));
-    shared_data.m_rust_function_ast = nullptr;
 
     return exec;
 }
@@ -1072,6 +1074,14 @@ extern "C" void rust_sfd_set_precompiled_executable(
     if (Bytecode::g_dump_bytecode)
         executable.dump();
     shared.clear_compile_inputs();
+}
+
+extern "C" void rust_sfd_set_precompiled_bytecode(
+    void* sfd_ptr,
+    void* precompiled_ptr)
+{
+    auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    shared.set_precompiled_bytecode(static_cast<JS::FFI::PrecompiledFunction*>(precompiled_ptr));
 }
 
 extern "C" void* rust_create_class_blueprint(

@@ -257,6 +257,8 @@ unsafe extern "C" {
         contains_direct_call_to_eval: bool,
     );
 
+    pub fn rust_sfd_set_precompiled_bytecode(sfd_ptr: *mut c_void, precompiled_ptr: *mut c_void);
+
     pub fn rust_create_class_blueprint(
         vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,
@@ -304,8 +306,8 @@ unsafe extern "C" {
 /// Create a SharedFunctionInstanceData from a FunctionData.
 ///
 /// Computes has_simple_parameter_list, builds parameter name slices,
-/// transfers ownership of the Box to C++ via `Box::into_raw`, and
-/// calls `rust_create_sfd`.
+/// transfers ownership of a FunctionPayload to C++ via `Box::into_raw`,
+/// and calls `rust_create_sfd`.
 ///
 /// Used by both `emit_new_function` in codegen.rs (for function
 /// expressions/declarations) and `create_sfd_for_gdi` below (for
@@ -440,29 +442,8 @@ unsafe fn materialize_shared_function_data(
             if let Some((name, is_private)) = &pending.class_field_initializer_name {
                 rust_sfd_set_class_field_initializer_name(sfd_ptr, name.as_ptr(), name.len(), *is_private);
             }
-            if let Some(precompiled) = pending.precompiled_function.as_mut() {
-                precompiled.generator.vm_ptr = vm_ptr;
-                precompiled.generator.source_code_ptr = source_code_ptr;
-                let executable_ptr = create_executable(
-                    &mut precompiled.generator,
-                    &precompiled.assembled,
-                    vm_ptr,
-                    source_code_ptr,
-                );
-                assert!(
-                    !executable_ptr.is_null(),
-                    "materialize_shared_function_data: eager function executable materialization failed"
-                );
-                rust_sfd_set_precompiled_executable(
-                    sfd_ptr,
-                    executable_ptr,
-                    precompiled.metadata.uses_this,
-                    precompiled.metadata.this_value_needs_environment_resolution,
-                    precompiled.metadata.function_environment_needed,
-                    precompiled.metadata.function_environment_bindings_count,
-                    precompiled.metadata.might_need_arguments,
-                    precompiled.metadata.contains_eval,
-                );
+            if let Some(precompiled) = pending.precompiled_function.take() {
+                rust_sfd_set_precompiled_bytecode(sfd_ptr, Box::into_raw(precompiled) as *mut c_void);
             }
             sfd_ptrs.push(sfd_ptr as *const c_void);
         }
