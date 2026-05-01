@@ -681,6 +681,29 @@ GC::Ptr<Bytecode::Executable> compile_function(VM& vm, SharedFunctionInstanceDat
     return exec;
 }
 
+PrecompiledFunction* precompile_function_off_thread(void* rust_function_ast, size_t source_len, bool builtin_abstract_operations_enabled)
+{
+    return rust_precompile_function_off_thread(rust_function_ast, source_len, builtin_abstract_operations_enabled);
+}
+
+GC::Ptr<Bytecode::Executable> materialize_precompiled_function(VM& vm, SourceCode const& source_code, SharedFunctionInstanceData& shared_data, PrecompiledFunction* precompiled)
+{
+    VERIFY(precompiled);
+    GC::DeferGC defer_gc(vm.heap());
+    auto* exec = static_cast<Bytecode::Executable*>(rust_materialize_precompiled_function(
+        precompiled,
+        &vm,
+        &source_code,
+        &shared_data));
+    return exec;
+}
+
+void free_precompiled_function(PrecompiledFunction* precompiled)
+{
+    if (precompiled)
+        rust_free_precompiled_function(precompiled);
+}
+
 void free_function_ast(void* ast)
 {
     if (ast)

@@ -126,6 +126,8 @@ pub struct CompiledProgram {
     bytecode: CompiledProgramBytecode,
 }
 
+pub type PrecompiledFunction = bytecode::generator::PrecompiledFunction;
+
 enum CompiledProgramBytecode {
     Program(CompiledBytecode),
     AsyncModule(CompiledBytecode),
@@ -2212,6 +2214,94 @@ pub unsafe extern "C" fn rust_compile_function(
                 source_code_ptr,
             )
         })
+    }
+}
+
+/// Compile a function body into an off-thread bytecode artifact.
+///
+/// Takes ownership of the `Box<FunctionPayload>`. The returned
+/// `PrecompiledFunction` still needs to be materialized on the main thread
+/// before it becomes a GC-backed Executable.
+///
+/// # Safety
+/// - `rust_function_ast` must be a valid `Box<FunctionPayload>` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_precompile_function_off_thread(
+    rust_function_ast: *mut c_void,
+    source_len: usize,
+    builtin_abstract_operations_enabled: bool,
+) -> *mut PrecompiledFunction {
+    unsafe {
+        abort_on_panic(|| {
+            if rust_function_ast.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let payload = Box::from_raw(rust_function_ast as *mut ast::FunctionPayload);
+            let (_function_data, precompiled) =
+                compile_function_payload_to_bytecode(*payload, source_len, builtin_abstract_operations_enabled);
+            Box::into_raw(precompiled)
+        })
+    }
+}
+
+/// Materialize an off-thread-compiled function. Consumes and frees the
+/// `PrecompiledFunction`.
+///
+/// # Safety
+/// - `precompiled` must be a valid pointer from `rust_precompile_function_off_thread()`.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `sfd_ptr` must be a valid `JS::SharedFunctionInstanceData*`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_materialize_precompiled_function(
+    precompiled: *mut PrecompiledFunction,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    sfd_ptr: *mut c_void,
+) -> *mut c_void {
+    unsafe {
+        abort_on_panic(|| {
+            if precompiled.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let mut precompiled = Box::from_raw(precompiled);
+            precompiled.generator.vm_ptr = vm_ptr;
+            precompiled.generator.source_code_ptr = source_code_ptr;
+            let executable_ptr = bytecode::ffi::create_executable(
+                &mut precompiled.generator,
+                &precompiled.assembled,
+                vm_ptr,
+                source_code_ptr,
+            );
+            if executable_ptr.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            bytecode::ffi::rust_sfd_set_precompiled_executable(
+                sfd_ptr,
+                executable_ptr,
+                precompiled.metadata.uses_this,
+                precompiled.metadata.this_value_needs_environment_resolution,
+                precompiled.metadata.function_environment_needed,
+                precompiled.metadata.function_environment_bindings_count,
+                precompiled.metadata.might_need_arguments,
+                precompiled.metadata.contains_eval,
+            );
+            executable_ptr
+        })
+    }
+}
+
+/// Free a precompiled function without materializing it.
+///
+/// # Safety
+/// - `precompiled` must be a valid pointer from `rust_precompile_function_off_thread()`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_free_precompiled_function(precompiled: *mut PrecompiledFunction) {
+    unsafe {
+        drop(Box::from_raw(precompiled));
     }
 }
 
