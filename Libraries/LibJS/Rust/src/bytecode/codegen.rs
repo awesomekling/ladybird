@@ -5971,6 +5971,8 @@ fn emit_default_constructor(generator: &mut Generator, has_super: bool) -> u32 {
     generator.register_shared_function_data(PendingSharedFunctionData {
         function_data: Some(function_data),
         subtable: Some(subtable),
+        metadata: None,
+        bytecode_input: std::ptr::null_mut(),
         name_override: None,
         class_field_initializer_name: None,
         should_eager_compile: false,
@@ -7577,6 +7579,8 @@ fn emit_new_function(generator: &mut Generator, data: Box<FunctionData>, name_ov
     generator.register_shared_function_data(PendingSharedFunctionData {
         function_data: Some(data),
         subtable: Some(subtable),
+        metadata: None,
+        bytecode_input: std::ptr::null_mut(),
         name_override: name_override.map(Utf16String::from),
         class_field_initializer_name: None,
         should_eager_compile: false,

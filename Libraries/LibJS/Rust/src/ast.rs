@@ -464,6 +464,398 @@ pub struct FunctionPayload {
     pub function_table: FunctionTable,
 }
 
+// Background workers compile and drop these payloads independently. Detach replaces parser-shared Rc/RefCell/Cell
+// state with private copies so each FunctionPayload can safely move through the C++ ThreadPool on its own.
+impl FunctionPayload {
+    pub fn detach_for_background_compilation(&mut self) {
+        detach_function_data(&mut self.data);
+        self.function_table.detach_for_background_compilation();
+    }
+}
+
+impl FunctionTable {
+    pub fn detach_for_background_compilation(&mut self) {
+        for function_data in self.functions.values_mut() {
+            detach_function_data(function_data);
+        }
+    }
+}
+
+fn detach_function_data(data: &mut FunctionData) {
+    detach_optional_identifier(&mut data.name);
+    detach_statement(&mut data.body);
+    for parameter in &mut data.parameters {
+        detach_function_parameter(parameter);
+    }
+}
+
+fn detach_function_parameter(parameter: &mut FunctionParameter) {
+    detach_function_parameter_binding(&mut parameter.binding);
+    if let Some(default_value) = &mut parameter.default_value {
+        detach_expression(default_value);
+    }
+}
+
+fn detach_function_parameter_binding(binding: &mut FunctionParameterBinding) {
+    match binding {
+        FunctionParameterBinding::Identifier(identifier) => detach_identifier(identifier),
+        FunctionParameterBinding::BindingPattern(pattern) => detach_binding_pattern(pattern),
+    }
+}
+
+fn detach_identifier(identifier: &mut Rc<Identifier>) {
+    let old_identifier = identifier.as_ref();
+    let mut name = old_identifier.name.clone();
+    detach_shared_utf16_string(&mut name);
+    *identifier = Rc::new(Identifier {
+        range: old_identifier.range,
+        name,
+        local_type: Cell::new(old_identifier.local_type.get()),
+        local_index: Cell::new(old_identifier.local_index.get()),
+        is_global: Cell::new(old_identifier.is_global.get()),
+        is_inside_scope_with_eval: Cell::new(old_identifier.is_inside_scope_with_eval.get()),
+        declaration_kind: Cell::new(old_identifier.declaration_kind.get()),
+    });
+}
+
+fn detach_optional_identifier(identifier: &mut Option<Rc<Identifier>>) {
+    if let Some(identifier) = identifier {
+        detach_identifier(identifier);
+    }
+}
+
+fn detach_shared_utf16_string(string: &mut SharedUtf16String) {
+    *string = SharedUtf16String::from(string.to_utf16_string());
+}
+
+fn detach_scope_ref(scope: &mut Rc<RefCell<ScopeData>>) {
+    let mut detached_scope = scope.borrow().clone();
+    detach_scope_data(&mut detached_scope);
+    *scope = Rc::new(RefCell::new(detached_scope));
+}
+
+fn detach_scope_data(scope: &mut ScopeData) {
+    for child in &mut scope.children {
+        detach_statement(child);
+    }
+}
+
+fn detach_statement(statement: &mut Statement) {
+    match &mut statement.inner {
+        StatementKind::Expression(expression) => detach_expression(expression),
+        StatementKind::Block(scope) | StatementKind::FunctionBody { scope, .. } => detach_scope_ref(scope),
+        StatementKind::Program(data) => detach_scope_ref(&mut data.scope),
+        StatementKind::If(data) => {
+            detach_expression(&mut data.test);
+            detach_statement(&mut data.consequent);
+            if let Some(alternate) = &mut data.alternate {
+                detach_statement(alternate);
+            }
+        }
+        StatementKind::While(data) | StatementKind::DoWhile(data) => {
+            detach_expression(&mut data.test);
+            detach_statement(&mut data.body);
+        }
+        StatementKind::For(data) => {
+            if let Some(init) = &mut data.init {
+                detach_for_init(init);
+            }
+            if let Some(test) = &mut data.test {
+                detach_expression(test);
+            }
+            if let Some(update) = &mut data.update {
+                detach_expression(update);
+            }
+            detach_statement(&mut data.body);
+        }
+        StatementKind::ForInOf(data) => {
+            detach_for_in_of_lhs(&mut data.lhs);
+            detach_expression(&mut data.rhs);
+            detach_statement(&mut data.body);
+        }
+        StatementKind::Switch(data) => {
+            detach_scope_ref(&mut data.scope);
+            detach_expression(&mut data.discriminant);
+            for case in &mut data.cases {
+                detach_scope_ref(&mut case.scope);
+                if let Some(test) = &mut case.test {
+                    detach_expression(test);
+                }
+            }
+        }
+        StatementKind::With(data) => {
+            detach_expression(&mut data.object);
+            detach_statement(&mut data.body);
+        }
+        StatementKind::Labelled(data) => detach_statement(&mut data.item),
+        StatementKind::Return(argument) => {
+            if let Some(argument) = argument {
+                detach_expression(argument);
+            }
+        }
+        StatementKind::Throw(expression) => detach_expression(expression),
+        StatementKind::Try(data) => {
+            detach_statement(&mut data.block);
+            if let Some(handler) = &mut data.handler {
+                if let Some(parameter) = &mut handler.parameter {
+                    detach_catch_binding(parameter);
+                }
+                detach_statement(&mut handler.body);
+            }
+            if let Some(finalizer) = &mut data.finalizer {
+                detach_statement(finalizer);
+            }
+        }
+        StatementKind::VariableDeclaration(data) => {
+            for declaration in &mut data.declarations {
+                detach_variable_declarator(declaration);
+            }
+        }
+        StatementKind::UsingDeclaration(declarations) => {
+            for declaration in declarations.iter_mut() {
+                detach_variable_declarator(declaration);
+            }
+        }
+        StatementKind::FunctionDeclaration(data) => {
+            detach_optional_identifier(&mut data.name);
+            data.is_hoisted = Cell::new(data.is_hoisted.get());
+        }
+        StatementKind::ClassDeclaration(data) => detach_class_data(data),
+        StatementKind::Export(data) => {
+            if let Some(statement) = &mut data.statement {
+                detach_statement(statement);
+            }
+        }
+        StatementKind::ClassFieldInitializer(data) => detach_expression(&mut data.expression),
+        StatementKind::Empty
+        | StatementKind::Error
+        | StatementKind::Debugger
+        | StatementKind::Break { .. }
+        | StatementKind::Continue { .. }
+        | StatementKind::Import(_)
+        | StatementKind::ErrorDeclaration => {}
+    }
+}
+
+fn detach_expression(expression: &mut Expression) {
+    match &mut expression.inner {
+        ExpressionKind::RegExpLiteral(data) => {
+            // RegExp literals were already validated by the parser, and materialization now uses pattern+flags.
+            data.compiled_regex = Rc::new(CompiledRegex::new(std::ptr::null_mut()));
+        }
+        ExpressionKind::Identifier(identifier) => detach_identifier(identifier),
+        ExpressionKind::Binary(data) => {
+            detach_expression(&mut data.lhs);
+            detach_expression(&mut data.rhs);
+        }
+        ExpressionKind::Logical(data) => {
+            detach_expression(&mut data.lhs);
+            detach_expression(&mut data.rhs);
+        }
+        ExpressionKind::Unary { operand, .. } => detach_expression(operand),
+        ExpressionKind::Update(data) => detach_expression(&mut data.argument),
+        ExpressionKind::Assignment(data) => {
+            detach_assignment_lhs(&mut data.lhs);
+            detach_expression(&mut data.rhs);
+        }
+        ExpressionKind::Conditional(data) => {
+            detach_expression(&mut data.test);
+            detach_expression(&mut data.consequent);
+            detach_expression(&mut data.alternate);
+        }
+        ExpressionKind::Sequence(expressions) => {
+            for expression in expressions.iter_mut() {
+                detach_expression(expression);
+            }
+        }
+        ExpressionKind::Member(data) => {
+            detach_expression(&mut data.object);
+            detach_expression(&mut data.property);
+        }
+        ExpressionKind::OptionalChain(data) => {
+            detach_expression(&mut data.base);
+            for reference in &mut data.references {
+                detach_optional_chain_reference(reference);
+            }
+        }
+        ExpressionKind::Call(data) | ExpressionKind::New(data) => {
+            detach_expression(&mut data.callee);
+            for argument in &mut data.arguments {
+                detach_call_argument(argument);
+            }
+        }
+        ExpressionKind::SuperCall(data) => {
+            for argument in &mut data.arguments {
+                detach_call_argument(argument);
+            }
+        }
+        ExpressionKind::Spread(expression) | ExpressionKind::Await(expression) => detach_expression(expression),
+        ExpressionKind::Class(data) => detach_class_data(data),
+        ExpressionKind::Array(elements) => {
+            for expression in elements.iter_mut().flatten() {
+                detach_expression(expression);
+            }
+        }
+        ExpressionKind::Object(properties) => {
+            for property in properties.iter_mut() {
+                detach_object_property(property);
+            }
+        }
+        ExpressionKind::TemplateLiteral(data) => {
+            for expression in &mut data.expressions {
+                detach_expression(expression);
+            }
+        }
+        ExpressionKind::TaggedTemplateLiteral(data) => {
+            detach_expression(&mut data.tag);
+            detach_expression(&mut data.template_literal);
+        }
+        ExpressionKind::ImportCall(data) => {
+            detach_expression(&mut data.specifier);
+            if let Some(options) = &mut data.options {
+                detach_expression(options);
+            }
+        }
+        ExpressionKind::Yield(data) => {
+            if let Some(argument) = &mut data.argument {
+                detach_expression(argument);
+            }
+        }
+        ExpressionKind::NumericLiteral(_)
+        | ExpressionKind::StringLiteral(_)
+        | ExpressionKind::BooleanLiteral(_)
+        | ExpressionKind::NullLiteral
+        | ExpressionKind::BigIntLiteral(_)
+        | ExpressionKind::PrivateIdentifier(_)
+        | ExpressionKind::This
+        | ExpressionKind::Super
+        | ExpressionKind::Function(_)
+        | ExpressionKind::MetaProperty(_)
+        | ExpressionKind::Error => {}
+    }
+}
+
+fn detach_class_data(data: &mut ClassData) {
+    detach_optional_identifier(&mut data.name);
+    if let Some(constructor) = &mut data.constructor {
+        detach_expression(constructor);
+    }
+    if let Some(super_class) = &mut data.super_class {
+        detach_expression(super_class);
+    }
+    for element in &mut data.elements {
+        match &mut element.inner {
+            ClassElement::Method { key, function, .. } => {
+                detach_expression(key);
+                detach_expression(function);
+            }
+            ClassElement::Field { key, initializer, .. } => {
+                detach_expression(key);
+                if let Some(initializer) = initializer {
+                    detach_expression(initializer);
+                }
+            }
+            ClassElement::StaticInitializer { body } => detach_statement(body),
+        }
+    }
+}
+
+fn detach_binding_pattern(pattern: &mut BindingPattern) {
+    for entry in &mut pattern.entries {
+        if let Some(name) = &mut entry.name {
+            detach_binding_entry_name(name);
+        }
+        if let Some(alias) = &mut entry.alias {
+            detach_binding_entry_alias(alias);
+        }
+        if let Some(initializer) = &mut entry.initializer {
+            detach_expression(initializer);
+        }
+    }
+}
+
+fn detach_binding_entry_name(name: &mut BindingEntryName) {
+    match name {
+        BindingEntryName::Identifier(identifier) => detach_identifier(identifier),
+        BindingEntryName::Expression(expression) => detach_expression(expression),
+    }
+}
+
+fn detach_binding_entry_alias(alias: &mut BindingEntryAlias) {
+    match alias {
+        BindingEntryAlias::Identifier(identifier) => detach_identifier(identifier),
+        BindingEntryAlias::BindingPattern(pattern) => detach_binding_pattern(pattern),
+        BindingEntryAlias::MemberExpression(expression) => detach_expression(expression),
+    }
+}
+
+fn detach_variable_declarator(declaration: &mut VariableDeclarator) {
+    detach_variable_declarator_target(&mut declaration.target);
+    if let Some(init) = &mut declaration.init {
+        detach_expression(init);
+    }
+}
+
+fn detach_variable_declarator_target(target: &mut VariableDeclaratorTarget) {
+    match target {
+        VariableDeclaratorTarget::Identifier(identifier) => detach_identifier(identifier),
+        VariableDeclaratorTarget::BindingPattern(pattern) => detach_binding_pattern(pattern),
+    }
+}
+
+fn detach_call_argument(argument: &mut CallArgument) {
+    detach_expression(&mut argument.value);
+}
+
+fn detach_optional_chain_reference(reference: &mut OptionalChainReference) {
+    match reference {
+        OptionalChainReference::Call { arguments, .. } => {
+            for argument in arguments {
+                detach_call_argument(argument);
+            }
+        }
+        OptionalChainReference::ComputedReference { expression, .. } => detach_expression(expression),
+        OptionalChainReference::MemberReference { identifier, .. } => detach_identifier(identifier),
+        OptionalChainReference::PrivateMemberReference { .. } => {}
+    }
+}
+
+fn detach_object_property(property: &mut ObjectProperty) {
+    detach_expression(&mut property.key);
+    if let Some(value) = &mut property.value {
+        detach_expression(value);
+    }
+}
+
+fn detach_for_init(init: &mut ForInit) {
+    match init {
+        ForInit::Declaration(statement) => detach_statement(statement),
+        ForInit::Expression(expression) => detach_expression(expression),
+    }
+}
+
+fn detach_for_in_of_lhs(lhs: &mut ForInOfLhs) {
+    match lhs {
+        ForInOfLhs::Declaration(statement) => detach_statement(statement),
+        ForInOfLhs::Expression(expression) => detach_expression(expression),
+        ForInOfLhs::Pattern(pattern) => detach_binding_pattern(pattern),
+    }
+}
+
+fn detach_assignment_lhs(lhs: &mut AssignmentLhs) {
+    match lhs {
+        AssignmentLhs::Expression(expression) => detach_expression(expression),
+        AssignmentLhs::Pattern(pattern) => detach_binding_pattern(pattern),
+    }
+}
+
+fn detach_catch_binding(binding: &mut CatchBinding) {
+    match binding {
+        CatchBinding::Identifier(identifier) => detach_identifier(identifier),
+        CatchBinding::BindingPattern(pattern) => detach_binding_pattern(pattern),
+    }
+}
+
 // =============================================================================
 // Source location
 // =============================================================================

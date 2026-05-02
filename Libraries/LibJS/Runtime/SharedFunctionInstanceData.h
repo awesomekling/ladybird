@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/OwnPtr.h>
+#include <AK/RefPtr.h>
 #include <LibGC/Cell.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
@@ -20,6 +20,12 @@ namespace JS {
 namespace FFI {
 
 struct PrecompiledFunction;
+
+}
+
+namespace RustIntegration {
+
+class FunctionBytecodeInput;
 
 }
 
@@ -151,11 +157,17 @@ public:
     ConstructorKind m_constructor_kind : 1 { ConstructorKind::Base };        // [[ConstructorKind]]
     bool m_is_class_constructor : 1 { false };                               // [[IsClassConstructor]]
 
+    // NB: When non-null, points to a Rust Box<FunctionPayload> used for
+    //     lazy compilation through the Rust pipeline.
+    void* m_rust_function_ast { nullptr };
     bool m_use_rust_compilation { false };
+    bool m_background_bytecode_compilation_enabled { true };
 
+    void set_bytecode_input(RustIntegration::FunctionBytecodeInput&);
     void set_precompiled_bytecode(FFI::PrecompiledFunction*);
-    FFI::PrecompiledFunction* take_precompiled_bytecode();
+    void start_background_bytecode_compilation(bool builtin_abstract_operations_enabled = false);
     void* take_rust_function_ast();
+    FFI::PrecompiledFunction* take_precompiled_bytecode_or_compile(size_t source_len, bool builtin_abstract_operations_enabled);
     void clear_compile_inputs();
 
 private:
@@ -164,8 +176,7 @@ private:
 
     bool m_can_inline_call { false };
 
-    class FunctionBytecodeInput;
-    OwnPtr<FunctionBytecodeInput> m_bytecode_input;
+    RefPtr<RustIntegration::FunctionBytecodeInput> m_bytecode_input;
 };
 
 }

@@ -27,6 +27,7 @@
 #include <LibJS/RustFFI.h>
 #include <LibJS/Script.h>
 #include <LibJS/SourceCode.h>
+#include <LibThreading/Mutex.h>
 
 extern bool JS::g_dump_ast;
 extern bool JS::g_dump_ast_use_color;
@@ -36,6 +37,38 @@ using namespace JS::FFI;
 namespace JS::RustIntegration {
 
 // --- Shared helpers ---
+
+// Direct lazy compilation still consumes parser-owned Rc/RefCell/Cell AST payloads.
+// Background compilation first detaches payloads into private inputs, so it does not need this mutex.
+static Threading::Mutex& function_ast_compilation_mutex()
+{
+    static Threading::Mutex mutex;
+    return mutex;
+}
+
+static void start_background_compilation_for_functions(Bytecode::Executable& executable, bool builtin_abstract_operations_enabled = false)
+{
+    for (auto& shared_data : executable.shared_function_data) {
+        if (shared_data)
+            shared_data->start_background_bytecode_compilation(builtin_abstract_operations_enabled);
+    }
+}
+
+template<typename FunctionToInitialize>
+static void start_background_compilation_for_functions_to_initialize(Vector<FunctionToInitialize> const& functions_to_initialize, bool builtin_abstract_operations_enabled = false)
+{
+    // These functions are used by declaration instantiation and are not part of any Executable's nested
+    // shared_function_data list.
+    for (auto& function : functions_to_initialize)
+        function.shared_data->start_background_bytecode_compilation(builtin_abstract_operations_enabled);
+}
+
+template<typename FunctionToInitialize>
+static void disable_background_compilation_for_functions_to_initialize(Vector<FunctionToInitialize> const& functions_to_initialize)
+{
+    for (auto& function : functions_to_initialize)
+        function.shared_data->m_background_bytecode_compilation_enabled = false;
+}
 
 static Utf16View utf16_view_from_bytes(uint16_t const* data, size_t len)
 {
@@ -365,6 +398,12 @@ CompiledProgram* compile_parsed_program_off_thread(ParsedProgram* parsed, size_t
     return rust_compile_parsed_program_off_thread(parsed, length_in_code_units);
 }
 
+void start_compiled_program_background_precompilation(CompiledProgram* compiled)
+{
+    if (compiled)
+        rust_start_compiled_program_background_precompilation(compiled);
+}
+
 bool parsed_program_has_errors(ParsedProgram const* parsed)
 {
     return rust_parsed_program_has_errors(const_cast<ParsedProgram*>(parsed));
@@ -377,6 +416,8 @@ void free_parsed_program(ParsedProgram* parsed)
 
 void free_compiled_program(CompiledProgram* compiled)
 {
+    if (!compiled)
+        return;
     rust_free_compiled_program(compiled);
 }
 
@@ -403,6 +444,8 @@ Optional<Result<ScriptResult, Vector<ParserError>>> compile_parsed_script(Parsed
         return Vector<ParserError> {};
 
     builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
+    start_background_compilation_for_functions(*builder.result.executable);
+    start_background_compilation_for_functions_to_initialize(builder.result.functions_to_initialize);
     return builder.result;
 }
 
@@ -420,6 +463,8 @@ Optional<Result<ScriptResult, Vector<ParserError>>> materialize_compiled_script(
         return Vector<ParserError> {};
 
     builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
+    start_background_compilation_for_functions(*builder.result.executable);
+    start_background_compilation_for_functions_to_initialize(builder.result.functions_to_initialize);
     return builder.result;
 }
 
@@ -464,6 +509,9 @@ Optional<Result<EvalResult, String>> compile_eval(
     builder.executable->name = "eval"_utf16_fly_string;
 
     auto result = builder.to_result();
+    // Eval executes synchronously and is often used for dynamic code generation, so keep nested functions lazy instead
+    // of turning each eval into background precompile work.
+    disable_background_compilation_for_functions_to_initialize(result.declaration_data.functions_to_initialize);
 
     // If the caller is strict, the eval is always strict regardless of what Rust reported.
     if (strict_caller == CallerMode::Strict)
@@ -523,10 +571,13 @@ Optional<Result<ModuleResult, Vector<ParserError>>> compile_parsed_module(Parsed
         builder.result.tla_shared_data->m_function_environment_needed = true;
         builder.result.tla_shared_data->update_asm_call_metadata();
         builder.result.tla_shared_data->set_executable(tla_exec);
+        start_background_compilation_for_functions(*tla_exec);
     } else {
         builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
+        start_background_compilation_for_functions(*builder.result.executable);
     }
 
+    start_background_compilation_for_functions_to_initialize(builder.result.functions_to_initialize);
     return builder.result;
 }
 
@@ -572,10 +623,13 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_compiled_module(
         builder.result.tla_shared_data->m_function_environment_needed = true;
         builder.result.tla_shared_data->update_asm_call_metadata();
         builder.result.tla_shared_data->set_executable(tla_exec);
+        start_background_compilation_for_functions(*tla_exec);
     } else {
         builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
+        start_background_compilation_for_functions(*builder.result.executable);
     }
 
+    start_background_compilation_for_functions_to_initialize(builder.result.functions_to_initialize);
     return builder.result;
 }
 
@@ -657,6 +711,11 @@ Optional<Vector<GC::Root<SharedFunctionInstanceData>>> compile_builtin_file(
     rust_compile_builtin_file(source_ptr, length, &vm, code.ptr(), &shared_data_list, collect_builtin_function,
         nullptr, nullptr);
 
+    // JavaScript-backed builtin functions are returned directly to Intrinsics, so they do not have an enclosing
+    // Executable whose function list can be walked for background compilation.
+    for (auto& shared_data : shared_data_list)
+        shared_data->start_background_bytecode_compilation(true);
+
     return shared_data_list;
 }
 
@@ -665,27 +724,41 @@ GC::Ptr<Bytecode::Executable> compile_function(VM& vm, SharedFunctionInstanceDat
     if (!shared_data.m_use_rust_compilation)
         return nullptr;
 
-    if (auto* precompiled = shared_data.take_precompiled_bytecode())
-        return materialize_precompiled_function(vm, *shared_data.m_source_code, shared_data, precompiled);
+    GC::Ptr<Bytecode::Executable> executable;
+    if (auto* precompiled = shared_data.take_precompiled_bytecode_or_compile(shared_data.m_source_code->length_in_code_units(), builtin_abstract_operations_enabled)) {
+        executable = materialize_precompiled_function(vm, *shared_data.m_source_code, shared_data, precompiled);
+    } else {
+        auto* rust_function_ast = shared_data.take_rust_function_ast();
+        VERIFY(rust_function_ast);
+        GC::DeferGC defer_gc(vm.heap());
+        void* exec_ptr = nullptr;
+        {
+            Threading::MutexLocker locker(function_ast_compilation_mutex());
+            exec_ptr = rust_compile_function(
+                &vm,
+                shared_data.m_source_code.ptr(),
+                shared_data.m_source_code->utf16_data(),
+                shared_data.m_source_code->length_in_code_units(),
+                &shared_data,
+                rust_function_ast,
+                builtin_abstract_operations_enabled,
+                shared_data.m_background_bytecode_compilation_enabled);
+        }
+        auto* exec = static_cast<Bytecode::Executable*>(exec_ptr);
+        executable = exec;
+    }
 
-    auto* rust_function_ast = shared_data.take_rust_function_ast();
-    VERIFY(rust_function_ast);
-    GC::DeferGC defer_gc(vm.heap());
-    auto* exec = static_cast<Bytecode::Executable*>(rust_compile_function(
-        &vm,
-        shared_data.m_source_code.ptr(),
-        shared_data.m_source_code->utf16_data(),
-        shared_data.m_source_code->length_in_code_units(),
-        &shared_data,
-        rust_function_ast,
-        builtin_abstract_operations_enabled));
-
-    return exec;
+    if (executable && shared_data.m_background_bytecode_compilation_enabled)
+        start_background_compilation_for_functions(*executable, builtin_abstract_operations_enabled);
+    return executable;
 }
 
 PrecompiledFunction* precompile_function_off_thread(void* rust_function_ast, size_t source_len, bool builtin_abstract_operations_enabled)
 {
-    return rust_precompile_function_off_thread(rust_function_ast, source_len, builtin_abstract_operations_enabled);
+    return rust_precompile_function_off_thread(
+        rust_function_ast,
+        source_len,
+        builtin_abstract_operations_enabled);
 }
 
 GC::Ptr<Bytecode::Executable> materialize_precompiled_function(VM& vm, SourceCode const& source_code, SharedFunctionInstanceData& shared_data, PrecompiledFunction* precompiled)
@@ -708,8 +781,10 @@ void free_precompiled_function(PrecompiledFunction* precompiled)
 
 void free_function_ast(void* ast)
 {
-    if (ast)
+    if (ast) {
+        Threading::MutexLocker locker(function_ast_compilation_mutex());
         rust_free_function_ast(ast);
+    }
 }
 
 }
@@ -998,6 +1073,8 @@ extern "C" void* rust_create_sfd(
         data->has_simple_parameter_list,
         move(mapped_param_names),
         data->rust_function_ast);
+    if (data->bytecode_input)
+        shared->set_bytecode_input(*static_cast<JS::RustIntegration::FunctionBytecodeInput*>(data->bytecode_input));
 
     // Set parsing insights that must be available before lazy compilation.
     shared->m_uses_this = data->uses_this;
@@ -1071,8 +1148,6 @@ extern "C" void rust_sfd_set_precompiled_executable(
     shared.m_contains_direct_call_to_eval = contains_direct_call_to_eval;
     shared.set_executable(executable);
     executable.name = shared.m_name;
-    if (Bytecode::g_dump_bytecode)
-        executable.dump();
     shared.clear_compile_inputs();
 }
 
@@ -1082,6 +1157,14 @@ extern "C" void rust_sfd_set_precompiled_bytecode(
 {
     auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
     shared.set_precompiled_bytecode(static_cast<JS::FFI::PrecompiledFunction*>(precompiled_ptr));
+}
+
+extern "C" void rust_sfd_set_background_bytecode_compilation_enabled(
+    void* sfd_ptr,
+    bool enabled)
+{
+    auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    shared.m_background_bytecode_compilation_enabled = enabled;
 }
 
 extern "C" void* rust_create_class_blueprint(

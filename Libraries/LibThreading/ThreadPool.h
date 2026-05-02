@@ -20,6 +20,7 @@ public:
     static ThreadPool& the();
 
     void submit(Function<void()>);
+    size_t thread_count() const { return m_threads.size(); }
 
 private:
     ThreadPool();

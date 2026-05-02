@@ -25,6 +25,7 @@ use std::ffi::c_void;
 
 use super::generator::{
     AssembledBytecode, ConstantValue, Generator, PendingClassBlueprint, PendingClassElement, PendingLiteralValueKind,
+    PendingSharedFunctionData, PendingSharedFunctionDataMetadata,
 };
 use crate::ast::Utf16String;
 use crate::u32_from_usize;
@@ -183,6 +184,7 @@ pub struct FFISharedFunctionData {
     pub source_text_offset: usize,
     pub source_text_length: usize,
     pub rust_function_ast: *mut c_void,
+    pub bytecode_input: *mut c_void,
     pub uses_this: bool,
     pub uses_this_from_environment: bool,
 }
@@ -259,6 +261,18 @@ unsafe extern "C" {
 
     pub fn rust_sfd_set_precompiled_bytecode(sfd_ptr: *mut c_void, precompiled_ptr: *mut c_void);
 
+    pub fn rust_sfd_set_background_bytecode_compilation_enabled(sfd_ptr: *mut c_void, enabled: bool);
+
+    pub fn rust_create_function_bytecode_input(rust_function_ast: *mut c_void) -> *mut c_void;
+
+    pub fn rust_free_function_bytecode_input(bytecode_input: *mut c_void);
+
+    pub fn rust_start_function_bytecode_input_background_compilation(
+        bytecode_input: *mut c_void,
+        source_len: usize,
+        builtin_abstract_operations_enabled: bool,
+    );
+
     pub fn rust_create_class_blueprint(
         vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,
@@ -298,6 +312,8 @@ unsafe extern "C" {
     ) -> *mut c_void;
 
     pub fn rust_free_error_string(str: *const std::os::raw::c_char);
+
+    pub fn rust_free_compiled_regex(ptr: *mut c_void);
 
     pub fn rust_number_to_utf16(value: f64, buffer: *mut u16, buffer_len: usize) -> usize;
 
@@ -387,6 +403,7 @@ pub unsafe fn create_shared_function_data(
             source_text_offset: source_start,
             source_text_length: source_text_len,
             rust_function_ast: rust_ast_ptr,
+            bytecode_input: std::ptr::null_mut(),
             uses_this,
             uses_this_from_environment,
         };
@@ -396,6 +413,61 @@ pub unsafe fn create_shared_function_data(
         assert!(
             !sfd_ptr.is_null(),
             "create_shared_function_data: rust_create_sfd returned null"
+        );
+        sfd_ptr
+    }
+}
+
+/// Create a SharedFunctionInstanceData from precomputed metadata and an existing
+/// background bytecode input.
+///
+/// # Safety
+/// `vm_ptr` and `source_code_ptr` must be valid pointers.
+pub unsafe fn create_shared_function_data_from_metadata(
+    metadata: &PendingSharedFunctionDataMetadata,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    bytecode_input: *mut c_void,
+) -> *mut c_void {
+    unsafe {
+        let (name_ptr, name_len) = if let Some(name) = &metadata.name {
+            (name.as_ptr(), name.len())
+        } else {
+            (std::ptr::null(), 0)
+        };
+        let parameter_name_slices: Vec<FFIUtf16Slice> = if metadata.has_simple_parameter_list {
+            metadata
+                .parameter_names
+                .iter()
+                .map(|name| FFIUtf16Slice::from(name.as_ref()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let ffi_data = FFISharedFunctionData {
+            name: name_ptr,
+            name_len,
+            function_kind: metadata.function_kind as u8,
+            function_length: metadata.function_length,
+            formal_parameter_count: metadata.formal_parameter_count,
+            strict: metadata.strict,
+            is_arrow: metadata.is_arrow,
+            has_simple_parameter_list: metadata.has_simple_parameter_list,
+            parameter_names: parameter_name_slices.as_ptr(),
+            parameter_name_count: parameter_name_slices.len(),
+            source_text_offset: metadata.source_text_offset,
+            source_text_length: metadata.source_text_length,
+            rust_function_ast: std::ptr::null_mut(),
+            bytecode_input,
+            uses_this: metadata.uses_this,
+            uses_this_from_environment: metadata.uses_this_from_environment,
+        };
+
+        let sfd_ptr = rust_create_sfd(vm_ptr, source_code_ptr, &raw const ffi_data);
+        assert!(
+            !sfd_ptr.is_null(),
+            "create_shared_function_data_from_metadata: rust_create_sfd returned null"
         );
         sfd_ptr
     }
@@ -415,6 +487,58 @@ pub unsafe fn create_sfd_for_gdi(
     unsafe { create_shared_function_data(function_data, subtable, vm_ptr, source_code_ptr, is_strict, None) }
 }
 
+/// Materialize a pending lazy function into GC-backed SharedFunctionInstanceData.
+///
+/// # Safety
+/// `vm_ptr` and `source_code_ptr` must be valid pointers. Any `bytecode_input`
+/// owned by `pending` must come from `rust_create_function_bytecode_input()`.
+pub unsafe fn materialize_pending_shared_function_data(
+    pending: &mut PendingSharedFunctionData,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    is_strict: bool,
+    background_compilation_enabled: bool,
+) -> *mut c_void {
+    unsafe {
+        let sfd_ptr = if let Some(function_data) = pending.function_data.take() {
+            let subtable = pending
+                .subtable
+                .take()
+                .expect("pending shared function data subtable was already materialized");
+            create_shared_function_data(
+                function_data,
+                subtable,
+                vm_ptr,
+                source_code_ptr,
+                is_strict,
+                pending.name_override.as_ref().map(|name| name.as_slice()),
+            )
+        } else {
+            let metadata = pending
+                .metadata
+                .take()
+                .expect("pending shared function data metadata was already materialized");
+            let bytecode_input = pending.take_bytecode_input();
+            assert!(
+                !bytecode_input.is_null(),
+                "pending shared function data had no function data or bytecode input"
+            );
+            create_shared_function_data_from_metadata(&metadata, vm_ptr, source_code_ptr, bytecode_input)
+        };
+
+        if let Some((name, is_private)) = &pending.class_field_initializer_name {
+            rust_sfd_set_class_field_initializer_name(sfd_ptr, name.as_ptr(), name.len(), *is_private);
+        }
+        if !background_compilation_enabled {
+            rust_sfd_set_background_bytecode_compilation_enabled(sfd_ptr, false);
+        }
+        if let Some(precompiled) = pending.precompiled_function.take() {
+            rust_sfd_set_precompiled_bytecode(sfd_ptr, Box::into_raw(precompiled) as *mut c_void);
+        }
+        sfd_ptr
+    }
+}
+
 unsafe fn materialize_shared_function_data(
     generator: &mut Generator,
     vm_ptr: *mut c_void,
@@ -423,28 +547,15 @@ unsafe fn materialize_shared_function_data(
     unsafe {
         let mut sfd_ptrs = Vec::with_capacity(generator.shared_function_data.len());
         for pending in &mut generator.shared_function_data {
-            let function_data = pending
-                .function_data
-                .take()
-                .expect("pending shared function data was already materialized");
-            let subtable = pending
-                .subtable
-                .take()
-                .expect("pending shared function data subtable was already materialized");
-            let sfd_ptr = create_shared_function_data(
-                function_data,
-                subtable,
+            let sfd_ptr = materialize_pending_shared_function_data(
+                pending,
                 vm_ptr,
                 source_code_ptr,
                 generator.strict,
-                pending.name_override.as_ref().map(|name| name.as_slice()),
+                generator
+                    .lazy_function_compilation_policy
+                    .background_compilation_enabled(),
             );
-            if let Some((name, is_private)) = &pending.class_field_initializer_name {
-                rust_sfd_set_class_field_initializer_name(sfd_ptr, name.as_ptr(), name.len(), *is_private);
-            }
-            if let Some(precompiled) = pending.precompiled_function.take() {
-                rust_sfd_set_precompiled_bytecode(sfd_ptr, Box::into_raw(precompiled) as *mut c_void);
-            }
             sfd_ptrs.push(sfd_ptr as *const c_void);
         }
         sfd_ptrs
@@ -686,7 +797,9 @@ pub unsafe fn create_executable(
             regex_count: generator.compiled_regexes.len(),
         };
 
-        rust_create_executable(vm_ptr, source_code_ptr, &raw const ffi_data)
+        let executable = rust_create_executable(vm_ptr, source_code_ptr, &raw const ffi_data);
+        generator.compiled_regexes.clear();
+        executable
     }
 }
 

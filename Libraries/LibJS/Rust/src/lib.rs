@@ -95,6 +95,7 @@ pub(crate) fn u32_from_usize(value: usize) -> u32 {
 }
 
 use ast::StatementKind;
+use bytecode::generator::LazyFunctionCompilationPolicy;
 use parser::{ParseError, Parser, ProgramType};
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -112,6 +113,7 @@ pub struct ParsedProgram {
     program: ast::Statement,
     function_table: ast::FunctionTable,
     scope_ref: Rc<RefCell<ast::ScopeData>>,
+    program_type: ProgramType,
     is_strict_mode: bool,
     has_top_level_await: bool,
     errors: Vec<ParseError>,
@@ -339,18 +341,193 @@ fn precompile_eager_functions(generator: &mut bytecode::generator::Generator) {
             data: *function_data,
             function_table: subtable,
         };
-        let (function_data, precompiled) = compile_function_payload_to_bytecode(
+        let (function_data, mut precompiled) = compile_function_payload_to_bytecode(
             payload,
             generator.source_len,
             generator.builtin_abstract_operations_enabled,
+            generator.lazy_function_compilation_policy,
         );
+        prepare_background_precompile_for_pending_functions(&mut precompiled.generator);
 
         pending.function_data = Some(function_data);
-        // The precompiled executable owns any nested lazy function payloads. Keep
-        // an empty payload here only until materialization creates the SFD; it is
-        // immediately cleared after the precompiled executable is attached.
+        // The precompiled artifact owns any nested lazy function inputs. Keep an
+        // empty payload here only until materialization creates the SFD; it is
+        // immediately cleared after the precompiled artifact is attached.
         pending.subtable = Some(ast::FunctionTable::new());
         pending.precompiled_function = Some(precompiled);
+    }
+}
+
+fn prepare_background_precompile_for_pending_function(
+    pending: &mut bytecode::generator::PendingSharedFunctionData,
+    is_strict: bool,
+) {
+    if pending.precompiled_function.is_some() || !pending.bytecode_input.is_null() {
+        return;
+    }
+
+    let function_data = pending
+        .function_data
+        .take()
+        .expect("pending function data was already materialized");
+    let subtable = pending
+        .subtable
+        .take()
+        .expect("pending function subtable was already materialized");
+    pending.metadata = Some(
+        bytecode::generator::PendingSharedFunctionDataMetadata::from_function_data(
+            &function_data,
+            is_strict,
+            pending.name_override.as_ref(),
+        ),
+    );
+
+    let payload = ast::FunctionPayload {
+        data: *function_data,
+        function_table: subtable,
+    };
+    let rust_function_ast = Box::into_raw(Box::new(payload)) as *mut c_void;
+    let bytecode_input = unsafe { bytecode::ffi::rust_create_function_bytecode_input(rust_function_ast) };
+    assert!(
+        !bytecode_input.is_null(),
+        "rust_create_function_bytecode_input returned null"
+    );
+    pending.bytecode_input = bytecode_input;
+}
+
+// Preparing only detaches the lazy function's AST payload into a C++-owned input. Starting is a separate step so the
+// top-level compile can finish all parser/bytecode bookkeeping before ThreadPool workers begin consuming those inputs.
+fn prepare_background_precompile_for_pending_functions(generator: &mut bytecode::generator::Generator) {
+    if !generator
+        .lazy_function_compilation_policy
+        .background_compilation_enabled()
+    {
+        return;
+    }
+
+    let is_strict = generator.strict;
+    for pending in &mut generator.shared_function_data {
+        prepare_background_precompile_for_pending_function(pending, is_strict);
+    }
+}
+
+fn start_background_precompile_for_pending_function(
+    pending: &mut bytecode::generator::PendingSharedFunctionData,
+    source_len: usize,
+    builtin_abstract_operations_enabled: bool,
+) {
+    if !pending.bytecode_input.is_null() {
+        unsafe {
+            bytecode::ffi::rust_start_function_bytecode_input_background_compilation(
+                pending.bytecode_input,
+                source_len,
+                builtin_abstract_operations_enabled,
+            );
+        }
+    }
+
+    if let Some(precompiled) = pending.precompiled_function.as_mut() {
+        start_background_precompile_for_generator(&mut precompiled.generator);
+    }
+}
+
+fn start_background_precompile_for_generator(generator: &mut bytecode::generator::Generator) {
+    if !generator
+        .lazy_function_compilation_policy
+        .background_compilation_enabled()
+    {
+        return;
+    }
+
+    let source_len = generator.source_len;
+    let builtin_abstract_operations_enabled = generator.builtin_abstract_operations_enabled;
+    for pending in &mut generator.shared_function_data {
+        start_background_precompile_for_pending_function(pending, source_len, builtin_abstract_operations_enabled);
+    }
+    for pending in generator.prepared_function_data.values_mut() {
+        start_background_precompile_for_pending_function(pending, source_len, builtin_abstract_operations_enabled);
+    }
+}
+
+fn start_background_precompile_for_compiled_program(compiled: &mut CompiledProgram) {
+    match &mut compiled.bytecode {
+        CompiledProgramBytecode::Program(bytecode) | CompiledProgramBytecode::AsyncModule(bytecode) => {
+            start_background_precompile_for_generator(&mut bytecode.generator);
+        }
+    }
+}
+
+fn prepare_function_declaration_for_background_precompile(
+    generator: &mut bytecode::generator::Generator,
+    function_id: ast::FunctionId,
+    is_strict: bool,
+) {
+    if generator.prepared_function_data.contains_key(&function_id) {
+        return;
+    }
+
+    let function_data = generator.function_table.take(function_id);
+    let subtable = generator.function_table.extract_reachable(&function_data);
+    let mut pending = bytecode::generator::PendingSharedFunctionData {
+        function_data: Some(function_data),
+        subtable: Some(subtable),
+        metadata: None,
+        bytecode_input: std::ptr::null_mut(),
+        name_override: None,
+        class_field_initializer_name: None,
+        should_eager_compile: false,
+        precompiled_function: None,
+    };
+    prepare_background_precompile_for_pending_function(&mut pending, is_strict);
+    generator.prepared_function_data.insert(function_id, pending);
+}
+
+fn prepare_script_gdi_functions_for_background_precompile(
+    scope: &ast::ScopeData,
+    generator: &mut bytecode::generator::Generator,
+    is_strict: bool,
+) {
+    use ast::StatementKind;
+
+    let mut last_position: std::collections::HashMap<ast::SharedUtf16String, usize> = std::collections::HashMap::new();
+    for (i, child) in scope.children.iter().enumerate() {
+        if let StatementKind::FunctionDeclaration(ref fd) = child.inner
+            && let Some(ref name_ident) = fd.name
+        {
+            last_position.insert(name_ident.name.clone(), i);
+        }
+    }
+    for (i, child) in scope.children.iter().enumerate() {
+        if let StatementKind::FunctionDeclaration(ref fd) = child.inner
+            && let Some(ref name_ident) = fd.name
+            && last_position.get(&name_ident.name).copied() == Some(i)
+        {
+            prepare_function_declaration_for_background_precompile(generator, fd.function_id, is_strict);
+        }
+    }
+}
+
+fn prepare_module_declaration_functions_for_background_precompile(
+    scope: &ast::ScopeData,
+    generator: &mut bytecode::generator::Generator,
+) {
+    use ast::StatementKind;
+
+    for child in &scope.children {
+        let declaration = match &child.inner {
+            StatementKind::Export(export_data) => {
+                if let Some(ref stmt) = export_data.statement {
+                    &stmt.inner
+                } else {
+                    continue;
+                }
+            }
+            other => other,
+        };
+
+        if let StatementKind::FunctionDeclaration(fd) = declaration {
+            prepare_function_declaration_for_background_precompile(generator, fd.function_id, true);
+        }
     }
 }
 
@@ -513,6 +690,7 @@ pub unsafe extern "C" fn rust_parse_program(
                 program,
                 function_table: std::mem::take(&mut parser.function_table),
                 scope_ref,
+                program_type: pt,
                 is_strict_mode: is_strict,
                 has_top_level_await: has_tla,
                 errors,
@@ -591,6 +769,11 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
                 generator.eager_compile_direct_iifes = true;
                 let assembled = compile_module_as_async_to_bytecode(&parsed.program, &parsed.scope_ref, &mut generator);
                 precompile_eager_functions(&mut generator);
+                prepare_background_precompile_for_pending_functions(&mut generator);
+                prepare_module_declaration_functions_for_background_precompile(
+                    &parsed.scope_ref.borrow(),
+                    &mut generator,
+                );
                 CompiledProgramBytecode::AsyncModule(CompiledBytecode { generator, assembled })
             } else {
                 let mut generator = new_program_generator(
@@ -603,6 +786,19 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
                 generator.function_table = std::mem::take(&mut parsed.function_table);
                 let assembled = compile_program_body_to_bytecode(&mut generator, &parsed.program, &parsed.scope_ref);
                 precompile_eager_functions(&mut generator);
+                prepare_background_precompile_for_pending_functions(&mut generator);
+                if parsed.program_type == ProgramType::Module {
+                    prepare_module_declaration_functions_for_background_precompile(
+                        &parsed.scope_ref.borrow(),
+                        &mut generator,
+                    );
+                } else {
+                    prepare_script_gdi_functions_for_background_precompile(
+                        &parsed.scope_ref.borrow(),
+                        &mut generator,
+                        parsed.is_strict_mode,
+                    );
+                }
                 CompiledProgramBytecode::Program(CompiledBytecode { generator, assembled })
             };
 
@@ -611,6 +807,26 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
                 bytecode,
             }))
         })
+    }
+}
+
+/// Start background precompilation for every lazy function input prepared by off-thread compilation.
+///
+/// The CompiledProgram remains owned by the caller. This may be called on the worker thread after
+/// `rust_compile_parsed_program_off_thread()` returns and before the program is handed to the main thread.
+///
+/// # Safety
+/// `compiled` must be a valid pointer from `rust_compile_parsed_program_off_thread()`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_start_compiled_program_background_precompilation(compiled: *mut CompiledProgram) {
+    unsafe {
+        abort_on_panic(|| {
+            if compiled.is_null() {
+                return;
+            }
+
+            start_background_precompile_for_compiled_program(&mut *compiled);
+        });
     }
 }
 
@@ -693,6 +909,7 @@ pub unsafe extern "C" fn rust_compile_parsed_script(
                 source_code_ptr,
                 gdi_context,
                 &mut generator.function_table,
+                &mut generator.prepared_function_data,
             );
 
             exec_ptr
@@ -737,6 +954,7 @@ pub unsafe extern "C" fn rust_materialize_compiled_script(
                 source_code_ptr,
                 gdi_context,
                 &mut bytecode.generator.function_table,
+                &mut bytecode.generator.prepared_function_data,
             );
 
             exec_ptr
@@ -806,6 +1024,7 @@ pub unsafe extern "C" fn rust_compile_eval(
             };
 
             let mut generator = new_program_generator(is_strict, vm_ptr, source_code_ptr, source_len);
+            generator.lazy_function_compilation_policy = LazyFunctionCompilationPolicy::LazyWithoutBackground;
             generator.function_table = std::mem::take(&mut parser.function_table);
             let exec_ptr = compile_program_body(&mut generator, &program, &scope_ref, vm_ptr, source_code_ptr);
             if exec_ptr.is_null() {
@@ -1146,6 +1365,7 @@ pub unsafe extern "C" fn rust_compile_parsed_module(
             extract_module_metadata(&parsed.scope_ref.borrow(), module_context, cb);
 
             // 3. Extract var declared names and lexical bindings.
+            let mut prepared_function_data = std::collections::HashMap::new();
             extract_module_declarations(
                 &parsed.scope_ref.borrow(),
                 vm_ptr,
@@ -1153,6 +1373,7 @@ pub unsafe extern "C" fn rust_compile_parsed_module(
                 module_context,
                 cb,
                 &mut parsed.function_table,
+                &mut prepared_function_data,
             );
 
             // 4. Compute requested modules (sorted by source offset).
@@ -1230,6 +1451,7 @@ pub unsafe extern "C" fn rust_materialize_compiled_module(
                 module_context,
                 cb,
                 &mut bytecode.generator.function_table,
+                &mut bytecode.generator.prepared_function_data,
             );
             extract_requested_modules(&compiled.parsed.scope_ref.borrow(), module_context, cb);
 
@@ -1591,6 +1813,10 @@ unsafe fn extract_module_declarations(
     ctx: *mut c_void,
     cb: &ModuleCallbacks,
     function_table: &mut ast::FunctionTable,
+    prepared_function_data: &mut std::collections::HashMap<
+        ast::FunctionId,
+        bytecode::generator::PendingSharedFunctionData,
+    >,
 ) {
     unsafe {
         use ast::StatementKind;
@@ -1620,10 +1846,19 @@ unsafe fn extract_module_declarations(
                 StatementKind::FunctionDeclaration(fd) => {
                     let is_default = is_exported && fd.name.as_ref().is_some_and(|n| n.name == default_name);
 
-                    let function_data = function_table.take(fd.function_id);
-                    let subtable = function_table.extract_reachable(&function_data);
-                    let sfd_ptr =
-                        bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, true);
+                    let sfd_ptr = if let Some(mut pending) = prepared_function_data.remove(&fd.function_id) {
+                        bytecode::ffi::materialize_pending_shared_function_data(
+                            &mut pending,
+                            vm_ptr,
+                            source_code_ptr,
+                            true,
+                            true,
+                        )
+                    } else {
+                        let function_data = function_table.take(fd.function_id);
+                        let subtable = function_table.extract_reachable(&function_data);
+                        bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, true)
+                    };
                     if sfd_ptr.is_null() {
                         continue;
                     }
@@ -1877,6 +2112,10 @@ fn extract_gdi_common(
     push_annex_b_name: &mut dyn FnMut(&[u16]),
     push_lexical_binding: &mut dyn FnMut(&[u16], bool),
     function_table: &mut ast::FunctionTable,
+    prepared_function_data: &mut std::collections::HashMap<
+        ast::FunctionId,
+        bytecode::generator::PendingSharedFunctionData,
+    >,
 ) {
     use ast::{DeclarationKind, StatementKind};
 
@@ -1906,10 +2145,22 @@ fn extract_gdi_common(
             && let Some(ref name_ident) = fd.name
             && last_position.get(&name_ident.name).copied() == Some(i)
         {
-            let function_data = function_table.take(fd.function_id);
-            let subtable = function_table.extract_reachable(&function_data);
-            let sfd_ptr = unsafe {
-                bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, is_strict)
+            let sfd_ptr = if let Some(mut pending) = prepared_function_data.remove(&fd.function_id) {
+                unsafe {
+                    bytecode::ffi::materialize_pending_shared_function_data(
+                        &mut pending,
+                        vm_ptr,
+                        source_code_ptr,
+                        is_strict,
+                        true,
+                    )
+                }
+            } else {
+                let function_data = function_table.take(fd.function_id);
+                let subtable = function_table.extract_reachable(&function_data);
+                unsafe {
+                    bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, is_strict)
+                }
             };
             assert!(!sfd_ptr.is_null(), "create_sfd_for_gdi returned null");
             push_function(sfd_ptr, name_ident.name.as_slice());
@@ -1970,6 +2221,7 @@ unsafe fn extract_eval_gdi(
 
         eval_gdi_set_strict(ctx, is_strict);
 
+        let mut prepared_function_data = std::collections::HashMap::new();
         extract_gdi_common(
             scope,
             vm_ptr,
@@ -1983,6 +2235,7 @@ unsafe fn extract_eval_gdi(
                 eval_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const);
             },
             function_table,
+            &mut prepared_function_data,
         );
     }
 }
@@ -1996,6 +2249,10 @@ unsafe fn extract_script_gdi(
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
     function_table: &mut ast::FunctionTable,
+    prepared_function_data: &mut std::collections::HashMap<
+        ast::FunctionId,
+        bytecode::generator::PendingSharedFunctionData,
+    >,
 ) {
     unsafe {
         use ast::{DeclarationKind, StatementKind};
@@ -2043,6 +2300,7 @@ unsafe fn extract_script_gdi(
                 script_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const);
             },
             function_table,
+            prepared_function_data,
         );
     }
 }
@@ -2157,6 +2415,25 @@ pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
     }
 }
 
+/// Detach a function payload from parser-owned shared AST state before background compilation.
+///
+/// # Safety
+/// `ast` must be a valid pointer returned by `Box::into_raw(Box<FunctionPayload>)`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_detach_function_ast_for_background_precompilation(ast: *mut c_void) -> *mut c_void {
+    unsafe {
+        abort_on_panic(|| {
+            if ast.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let mut payload = Box::from_raw(ast as *mut ast::FunctionPayload);
+            payload.detach_for_background_compilation();
+            Box::into_raw(payload) as *mut c_void
+        })
+    }
+}
+
 /// Free a string allocated by Rust (e.g. AST dump output).
 ///
 /// # Safety
@@ -2182,7 +2459,7 @@ pub unsafe extern "C" fn rust_free_string(ptr: *mut u8, len: usize) {
 /// - `vm_ptr` must be a valid `JS::VM*`.
 /// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
 /// - `sfd_ptr` must be a valid `JS::SharedFunctionInstanceData*`.
-/// - `rust_function_ast` must be a valid `Box<FunctionData>` pointer.
+/// - `rust_function_ast` must be a valid `Box<FunctionPayload>` pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_compile_function(
     vm_ptr: *mut c_void,
@@ -2192,6 +2469,7 @@ pub unsafe extern "C" fn rust_compile_function(
     sfd_ptr: *mut c_void,
     rust_function_ast: *mut c_void,
     builtin_abstract_operations_enabled: bool,
+    background_bytecode_compilation_enabled: bool,
 ) -> *mut c_void {
     unsafe {
         abort_on_panic(|| {
@@ -2199,8 +2477,13 @@ pub unsafe extern "C" fn rust_compile_function(
                 return std::ptr::null_mut();
             }
             let payload = Box::from_raw(rust_function_ast as *mut ast::FunctionPayload);
+            let policy = if background_bytecode_compilation_enabled {
+                LazyFunctionCompilationPolicy::Lazy
+            } else {
+                LazyFunctionCompilationPolicy::LazyWithoutBackground
+            };
             let (_function_data, mut precompiled) =
-                compile_function_payload_to_bytecode(*payload, source_len, builtin_abstract_operations_enabled);
+                compile_function_payload_to_bytecode(*payload, source_len, builtin_abstract_operations_enabled, policy);
 
             precompiled.generator.vm_ptr = vm_ptr;
             precompiled.generator.source_code_ptr = source_code_ptr;
@@ -2238,8 +2521,14 @@ pub unsafe extern "C" fn rust_precompile_function_off_thread(
             }
 
             let payload = Box::from_raw(rust_function_ast as *mut ast::FunctionPayload);
-            let (_function_data, precompiled) =
-                compile_function_payload_to_bytecode(*payload, source_len, builtin_abstract_operations_enabled);
+            let (_function_data, mut precompiled) = compile_function_payload_to_bytecode(
+                *payload,
+                source_len,
+                builtin_abstract_operations_enabled,
+                LazyFunctionCompilationPolicy::Lazy,
+            );
+            prepare_background_precompile_for_pending_functions(&mut precompiled.generator);
+            start_background_precompile_for_generator(&mut precompiled.generator);
             Box::into_raw(precompiled)
         })
     }
@@ -2309,6 +2598,7 @@ fn compile_function_payload_to_bytecode(
     payload: ast::FunctionPayload,
     source_len: usize,
     builtin_abstract_operations_enabled: bool,
+    lazy_function_compilation_policy: LazyFunctionCompilationPolicy,
 ) -> (Box<ast::FunctionData>, Box<bytecode::generator::PrecompiledFunction>) {
     let function_data = Box::new(payload.data);
 
@@ -2326,6 +2616,7 @@ fn compile_function_payload_to_bytecode(
     generator.strict = function_data.is_strict_mode;
     generator.this_value_needs_environment_resolution = sfd_metadata.this_value_needs_environment_resolution;
     generator.builtin_abstract_operations_enabled = builtin_abstract_operations_enabled;
+    generator.lazy_function_compilation_policy = lazy_function_compilation_policy;
     generator.function_table = payload.function_table;
     generator.source_len = source_len;
     generator.enclosing_function_kind = function_data.kind;
@@ -2398,7 +2689,6 @@ fn compile_function_payload_to_bytecode(
     }
 
     let assembled = generator.assemble();
-
     (
         function_data,
         Box::new(bytecode::generator::PrecompiledFunction {

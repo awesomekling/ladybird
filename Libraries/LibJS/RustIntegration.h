@@ -94,6 +94,12 @@ JS_API FFI::ParsedProgram* parse_program(u16 const* utf16_data, size_t length_in
 // Compile a parsed program to bytecode without touching the VM or GC. Thread-safe.
 JS_API FFI::CompiledProgram* compile_parsed_program_off_thread(FFI::ParsedProgram* parsed, size_t length_in_code_units);
 
+// Start compiling every lazy function input prepared by off-thread compilation. Thread-safe.
+JS_API void start_compiled_program_background_precompilation(FFI::CompiledProgram*);
+
+// Wait until all currently queued background bytecode compilation work has completed.
+JS_API void wait_for_background_bytecode_compilation();
+
 // Check if a parsed program has errors. Does not consume the program.
 JS_API bool parsed_program_has_errors(FFI::ParsedProgram const*);
 

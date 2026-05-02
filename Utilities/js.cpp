@@ -9,6 +9,7 @@
 
 #include <AK/NeverDestroyed.h>
 #include <AK/Platform.h>
+#include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/ConfigFile.h>
@@ -26,6 +27,7 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/ValueInlines.h>
 #include <LibJS/RustFFI.h>
+#include <LibJS/RustIntegration.h>
 #include <LibJS/Script.h>
 #include <LibJS/SourceCode.h>
 #include <LibJS/SourceTextModule.h>
@@ -890,6 +892,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     g_vm_storage.get() = JS::VM::create();
     g_vm = g_vm_storage->ptr();
     g_vm->set_dynamic_imports_allowed(true);
+    ScopeGuard wait_for_background_bytecode_compilation = [] {
+        JS::RustIntegration::wait_for_background_bytecode_compilation();
+    };
 
     if (!disable_debug_printing) {
         // NOTE: These will print out both warnings when using something like Promise.reject().catch(...) -

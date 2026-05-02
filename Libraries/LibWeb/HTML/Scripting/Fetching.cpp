@@ -71,6 +71,7 @@ static void compile_off_thread(NonnullRefPtr<JS::SourceCode const> source_code, 
         OffThreadCompiledProgram result { .parsed = parsed };
         if (parsed && !JS::RustIntegration::parsed_program_has_errors(parsed)) {
             result.compiled = JS::RustIntegration::compile_parsed_program_off_thread(parsed, length);
+            JS::RustIntegration::start_compiled_program_background_precompilation(result.compiled);
             result.parsed = nullptr;
         }
 

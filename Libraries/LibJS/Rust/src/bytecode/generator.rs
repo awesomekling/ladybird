@@ -39,10 +39,105 @@ pub(crate) struct ScopedOperandInner {
 pub struct PendingSharedFunctionData {
     pub function_data: Option<Box<FunctionData>>,
     pub subtable: Option<FunctionTable>,
+    pub metadata: Option<PendingSharedFunctionDataMetadata>,
+    pub bytecode_input: *mut std::ffi::c_void,
     pub name_override: Option<Utf16String>,
     pub class_field_initializer_name: Option<(Utf16String, bool)>,
     pub should_eager_compile: bool,
     pub precompiled_function: Option<Box<PrecompiledFunction>>,
+}
+
+impl PendingSharedFunctionData {
+    pub fn take_bytecode_input(&mut self) -> *mut std::ffi::c_void {
+        std::mem::replace(&mut self.bytecode_input, std::ptr::null_mut())
+    }
+}
+
+impl Drop for PendingSharedFunctionData {
+    fn drop(&mut self) {
+        if !self.bytecode_input.is_null() {
+            unsafe { super::ffi::rust_free_function_bytecode_input(self.bytecode_input) };
+        }
+    }
+}
+
+pub struct PendingSharedFunctionDataMetadata {
+    pub name: Option<Utf16String>,
+    pub function_kind: FunctionKind,
+    pub function_length: i32,
+    pub formal_parameter_count: u32,
+    pub strict: bool,
+    pub is_arrow: bool,
+    pub has_simple_parameter_list: bool,
+    pub parameter_names: Vec<Utf16String>,
+    pub source_text_offset: usize,
+    pub source_text_length: usize,
+    pub uses_this: bool,
+    pub uses_this_from_environment: bool,
+}
+
+impl PendingSharedFunctionDataMetadata {
+    pub fn from_function_data(
+        function_data: &FunctionData,
+        is_strict: bool,
+        name_override: Option<&Utf16String>,
+    ) -> Self {
+        use crate::ast::FunctionParameterBinding;
+
+        let source_start = function_data.source_text_start as usize;
+        let source_end = function_data.source_text_end as usize;
+        let has_simple_parameter_list = function_data.parameters.iter().all(|p| {
+            !p.is_rest && p.default_value.is_none() && matches!(p.binding, FunctionParameterBinding::Identifier(_))
+        });
+        let parameter_names = if has_simple_parameter_list {
+            function_data
+                .parameters
+                .iter()
+                .map(|p| {
+                    if let FunctionParameterBinding::Identifier(ref id) = p.binding {
+                        id.name.to_utf16_string()
+                    } else {
+                        unreachable!("has_simple_parameter_list guarantees all bindings are identifiers")
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Self {
+            name: name_override
+                .cloned()
+                .or_else(|| function_data.name.as_ref().map(|name| name.name.to_utf16_string())),
+            function_kind: function_data.kind,
+            function_length: function_data.function_length,
+            formal_parameter_count: u32_from_usize(function_data.parameters.len()),
+            strict: function_data.is_strict_mode || is_strict,
+            is_arrow: function_data.is_arrow_function,
+            has_simple_parameter_list,
+            parameter_names,
+            source_text_offset: source_start,
+            source_text_length: source_end - source_start,
+            uses_this: function_data.parsing_insights.uses_this,
+            uses_this_from_environment: function_data.parsing_insights.uses_this_from_environment,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LazyFunctionCompilationPolicy {
+    // Keep function bodies as lazy AST payloads until first call.
+    Lazy,
+
+    // Same as Lazy, but child functions inherit a no-background-precompile policy. This is used for eval, where
+    // synchronous dynamic code generation should not fan out speculative background work.
+    LazyWithoutBackground,
+}
+
+impl LazyFunctionCompilationPolicy {
+    pub fn background_compilation_enabled(self) -> bool {
+        !matches!(self, Self::LazyWithoutBackground)
+    }
 }
 
 /// Metadata computed from scope analysis for a SharedFunctionInstanceData.
@@ -263,8 +358,10 @@ pub struct Generator {
     // materialized at the C++ boundary so bytecode generation can run without
     // allocating GC cells.
     pub shared_function_data: Vec<PendingSharedFunctionData>,
+    pub prepared_function_data: HashMap<FunctionId, PendingSharedFunctionData>,
     pub eager_compile_function_ids: HashSet<FunctionId>,
     pub eager_compile_direct_iifes: bool,
+    pub lazy_function_compilation_policy: LazyFunctionCompilationPolicy,
 
     // --- Class blueprints ---
     // Pending descriptors for ClassBlueprint objects. Ownership transfers to
@@ -300,6 +397,14 @@ pub struct Generator {
     // Side table owning all FunctionData from the parser. Codegen
     // takes ownership of individual entries via `take()`.
     pub function_table: crate::ast::FunctionTable,
+}
+
+impl Drop for Generator {
+    fn drop(&mut self) {
+        for compiled_regex in self.compiled_regexes.drain(..) {
+            unsafe { super::ffi::rust_free_compiled_regex(compiled_regex) };
+        }
+    }
 }
 
 macro_rules! singleton_constant {
@@ -414,8 +519,10 @@ impl Generator {
                 }),
             },
             shared_function_data: Vec::new(),
+            prepared_function_data: HashMap::new(),
             eager_compile_function_ids: HashSet::new(),
             eager_compile_direct_iifes: false,
+            lazy_function_compilation_policy: LazyFunctionCompilationPolicy::Lazy,
             class_blueprints: Vec::new(),
             length_identifier: None,
             current_unwind_handler: None,
