@@ -612,6 +612,29 @@ pub unsafe fn create_executable(
     source_code_ptr: *const c_void,
 ) -> ExecutableHandle {
     unsafe {
+        let sfd_ptrs = materialize_shared_function_data(generator, vm_ptr, source_code_ptr);
+        let bp_ptrs = materialize_class_blueprints(generator, vm_ptr, source_code_ptr);
+        create_executable_with_dependencies(generator, assembled, vm_ptr, source_code_ptr, &sfd_ptrs, &bp_ptrs)
+    }
+}
+
+/// Create a C++ Executable from already materialized dependency objects.
+///
+/// This is used by bytecode cache materialization, where the cache blob
+/// contains precompiled nested functions and class blueprints instead of
+/// AST-backed `PendingSharedFunctionData` records.
+///
+/// # Safety
+/// `vm_ptr`, `source_code_ptr`, and all dependency pointers must be valid.
+pub unsafe fn create_executable_with_dependencies(
+    generator: &Generator,
+    assembled: &AssembledBytecode,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    sfd_ptrs: &[*const c_void],
+    bp_ptrs: &[*mut c_void],
+) -> ExecutableHandle {
+    unsafe {
         // Build FFI slices for tables
         let ident_slices: Vec<FFIUtf16Slice> = generator
             .identifier_table
@@ -666,9 +689,6 @@ pub unsafe fn create_executable(
             .iter()
             .map(|v| FFIUtf16Slice::from(v.name.as_ref()))
             .collect();
-
-        let sfd_ptrs = materialize_shared_function_data(generator, vm_ptr, source_code_ptr);
-        let bp_ptrs = materialize_class_blueprints(generator, vm_ptr, source_code_ptr);
 
         let ffi_data = FFIExecutableData {
             bytecode: assembled.bytecode.as_ptr(),
