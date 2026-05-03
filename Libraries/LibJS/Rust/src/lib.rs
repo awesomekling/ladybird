@@ -319,9 +319,18 @@ unsafe fn create_executable_from_compiled_bytecode(
     }
 }
 
-fn precompile_eager_functions(generator: &mut bytecode::generator::Generator) {
+#[derive(Clone, Copy)]
+enum FunctionPrecompileMode {
+    EagerOnly,
+    All,
+}
+
+fn precompile_functions(generator: &mut bytecode::generator::Generator, mode: FunctionPrecompileMode) {
     for pending in &mut generator.shared_function_data {
-        if !pending.should_eager_compile || pending.precompiled_function.is_some() {
+        if pending.precompiled_function.is_some() {
+            continue;
+        }
+        if matches!(mode, FunctionPrecompileMode::EagerOnly) && !pending.should_eager_compile {
             continue;
         }
 
@@ -341,6 +350,7 @@ fn precompile_eager_functions(generator: &mut bytecode::generator::Generator) {
             payload,
             generator.source_len,
             generator.builtin_abstract_operations_enabled,
+            mode,
         );
 
         pending.function_data = Some(function_data);
@@ -565,17 +575,10 @@ pub unsafe extern "C" fn rust_free_parsed_program(parsed: *mut ParsedProgram) {
     }
 }
 
-/// Compile a parsed program to an off-thread bytecode artifact.
-///
-/// Consumes and frees the ParsedProgram. The returned CompiledProgram still needs to be materialized on the main thread
-/// before it becomes a GC-backed Executable.
-///
-/// # Safety
-/// - `parsed` must be a valid pointer from `rust_parse_program()` with no errors.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
+fn compile_parsed_program_off_thread_impl(
     parsed: *mut ParsedProgram,
     source_len: usize,
+    function_precompile_mode: FunctionPrecompileMode,
 ) -> *mut CompiledProgram {
     unsafe {
         abort_on_panic(|| {
@@ -588,7 +591,7 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
                 let mut generator = new_module_async_generator(source_len, std::mem::take(&mut parsed.function_table));
                 generator.eager_compile_direct_iifes = true;
                 let assembled = compile_module_as_async_to_bytecode(&parsed.program, &parsed.scope_ref, &mut generator);
-                precompile_eager_functions(&mut generator);
+                precompile_functions(&mut generator, function_precompile_mode);
                 CompiledProgramBytecode::AsyncModule(CompiledBytecode { generator, assembled })
             } else {
                 let mut generator = new_program_generator(
@@ -600,7 +603,7 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
                 generator.eager_compile_direct_iifes = true;
                 generator.function_table = std::mem::take(&mut parsed.function_table);
                 let assembled = compile_program_body_to_bytecode(&mut generator, &parsed.program, &parsed.scope_ref);
-                precompile_eager_functions(&mut generator);
+                precompile_functions(&mut generator, function_precompile_mode);
                 CompiledProgramBytecode::Program(CompiledBytecode { generator, assembled })
             };
 
@@ -610,6 +613,36 @@ pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
             }))
         })
     }
+}
+
+/// Compile a parsed program to an off-thread bytecode artifact.
+///
+/// Consumes and frees the ParsedProgram. The returned CompiledProgram still needs to be materialized on the main thread
+/// before it becomes a GC-backed Executable.
+///
+/// # Safety
+/// - `parsed` must be a valid pointer from `rust_parse_program()` with no errors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_compile_parsed_program_off_thread(
+    parsed: *mut ParsedProgram,
+    source_len: usize,
+) -> *mut CompiledProgram {
+    compile_parsed_program_off_thread_impl(parsed, source_len, FunctionPrecompileMode::EagerOnly)
+}
+
+/// Fully compile a parsed program to an off-thread bytecode artifact for persistence.
+///
+/// This is intended for post-handoff cache generation, not the latency-sensitive
+/// path that produces bytecode for immediate execution.
+///
+/// # Safety
+/// - `parsed` must be a valid pointer from `rust_parse_program()` with no errors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_compile_parsed_program_fully_off_thread(
+    parsed: *mut ParsedProgram,
+    source_len: usize,
+) -> *mut CompiledProgram {
+    compile_parsed_program_off_thread_impl(parsed, source_len, FunctionPrecompileMode::All)
 }
 
 /// Free a CompiledProgram without materializing it.
@@ -2197,8 +2230,12 @@ pub unsafe extern "C" fn rust_compile_function(
                 return std::ptr::null_mut();
             }
             let payload = Box::from_raw(rust_function_ast as *mut ast::FunctionPayload);
-            let (_function_data, mut precompiled) =
-                compile_function_payload_to_bytecode(*payload, source_len, builtin_abstract_operations_enabled);
+            let (_function_data, mut precompiled) = compile_function_payload_to_bytecode(
+                *payload,
+                source_len,
+                builtin_abstract_operations_enabled,
+                FunctionPrecompileMode::EagerOnly,
+            );
 
             precompiled.generator.vm_ptr = vm_ptr;
             precompiled.generator.source_code_ptr = source_code_ptr;
@@ -2219,6 +2256,7 @@ fn compile_function_payload_to_bytecode(
     payload: ast::FunctionPayload,
     source_len: usize,
     builtin_abstract_operations_enabled: bool,
+    precompile_mode: FunctionPrecompileMode,
 ) -> (Box<ast::FunctionData>, Box<bytecode::generator::PrecompiledFunction>) {
     let function_data = Box::new(payload.data);
 
@@ -2306,6 +2344,8 @@ fn compile_function_payload_to_bytecode(
     if generator.is_in_generator_or_async_function() {
         generator.terminate_unterminated_blocks_with_yield();
     }
+
+    precompile_functions(&mut generator, precompile_mode);
 
     let assembled = generator.assemble();
 
