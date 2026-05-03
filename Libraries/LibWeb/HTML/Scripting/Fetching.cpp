@@ -8,6 +8,7 @@
 
 #include <AK/Utf16String.h>
 #include <LibCore/EventLoop.h>
+#include <LibCrypto/Hash/SHA2.h>
 #include <LibGC/Function.h>
 #include <LibGC/Root.h>
 #include <LibJS/Runtime/ModuleRequest.h>
@@ -52,6 +53,11 @@ struct BytecodeCacheContext {
     NonnullRefPtr<HTTP::HeaderList> request_headers;
 };
 
+static ::Crypto::Hash::Digest<::Crypto::Hash::SHA256::DigestSize * 8> bytecode_cache_source_hash(JS::SourceCode const& source_code)
+{
+    return ::Crypto::Hash::SHA256::hash(reinterpret_cast<u8 const*>(source_code.utf16_data()), source_code.length_in_code_units() * sizeof(u16));
+}
+
 static Optional<BytecodeCacheContext> bytecode_cache_context_for_request(Fetch::Infrastructure::Request const& request, URL::URL const& response_url)
 {
     if (!Fetch::Infrastructure::is_http_or_https_scheme(response_url.scheme()))
@@ -93,7 +99,8 @@ static void schedule_bytecode_cache_generation(JS::SourceCode const& original_so
         if (!compiled)
             return;
 
-        auto blob = JS::RustIntegration::serialize_compiled_program_for_bytecode_cache(*compiled, type);
+        auto source_hash = bytecode_cache_source_hash(*source);
+        auto blob = JS::RustIntegration::serialize_compiled_program_for_bytecode_cache(*compiled, type, source_hash.bytes());
         JS::RustIntegration::free_compiled_program(compiled);
         if (blob.is_empty())
             return;
