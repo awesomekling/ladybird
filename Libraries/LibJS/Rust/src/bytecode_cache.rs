@@ -11,15 +11,19 @@
 //! of growing a separate procedural parser.
 
 use std::collections::HashMap;
+use std::ffi::c_void;
 
 use crate::bytecode::basic_block::SourceMapEntry;
-use crate::bytecode::ffi::{AbstractOperationKind, ConstantTag, WellKnownSymbolKind};
+use crate::bytecode::ffi::{
+    AbstractOperationKind, ConstantTag, FFISharedFunctionData, FFIUtf16Slice, WellKnownSymbolKind,
+};
 use crate::bytecode::generator::{
     AssembledBytecode, ConstantValue, ExceptionHandler, FunctionSfdMetadata, Generator, LocalVariable,
     PendingClassBlueprint, PendingClassElement, PendingLiteralValueKind, PendingSharedFunctionData,
     PrecompiledFunction,
 };
-use crate::{CompiledProgram, CompiledProgramBytecode, ast, u32_from_usize};
+use crate::bytecode::operand::PropertyKeyTableIndex;
+use crate::{CompiledProgram, CompiledProgramBytecode, ModuleCallbacks, ast, u32_from_usize};
 
 const MAGIC: &[u8; 8] = b"LBJSBC\0\0";
 const FORMAT_VERSION: u32 = 1;
@@ -354,6 +358,446 @@ impl DecodedCacheBlob {
         let _ = self.has_top_level_await || self.is_strict_mode;
         self.metadata.validate();
         self.program.validate();
+    }
+
+    pub(crate) unsafe fn materialize_script(
+        self,
+        vm_ptr: *mut c_void,
+        source_code_ptr: *const c_void,
+        gdi_context: *mut c_void,
+    ) -> *mut c_void {
+        unsafe {
+            let Self {
+                program_type,
+                is_strict_mode,
+                metadata,
+                program,
+                ..
+            } = self;
+            if program_type != ast::ProgramType::Script {
+                return std::ptr::null_mut();
+            }
+            let DecodedDeclarationMetadata::Script {
+                metadata,
+                declaration_functions,
+            } = metadata
+            else {
+                return std::ptr::null_mut();
+            };
+            let ProgramKind::ScriptOrModule = program.kind else {
+                return std::ptr::null_mut();
+            };
+            if declaration_functions.len() != metadata.function_names.len() {
+                return std::ptr::null_mut();
+            }
+
+            if !materialize_script_declaration_metadata(
+                metadata,
+                declaration_functions,
+                is_strict_mode,
+                vm_ptr,
+                source_code_ptr,
+                gdi_context,
+            ) {
+                return std::ptr::null_mut();
+            }
+            materialize_executable(program.executable, vm_ptr, source_code_ptr)
+        }
+    }
+
+    pub(crate) unsafe fn materialize_module(
+        self,
+        vm_ptr: *mut c_void,
+        source_code_ptr: *const c_void,
+        module_context: *mut c_void,
+        callbacks: *const ModuleCallbacks,
+        tla_executable_out: *mut *mut c_void,
+    ) -> *mut c_void {
+        unsafe {
+            if callbacks.is_null() {
+                return std::ptr::null_mut();
+            }
+            let cb = &*callbacks;
+            let Self {
+                program_type,
+                has_top_level_await,
+                metadata,
+                program,
+                ..
+            } = self;
+            if program_type != ast::ProgramType::Module {
+                return std::ptr::null_mut();
+            }
+            let DecodedDeclarationMetadata::Module {
+                metadata,
+                declaration_functions,
+            } = metadata
+            else {
+                return std::ptr::null_mut();
+            };
+            if declaration_functions.len() != metadata.function_names.len() {
+                return std::ptr::null_mut();
+            }
+
+            (cb.set_has_top_level_await)(module_context, has_top_level_await);
+            if !materialize_module_declaration_metadata(
+                metadata,
+                declaration_functions,
+                vm_ptr,
+                source_code_ptr,
+                module_context,
+                cb,
+            ) {
+                return std::ptr::null_mut();
+            }
+
+            match program.kind {
+                ProgramKind::AsyncModule => {
+                    let exec_ptr = materialize_executable(program.executable, vm_ptr, source_code_ptr);
+                    if !tla_executable_out.is_null() {
+                        *tla_executable_out = exec_ptr;
+                    }
+                    std::ptr::null_mut()
+                }
+                ProgramKind::ScriptOrModule => {
+                    if !tla_executable_out.is_null() {
+                        *tla_executable_out = std::ptr::null_mut();
+                    }
+                    materialize_executable(program.executable, vm_ptr, source_code_ptr)
+                }
+            }
+        }
+    }
+}
+
+unsafe fn materialize_script_declaration_metadata(
+    metadata: ScriptDeclarationMetadata,
+    declaration_functions: Vec<DecodedFunctionRecord>,
+    is_strict_mode: bool,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    gdi_context: *mut c_void,
+) -> bool {
+    unsafe {
+        use crate::bytecode::ffi::{
+            script_gdi_push_annex_b_name, script_gdi_push_function, script_gdi_push_lexical_binding,
+            script_gdi_push_lexical_name, script_gdi_push_var_name, script_gdi_push_var_scoped_name,
+        };
+
+        for name in &metadata.lexical_names {
+            script_gdi_push_lexical_name(gdi_context, name.as_ptr(), name.len());
+        }
+        for name in &metadata.var_names {
+            script_gdi_push_var_name(gdi_context, name.as_ptr(), name.len());
+        }
+        for (function, name) in declaration_functions.into_iter().zip(metadata.function_names.iter()) {
+            let sfd_ptr = materialize_function(function, is_strict_mode, vm_ptr, source_code_ptr);
+            if sfd_ptr.is_null() {
+                return false;
+            }
+            script_gdi_push_function(gdi_context, sfd_ptr, name.as_ptr(), name.len());
+        }
+        for name in &metadata.var_scoped_names {
+            script_gdi_push_var_scoped_name(gdi_context, name.as_ptr(), name.len());
+        }
+        for name in &metadata.annex_b_candidate_names {
+            script_gdi_push_annex_b_name(gdi_context, name.as_ptr(), name.len());
+        }
+        for binding in &metadata.lexical_bindings {
+            script_gdi_push_lexical_binding(
+                gdi_context,
+                binding.name.as_ptr(),
+                binding.name.len(),
+                binding.is_constant,
+            );
+        }
+
+        true
+    }
+}
+
+unsafe fn materialize_module_declaration_metadata(
+    metadata: ModuleDeclarationMetadata,
+    declaration_functions: Vec<DecodedFunctionRecord>,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    module_context: *mut c_void,
+    cb: &ModuleCallbacks,
+) -> bool {
+    unsafe {
+        for entry in &metadata.import_entries {
+            let (import_name, import_name_len, is_namespace) = entry
+                .import_name
+                .as_ref()
+                .map(|name| (name.as_ptr(), name.len(), false))
+                .unwrap_or((std::ptr::null(), 0, true));
+            let attributes = import_attributes_to_ffi(&entry.module_request.attributes);
+            (cb.push_import_entry)(
+                module_context,
+                import_name,
+                import_name_len,
+                is_namespace,
+                entry.local_name.as_ptr(),
+                entry.local_name.len(),
+                entry.module_request.specifier.as_ptr(),
+                entry.module_request.specifier.len(),
+                attributes.keys.as_ptr(),
+                attributes.values.as_ptr(),
+                attributes.keys.len(),
+            );
+        }
+
+        for entry in &metadata.local_exports {
+            push_module_export_entry(module_context, cb.push_local_export, entry);
+        }
+        for entry in &metadata.indirect_exports {
+            push_module_export_entry(module_context, cb.push_indirect_export, entry);
+        }
+        for entry in &metadata.star_exports {
+            push_module_export_entry(module_context, cb.push_star_export, entry);
+        }
+        for request in &metadata.requested_modules {
+            let attributes = import_attributes_to_ffi(&request.attributes);
+            (cb.push_requested_module)(
+                module_context,
+                request.specifier.as_ptr(),
+                request.specifier.len(),
+                attributes.keys.as_ptr(),
+                attributes.values.as_ptr(),
+                attributes.keys.len(),
+            );
+        }
+        if let Some(name) = &metadata.default_export_binding_name {
+            (cb.set_default_export_binding)(module_context, name.as_ptr(), name.len());
+        }
+        for name in &metadata.var_declared_names {
+            (cb.push_var_name)(module_context, name.as_ptr(), name.len());
+        }
+        for (function, name) in declaration_functions.into_iter().zip(metadata.function_names.iter()) {
+            let sfd_ptr = materialize_function(function, true, vm_ptr, source_code_ptr);
+            if sfd_ptr.is_null() {
+                return false;
+            }
+            (cb.push_function)(module_context, sfd_ptr, name.as_ptr(), name.len());
+        }
+        for binding in &metadata.lexical_bindings {
+            (cb.push_lexical_binding)(
+                module_context,
+                binding.name.as_ptr(),
+                binding.name.len(),
+                binding.is_constant,
+                binding.function_index,
+            );
+        }
+
+        true
+    }
+}
+
+struct ImportAttributesFfi {
+    keys: Vec<FFIUtf16Slice>,
+    values: Vec<FFIUtf16Slice>,
+}
+
+fn import_attributes_to_ffi(attributes: &[ast::ImportAttribute]) -> ImportAttributesFfi {
+    ImportAttributesFfi {
+        keys: attributes
+            .iter()
+            .map(|attribute| FFIUtf16Slice::from(attribute.key.as_ref()))
+            .collect(),
+        values: attributes
+            .iter()
+            .map(|attribute| FFIUtf16Slice::from(attribute.value.as_ref()))
+            .collect(),
+    }
+}
+
+unsafe fn push_module_export_entry(
+    module_context: *mut c_void,
+    callback: crate::ModuleExportEntryCallback,
+    entry: &ModuleExportEntryRecord,
+) {
+    unsafe {
+        let (export_name, export_name_len) = entry
+            .export_name
+            .as_ref()
+            .map(|name| (name.as_ptr(), name.len()))
+            .unwrap_or((std::ptr::null(), 0));
+        let (local_or_import_name, local_or_import_name_len) = entry
+            .local_or_import_name
+            .as_ref()
+            .map(|name| (name.as_ptr(), name.len()))
+            .unwrap_or((std::ptr::null(), 0));
+        let (module_specifier, module_specifier_len, attributes) = entry
+            .module_request
+            .as_ref()
+            .map(|request| {
+                (
+                    request.specifier.as_ptr(),
+                    request.specifier.len(),
+                    import_attributes_to_ffi(&request.attributes),
+                )
+            })
+            .unwrap_or((
+                std::ptr::null(),
+                0,
+                ImportAttributesFfi {
+                    keys: Vec::new(),
+                    values: Vec::new(),
+                },
+            ));
+
+        callback(
+            module_context,
+            entry.kind as u8,
+            export_name,
+            export_name_len,
+            local_or_import_name,
+            local_or_import_name_len,
+            module_specifier,
+            module_specifier_len,
+            attributes.keys.as_ptr(),
+            attributes.values.as_ptr(),
+            attributes.keys.len(),
+        );
+    }
+}
+
+unsafe fn materialize_function(
+    function: DecodedFunctionRecord,
+    outer_strict: bool,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+) -> *mut c_void {
+    unsafe {
+        let parameter_names: Vec<FFIUtf16Slice> = function
+            .parameter_names
+            .as_ref()
+            .map(|names| names.iter().map(|name| FFIUtf16Slice::from(name.as_ref())).collect())
+            .unwrap_or_default();
+        let (name, name_len) = function
+            .name
+            .as_ref()
+            .map(|name| (name.as_ptr(), name.len()))
+            .unwrap_or((std::ptr::null(), 0));
+        let source_text_offset = function.source_text_start as usize;
+        let source_text_length = function
+            .source_text_end
+            .checked_sub(function.source_text_start)
+            .map(|length| length as usize)
+            .unwrap_or(0);
+
+        let data = FFISharedFunctionData {
+            name,
+            name_len,
+            function_kind: function.kind as u8,
+            function_length: function.function_length,
+            formal_parameter_count: function.formal_parameter_count,
+            strict: function.is_strict_mode || outer_strict,
+            is_arrow: function.is_arrow_function,
+            has_simple_parameter_list: function.parameter_names.is_some(),
+            parameter_names: parameter_names.as_ptr(),
+            parameter_name_count: parameter_names.len(),
+            source_text_offset,
+            source_text_length,
+            rust_function_ast: std::ptr::null_mut(),
+            uses_this: function.uses_this,
+            uses_this_from_environment: function.uses_this_from_environment,
+        };
+
+        let sfd_ptr = crate::bytecode::ffi::rust_create_sfd(vm_ptr, source_code_ptr, &raw const data);
+        if sfd_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if let Some((name, is_private)) = &function.class_field_initializer_name {
+            crate::bytecode::ffi::rust_sfd_set_class_field_initializer_name(
+                sfd_ptr,
+                name.as_ptr(),
+                name.len(),
+                *is_private,
+            );
+        }
+
+        let executable_ptr = materialize_executable(function.precompiled, vm_ptr, source_code_ptr);
+        if executable_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+        crate::bytecode::ffi::rust_sfd_set_precompiled_executable(
+            sfd_ptr,
+            executable_ptr,
+            function.metadata.uses_this,
+            function.metadata.this_value_needs_environment_resolution,
+            function.metadata.function_environment_needed,
+            function.metadata.function_environment_bindings_count,
+            function.metadata.might_need_arguments,
+            function.metadata.contains_eval,
+        );
+
+        sfd_ptr
+    }
+}
+
+unsafe fn materialize_executable(
+    executable: DecodedExecutableRecord,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+) -> *mut c_void {
+    unsafe {
+        let mut generator = Generator::new();
+        generator.strict = executable.strict;
+        generator.this_value_needs_environment_resolution = executable.this_value_needs_environment_resolution;
+        generator.next_property_lookup_cache = executable.cache_counters.property_lookup_cache_count;
+        generator.next_global_variable_cache = executable.cache_counters.global_variable_cache_count;
+        generator.next_template_object_cache = executable.cache_counters.template_object_cache_count;
+        generator.next_object_shape_cache = executable.cache_counters.object_shape_cache_count;
+        generator.next_object_property_iterator_cache = executable.cache_counters.object_property_iterator_cache_count;
+        generator.identifier_table = executable.identifier_table;
+        generator.property_key_table = executable.property_key_table;
+        generator.string_table = executable.string_table;
+        generator.constants = executable.constants;
+        generator.local_variables = executable.local_variables;
+        generator.length_identifier = executable.length_identifier.map(PropertyKeyTableIndex);
+
+        let sfd_ptrs: Vec<*const c_void> = executable
+            .shared_functions
+            .into_iter()
+            .map(|function| materialize_function(function, generator.strict, vm_ptr, source_code_ptr) as *const c_void)
+            .collect();
+        if sfd_ptrs.iter().any(|ptr| ptr.is_null()) {
+            return std::ptr::null_mut();
+        }
+
+        let class_blueprints: Vec<PendingClassBlueprint> = executable
+            .class_blueprints
+            .into_iter()
+            .map(PendingClassBlueprint::from)
+            .collect();
+        let bp_ptrs: Vec<*mut c_void> = class_blueprints
+            .iter()
+            .map(|blueprint| crate::bytecode::ffi::materialize_class_blueprint(blueprint, vm_ptr, source_code_ptr))
+            .collect();
+        if bp_ptrs.iter().any(|ptr| ptr.is_null()) {
+            return std::ptr::null_mut();
+        }
+
+        let assembled = AssembledBytecode {
+            bytecode: executable.bytecode,
+            source_map: executable.source_map,
+            exception_handlers: executable.exception_handlers,
+            basic_block_start_offsets: executable.basic_block_start_offsets,
+            number_of_registers: executable.number_of_registers,
+            number_of_arguments: executable.number_of_arguments,
+        };
+
+        crate::bytecode::ffi::create_executable_with_dependencies(
+            &generator,
+            &assembled,
+            vm_ptr,
+            source_code_ptr,
+            &sfd_ptrs,
+            &bp_ptrs,
+        )
     }
 }
 
@@ -1966,6 +2410,20 @@ impl DecodedClassBlueprintRecord {
     }
 }
 
+impl From<DecodedClassBlueprintRecord> for PendingClassBlueprint {
+    fn from(record: DecodedClassBlueprintRecord) -> Self {
+        Self {
+            name: record.name,
+            source_text_offset: record.source_text_offset,
+            source_text_length: record.source_text_length,
+            constructor_sfd_index: record.constructor_sfd_index,
+            has_super_class: record.has_super_class,
+            has_name: record.has_name,
+            elements: record.elements.into_iter().map(PendingClassElement::from).collect(),
+        }
+    }
+}
+
 struct ClassElementRecord<'a>(&'a PendingClassElement);
 
 impl Encode for ClassElementRecord<'_> {
@@ -2019,6 +2477,22 @@ impl DecodedClassElementRecord {
         let _ = literal_value_kind_tag(self.literal_value_kind);
         let _ = self.literal_value_number;
         let _ = self.literal_value_string.as_ref().map(|value| value.as_slice().len());
+    }
+}
+
+impl From<DecodedClassElementRecord> for PendingClassElement {
+    fn from(record: DecodedClassElementRecord) -> Self {
+        Self {
+            kind: record.kind,
+            is_static: record.is_static,
+            is_private: record.is_private,
+            private_identifier: record.private_identifier,
+            shared_function_data_index: record.shared_function_data_index,
+            has_initializer: record.has_initializer,
+            literal_value_kind: record.literal_value_kind,
+            literal_value_number: record.literal_value_number,
+            literal_value_string: record.literal_value_string,
+        }
     }
 }
 

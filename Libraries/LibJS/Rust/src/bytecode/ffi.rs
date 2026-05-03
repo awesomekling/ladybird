@@ -485,7 +485,11 @@ unsafe fn materialize_class_blueprints(
     }
 }
 
-unsafe fn materialize_class_blueprint(
+/// Create a C++ ClassBlueprint from a pending blueprint record.
+///
+/// # Safety
+/// `vm_ptr` and `source_code_ptr` must be valid pointers.
+pub unsafe fn materialize_class_blueprint(
     blueprint: &PendingClassBlueprint,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
