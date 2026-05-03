@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
 #include <AK/Utf16String.h>
 #include <LibCore/EventLoop.h>
 #include <LibCrypto/Hash/SHA2.h>
@@ -91,34 +92,56 @@ static void schedule_bytecode_cache_generation(JS::SourceCode const& original_so
     auto event_loop_weak = Core::EventLoop::current_weak();
 
     Threading::ThreadPool::the().submit([filename = move(filename), source_code = move(source_code), type, line_number_offset, cache_context = move(cache_context), event_loop_weak = move(event_loop_weak)]() mutable {
+        dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Generating bytecode cache blob for {}", filename);
+
         auto source = JS::SourceCode::create(move(filename), move(source_code));
         auto* parsed = JS::RustIntegration::parse_program(source->utf16_data(), source->length_in_code_units(), type, line_number_offset);
-        if (!parsed)
+        if (!parsed) {
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Failed to parse {}", source->filename());
             return;
+        }
 
         if (JS::RustIntegration::parsed_program_has_errors(parsed)) {
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Not caching script with parse errors: {}", source->filename());
             JS::RustIntegration::free_parsed_program(parsed);
             return;
         }
 
         auto* compiled = JS::RustIntegration::compile_parsed_program_fully_off_thread(parsed, source->length_in_code_units());
-        if (!compiled)
+        if (!compiled) {
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Failed to compile {}", source->filename());
             return;
+        }
 
         auto source_hash = bytecode_cache_source_hash(*source);
         auto blob = JS::RustIntegration::serialize_compiled_program_for_bytecode_cache(*compiled, type, source_hash.bytes());
         JS::RustIntegration::free_compiled_program(compiled);
-        if (blob.is_empty())
+        if (blob.is_empty()) {
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Failed to serialize {}", source->filename());
             return;
+        }
+
+        dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Generated {} byte blob for {}", blob.size(), source->filename());
 
         auto origin = event_loop_weak->take();
-        if (!origin)
+        if (!origin) {
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Dropping blob because the event loop is gone: {}", source->filename());
             return;
+        }
 
         origin->deferred_invoke([cache_context = move(cache_context), blob = move(blob)]() mutable {
-            if (!ResourceLoader::is_initialized() || !ResourceLoader::the().request_client())
+            if (!ResourceLoader::is_initialized() || !ResourceLoader::the().request_client()) {
+                dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Dropping blob because ResourceLoader is unavailable: {}", cache_context.url);
                 return;
-            (void)ResourceLoader::the().request_client()->store_cache_associated_data(cache_context.url, cache_context.method, *cache_context.request_headers, cache_context.vary_key, HTTP::CacheEntryAssociatedData::JavaScriptBytecode, blob.bytes());
+            }
+
+            auto store_result = ResourceLoader::the().request_client()->store_cache_associated_data(cache_context.url, cache_context.method, *cache_context.request_headers, cache_context.vary_key, HTTP::CacheEntryAssociatedData::JavaScriptBytecode, blob.bytes());
+            if (store_result.is_error()) {
+                dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Failed to store blob for {}: {}", cache_context.url, store_result.error());
+                return;
+            }
+
+            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: {} {} byte blob for {}", store_result.value() ? "Stored" : "Rejected", blob.size(), cache_context.url);
         });
     });
 }
@@ -527,8 +550,10 @@ void fetch_classic_script(GC::Ref<HTMLScriptElement> element, URL::URL const& ur
             // straight from the cached bytecode without parsing or compiling. Pass non-moved source_code / response_url
             // so the fallback compile path below can reuse them if decode or materialization is rejected.
             if (auto const& bytecode = response->javascript_bytecode_cache(); bytecode.has_value()) {
+                dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Received {} byte script blob for {}", bytecode->size(), response_url);
                 auto source_hash = bytecode_cache_source_hash(*source_code);
                 if (auto* bytecode_cache = JS::RustIntegration::decode_bytecode_cache_blob(bytecode->bytes(), JS::RustIntegration::ProgramType::Script, source_hash.bytes())) {
+                    dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Materializing classic script from cache for {}", response_url);
                     auto script = ClassicScript::create_from_bytecode_cache(response_url_string, source_code, settings_object, response_url, bytecode_cache, muted_errors);
                     // Bytecode validation runs during materialization and may reject a structurally valid blob whose
                     // bytecode is corrupt. Treat that as a cache miss and fall through to off-thread source compile.
@@ -537,6 +562,7 @@ void fetch_classic_script(GC::Ref<HTMLScriptElement> element, URL::URL const& ur
                         return;
                     }
                 }
+                dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Rejected cached script blob for {}", response_url);
             }
 
             compile_off_thread(move(source_code), JS::RustIntegration::ProgramType::Script, 1,
@@ -910,8 +936,10 @@ void fetch_single_module_script(JS::Realm& realm,
                         Utf16String::from_utf8(source_text));
                     auto bytecode_cache_context = bytecode_cache_context_for_request(*request, *response, response_url);
                     if (auto const& bytecode = response->javascript_bytecode_cache(); bytecode.has_value()) {
+                        dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Received {} byte module blob for {}", bytecode->size(), response_url);
                         auto source_hash = bytecode_cache_source_hash(*source_code);
                         if (auto* bytecode_cache = JS::RustIntegration::decode_bytecode_cache_blob(bytecode->bytes(), JS::RustIntegration::ProgramType::Module, source_hash.bytes())) {
+                            dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Materializing module script from cache for {}", response_url);
                             auto module_script = ModuleScript::create_from_bytecode_cache(url_string, source_code, settings_object, response_url, bytecode_cache).release_value_but_fixme_should_propagate_errors();
                             if (module_script && module_script->parse_error().is_null()) {
                                 settings_object.module_map().set(url, module_type_string, { ModuleMap::EntryType::ModuleScript, module_script });
@@ -919,6 +947,7 @@ void fetch_single_module_script(JS::Realm& realm,
                                 return;
                             }
                         }
+                        dbgln_if(HTML_SCRIPT_DEBUG, "BytecodeCache: Rejected cached module blob for {}", response_url);
                     }
 
                     compile_off_thread(move(source_code), JS::RustIntegration::ProgramType::Module, 0,

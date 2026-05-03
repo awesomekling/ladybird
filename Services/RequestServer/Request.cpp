@@ -1174,11 +1174,17 @@ void Request::transfer_headers_to_client_if_needed()
         VERIFY(m_cache_entry_reader.has_value());
         javascript_bytecode_cache_vary_key = m_cache_entry_reader->vary_key();
         auto data = m_disk_cache->retrieve_associated_data(m_url, m_method, *m_request_headers, javascript_bytecode_cache_vary_key, HTTP::CacheEntryAssociatedData::JavaScriptBytecode);
+        if (data.is_error()) {
+            dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: Failed to retrieve JavaScript bytecode sidecar for {}: {}", m_url, data.error());
+        }
         if (!data.is_error() && data.value().has_value()) {
             auto buffer = Core::AnonymousBuffer::create_with_size(data.value()->size());
             if (!buffer.is_error()) {
                 memcpy(buffer.value().data<void>(), data.value()->data(), data.value()->size());
                 javascript_bytecode = buffer.release_value();
+                dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: Sending {} byte JavaScript bytecode sidecar for {}", javascript_bytecode->size(), m_url);
+            } else {
+                dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: Failed to allocate JavaScript bytecode sidecar for {}: {}", m_url, buffer.error());
             }
         }
     } else if (m_cache_status == CacheStatus::WrittenToCache && m_cache_entry_writer.has_value()) {
