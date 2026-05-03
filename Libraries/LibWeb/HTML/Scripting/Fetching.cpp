@@ -93,7 +93,7 @@ static void schedule_bytecode_cache_generation(JS::SourceCode const& original_so
         if (!compiled)
             return;
 
-        auto blob = JS::RustIntegration::serialize_compiled_program_for_bytecode_cache(*compiled);
+        auto blob = JS::RustIntegration::serialize_compiled_program_for_bytecode_cache(*compiled, type);
         JS::RustIntegration::free_compiled_program(compiled);
         if (blob.is_empty())
             return;
