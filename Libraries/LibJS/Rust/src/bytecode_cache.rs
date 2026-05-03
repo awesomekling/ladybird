@@ -376,32 +376,57 @@ impl Encode for DeclarationMetadataRecord<'_> {
             ast::ProgramType::Script => ScriptDeclarationMetadata::from_scope(&scope).encode(encoder),
             ast::ProgramType::Module => ModuleDeclarationMetadata::from_scope(&scope).encode(encoder),
         }
+        DeclarationFunctionTable(&self.compiled.declaration_functions).encode(encoder);
     }
 }
 
 impl DeclarationMetadataRecord<'_> {
     fn decode(decoder: &mut Decoder<'_>) -> Option<DecodedDeclarationMetadata> {
         match MetadataKind::decode(decoder)? {
-            MetadataKind::Script => {
-                ScriptDeclarationMetadata::decode_payload(decoder).map(DecodedDeclarationMetadata::Script)
-            }
-            MetadataKind::Module => {
-                ModuleDeclarationMetadata::decode_payload(decoder).map(DecodedDeclarationMetadata::Module)
-            }
+            MetadataKind::Script => Some(DecodedDeclarationMetadata::Script {
+                metadata: ScriptDeclarationMetadata::decode_payload(decoder)?,
+                declaration_functions: DeclarationFunctionTable::decode(decoder)?,
+            }),
+            MetadataKind::Module => Some(DecodedDeclarationMetadata::Module {
+                metadata: ModuleDeclarationMetadata::decode_payload(decoder)?,
+                declaration_functions: DeclarationFunctionTable::decode(decoder)?,
+            }),
         }
     }
 }
 
 enum DecodedDeclarationMetadata {
-    Script(ScriptDeclarationMetadata),
-    Module(ModuleDeclarationMetadata),
+    Script {
+        metadata: ScriptDeclarationMetadata,
+        declaration_functions: Vec<DecodedFunctionRecord>,
+    },
+    Module {
+        metadata: ModuleDeclarationMetadata,
+        declaration_functions: Vec<DecodedFunctionRecord>,
+    },
 }
 
 impl DecodedDeclarationMetadata {
     fn validate(&self) {
         match self {
-            Self::Script(metadata) => metadata.validate(),
-            Self::Module(metadata) => metadata.validate(),
+            Self::Script {
+                metadata,
+                declaration_functions,
+            } => {
+                metadata.validate();
+                for function in declaration_functions {
+                    function.validate();
+                }
+            }
+            Self::Module {
+                metadata,
+                declaration_functions,
+            } => {
+                metadata.validate();
+                for function in declaration_functions {
+                    function.validate();
+                }
+            }
         }
     }
 }
@@ -1595,6 +1620,22 @@ impl Encode for SharedFunctionTable<'_> {
 }
 
 impl SharedFunctionTable<'_> {
+    fn decode(decoder: &mut Decoder<'_>) -> Option<Vec<DecodedFunctionRecord>> {
+        decoder.sequence_values(FunctionRecord::decode)
+    }
+}
+
+struct DeclarationFunctionTable<'a>(&'a [PendingSharedFunctionData]);
+
+impl Encode for DeclarationFunctionTable<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.sequence(self.0, |shared_data, encoder| {
+            FunctionRecord { shared_data }.encode(encoder);
+        });
+    }
+}
+
+impl DeclarationFunctionTable<'_> {
     fn decode(decoder: &mut Decoder<'_>) -> Option<Vec<DecodedFunctionRecord>> {
         decoder.sequence_values(FunctionRecord::decode)
     }
