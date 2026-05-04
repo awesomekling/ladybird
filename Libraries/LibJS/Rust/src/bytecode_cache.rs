@@ -26,6 +26,11 @@ use crate::bytecode::operand::PropertyKeyTableIndex;
 use crate::{CompiledProgram, CompiledProgramBytecode, ModuleCallbacks, ast, u32_from_usize};
 
 const MAGIC: &[u8; 8] = b"LBJSBC\0\0";
+// Bump this whenever you change anything that ends up on disk: a new field on any record, a reordering, a different
+// integer width, a new enum tag value, anything. Old caches with the previous layout will then be rejected by the
+// version check in `decode_blob` instead of being decoded with the new layout (which silently produces wrong values).
+// `bytecode_cache_blob_layout_is_pinned` in `Tests/LibJS/test-bytecode-cache.cpp` snapshots a serialized blob and will
+// fail until both this constant and that test's expected digest are updated together.
 const FORMAT_VERSION: u32 = 1;
 const SOURCE_HASH_SIZE: usize = 32;
 
