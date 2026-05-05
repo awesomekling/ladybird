@@ -610,7 +610,6 @@ private:
     OwnPtr<Supports::Declaration> parse_supports_declaration(TokenStream<ComponentValue>&);
 
     OwnPtr<BooleanExpression> parse_container_query_condition(TokenStream<ComponentValue>&);
-    OwnPtr<BooleanExpression> parse_container_query_feature(TokenStream<ComponentValue>&);
     RefPtr<ContainerQuery> parse_container_query(TokenStream<ComponentValue>&);
 
     NonnullRefPtr<StyleValue const> resolve_unresolved_style_value(DOM::AbstractElement, GuardedSubstitutionContexts&, PropertyNameAndID const&, UnresolvedStyleValue const&);

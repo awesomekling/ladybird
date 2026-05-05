@@ -513,13 +513,6 @@ OwnPtr<Supports::Declaration> Parser::parse_supports_declaration(TokenStream<Com
 
 OwnPtr<BooleanExpression> Parser::parse_container_query_condition(TokenStream<ComponentValue>& tokens)
 {
-    return parse_boolean_expression(tokens, MatchResult::False, [this](auto& tokens) {
-        return parse_container_query_feature(tokens);
-    });
-}
-
-OwnPtr<BooleanExpression> Parser::parse_container_query_feature(TokenStream<ComponentValue>&)
-{
     // https://drafts.csswg.org/css-conditional-5/#typedef-query-in-parens
     // <query-in-parens> = ( <container-query> )
     //                   | ( <size-feature> )
@@ -531,14 +524,22 @@ OwnPtr<BooleanExpression> Parser::parse_container_query_feature(TokenStream<Comp
     // <query-in-parens> = ...
     //                   | anchored( <anchored-query> )
 
-    // NB: Spec isn't yet in terms of `<boolean-condition>`, so this is the closest definition to what we want.
-    //     `( <container-query> )` and `<general-enclosed>` are handled by parse_boolean_expression() already.
-
     // FIXME: `( <size-feature> )`
     // FIXME: `style( <style-query> )`
     // FIXME: `scroll-state( <scroll-state-query> )`
     // FIXME: `anchored( <anchored-query> )`
-    return nullptr;
+    auto transaction = tokens.begin_transaction();
+
+    StringBuilder serialized_container_query_condition;
+    while (tokens.has_next_token())
+        serialized_container_query_condition.append(tokens.consume_a_token().original_source_text());
+
+    auto maybe_condition = RustComponentValueParser::parse_a_container_condition(serialized_container_query_condition.string_view(), "utf-8"sv);
+    if (!maybe_condition)
+        return nullptr;
+
+    transaction.commit();
+    return maybe_condition;
 }
 
 RefPtr<ContainerQuery> Parser::parse_container_query(TokenStream<ComponentValue>& tokens)

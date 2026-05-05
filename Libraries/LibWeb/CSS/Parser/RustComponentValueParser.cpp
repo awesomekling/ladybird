@@ -782,6 +782,20 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
         });
 }
 
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_container_condition(StringView input, StringView encoding)
+{
+    return parse_a_boolean_expression(
+        input,
+        encoding,
+        MatchResult::False,
+        [](Optional<MediaFeatureTest>&&, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+            return nullptr;
+        },
+        [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
+            FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
+        });
+}
+
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
 {
     return parse_a_boolean_expression(
