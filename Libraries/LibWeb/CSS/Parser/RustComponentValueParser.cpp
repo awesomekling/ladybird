@@ -686,51 +686,6 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_test(StringVie
         });
 }
 
-Optional<RustComponentValueParser::MediaFeatureTest> RustComponentValueParser::parse_a_media_feature(StringView input, StringView encoding)
-{
-    Optional<RustMediaFeatureTestBuilder> builder;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    FFI::rust_css_parse_media_feature(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &builder,
-        [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
-            auto& builder = *static_cast<Optional<RustMediaFeatureTestBuilder>*>(raw_builder);
-            builder = RustMediaFeatureTestBuilder {
-                .feature = *media_feature,
-            };
-        },
-        [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
-            auto& builder = *static_cast<Optional<RustMediaFeatureTestBuilder>*>(raw_builder);
-            VERIFY(builder.has_value());
-
-            auto append_to_builder = [&](ComponentValueBuilder& component_value_builder) {
-                append_component_value_token(component_value_builder, media_feature_value->component_value.kind, RustTokenizer::token_from_ffi(media_feature_value->component_value.token));
-            };
-
-            switch (media_feature_value->kind) {
-            case FFI::CssMediaFeatureValueKind::Value:
-                set_media_feature_value_syntax_kind(builder->value_syntax_kind, media_feature_value->syntax_kind);
-                append_to_builder(builder->value_builder);
-                break;
-            case FFI::CssMediaFeatureValueKind::LeftValue:
-                set_media_feature_value_syntax_kind(builder->left_value_syntax_kind, media_feature_value->syntax_kind);
-                append_to_builder(builder->left_value_builder);
-                break;
-            case FFI::CssMediaFeatureValueKind::RightValue:
-                set_media_feature_value_syntax_kind(builder->right_value_syntax_kind, media_feature_value->syntax_kind);
-                append_to_builder(builder->right_value_builder);
-                break;
-            }
-        });
-
-    if (!builder.has_value())
-        return {};
-    return builder->build();
-}
-
 Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
 {
     struct MediaQueryListBuilder {
