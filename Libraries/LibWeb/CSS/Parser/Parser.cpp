@@ -1482,7 +1482,7 @@ Optional<Declaration> Parser::parse_a_declaration(TokenStream<T>& input)
 
 Optional<ComponentValue> Parser::parse_as_component_value()
 {
-    return parse_a_component_value(m_token_stream);
+    return RustComponentValueParser::parse_a_component_value(m_input, m_encoding);
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-component-value

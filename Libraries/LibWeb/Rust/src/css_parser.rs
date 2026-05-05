@@ -189,6 +189,17 @@ where
     }
 }
 
+pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)
+where
+    F: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let Some(component_value) = parser.parse_a_component_value() else {
+        return;
+    };
+    emit_component_value(&component_value, filtered_input_string, &mut callback);
+}
+
 pub(crate) fn parse_a_declaration<D, C>(
     filtered_input: &[u8],
     mut declaration_callback: D,
@@ -615,6 +626,33 @@ impl Parser {
 
         // 2. Consume a list of component values from input, and return the result.
         self.consume_a_list_of_component_values(None, Nested::No)
+    }
+
+    // https://drafts.csswg.org/css-syntax/#parse-component-value
+    pub(crate) fn parse_a_component_value(&mut self) -> Option<ComponentValue> {
+        // To parse a component value from input:
+        // 1. Normalize input, and set input to the result.
+        // NOTE: This is done automatically before creating the Parser.
+
+        // 2. Discard whitespace from input.
+        self.discard_whitespace();
+
+        // 3. If input is empty, return a syntax error.
+        if matches!(self.next_input_token().token_type, TokenType::EndOfFile) {
+            return None;
+        }
+
+        // 4. Consume a component value from input and let value be the return value.
+        let component_value = self.consume_a_component_value();
+
+        // 5. Discard whitespace from input.
+        self.discard_whitespace();
+
+        // 6. If input is empty, return value. Otherwise, return a syntax error.
+        if matches!(self.next_input_token().token_type, TokenType::EndOfFile) {
+            return Some(component_value);
+        }
+        None
     }
 
     fn next_input_token(&self) -> &Token {
@@ -1604,6 +1642,20 @@ mod tests {
                 .iter()
                 .any(|value| matches!(value, ComponentValue::Function(function) if function.name == "var"))
         );
+    }
+
+    #[test]
+    fn parses_a_component_value() {
+        let value = parse_with(" calc(1px + var(--gap)) ", Parser::parse_a_component_value)
+            .expect("expected a component value");
+
+        let ComponentValue::Function(function) = value else {
+            panic!("expected a function");
+        };
+        assert_eq!(function.name, "calc");
+
+        assert!(parse_with("", Parser::parse_a_component_value).is_none());
+        assert!(parse_with("a b", Parser::parse_a_component_value).is_none());
     }
 
     #[test]

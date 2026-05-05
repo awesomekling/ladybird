@@ -113,6 +113,30 @@ pub unsafe extern "C" fn rust_css_parse_component_values(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_component_value(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_a_component_value(input, |component_value| {
+                callback(ctx, &raw const component_value);
+            });
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_declaration(
