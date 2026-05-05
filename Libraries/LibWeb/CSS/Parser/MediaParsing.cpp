@@ -310,6 +310,15 @@ OwnPtr<BooleanExpression> Parser::materialize_rust_media_condition(Vector<Compon
     return media_condition;
 }
 
+OwnPtr<BooleanExpression> Parser::materialize_rust_media_test(Vector<ComponentValue> const& component_values)
+{
+    auto serialized_media_test = serialize_component_values_for_reparsing(component_values);
+
+    return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
+}
+
 OwnPtr<MediaFeature> Parser::materialize_rust_media_feature(Vector<ComponentValue> const& component_values)
 {
     auto serialized_media_feature = serialize_component_values_for_reparsing(component_values);

@@ -535,6 +535,58 @@ pub(crate) fn parse_a_media_feature<M, V>(
     emit_media_feature_values(&media_feature, filtered_input_string, &mut media_feature_value_callback);
 }
 
+pub(crate) fn parse_a_media_test<E, M, V, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/css-values-5/#typedef-if-test
+    // media( <media-feature> | <media-condition> )
+    if let Some(media_feature) = component_values_parse_as_media_feature(&component_values) {
+        event_callback(CssBooleanExpressionEventKind::TestStart);
+        media_feature_callback(css_media_feature_from_syntax(&media_feature));
+        emit_media_feature_values(&media_feature, filtered_input_string, &mut media_feature_value_callback);
+        for component_value in component_values {
+            emit_component_value(&component_value, filtered_input_string, &mut component_value_callback);
+        }
+        event_callback(CssBooleanExpressionEventKind::TestEnd);
+        return;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values);
+    if parser
+        .parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature)
+        .is_none()
+        || parser.has_next_component_value()
+    {
+        event_callback(CssBooleanExpressionEventKind::Invalid);
+        return;
+    }
+
+    let boolean_expression = parser
+        .boolean_expression
+        .take()
+        .expect("parsed expression must be present");
+    emit_boolean_expression(
+        &boolean_expression,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
+    );
+}
+
 pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
     filtered_input: &[u8],
     mut media_query_callback: Q,
@@ -3310,11 +3362,11 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CssValueTypeSyntaxKind,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_value_type, parse_a_value_type,
-        strip_whitespace,
+        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
+        CssBooleanExpressionEventKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_value_type, parse_a_media_test, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3340,6 +3392,19 @@ mod tests {
 
     fn parse_media_query_list(input: &str) -> Vec<MediaQuerySyntax> {
         parse_with(input, Parser::parse_a_media_query_list)
+    }
+
+    fn parse_media_test(input: &str) -> (Vec<CssBooleanExpressionEventKind>, usize) {
+        let mut events = Vec::new();
+        let mut media_feature_count = 0;
+        parse_a_media_test(
+            input.as_bytes(),
+            |event| events.push(event),
+            |_| media_feature_count += 1,
+            |_| {},
+            |_| {},
+        );
+        (events, media_feature_count)
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -3817,6 +3882,33 @@ mod tests {
     fn ignores_whitespace_only_media_query_lists() {
         assert!(parse_media_query_list("").is_empty());
         assert!(parse_media_query_list(" \t\n").is_empty());
+    }
+
+    #[test]
+    fn parses_media_tests() {
+        let (events, media_feature_count) = parse_media_test("width >= 100px");
+        assert_eq!(
+            events,
+            vec![
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd
+            ]
+        );
+        assert_eq!(media_feature_count, 1);
+
+        let (events, media_feature_count) = parse_media_test("(width >= 100px) and (hover)");
+        assert_eq!(
+            events,
+            vec![
+                CssBooleanExpressionEventKind::AndStart,
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd,
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd,
+                CssBooleanExpressionEventKind::AndEnd,
+            ]
+        );
+        assert_eq!(media_feature_count, 2);
     }
 
     #[test]

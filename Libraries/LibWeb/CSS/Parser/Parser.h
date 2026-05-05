@@ -595,6 +595,7 @@ private:
     ParseErrorOr<Optional<Selector::SimpleSelector>> parse_simple_selector(TokenStream<ComponentValue>&);
 
     OwnPtr<BooleanExpression> materialize_rust_media_condition(Vector<ComponentValue> const&);
+    OwnPtr<BooleanExpression> materialize_rust_media_test(Vector<ComponentValue> const&);
     OwnPtr<MediaFeature> materialize_rust_media_feature(Vector<ComponentValue> const&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
 

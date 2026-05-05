@@ -670,6 +670,22 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(Stri
         });
 }
 
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_test(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
+{
+    return parse_a_boolean_expression(
+        input,
+        encoding,
+        MatchResult::False,
+        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&& component_values) mutable -> OwnPtr<BooleanExpression> {
+            if (!media_feature.has_value())
+                return nullptr;
+            return parse_test(media_feature.release_value(), move(component_values));
+        },
+        [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
+            FFI::rust_css_parse_media_test(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
+        });
+}
+
 Optional<RustComponentValueParser::MediaFeatureTest> RustComponentValueParser::parse_a_media_feature(StringView input, StringView encoding)
 {
     Optional<RustMediaFeatureTestBuilder> builder;
