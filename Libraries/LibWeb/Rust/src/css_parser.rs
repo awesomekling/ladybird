@@ -3033,6 +3033,7 @@ mod tests {
         MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
         media_feature_identifier_is_falsey,
     };
+    use crate::generated_units::{DimensionType, dimension_for_unit};
     use crate::generated_value_types::ValueTypeId;
 
     fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
@@ -3297,6 +3298,14 @@ mod tests {
         assert!(!media_feature_accepts_identifier(MediaFeatureId::Hover, "fine"));
         assert!(media_feature_identifier_is_falsey(MediaFeatureId::Hover, "none"));
         assert!(!media_feature_identifier_is_falsey(MediaFeatureId::Hover, "hover"));
+    }
+
+    #[test]
+    fn knows_generated_css_unit_metadata() {
+        assert_eq!(dimension_for_unit("px"), Some(DimensionType::Length));
+        assert_eq!(dimension_for_unit("PX"), Some(DimensionType::Length));
+        assert_eq!(dimension_for_unit("dpi"), Some(DimensionType::Resolution));
+        assert_eq!(dimension_for_unit("unknown"), None);
     }
 
     #[test]
