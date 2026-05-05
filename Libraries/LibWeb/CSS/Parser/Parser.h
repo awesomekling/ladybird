@@ -235,8 +235,7 @@ private:
     template<typename T>
     ParseErrorOr<SelectorList> parse_a_selector_list(TokenStream<T>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
 
-    template<typename T>
-    ParseErrorOr<PageSelectorList> parse_a_page_selector_list(TokenStream<T>&);
+    ParseErrorOr<PageSelectorList> parse_a_page_selector_list(TokenStream<ComponentValue>&);
 
     template<typename T>
     Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list(TokenStream<T>&);

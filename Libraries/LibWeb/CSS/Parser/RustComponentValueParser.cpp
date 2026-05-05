@@ -989,6 +989,73 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
     return move(builder.media_queries);
 }
 
+static PagePseudoClass page_pseudo_class_from_rust(FFI::CssPagePseudoClassKind pseudo_class)
+{
+    switch (pseudo_class) {
+    case FFI::CssPagePseudoClassKind::Left:
+        return PagePseudoClass::Left;
+    case FFI::CssPagePseudoClassKind::Right:
+        return PagePseudoClass::Right;
+    case FFI::CssPagePseudoClassKind::First:
+        return PagePseudoClass::First;
+    case FFI::CssPagePseudoClassKind::Blank:
+        return PagePseudoClass::Blank;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+struct PageSelectorListBuilder {
+    PageSelectorList selectors;
+    Optional<FlyString> current_name;
+    Vector<PagePseudoClass> current_pseudo_classes;
+    bool has_current_selector { false };
+
+    void finish_current_selector()
+    {
+        if (!has_current_selector)
+            return;
+        selectors.empend(move(current_name), move(current_pseudo_classes));
+        current_name = {};
+        current_pseudo_classes.clear();
+        has_current_selector = false;
+    }
+
+    void start_selector(FFI::CssPageSelector const* selector)
+    {
+        finish_current_selector();
+        has_current_selector = true;
+        if (selector->has_name)
+            current_name = fly_string_from_ffi_bytes(selector->name_ptr, selector->name_len);
+    }
+};
+
+Optional<PageSelectorList> RustComponentValueParser::parse_a_page_selector_list(StringView input, StringView encoding)
+{
+    PageSelectorListBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_page_selector_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssPageSelector const* selector) {
+            auto& builder = *static_cast<PageSelectorListBuilder*>(raw_builder);
+            builder.start_selector(selector);
+        },
+        [](void* raw_builder, FFI::CssPagePseudoClassKind pseudo_class) {
+            auto& builder = *static_cast<PageSelectorListBuilder*>(raw_builder);
+            VERIFY(builder.has_current_selector);
+            builder.current_pseudo_classes.append(page_pseudo_class_from_rust(pseudo_class));
+        });
+
+    if (!parsed)
+        return {};
+
+    builder.finish_current_selector();
+    return move(builder.selectors);
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,

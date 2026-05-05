@@ -123,6 +123,12 @@ pub(crate) enum MediaQueryModifier {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PageSelector {
+    name: Option<String>,
+    pseudo_classes: Vec<CssPagePseudoClassKind>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MediaFeatureTest {
     component_value: ComponentValue,
     kind: MediaFeatureSyntax,
@@ -256,6 +262,22 @@ pub enum CssComponentValueKind {
     FunctionEnd,
     SimpleBlockStart,
     SimpleBlockEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssPagePseudoClassKind {
+    Left,
+    Right,
+    First,
+    Blank,
+}
+
+#[repr(C)]
+pub struct CssPageSelector {
+    pub has_name: bool,
+    pub name_ptr: *const u8,
+    pub name_len: usize,
 }
 
 #[repr(C)]
@@ -572,6 +594,47 @@ where
         &mut |_| {},
         &mut |_| {},
     );
+}
+
+pub(crate) fn parse_a_page_selector_list<S, P>(
+    filtered_input: &[u8],
+    mut selector_callback: S,
+    mut pseudo_class_callback: P,
+) -> bool
+where
+    S: FnMut(CssPageSelector),
+    P: FnMut(CssPagePseudoClassKind),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(selectors) = parser.parse_a_page_selector_list() else {
+        return false;
+    };
+
+    for selector in selectors {
+        if let Some(name) = &selector.name {
+            let (name_ptr, name_len) = string_parts(name);
+            selector_callback(CssPageSelector {
+                has_name: true,
+                name_ptr,
+                name_len,
+            });
+        } else {
+            selector_callback(CssPageSelector {
+                has_name: false,
+                name_ptr: std::ptr::null(),
+                name_len: 0,
+            });
+        }
+
+        for pseudo_class in selector.pseudo_classes {
+            pseudo_class_callback(pseudo_class);
+        }
+    }
+
+    true
 }
 
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
@@ -1802,6 +1865,75 @@ impl ComponentValueParser {
         None
     }
 
+    // https://drafts.csswg.org/css-page-3/#syntax-page-selector
+    fn parse_a_page_selector_list(&mut self) -> Option<Vec<PageSelector>> {
+        // <page-selector-list> = <page-selector>#
+        // <page-selector> = [ <ident-token>? <pseudo-page>* ]!
+        // <pseudo-page> = : [ left | right | first | blank ]
+        let mut selector_list = Vec::new();
+
+        self.discard_whitespace();
+        while self.has_next_component_value() {
+            let name = if let Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            })) = self.next_component_value()
+            {
+                let name = value.clone();
+                self.index += 1;
+                Some(name)
+            } else {
+                None
+            };
+
+            let mut pseudo_classes = Vec::new();
+            while matches!(
+                self.next_component_value(),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Colon,
+                    ..
+                }))
+            ) {
+                self.index += 1;
+                let Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                })) = self.next_component_value()
+                else {
+                    return None;
+                };
+
+                let pseudo_class = page_pseudo_class_from_string(value)?;
+                self.index += 1;
+                pseudo_classes.push(pseudo_class);
+            }
+
+            if name.is_none() && pseudo_classes.is_empty() {
+                return None;
+            }
+            selector_list.push(PageSelector { name, pseudo_classes });
+
+            self.discard_whitespace();
+            if matches!(
+                self.next_component_value(),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Comma,
+                    ..
+                }))
+            ) {
+                self.index += 1;
+                self.discard_whitespace();
+                if !self.has_next_component_value() {
+                    return None;
+                }
+            } else if self.has_next_component_value() {
+                return None;
+            }
+        }
+
+        Some(selector_list)
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
@@ -1973,6 +2105,22 @@ fn component_values_parse_as_value_type(
     component_values: &[ComponentValue],
 ) -> CssValueTypeSyntaxKind {
     component_values_parse_as_generated_value_type(value_type_id, component_values)
+}
+
+fn page_pseudo_class_from_string(input: &str) -> Option<CssPagePseudoClassKind> {
+    if input.eq_ignore_ascii_case("left") {
+        return Some(CssPagePseudoClassKind::Left);
+    }
+    if input.eq_ignore_ascii_case("right") {
+        return Some(CssPagePseudoClassKind::Right);
+    }
+    if input.eq_ignore_ascii_case("first") {
+        return Some(CssPagePseudoClassKind::First);
+    }
+    if input.eq_ignore_ascii_case("blank") {
+        return Some(CssPagePseudoClassKind::Blank);
+    }
+    None
 }
 
 // https://drafts.csswg.org/css-values-5/#typedef-syntax
@@ -3857,12 +4005,13 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssValueTypeSyntaxKind, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_media_query,
-        parse_a_media_test, parse_a_value_type, parse_an_if_condition, strip_whitespace,
+        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssValueTypeSyntaxKind,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_media_query, parse_a_media_test, parse_a_page_selector_list,
+        parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3922,6 +4071,32 @@ mod tests {
         let mut events = Vec::new();
         parse_an_if_condition(input.as_bytes(), |event| events.push(event), |_| {});
         events
+    }
+
+    fn parse_page_selector_list(input: &str) -> Option<Vec<(Option<String>, Vec<CssPagePseudoClassKind>)>> {
+        let selectors = std::cell::RefCell::new(Vec::new());
+        let parsed = parse_a_page_selector_list(
+            input.as_bytes(),
+            |selector| {
+                let name = if selector.has_name {
+                    let bytes = unsafe { std::slice::from_raw_parts(selector.name_ptr, selector.name_len) };
+                    Some(String::from_utf8(bytes.to_vec()).expect("selector name must be utf-8"))
+                } else {
+                    None
+                };
+                selectors.borrow_mut().push((name, Vec::new()));
+            },
+            |pseudo_class| {
+                selectors
+                    .borrow_mut()
+                    .last_mut()
+                    .expect("pseudo-class callback must follow a selector callback")
+                    .1
+                    .push(pseudo_class);
+            },
+        );
+
+        parsed.then(|| selectors.into_inner())
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -4563,6 +4738,29 @@ mod tests {
 
         let events = parse_if_condition("supports(width: 1px) or media(width >= 100px) and style(--foo: bar)");
         assert_eq!(events, vec![CssBooleanExpressionEventKind::Invalid]);
+    }
+
+    #[test]
+    fn parses_page_selector_lists() {
+        assert_eq!(
+            parse_page_selector_list("invoice:left:first, :blank"),
+            Some(vec![
+                (
+                    Some("invoice".to_string()),
+                    vec![CssPagePseudoClassKind::Left, CssPagePseudoClassKind::First],
+                ),
+                (None, vec![CssPagePseudoClassKind::Blank]),
+            ])
+        );
+
+        assert_eq!(parse_page_selector_list(""), Some(vec![]));
+    }
+
+    #[test]
+    fn rejects_invalid_page_selector_lists() {
+        assert_eq!(parse_page_selector_list(","), None);
+        assert_eq!(parse_page_selector_list(":unknown"), None);
+        assert_eq!(parse_page_selector_list("invoice :left"), None);
     }
 
     #[test]

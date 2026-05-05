@@ -25,8 +25,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
     CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssRuleContext,
-    CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssValueTypeSyntaxKind,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind,
+    CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -280,6 +281,37 @@ pub unsafe extern "C" fn rust_css_parse_if_condition(
                 },
             );
         });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_page_selector_list(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    selector_callback: unsafe extern "C" fn(ctx: *mut c_void, selector: *const CssPageSelector),
+    pseudo_class_callback: unsafe extern "C" fn(ctx: *mut c_void, pseudo_class: CssPagePseudoClassKind),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_page_selector_list(
+                input,
+                |selector| {
+                    selector_callback(ctx, &raw const selector);
+                },
+                |pseudo_class| {
+                    pseudo_class_callback(ctx, pseudo_class);
+                },
+            )
+        })
     }
 }
 

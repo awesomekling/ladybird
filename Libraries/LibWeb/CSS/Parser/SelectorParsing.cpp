@@ -10,6 +10,7 @@
 
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/Infra/Strings.h>
 
 namespace Web::CSS::Parser {
@@ -1474,93 +1475,34 @@ Optional<Selector::SimpleSelector::ANPlusBPattern> Parser::parse_a_n_plus_b_patt
 
 Optional<PageSelectorList> Parser::parse_as_page_selector_list()
 {
-    auto selector_list = parse_a_page_selector_list(m_token_stream);
-    if (!selector_list.is_error())
-        return selector_list.release_value();
-    return {};
+    return RustComponentValueParser::parse_a_page_selector_list(m_input, m_encoding);
 }
 
-template<typename T>
-Parser::ParseErrorOr<PageSelectorList> Parser::parse_a_page_selector_list(TokenStream<T>& tokens)
+Parser::ParseErrorOr<PageSelectorList> Parser::parse_a_page_selector_list(TokenStream<ComponentValue>& tokens)
 {
     // https://drafts.csswg.org/css-page-3/#syntax-page-selector
     // <page-selector-list> = <page-selector>#
     // <page-selector> = [ <ident-token>? <pseudo-page>* ]!
     // <pseudo-page> = : [ left | right | first | blank ]
 
-    PageSelectorList selector_list;
+    auto transaction = tokens.begin_transaction();
+    Vector<ComponentValue> page_selector_list;
+    while (tokens.has_next_token())
+        page_selector_list.append(tokens.consume_a_token());
 
-    tokens.discard_whitespace();
-
-    while (tokens.has_next_token()) {
-        // First optional ident
-        Optional<FlyString> maybe_ident;
-        if (tokens.next_token().is(Token::Type::Ident))
-            maybe_ident = static_cast<Token>(tokens.consume_a_token()).ident();
-
-        // Then an optional series of pseudo-classes
-        Vector<PagePseudoClass> pseudo_classes;
-        while (tokens.next_token().is(Token::Type::Colon)) {
-            tokens.discard_a_token(); // :
-            if (!tokens.next_token().is(Token::Type::Ident)) {
-                ErrorReporter::the().report(InvalidSelectorError {
-                    .rule_name = "@page"_fly_string,
-                    .value_string = tokens.dump_string(),
-                    .description = "Pseudo-classes must be idents."_string,
-                });
-                return ParseError::SyntaxError;
-            }
-            auto pseudo_class_name = static_cast<Token>(tokens.consume_a_token()).ident();
-            if (auto pseudo_class = page_pseudo_class_from_string(pseudo_class_name); pseudo_class.has_value()) {
-                pseudo_classes.append(*pseudo_class);
-            } else {
-                ErrorReporter::the().report(UnknownPseudoClassOrElementError {
-                    .rule_name = "@page"_fly_string,
-                    .name = MUST(String::formatted(":{}", pseudo_class_name)),
-                });
-                return ParseError::SyntaxError;
-            }
-        }
-
-        if (!maybe_ident.has_value() && pseudo_classes.is_empty()) {
-            // Nothing parsed
-            ErrorReporter::the().report(InvalidSelectorError {
-                .rule_name = "@page"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "Is empty."_string,
-            });
-            return ParseError::SyntaxError;
-        }
-
-        selector_list.empend(move(maybe_ident), move(pseudo_classes));
-
-        tokens.discard_whitespace();
-
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            tokens.discard_a_token(); // ,
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token()) {
-                ErrorReporter::the().report(InvalidSelectorError {
-                    .rule_name = "@page"_fly_string,
-                    .value_string = tokens.dump_string(),
-                    .description = "Trailing comma."_string,
-                });
-                return ParseError::SyntaxError;
-            }
-
-        } else if (tokens.has_next_token()) {
-            ErrorReporter::the().report(InvalidSelectorError {
-                .rule_name = "@page"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "Trailing tokens."_string,
-            });
-            return ParseError::SyntaxError;
-        }
+    auto serialized_page_selector_list = serialize_component_values_for_reparsing(page_selector_list);
+    auto selector_list = RustComponentValueParser::parse_a_page_selector_list(serialized_page_selector_list.bytes_as_string_view(), "utf-8"sv);
+    if (selector_list.has_value()) {
+        transaction.commit();
+        return selector_list.release_value();
     }
 
-    return selector_list;
+    ErrorReporter::the().report(InvalidSelectorError {
+        .rule_name = "@page"_fly_string,
+        .value_string = serialized_page_selector_list,
+        .description = "Invalid page selector list."_string,
+    });
+    return ParseError::SyntaxError;
 }
-template Parser::ParseErrorOr<PageSelectorList> Parser::parse_a_page_selector_list(TokenStream<ComponentValue>&);
-template Parser::ParseErrorOr<PageSelectorList> Parser::parse_a_page_selector_list(TokenStream<Token>&);
 
 }
