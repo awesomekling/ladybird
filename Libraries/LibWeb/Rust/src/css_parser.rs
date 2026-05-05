@@ -88,6 +88,23 @@ pub(crate) enum BooleanExpressionTest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MediaQuerySyntax {
+    Valid {
+        modifier: MediaQueryModifier,
+        media_type: Option<String>,
+        condition: Option<Box<BooleanExpression>>,
+    },
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaQueryModifier {
+    None,
+    Not,
+    Only,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MediaFeatureTest {
     component_value: ComponentValue,
     kind: MediaFeatureSyntax,
@@ -1076,6 +1093,59 @@ impl ComponentValueParser {
         Some(())
     }
 
+    fn parse_media_condition(&mut self) -> Option<BooleanExpression> {
+        // <media-condition> = <media-not> | <media-and> | <media-or> | <media-in-parens>
+        self.parse_boolean_expression(BooleanExpressionTestKind::MediaFeature)
+    }
+
+    fn parse_media_condition_without_or(&mut self) -> Option<BooleanExpression> {
+        // <media-condition-without-or> = <media-not> | <media-and> | <media-in-parens>
+        let expression = self.parse_media_condition()?;
+        if matches!(expression, BooleanExpression::Or(_)) {
+            return None;
+        }
+        Some(expression)
+    }
+
+    fn parse_media_query_modifier(&mut self) -> MediaQueryModifier {
+        // [ not | only ]?
+        if component_value_is_ident(self.next_component_value(), "not") {
+            self.index += 1;
+            return MediaQueryModifier::Not;
+        }
+        if component_value_is_ident(self.next_component_value(), "only") {
+            self.index += 1;
+            return MediaQueryModifier::Only;
+        }
+        MediaQueryModifier::None
+    }
+
+    fn parse_media_type(&mut self) -> Option<String> {
+        // <media-type> = <ident>
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+        else {
+            return None;
+        };
+
+        // https://drafts.csswg.org/mediaqueries-3/#error-handling
+        // "However, an exception is made for media types ‘layer’, ‘not’, ‘and’, ‘only’, and ‘or’.
+        // Even though they do match the IDENT production, they must not be treated as unknown media
+        // types, but rather trigger the malformed query clause."
+        if ["layer", "not", "and", "only", "or"]
+            .iter()
+            .any(|reserved| value.eq_ignore_ascii_case(reserved))
+        {
+            return None;
+        }
+
+        let media_type = value.clone();
+        self.index += 1;
+        Some(media_type)
+    }
+
     // https://drafts.csswg.org/css-values-5/#typedef-boolean-expr
     fn parse_boolean_expression(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpression> {
         // <boolean-expr[ <test> ]> = not <boolean-expr-group> | <boolean-expr-group>
@@ -1363,6 +1433,54 @@ fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) 
     }
 
     None
+}
+
+fn component_values_parse_as_media_query(component_values: Vec<ComponentValue>) -> MediaQuerySyntax {
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    if let Some(condition) = parser.parse_media_condition()
+        && !parser.has_next_component_value()
+    {
+        return MediaQuerySyntax::Valid {
+            modifier: MediaQueryModifier::None,
+            media_type: None,
+            condition: Some(Box::new(condition)),
+        };
+    }
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let modifier = parser.parse_media_query_modifier();
+    parser.discard_whitespace();
+    let Some(media_type) = parser.parse_media_type() else {
+        return MediaQuerySyntax::Invalid;
+    };
+    parser.discard_whitespace();
+    if !parser.has_next_component_value() {
+        return MediaQuerySyntax::Valid {
+            modifier,
+            media_type: Some(media_type),
+            condition: None,
+        };
+    }
+
+    if !component_value_is_ident(parser.next_component_value(), "and") {
+        return MediaQuerySyntax::Invalid;
+    }
+    parser.index += 1;
+    parser.discard_whitespace();
+    let Some(condition) = parser.parse_media_condition_without_or() else {
+        return MediaQuerySyntax::Invalid;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return MediaQuerySyntax::Invalid;
+    }
+
+    MediaQuerySyntax::Valid {
+        modifier,
+        media_type: Some(media_type),
+        condition: Some(Box::new(condition)),
+    }
 }
 
 fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
@@ -1764,6 +1882,13 @@ impl Parser {
 
         // 4. Return groups.
         groups
+    }
+
+    pub(crate) fn parse_a_media_query_list(&mut self) -> Vec<MediaQuerySyntax> {
+        self.parse_a_comma_separated_list_of_component_values()
+            .into_iter()
+            .map(component_values_parse_as_media_query)
+            .collect()
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-component-value
@@ -2726,8 +2851,8 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, MediaFeatureNameKind,
-        MediaFeatureSyntax, MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations,
-        component_values_parse_as_media_feature, strip_whitespace,
+        MediaFeatureSyntax, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, component_values_parse_as_media_feature, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::MediaFeatureId;
@@ -2744,6 +2869,10 @@ mod tests {
 
     fn parse_media_feature_syntax(input: &str) -> Option<MediaFeatureSyntax> {
         component_values_parse_as_media_feature(&parse(input))
+    }
+
+    fn parse_media_query_list(input: &str) -> Vec<MediaQuerySyntax> {
+        parse_with(input, Parser::parse_a_media_query_list)
     }
 
     #[test]
@@ -2965,6 +3094,55 @@ mod tests {
         assert!(parse_media_feature_syntax("100px <= width >= 200px").is_none());
         assert!(parse_media_feature_syntax("100px = width = 200px").is_none());
         assert!(parse_media_feature_syntax("width <> 100px").is_none());
+    }
+
+    #[test]
+    fn parses_media_query_syntax_nodes() {
+        let queries = parse_media_query_list("screen, not print and (width >= 100px), (hover)");
+        assert_eq!(queries.len(), 3);
+
+        let MediaQuerySyntax::Valid {
+            modifier,
+            media_type,
+            condition,
+        } = &queries[0]
+        else {
+            panic!("expected a valid media query");
+        };
+        assert_eq!(*modifier, MediaQueryModifier::None);
+        assert_eq!(media_type.as_deref(), Some("screen"));
+        assert!(condition.is_none());
+
+        let MediaQuerySyntax::Valid {
+            modifier,
+            media_type,
+            condition,
+        } = &queries[1]
+        else {
+            panic!("expected a valid media query");
+        };
+        assert_eq!(*modifier, MediaQueryModifier::Not);
+        assert_eq!(media_type.as_deref(), Some("print"));
+        assert!(condition.is_some());
+
+        let MediaQuerySyntax::Valid {
+            modifier,
+            media_type,
+            condition,
+        } = &queries[2]
+        else {
+            panic!("expected a valid media query");
+        };
+        assert_eq!(*modifier, MediaQueryModifier::None);
+        assert!(media_type.is_none());
+        assert!(condition.is_some());
+    }
+
+    #[test]
+    fn rejects_invalid_media_query_syntax_nodes() {
+        let queries = parse_media_query_list("layer, screen or (hover), screen and (hover) or (color)");
+        assert_eq!(queries.len(), 3);
+        assert!(queries.iter().all(|query| matches!(query, MediaQuerySyntax::Invalid)));
     }
 
     #[test]
