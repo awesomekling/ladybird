@@ -104,6 +104,22 @@ static void expect_rust_rule_matches_cpp(StringView input)
     EXPECT_EQ(dump_rule(rust_rule), dump_rule(cpp_rule));
 }
 
+static String dump_rule_or_list_of_declarations(Vector<Web::CSS::Parser::RuleOrListOfDeclarations> const& rules_or_lists_of_declarations)
+{
+    StringBuilder builder;
+    for (auto const& rule_or_list_of_declarations : rules_or_lists_of_declarations)
+        dump_rule_or_list_of_declarations(builder, rule_or_list_of_declarations);
+    return builder.to_string_without_validation();
+}
+
+static void expect_rust_blocks_contents_match_cpp(StringView input)
+{
+    auto cpp_blocks_contents = Web::CSS::Parser::Parser::create(Web::CSS::Parser::ParsingParams {}, input).parse_as_blocks_contents();
+    auto rust_blocks_contents = Web::CSS::Parser::RustComponentValueParser::parse_a_blocks_contents(input, "utf-8"sv);
+
+    EXPECT_EQ(dump_rule_or_list_of_declarations(rust_blocks_contents), dump_rule_or_list_of_declarations(cpp_blocks_contents));
+}
+
 }
 
 TEST_CASE(basic_values)
@@ -148,4 +164,12 @@ TEST_CASE(rules)
     expect_rust_rule_matches_cpp("@layer foo;"sv);
     expect_rust_rule_matches_cpp("a { color: red; @media screen { color: green } & { color: blue } }"sv);
     expect_rust_rule_matches_cpp("a { --foo: { red } blue }"sv);
+}
+
+TEST_CASE(blocks_contents)
+{
+    expect_rust_blocks_contents_match_cpp("color: red; background: blue"sv);
+    expect_rust_blocks_contents_match_cpp("color: red; @media screen { color: green } & { color: blue }"sv);
+    expect_rust_blocks_contents_match_cpp("--foo: { red } blue; color: green"sv);
+    expect_rust_blocks_contents_match_cpp("color: { red } blue; width: 1px"sv);
 }

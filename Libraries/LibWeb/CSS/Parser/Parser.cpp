@@ -1386,6 +1386,13 @@ Optional<Declaration> Parser::parse_as_declaration()
     return parse_a_declaration(m_token_stream);
 }
 
+Vector<RuleOrListOfDeclarations> Parser::parse_as_blocks_contents()
+{
+    m_rule_context.append(RuleContext::Style);
+    auto guard = ScopeGuard { [&] { m_rule_context.take_last(); } };
+    return parse_a_blocks_contents(m_token_stream);
+}
+
 // https://drafts.csswg.org/css-syntax/#parse-rule
 template<typename T>
 Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)

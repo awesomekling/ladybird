@@ -20,6 +20,7 @@ public:
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
+    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
 };
 
 }

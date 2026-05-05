@@ -195,6 +195,24 @@ where
     );
 }
 
+pub(crate) fn parse_a_blocks_contents<E, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let rules_or_lists_of_declarations = parser.parse_a_blocks_contents();
+    emit_rule_or_list_of_declarations_list(
+        &rules_or_lists_of_declarations,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
+}
+
 fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     let mut tokens = Vec::new();
     let filtered_input_string = std::str::from_utf8(filtered_input)
