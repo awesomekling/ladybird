@@ -13,6 +13,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/StringBuilder.h>
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibURL/Parser.h>
 #include <LibWeb/CSS/CSSFontFeatureValuesRule.h>
@@ -205,21 +206,32 @@ GC::Ref<CSS::CSSStyleSheet> Parser::parse_as_css_stylesheet(Optional<::URL::URL>
 
 RefPtr<Supports> Parser::parse_as_supports()
 {
-    return parse_a_supports(m_token_stream);
+    return parse_a_supports_from_string(m_input, m_encoding);
 }
 
 template<typename T>
 RefPtr<Supports> Parser::parse_a_supports(TokenStream<T>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    auto component_values = parse_a_list_of_component_values(tokens);
+    StringBuilder serialized_supports;
+    while (tokens.has_next_token())
+        serialized_supports.append(tokens.consume_a_token().original_source_text());
+
+    auto supports = parse_a_supports_from_string(serialized_supports.string_view(), "utf-8"sv);
+    if (supports)
+        transaction.commit();
+
+    return supports;
+}
+
+RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringView encoding)
+{
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(input, encoding);
     TokenStream<ComponentValue> token_stream { component_values };
     auto maybe_condition = parse_supports_condition(token_stream);
     token_stream.discard_whitespace();
-    if (maybe_condition && !token_stream.has_next_token()) {
-        transaction.commit();
+    if (maybe_condition && !token_stream.has_next_token())
         return Supports::create(maybe_condition.release_nonnull());
-    }
 
     return {};
 }

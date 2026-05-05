@@ -242,6 +242,7 @@ private:
     Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list_from_string(StringView, StringView encoding);
     template<typename T>
     RefPtr<Supports> parse_a_supports(TokenStream<T>&);
+    RefPtr<Supports> parse_a_supports_from_string(StringView, StringView encoding);
 
     Optional<Selector::SimpleSelector::ANPlusBPattern> parse_a_n_plus_b_pattern(TokenStream<ComponentValue>&);
 
