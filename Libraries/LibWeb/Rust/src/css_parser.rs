@@ -76,9 +76,31 @@ enum Nested {
     Yes,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuleContext {
+    Unknown,
+    Style,
+    AtContainer,
+    AtCounterStyle,
+    AtMedia,
+    AtFontFace,
+    AtFontFeatureValues,
+    FontFeatureValue,
+    AtFunction,
+    AtKeyframes,
+    Keyframe,
+    AtSupports,
+    SupportsCondition,
+    AtLayer,
+    AtProperty,
+    AtPage,
+    Margin,
+}
+
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     index: usize,
+    rule_context: Vec<RuleContext>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,7 +226,9 @@ pub(crate) fn parse_a_blocks_contents<E, C>(
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    parser.rule_context.push(RuleContext::Style);
     let rules_or_lists_of_declarations = parser.parse_a_blocks_contents();
+    parser.rule_context.pop();
     emit_rule_or_list_of_declarations_list(
         &rules_or_lists_of_declarations,
         filtered_input_string,
@@ -438,7 +462,11 @@ fn emit_component_value_list<E, C>(
 
 impl Parser {
     pub(crate) fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, index: 0 }
+        Self {
+            tokens,
+            index: 0,
+            rule_context: Vec::new(),
+        }
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-a-stylesheets-contents
@@ -506,7 +534,10 @@ impl Parser {
 
         // 3. Consume a declaration from input. If anything was returned, return it.
         // Otherwise, return a syntax error.
-        self.consume_a_declaration(Nested::No)
+        self.rule_context.push(RuleContext::Style);
+        let declaration = self.consume_a_declaration(Nested::No);
+        self.rule_context.pop();
+        declaration
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-list-of-component-values
@@ -629,7 +660,10 @@ impl Parser {
                 // Discard a token from input. If rule is valid in the current context, return it;
                 // otherwise return nothing.
                 self.discard_a_token();
-                return Some(rule);
+                if self.is_at_rule_valid_in_the_current_context(&rule) {
+                    return Some(rule);
+                }
+                return None;
             }
 
             // <}-token>
@@ -637,7 +671,10 @@ impl Parser {
                 // If nested is true:
                 if nested == Nested::Yes {
                     // If rule is valid in the current context, return it.
-                    return Some(rule);
+                    if self.is_at_rule_valid_in_the_current_context(&rule) {
+                        return Some(rule);
+                    }
+                    return None;
                 }
                 // Otherwise, consume a token and append the result to rule’s prelude.
                 rule.prelude
@@ -648,11 +685,16 @@ impl Parser {
             // <{-token>
             if matches!(token.token_type, TokenType::OpenCurly) {
                 // Consume a block from input, and assign the result to rule’s child rules.
+                self.rule_context.push(rule_context_type_for_at_rule(&rule.name));
                 rule.child_rules_and_lists_of_declarations = self.consume_a_block();
+                self.rule_context.pop();
                 rule.is_block_rule = true;
 
                 // If rule is valid in the current context, return it. Otherwise, return nothing.
-                return Some(rule);
+                if self.is_at_rule_valid_in_the_current_context(&rule) {
+                    return Some(rule);
+                }
+                return None;
             }
 
             // anything else
@@ -671,6 +713,14 @@ impl Parser {
             prelude: Vec::new(),
             declarations: Vec::new(),
             child_rules: Vec::new(),
+        };
+
+        // NOTE: Qualified rules inside @keyframes are a keyframe rule.
+        //       We'll assume all others are style rules.
+        let type_of_qualified_rule = if self.rule_context.last() == Some(&RuleContext::AtKeyframes) {
+            RuleContext::Keyframe
+        } else {
+            RuleContext::Style
         };
 
         // Process input:
@@ -736,7 +786,9 @@ impl Parser {
                 }
 
                 // Otherwise, consume a block from input, and let child rules be the result.
+                self.rule_context.push(type_of_qualified_rule);
                 rule.child_rules = self.consume_a_block();
+                self.rule_context.pop();
 
                 // If the first item of child rules is a list of declarations, remove it from child rules
                 // and assign it to rule’s declarations.
@@ -749,7 +801,10 @@ impl Parser {
                 }
 
                 // If rule is valid in the current context, return it; otherwise return an invalid rule error.
-                return Some(rule);
+                if self.is_qualified_rule_valid_in_the_current_context() {
+                    return Some(rule);
+                }
+                return None;
             }
 
             // anything else
@@ -965,7 +1020,10 @@ impl Parser {
         }
 
         // 9. If decl is valid in the current context, return it; otherwise return nothing.
-        Some(declaration)
+        if self.is_declaration_valid_in_the_current_context() {
+            return Some(declaration);
+        }
+        None
     }
 
     // https://drafts.csswg.org/css-syntax/#consume-the-remnants-of-a-bad-declaration
@@ -1210,9 +1268,190 @@ fn contains_a_curly_block_and_non_whitespace(declaration_value: &[ComponentValue
     false
 }
 
+impl Parser {
+    fn is_declaration_valid_in_the_current_context(&self) -> bool {
+        let Some(context) = self.rule_context.last() else {
+            return false;
+        };
+
+        match context {
+            RuleContext::Unknown => false,
+            RuleContext::Style => true,
+            RuleContext::Keyframe => true,
+            RuleContext::AtContainer | RuleContext::AtLayer | RuleContext::AtMedia | RuleContext::AtSupports => self
+                .rule_context
+                .iter()
+                .any(|context| matches!(context, RuleContext::Style | RuleContext::AtFunction)),
+            RuleContext::FontFeatureValue => true,
+            RuleContext::AtFunction => true,
+            RuleContext::AtCounterStyle
+            | RuleContext::AtFontFace
+            | RuleContext::AtFontFeatureValues
+            | RuleContext::AtPage
+            | RuleContext::AtProperty
+            | RuleContext::Margin => true,
+            RuleContext::AtKeyframes => false,
+            RuleContext::SupportsCondition => true,
+        }
+    }
+
+    fn is_at_rule_valid_in_the_current_context(&self, at_rule: &AtRule) -> bool {
+        if self.rule_context.is_empty() {
+            return !is_margin_rule_name(&at_rule.name);
+        }
+
+        if self
+            .rule_context
+            .iter()
+            .any(|context| matches!(context, RuleContext::Style))
+        {
+            return first_is_one_of(&at_rule.name, &["container", "layer", "media", "supports"]);
+        }
+
+        if self
+            .rule_context
+            .iter()
+            .any(|context| matches!(context, RuleContext::AtFunction))
+        {
+            return first_is_one_of(&at_rule.name, &["container", "media", "supports"]);
+        }
+
+        match self.rule_context.last().expect("checked non-empty context") {
+            RuleContext::Unknown => false,
+            RuleContext::Style => unreachable!("style context handled above"),
+            RuleContext::AtContainer | RuleContext::AtLayer | RuleContext::AtMedia | RuleContext::AtSupports => {
+                !first_is_one_of(&at_rule.name, &["import", "namespace"])
+            }
+            RuleContext::SupportsCondition => false,
+            RuleContext::AtPage => is_margin_rule_name(&at_rule.name),
+            RuleContext::AtCounterStyle
+            | RuleContext::AtFontFace
+            | RuleContext::FontFeatureValue
+            | RuleContext::AtKeyframes
+            | RuleContext::Keyframe
+            | RuleContext::AtProperty
+            | RuleContext::Margin => false,
+            RuleContext::AtFontFeatureValues => is_font_feature_value_type_at_keyword(&at_rule.name),
+            RuleContext::AtFunction => unreachable!("function context handled above"),
+        }
+    }
+
+    fn is_qualified_rule_valid_in_the_current_context(&self) -> bool {
+        let Some(context) = self.rule_context.last() else {
+            return true;
+        };
+
+        match context {
+            RuleContext::Unknown => false,
+            RuleContext::Style
+            | RuleContext::AtContainer
+            | RuleContext::AtLayer
+            | RuleContext::AtMedia
+            | RuleContext::AtSupports
+            | RuleContext::AtKeyframes => true,
+            RuleContext::SupportsCondition
+            | RuleContext::AtCounterStyle
+            | RuleContext::AtFontFace
+            | RuleContext::AtFontFeatureValues
+            | RuleContext::FontFeatureValue
+            | RuleContext::AtFunction
+            | RuleContext::AtPage
+            | RuleContext::AtProperty
+            | RuleContext::Keyframe
+            | RuleContext::Margin => false,
+        }
+    }
+}
+
+fn rule_context_type_for_at_rule(name: &str) -> RuleContext {
+    if name.eq_ignore_ascii_case("media") {
+        return RuleContext::AtMedia;
+    }
+    if name.eq_ignore_ascii_case("container") {
+        return RuleContext::AtContainer;
+    }
+    if name.eq_ignore_ascii_case("counter-style") {
+        return RuleContext::AtCounterStyle;
+    }
+    if name.eq_ignore_ascii_case("font-face") {
+        return RuleContext::AtFontFace;
+    }
+    if name.eq_ignore_ascii_case("keyframes") || name.eq_ignore_ascii_case("-webkit-keyframes") {
+        return RuleContext::AtKeyframes;
+    }
+    if name.eq_ignore_ascii_case("font-feature-values") {
+        return RuleContext::AtFontFeatureValues;
+    }
+    if name.eq_ignore_ascii_case("function") {
+        return RuleContext::AtFunction;
+    }
+    if is_font_feature_value_type_at_keyword(name) {
+        return RuleContext::FontFeatureValue;
+    }
+    if name.eq_ignore_ascii_case("supports") {
+        return RuleContext::AtSupports;
+    }
+    if name.eq_ignore_ascii_case("layer") {
+        return RuleContext::AtLayer;
+    }
+    if name.eq_ignore_ascii_case("property") {
+        return RuleContext::AtProperty;
+    }
+    if name.eq_ignore_ascii_case("page") {
+        return RuleContext::AtPage;
+    }
+    if is_margin_rule_name(name) {
+        return RuleContext::Margin;
+    }
+    RuleContext::Unknown
+}
+
+fn first_is_one_of(name: &str, values: &[&str]) -> bool {
+    values.iter().any(|value| name.eq_ignore_ascii_case(value))
+}
+
+fn is_margin_rule_name(name: &str) -> bool {
+    first_is_one_of(
+        name,
+        &[
+            "top-left-corner",
+            "top-left",
+            "top-center",
+            "top-right",
+            "top-right-corner",
+            "bottom-left-corner",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right",
+            "bottom-right-corner",
+            "left-top",
+            "left-middle",
+            "left-bottom",
+            "right-top",
+            "right-middle",
+            "right-bottom",
+        ],
+    )
+}
+
+fn is_font_feature_value_type_at_keyword(name: &str) -> bool {
+    first_is_one_of(
+        name,
+        &[
+            "stylistic",
+            "historical-forms",
+            "styleset",
+            "character-variant",
+            "swash",
+            "ornaments",
+            "annotation",
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ComponentValue, Parser, Rule, RuleOrListOfDeclarations};
+    use super::{ComponentValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations};
     use crate::css_tokenizer::{self, TokenType};
 
     fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
@@ -1295,7 +1534,12 @@ mod tests {
     fn parses_block_contents() {
         let rules = parse_with(
             "color: red; @media screen { color: green } & { color: blue }",
-            |parser| parser.parse_a_blocks_contents(),
+            |parser| {
+                parser.rule_context.push(RuleContext::Style);
+                let rules = parser.parse_a_blocks_contents();
+                parser.rule_context.pop();
+                rules
+            },
         );
 
         assert_eq!(rules.len(), 3);
