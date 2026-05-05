@@ -8,8 +8,12 @@
 // the C++ bridge starts calling into it.
 #![allow(dead_code)]
 
-use crate::css_tokenizer::{CssToken, Token, TokenType};
-use crate::generated_media_features::{MediaFeatureId, media_feature_id_from_string, media_feature_type_is_range};
+use crate::css_tokenizer::{CssNumberType, CssToken, NumericValue, Token, TokenType};
+use crate::generated_media_features::{
+    MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
+    media_feature_id_from_string, media_feature_type_is_range,
+};
+use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
 };
@@ -137,6 +141,18 @@ pub(crate) enum MediaFeatureSyntax {
         right_comparison: MfComparison,
         right_value: Vec<ComponentValue>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaFeatureValueSyntaxKind {
+    Ident,
+    Boolean,
+    Integer,
+    Length,
+    Ratio,
+    Resolution,
+    Unknown,
+    Invalid,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1823,6 +1839,176 @@ fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bo
     !component_values.is_empty() && component_values.iter().all(is_media_feature_value_component_value)
 }
 
+fn component_values_parse_as_mf_value_syntax(
+    media_feature_id: MediaFeatureId,
+    component_values: &[ComponentValue],
+) -> MediaFeatureValueSyntaxKind {
+    let component_values = strip_whitespace(component_values);
+    if !component_values_parse_as_mf_value(component_values) {
+        return MediaFeatureValueSyntaxKind::Invalid;
+    }
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-mf-value
+    // <mf-value> = <number> | <dimension> | <ident> | <ratio>
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+        && media_feature_accepts_identifier(media_feature_id, value)
+    {
+        return MediaFeatureValueSyntaxKind::Ident;
+    }
+
+    if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Boolean)
+        && component_values_parse_as_mq_boolean(component_values)
+    {
+        return MediaFeatureValueSyntaxKind::Boolean;
+    }
+
+    if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Integer)
+        && component_values_parse_as_integer(component_values)
+    {
+        return MediaFeatureValueSyntaxKind::Integer;
+    }
+
+    if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Length)
+        && component_values_parse_as_length(component_values)
+    {
+        return MediaFeatureValueSyntaxKind::Length;
+    }
+
+    if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Ratio)
+        && component_values_parse_as_ratio(component_values)
+    {
+        return MediaFeatureValueSyntaxKind::Ratio;
+    }
+
+    if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Resolution)
+        && component_values_parse_as_resolution(component_values)
+    {
+        return MediaFeatureValueSyntaxKind::Resolution;
+    }
+
+    MediaFeatureValueSyntaxKind::Unknown
+}
+
+fn component_values_parse_as_mq_boolean(component_values: &[ComponentValue]) -> bool {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }),
+    ] = component_values
+    else {
+        return false;
+    };
+
+    number_is_integer(*number) && matches!(number.value(), 0.0 | 1.0)
+}
+
+fn component_values_parse_as_integer(component_values: &[ComponentValue]) -> bool {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }),
+    ] = component_values
+    else {
+        return false;
+    };
+
+    number_is_integer(*number)
+}
+
+fn component_values_parse_as_length(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_resolution(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Resolution)),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_ratio(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-values-4/#ratios
+    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
+    let component_values = strip_whitespace(component_values);
+    let [numerator] = component_values else {
+        return component_values_parse_as_ratio_with_denominator(component_values);
+    };
+
+    component_value_parse_as_non_negative_number(numerator)
+}
+
+fn component_values_parse_as_ratio_with_denominator(component_values: &[ComponentValue]) -> bool {
+    let Some((slash_index, _)) = component_values.iter().enumerate().find(|(_, component_value)| {
+        matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            }) if *value == '/' as u32
+        )
+    }) else {
+        return false;
+    };
+
+    let numerator = strip_whitespace(&component_values[..slash_index]);
+    let denominator = strip_whitespace(&component_values[slash_index + 1..]);
+    let [numerator] = numerator else {
+        return false;
+    };
+    let [denominator] = denominator else {
+        return false;
+    };
+
+    component_value_parse_as_non_negative_number(numerator) && component_value_parse_as_non_negative_number(denominator)
+}
+
+fn component_value_parse_as_non_negative_number(component_value: &ComponentValue) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() >= 0.0
+    )
+}
+
+fn number_is_integer(number: NumericValue) -> bool {
+    matches!(
+        number.number_type(),
+        CssNumberType::Integer | CssNumberType::IntegerWithExplicitSign
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MfComparison {
     Equal,
@@ -3024,9 +3210,10 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CssValueTypeSyntaxKind,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule,
-        RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
-        component_values_parse_as_value_type, parse_a_value_type, strip_whitespace,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_value_type, parse_a_value_type,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3306,6 +3493,66 @@ mod tests {
         assert_eq!(dimension_for_unit("PX"), Some(DimensionType::Length));
         assert_eq!(dimension_for_unit("dpi"), Some(DimensionType::Resolution));
         assert_eq!(dimension_for_unit("unknown"), None);
+    }
+
+    #[test]
+    fn parses_media_feature_value_syntax_nodes() {
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Hover, &parse("hover")),
+            MediaFeatureValueSyntaxKind::Ident
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Grid, &parse("1")),
+            MediaFeatureValueSyntaxKind::Boolean
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Color, &parse("8")),
+            MediaFeatureValueSyntaxKind::Integer
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("100px")),
+            MediaFeatureValueSyntaxKind::Length
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("0")),
+            MediaFeatureValueSyntaxKind::Length
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::AspectRatio, &parse("16 / 9")),
+            MediaFeatureValueSyntaxKind::Ratio
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Resolution, &parse("96dpi")),
+            MediaFeatureValueSyntaxKind::Resolution
+        );
+    }
+
+    #[test]
+    fn classifies_unknown_and_invalid_media_feature_value_syntax_nodes() {
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Hover, &parse("fine")),
+            MediaFeatureValueSyntaxKind::Unknown
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Grid, &parse("2")),
+            MediaFeatureValueSyntaxKind::Unknown
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("1quux")),
+            MediaFeatureValueSyntaxKind::Unknown
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Resolution, &parse("-1dpi")),
+            MediaFeatureValueSyntaxKind::Unknown
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::AspectRatio, &parse("16 / -9")),
+            MediaFeatureValueSyntaxKind::Unknown
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("1 < 2")),
+            MediaFeatureValueSyntaxKind::Invalid
+        );
     }
 
     #[test]

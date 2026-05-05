@@ -93,6 +93,10 @@ impl NumericValue {
     pub(crate) fn value(&self) -> f64 {
         self.value
     }
+
+    pub(crate) fn number_type(&self) -> CssNumberType {
+        self.number_type
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
