@@ -15,6 +15,7 @@
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
@@ -23,7 +24,23 @@ namespace Web::CSS::Parser {
 
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
-    return parse_a_media_query_list(m_token_stream);
+    // https://www.w3.org/TR/mediaqueries-4/#mq-list
+
+    // AD-HOC: Ignore whitespace-only queries
+    // to make `@media {..}` equivalent to `@media all {..}`
+    m_token_stream.discard_whitespace();
+    if (!m_token_stream.has_next_token())
+        return {};
+
+    auto comma_separated_lists = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(m_input, m_encoding);
+
+    AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
+    for (auto& media_query_parts : comma_separated_lists) {
+        auto stream = TokenStream(media_query_parts);
+        media_queries.append(parse_media_query(stream));
+    }
+
+    return media_queries;
 }
 
 template<typename T>
