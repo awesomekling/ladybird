@@ -35,7 +35,6 @@ public:
     };
 
     struct MediaQuerySyntax {
-        bool is_valid { false };
         bool is_negated { false };
         Optional<MediaQuery::MediaType> media_type;
         OwnPtr<BooleanExpression> media_condition;

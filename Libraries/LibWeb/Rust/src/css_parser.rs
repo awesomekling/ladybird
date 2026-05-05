@@ -385,7 +385,6 @@ pub enum CssMediaTypeKind {
 
 #[repr(C)]
 pub struct CssMediaQuery {
-    pub is_valid: bool,
     pub is_negated: bool,
     pub has_media_condition: bool,
     pub media_type_kind: CssMediaTypeKind,
@@ -583,17 +582,21 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
+    const ALL_MEDIA_TYPE: &[u8] = b"all";
+
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     for media_query in parser.parse_a_media_query_list() {
         match media_query {
             MediaQuerySyntax::Invalid => {
+                // https://www.w3.org/TR/mediaqueries-5/#error-handling
+                // A media query that does not match the grammar in the previous section must be
+                // replaced by `not all` during parsing.
                 media_query_callback(CssMediaQuery {
-                    is_valid: false,
-                    is_negated: false,
+                    is_negated: true,
                     has_media_condition: false,
-                    media_type_kind: CssMediaTypeKind::None,
-                    media_type_ptr: std::ptr::null(),
-                    media_type_len: 0,
+                    media_type_kind: CssMediaTypeKind::All,
+                    media_type_ptr: ALL_MEDIA_TYPE.as_ptr(),
+                    media_type_len: ALL_MEDIA_TYPE.len(),
                 });
             }
             MediaQuerySyntax::Valid {
@@ -602,7 +605,6 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
                 condition,
             } => {
                 media_query_callback(CssMediaQuery {
-                    is_valid: true,
                     is_negated: modifier == MediaQueryModifier::Not,
                     has_media_condition: condition.is_some(),
                     media_type_kind: media_type

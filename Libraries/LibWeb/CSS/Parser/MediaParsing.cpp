@@ -89,13 +89,6 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(S
     });
 
     for (auto& rust_media_query : rust_media_queries) {
-        if (!rust_media_query.is_valid) {
-            // "A media query that does not match the grammar in the previous section must be replaced by `not all`
-            // during parsing." - https://www.w3.org/TR/mediaqueries-5/#error-handling
-            media_queries.append(MediaQuery::create_not_all());
-            continue;
-        }
-
         auto media_query = MediaQuery::create();
         media_query->m_negated = rust_media_query.is_negated;
         if (rust_media_query.media_type.has_value())

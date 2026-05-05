@@ -693,6 +693,17 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
         Optional<RustBooleanExpressionBuilder> media_condition_builder;
         AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test;
 
+        static MediaQuerySyntax create_not_all_media_query_syntax()
+        {
+            return MediaQuerySyntax {
+                .is_negated = true,
+                .media_type = MediaQuery::MediaType {
+                    .name = "all"_fly_string,
+                    .known_type = MediaQuery::KnownMediaType::All,
+                },
+            };
+        }
+
         void finish_media_condition()
         {
             if (!media_condition_builder.has_value())
@@ -701,7 +712,7 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
             VERIFY(!media_queries.is_empty());
             auto& media_query = media_queries.last();
             if (media_condition_builder->invalid || !media_condition_builder->stack.is_empty() || !media_condition_builder->root) {
-                media_query.is_valid = false;
+                media_query = create_not_all_media_query_syntax();
                 media_condition_builder = {};
                 return;
             }
@@ -715,11 +726,6 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
         {
             finish_media_condition();
 
-            if (!rust_media_query->is_valid) {
-                media_queries.append(MediaQuerySyntax {});
-                return;
-            }
-
             Optional<MediaQuery::MediaType> media_type;
             if (rust_media_query->media_type_len > 0) {
                 auto media_type_name = fly_string_from_ffi_bytes(rust_media_query->media_type_ptr, rust_media_query->media_type_len);
@@ -730,7 +736,6 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
             }
 
             media_queries.append(MediaQuerySyntax {
-                .is_valid = true,
                 .is_negated = rust_media_query->is_negated,
                 .media_type = media_type,
             });
