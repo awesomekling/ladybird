@@ -66,13 +66,6 @@ static String serialize_component_values_for_reparsing(Vector<ComponentValue> co
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
     // https://www.w3.org/TR/mediaqueries-4/#mq-list
-
-    // AD-HOC: Ignore whitespace-only queries
-    // to make `@media {..}` equivalent to `@media all {..}`
-    m_token_stream.discard_whitespace();
-    if (!m_token_stream.has_next_token())
-        return {};
-
     return parse_a_media_query_list_from_string(m_input, m_encoding);
 }
 
@@ -80,12 +73,6 @@ template<typename T>
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list(TokenStream<T>& tokens)
 {
     // https://www.w3.org/TR/mediaqueries-4/#mq-list
-
-    // AD-HOC: Ignore whitespace-only queries
-    // to make `@media {..}` equivalent to `@media all {..}`
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return {};
 
     StringBuilder serialized_media_query_list;
     while (tokens.has_next_token())

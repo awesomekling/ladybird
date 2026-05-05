@@ -2340,10 +2340,15 @@ impl Parser {
     }
 
     pub(crate) fn parse_a_media_query_list(&mut self) -> Vec<MediaQuerySyntax> {
-        self.parse_a_comma_separated_list_of_component_values()
-            .into_iter()
-            .map(component_values_parse_as_media_query)
-            .collect()
+        let groups = self.parse_a_comma_separated_list_of_component_values();
+
+        // AD-HOC: Ignore whitespace-only queries
+        // to make `@media {..}` equivalent to `@media all {..}`.
+        if groups.len() == 1 && strip_whitespace(&groups[0]).is_empty() {
+            return Vec::new();
+        }
+
+        groups.into_iter().map(component_values_parse_as_media_query).collect()
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-component-value
@@ -3806,6 +3811,12 @@ mod tests {
         assert_eq!(*modifier, MediaQueryModifier::None);
         assert!(media_type.is_none());
         assert!(condition.is_some());
+    }
+
+    #[test]
+    fn ignores_whitespace_only_media_query_lists() {
+        assert!(parse_media_query_list("").is_empty());
+        assert!(parse_media_query_list(" \t\n").is_empty());
     }
 
     #[test]
