@@ -13,6 +13,7 @@ from typing import TextIO
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+from Generators.generate_libweb_css_value_types_parsing import json_is_valid
 from Utils.utils import title_casify
 
 
@@ -179,6 +180,12 @@ def main() -> None:
 
     with open(args.json, "r", encoding="utf-8") as input_file:
         value_type_data = json.load(input_file)
+
+    if not isinstance(value_type_data, dict):
+        raise RuntimeError(f"{args.json}: expected a JSON object")
+
+    if not json_is_valid(value_type_data, args.json):
+        sys.exit(1)
 
     with open(args.output, "w", encoding="utf-8") as output_file:
         write_rust_file(output_file, value_type_data)
