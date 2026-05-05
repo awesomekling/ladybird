@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 use crate::css_tokenizer::{CssToken, Token, TokenType};
+use crate::generated_media_features::{media_feature_id_from_string, media_feature_type_is_range};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ComponentValue {
@@ -1066,7 +1067,7 @@ fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) 
 
 fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> bool {
     // <mf-boolean> = <mf-name>
-    component_values_parse_as_mf_name(component_values)
+    component_values_parse_as_mf_name(component_values, AllowMinMaxPrefix::No)
 }
 
 fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> bool {
@@ -1085,7 +1086,7 @@ fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> bo
 
     let name = strip_whitespace(&component_values[..colon_index]);
     let value = strip_whitespace(&component_values[colon_index + 1..]);
-    component_values_parse_as_mf_name(name) && component_values_parse_as_mf_value(value)
+    component_values_parse_as_mf_name(name, AllowMinMaxPrefix::Yes) && component_values_parse_as_mf_value(value)
 }
 
 fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bool {
@@ -1114,8 +1115,10 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bo
         let left = strip_whitespace(&component_values[..comparison_index]);
         let right = strip_whitespace(&component_values[comparison_end..]);
 
-        return (component_values_parse_as_mf_name(left) && component_values_parse_as_mf_value(right))
-            || (component_values_parse_as_mf_value(left) && component_values_parse_as_mf_name(right));
+        return (component_values_parse_as_mf_name(left, AllowMinMaxPrefix::No)
+            && component_values_parse_as_mf_value(right))
+            || (component_values_parse_as_mf_value(left)
+                && component_values_parse_as_mf_name(right, AllowMinMaxPrefix::No));
     }
 
     if comparison_indices.len() == 2 {
@@ -1134,21 +1137,48 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bo
         let name = strip_whitespace(&component_values[left_comparison_end..right_comparison_index]);
         let right_value = strip_whitespace(&component_values[right_comparison_end..]);
         return component_values_parse_as_mf_value(left_value)
-            && component_values_parse_as_mf_name(name)
+            && component_values_parse_as_mf_name(name, AllowMinMaxPrefix::No)
             && component_values_parse_as_mf_value(right_value);
     }
 
     false
 }
 
-fn component_values_parse_as_mf_name(component_values: &[ComponentValue]) -> bool {
-    matches!(
-        component_values,
-        [ComponentValue::PreservedToken(Token {
-            token_type: TokenType::Ident { .. },
+#[derive(Clone, Copy)]
+enum AllowMinMaxPrefix {
+    No,
+    Yes,
+}
+
+fn component_values_parse_as_mf_name(
+    component_values: &[ComponentValue],
+    allow_min_max_prefix: AllowMinMaxPrefix,
+) -> bool {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
             ..
-        })]
-    )
+        }),
+    ] = component_values
+    else {
+        return false;
+    };
+
+    if media_feature_id_from_string(value).is_some() {
+        return true;
+    }
+
+    if matches!(allow_min_max_prefix, AllowMinMaxPrefix::No) {
+        return false;
+    }
+
+    let prefix = value.get(..4);
+    if !matches!(prefix, Some(prefix) if prefix.eq_ignore_ascii_case("min-") || prefix.eq_ignore_ascii_case("max-")) {
+        return false;
+    }
+
+    let adjusted_name = &value[4..];
+    media_feature_id_from_string(adjusted_name).is_some_and(media_feature_type_is_range)
 }
 
 fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bool {
@@ -2459,6 +2489,15 @@ mod tests {
         let component_values = parse("florb(123)");
         let mut parser = ComponentValueParser::new(component_values);
         parser.parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature);
+
+        assert!(matches!(
+            parser.boolean_expression,
+            Some(BooleanExpression::GeneralEnclosed(_))
+        ));
+
+        let component_values = parse("(unknown-feature)");
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature);
 
         assert!(matches!(
             parser.boolean_expression,
