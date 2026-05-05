@@ -2725,10 +2725,12 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations,
+        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, MediaFeatureNameKind,
+        MediaFeatureSyntax, MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations,
+        component_values_parse_as_media_feature, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
+    use crate::generated_media_features::MediaFeatureId;
 
     fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
         let mut tokens = Vec::new();
@@ -2738,6 +2740,10 @@ mod tests {
 
     fn parse(input: &str) -> Vec<ComponentValue> {
         parse_with(input, Parser::parse_a_list_of_component_values)
+    }
+
+    fn parse_media_feature_syntax(input: &str) -> Option<MediaFeatureSyntax> {
+        component_values_parse_as_media_feature(&parse(input))
     }
 
     #[test]
@@ -2875,6 +2881,90 @@ mod tests {
             parser.boolean_expression,
             Some(BooleanExpression::GeneralEnclosed(_))
         ));
+    }
+
+    #[test]
+    fn parses_media_feature_syntax_nodes() {
+        let Some(MediaFeatureSyntax::Boolean(name)) = parse_media_feature_syntax("color") else {
+            panic!("expected a boolean media feature");
+        };
+        assert_eq!(name.kind, MediaFeatureNameKind::Normal);
+        assert_eq!(name.id, MediaFeatureId::Color);
+
+        let Some(MediaFeatureSyntax::Plain { name, value }) = parse_media_feature_syntax("width: 100px") else {
+            panic!("expected a plain media feature");
+        };
+        assert_eq!(name.kind, MediaFeatureNameKind::Normal);
+        assert_eq!(name.id, MediaFeatureId::Width);
+        assert_eq!(strip_whitespace(&value).len(), 1);
+
+        let Some(MediaFeatureSyntax::Plain { name, value }) = parse_media_feature_syntax("min-width: 100px") else {
+            panic!("expected a min-prefixed media feature");
+        };
+        assert_eq!(name.kind, MediaFeatureNameKind::Min);
+        assert_eq!(name.id, MediaFeatureId::Width);
+        assert_eq!(strip_whitespace(&value).len(), 1);
+
+        let Some(MediaFeatureSyntax::Plain { name, value }) = parse_media_feature_syntax("max-width: 100px") else {
+            panic!("expected a max-prefixed media feature");
+        };
+        assert_eq!(name.kind, MediaFeatureNameKind::Max);
+        assert_eq!(name.id, MediaFeatureId::Width);
+        assert_eq!(strip_whitespace(&value).len(), 1);
+    }
+
+    #[test]
+    fn parses_media_feature_range_syntax_nodes() {
+        let Some(MediaFeatureSyntax::HalfRangeNameFirst {
+            name,
+            comparison,
+            value,
+        }) = parse_media_feature_syntax("width >= 100px")
+        else {
+            panic!("expected a name-first half-range media feature");
+        };
+        assert_eq!(name.kind, MediaFeatureNameKind::Normal);
+        assert_eq!(name.id, MediaFeatureId::Width);
+        assert_eq!(comparison, MfComparison::GreaterThanOrEqual);
+        assert_eq!(strip_whitespace(&value).len(), 1);
+
+        let Some(MediaFeatureSyntax::HalfRangeValueFirst {
+            value,
+            comparison,
+            name,
+        }) = parse_media_feature_syntax("100px <= width")
+        else {
+            panic!("expected a value-first half-range media feature");
+        };
+        assert_eq!(strip_whitespace(&value).len(), 1);
+        assert_eq!(comparison, MfComparison::LessThanOrEqual);
+        assert_eq!(name.kind, MediaFeatureNameKind::Normal);
+        assert_eq!(name.id, MediaFeatureId::Width);
+
+        let Some(MediaFeatureSyntax::Range {
+            left_value,
+            left_comparison,
+            name,
+            right_comparison,
+            right_value,
+        }) = parse_media_feature_syntax("100px <= width <= 200px")
+        else {
+            panic!("expected a full-range media feature");
+        };
+        assert_eq!(strip_whitespace(&left_value).len(), 1);
+        assert_eq!(left_comparison, MfComparison::LessThanOrEqual);
+        assert_eq!(name.kind, MediaFeatureNameKind::Normal);
+        assert_eq!(name.id, MediaFeatureId::Width);
+        assert_eq!(right_comparison, MfComparison::LessThanOrEqual);
+        assert_eq!(strip_whitespace(&right_value).len(), 1);
+    }
+
+    #[test]
+    fn rejects_invalid_media_feature_syntax_nodes() {
+        assert!(parse_media_feature_syntax("min-hover: hover").is_none());
+        assert!(parse_media_feature_syntax("100px <= width >= 200px").is_none());
+        assert!(parse_media_feature_syntax("100px = width = 200px").is_none());
+        assert!(parse_media_feature_syntax("width <> 100px").is_none());
     }
 
     #[test]
