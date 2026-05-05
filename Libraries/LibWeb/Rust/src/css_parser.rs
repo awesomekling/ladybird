@@ -8,7 +8,7 @@
 // the C++ bridge starts calling into it.
 #![allow(dead_code)]
 
-use crate::css_tokenizer::{Token, TokenType};
+use crate::css_tokenizer::{CssToken, Token, TokenType};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ComponentValue {
@@ -35,6 +35,94 @@ pub(crate) struct SimpleBlock {
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssComponentValueKind {
+    Token,
+    FunctionStart,
+    FunctionEnd,
+    SimpleBlockStart,
+    SimpleBlockEnd,
+}
+
+#[repr(C)]
+pub struct CssComponentValue {
+    pub kind: CssComponentValueKind,
+    pub token: CssToken,
+}
+
+pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
+where
+    F: FnMut(CssComponentValue),
+{
+    let mut tokens = Vec::new();
+    let filtered_input_string = std::str::from_utf8(filtered_input)
+        .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
+    crate::css_tokenizer::tokenize(filtered_input, |token, _| {
+        tokens.push(token.clone());
+    });
+
+    let mut parser = Parser::new(tokens);
+    for component_value in parser.parse_a_list_of_component_values() {
+        emit_component_value(&component_value, filtered_input_string, &mut callback);
+    }
+}
+
+fn emit_component_value<F>(component_value: &ComponentValue, filtered_input: &str, callback: &mut F)
+where
+    F: FnMut(CssComponentValue),
+{
+    match component_value {
+        ComponentValue::PreservedToken(token) => {
+            emit_token(CssComponentValueKind::Token, token, filtered_input, callback);
+        }
+        ComponentValue::Function(function) => {
+            emit_token(
+                CssComponentValueKind::FunctionStart,
+                &function.name_token,
+                filtered_input,
+                callback,
+            );
+            for value in &function.value {
+                emit_component_value(value, filtered_input, callback);
+            }
+            emit_token(
+                CssComponentValueKind::FunctionEnd,
+                &function.end_token,
+                filtered_input,
+                callback,
+            );
+        }
+        ComponentValue::SimpleBlock(block) => {
+            emit_token(
+                CssComponentValueKind::SimpleBlockStart,
+                &block.token,
+                filtered_input,
+                callback,
+            );
+            for value in &block.value {
+                emit_component_value(value, filtered_input, callback);
+            }
+            emit_token(
+                CssComponentValueKind::SimpleBlockEnd,
+                &block.end_token,
+                filtered_input,
+                callback,
+            );
+        }
+    }
+}
+
+fn emit_token<F>(kind: CssComponentValueKind, token: &Token, filtered_input: &str, callback: &mut F)
+where
+    F: FnMut(CssComponentValue),
+{
+    callback(CssComponentValue {
+        kind,
+        token: token.as_ffi(filtered_input),
+    });
 }
 
 impl Parser {

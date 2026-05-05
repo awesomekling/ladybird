@@ -13,6 +13,7 @@ mod css_tokenizer;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+pub use css_parser::{CssComponentValue, CssComponentValueKind};
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
 fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
@@ -65,6 +66,30 @@ pub unsafe extern "C" fn rust_css_tokenize(
             css_tokenizer::tokenize(input, |token, filtered_input| {
                 let ffi_token = token.as_ffi(filtered_input);
                 callback(ctx, &raw const ffi_token);
+            });
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_component_values(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_a_list_of_component_values(input, |component_value| {
+                callback(ctx, &raw const component_value);
             });
         });
     }

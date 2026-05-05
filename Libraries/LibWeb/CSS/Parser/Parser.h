@@ -88,7 +88,7 @@ enum class IsUAStyleSheet {
     No,
 };
 
-struct ParsingParams {
+struct WEB_API ParsingParams {
     explicit ParsingParams(ParsingMode = ParsingMode::Normal);
     explicit ParsingParams(ValueParsingContext);
     explicit ParsingParams(JS::Realm&, ParsingMode = ParsingMode::Normal);
@@ -108,7 +108,7 @@ struct ParsingParams {
 // The very large CSS Parser implementation code is broken up among several .cpp files:
 // Parser.cpp contains the core parser algorithms, defined in https://drafts.csswg.org/css-syntax
 // Everything else is in different *Parsing.cpp files
-class Parser {
+class WEB_API Parser {
     AK_MAKE_NONCOPYABLE(Parser);
     AK_MAKE_NONMOVABLE(Parser);
 

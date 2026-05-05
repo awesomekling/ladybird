@@ -20,7 +20,7 @@ parse_deps = false
 all_features = false
 
 [export]
-include = ["CssHashType", "CssNumberType", "CssToken", "CssTokenType"]
+include = ["CssComponentValue", "CssComponentValueKind", "CssHashType", "CssNumberType", "CssToken", "CssTokenType"]
 
 [export.mangle]
 rename_types = "PascalCase"
