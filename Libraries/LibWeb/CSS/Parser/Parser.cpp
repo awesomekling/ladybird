@@ -27,6 +27,7 @@
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/Sizing.h>
@@ -73,7 +74,7 @@ ParsingParams::ParsingParams(DOM::Document const& document, ParsingMode mode)
 
 Parser Parser::create(ParsingParams const& context, StringView input, StringView encoding)
 {
-    auto tokens = Tokenizer::tokenize(input, encoding);
+    auto tokens = RustTokenizer::tokenize(input, encoding);
     return Parser { context, move(tokens) };
 }
 
