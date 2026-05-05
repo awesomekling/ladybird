@@ -10,7 +10,7 @@
 
 use crate::css_tokenizer::{CssToken, Token, TokenType};
 use crate::generated_media_features::{MediaFeatureId, media_feature_id_from_string, media_feature_type_is_range};
-use crate::generated_value_types::ValueTypeId;
+use crate::generated_value_types::{ValueTypeId, value_type_id_from_u8};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ComponentValue {
@@ -369,6 +369,17 @@ pub struct CssMediaQuery {
     pub media_type_len: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssValueTypeSyntaxKind {
+    Invalid,
+    FontWeightAbsoluteNormal,
+    FontWeightAbsoluteBold,
+    FontWeightAbsoluteNumber,
+    SymbolString,
+    SymbolCustomIdent,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -393,6 +404,29 @@ pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
             emit_component_value(&component_value, filtered_input_string, &mut component_value_callback);
         }
         group_callback();
+    }
+}
+
+pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> CssValueTypeSyntaxKind {
+    let Some(value_type_id) = value_type_id_from_u8(value_type_id) else {
+        return CssValueTypeSyntaxKind::Invalid;
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    match component_values_parse_as_value_type(value_type_id, &component_values) {
+        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Normal)) => {
+            CssValueTypeSyntaxKind::FontWeightAbsoluteNormal
+        }
+        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Bold)) => {
+            CssValueTypeSyntaxKind::FontWeightAbsoluteBold
+        }
+        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Number(_))) => {
+            CssValueTypeSyntaxKind::FontWeightAbsoluteNumber
+        }
+        Some(ValueTypeSyntax::Symbol(SymbolSyntax::String(_))) => CssValueTypeSyntaxKind::SymbolString,
+        Some(ValueTypeSyntax::Symbol(SymbolSyntax::CustomIdent(_))) => CssValueTypeSyntaxKind::SymbolCustomIdent,
+        None => CssValueTypeSyntaxKind::Invalid,
     }
 }
 
@@ -3053,7 +3087,7 @@ mod tests {
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, FontWeightAbsoluteSyntax,
         MediaFeatureNameKind, MediaFeatureSyntax, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule,
         RuleContext, RuleOrListOfDeclarations, SymbolSyntax, ValueTypeSyntax, component_values_parse_as_media_feature,
-        component_values_parse_as_value_type, strip_whitespace,
+        component_values_parse_as_value_type, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::MediaFeatureId;
@@ -3357,6 +3391,26 @@ mod tests {
         assert!(parse_value_type("inherit", ValueTypeId::Symbol).is_none());
         assert!(parse_value_type("default", ValueTypeId::Symbol).is_none());
         assert!(parse_value_type("triangle square", ValueTypeId::Symbol).is_none());
+    }
+
+    #[test]
+    fn parses_value_type_syntax_for_ffi() {
+        assert_eq!(
+            parse_a_value_type(b"normal", ValueTypeId::FontWeightAbsolute as u8),
+            super::CssValueTypeSyntaxKind::FontWeightAbsoluteNormal
+        );
+        assert_eq!(
+            parse_a_value_type(b"700", ValueTypeId::FontWeightAbsolute as u8),
+            super::CssValueTypeSyntaxKind::FontWeightAbsoluteNumber
+        );
+        assert_eq!(
+            parse_a_value_type(b"triangle", ValueTypeId::Symbol as u8),
+            super::CssValueTypeSyntaxKind::SymbolCustomIdent
+        );
+        assert_eq!(
+            parse_a_value_type(b"triangle square", ValueTypeId::Symbol as u8),
+            super::CssValueTypeSyntaxKind::Invalid
+        );
     }
 
     #[test]

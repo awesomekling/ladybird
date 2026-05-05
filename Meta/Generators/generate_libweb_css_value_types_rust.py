@@ -36,11 +36,24 @@ def write_rust_file(out: TextIO, value_type_data: dict) -> None:
 #[repr(u8)]
 pub(crate) enum ValueTypeId {""")
 
-    for name in value_type_data:
+    for index, name in enumerate(value_type_data):
         out.write(f"""
-    {title_casify(value_type_name_without_brackets(name))},""")
+    {title_casify(value_type_name_without_brackets(name))} = {index},""")
 
     out.write("""
+}
+
+#[allow(dead_code)]
+pub(crate) fn value_type_id_from_u8(value_type_id: u8) -> Option<ValueTypeId> {
+    match value_type_id {""")
+
+    for index, name in enumerate(value_type_data):
+        out.write(f"""
+        {index} => Some(ValueTypeId::{title_casify(value_type_name_without_brackets(name))}),""")
+
+    out.write("""
+        _ => None,
+    }
 }
 
 #[allow(dead_code)]

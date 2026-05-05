@@ -22,7 +22,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
     CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaQuery, CssRuleContext, CssRuleEvent, CssRuleEventKind,
+    CssMediaFeatureValueKind, CssMediaQuery, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -170,6 +170,25 @@ pub unsafe extern "C" fn rust_css_parse_component_value(
                 callback(ctx, &raw const component_value);
             });
         });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_value_type(
+    input: *const u8,
+    input_len: usize,
+    value_type_id: u8,
+) -> CssValueTypeSyntaxKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssValueTypeSyntaxKind::Invalid;
+            };
+
+            css_parser::parse_a_value_type(input, value_type_id)
+        })
     }
 }
 
