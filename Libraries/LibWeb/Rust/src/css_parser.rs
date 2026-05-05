@@ -2057,7 +2057,7 @@ fn component_value_parse_as_non_negative_number(component_value: &ComponentValue
             token_type: TokenType::Number { number },
             ..
         }) if number.value() >= 0.0
-    )
+    ) || matches!(component_value, ComponentValue::Function(_))
 }
 
 fn number_is_integer(number: NumericValue) -> bool {
@@ -3589,6 +3589,14 @@ mod tests {
         );
         assert_eq!(
             component_values_parse_as_mf_value_syntax(MediaFeatureId::AspectRatio, &parse("16 / 9")),
+            MediaFeatureValueSyntaxKind::Ratio
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::AspectRatio, &parse("calc(16 / 9)")),
+            MediaFeatureValueSyntaxKind::Ratio
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::AspectRatio, &parse("calc(16) / calc(9)")),
             MediaFeatureValueSyntaxKind::Ratio
         );
         assert_eq!(

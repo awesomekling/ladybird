@@ -138,14 +138,93 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         return media_feature_id_from_u8(media_feature.id);
     };
 
-    auto parse_rust_media_feature_value = [this](MediaFeatureID media_feature_id, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
-        TokenStream value_tokens { component_values };
-        auto maybe_value = parse_media_feature_value(media_feature_id, value_tokens);
-        if (!maybe_value.has_value())
+    auto materialize_unknown_media_feature_value = [](Vector<ComponentValue> const& component_values) -> MediaFeatureValue {
+        ErrorReporter::the().report(InvalidValueError {
+            .value_type = "<mf-value>"_fly_string,
+            .value_string = MUST(String::join(""sv, component_values)),
+            .description = "Unrecognized type"_string,
+        });
+
+        // NB: We only use this for serialization so the substitution function presence is irrelevant and we can just
+        //     set it to empty.
+        Vector<ComponentValue> unknown_tokens;
+        unknown_tokens.ensure_capacity(component_values.size());
+        for (auto const& component_value : component_values)
+            unknown_tokens.unchecked_append(component_value);
+        return MediaFeatureValue(MediaFeatureValue::Type::Unknown, UnresolvedStyleValue::create(move(unknown_tokens), {}));
+    };
+
+    auto materialize_rust_media_feature_value = [this, &materialize_unknown_media_feature_value](MediaFeatureID media_feature_id, FFI::CssMediaFeatureValueSyntaxKind syntax_kind, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
+        if (syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Invalid)
             return {};
+
+        if (syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Unknown)
+            return materialize_unknown_media_feature_value(component_values);
+
+        TokenStream value_tokens { component_values };
+        auto maybe_value = [&]() -> Optional<MediaFeatureValue> {
+            auto context_guard = push_temporary_value_parsing_context(SpecialContext::MediaCondition);
+
+            switch (syntax_kind) {
+            case FFI::CssMediaFeatureValueSyntaxKind::Ident: {
+                value_tokens.discard_whitespace();
+                auto keyword = parse_keyword_value(value_tokens);
+                if (keyword && media_feature_accepts_keyword(media_feature_id, keyword->to_keyword()))
+                    return MediaFeatureValue(MediaFeatureValue::Type::Ident, keyword.release_nonnull());
+                return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Boolean: {
+                value_tokens.discard_whitespace();
+                if (auto integer = parse_integer_value(value_tokens, infinite_integer_range)) {
+                    if (integer->is_calculated() || first_is_one_of(integer->as_integer().integer(), 0, 1))
+                        return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
+                }
+                return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Integer:
+                if (auto integer = parse_integer_value(value_tokens, infinite_integer_range))
+                    return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
+                return {};
+            case FFI::CssMediaFeatureValueSyntaxKind::Length: {
+                value_tokens.discard_whitespace();
+                if (auto length = parse_length_value(value_tokens, infinite_range))
+                    return MediaFeatureValue(MediaFeatureValue::Type::Length, length.release_nonnull());
+
+                if (value_tokens.has_next_token()) {
+                    auto const& token = value_tokens.next_token();
+                    if (auto calc = parse_calculated_value(token, { .accepted_ranges_by_type = { { ValueType::Number, infinite_range } } }); calc && calc->as_calculated().resolves_to_number()) {
+                        if (auto resolved_number = calc->as_calculated().resolve_number({}); resolved_number.has_value() && *resolved_number == 0) {
+                            value_tokens.discard_a_token();
+                            return MediaFeatureValue(MediaFeatureValue::Type::Length, LengthStyleValue::create(Length::make_px(0)));
+                        }
+                    }
+                }
+                return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Ratio: {
+                value_tokens.discard_whitespace();
+                if (auto ratio = parse_ratio_value(value_tokens))
+                    return MediaFeatureValue(MediaFeatureValue::Type::Ratio, ratio.release_nonnull());
+                return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Resolution: {
+                value_tokens.discard_whitespace();
+                if (auto resolution = parse_resolution_value(value_tokens, infinite_range))
+                    return MediaFeatureValue(MediaFeatureValue::Type::Resolution, resolution.release_nonnull());
+                return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Unknown:
+            case FFI::CssMediaFeatureValueSyntaxKind::Invalid:
+                VERIFY_NOT_REACHED();
+            }
+            VERIFY_NOT_REACHED();
+        }();
+
+        if (!maybe_value.has_value())
+            return materialize_unknown_media_feature_value(component_values);
         value_tokens.discard_whitespace();
         if (value_tokens.has_next_token())
-            return {};
+            return materialize_unknown_media_feature_value(component_values);
         return maybe_value.release_value();
     };
 
@@ -177,7 +256,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         if (!maybe_media_feature_id.has_value())
             return nullptr;
         auto media_feature_id = maybe_media_feature_id.value();
-        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_id, media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
 
@@ -197,7 +276,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         if (!maybe_media_feature_id.has_value())
             return nullptr;
         auto media_feature_id = maybe_media_feature_id.value();
-        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_id, media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value() || media_feature_test.value_syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Ident)
             return nullptr;
         return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
@@ -208,7 +287,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         if (!maybe_media_feature_id.has_value())
             return nullptr;
         auto media_feature_id = maybe_media_feature_id.value();
-        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_id, media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
         return MediaFeature::half_range(maybe_value.release_value(), media_feature_comparison_from_rust(media_feature_test.feature.comparison), media_feature_id);
@@ -219,10 +298,10 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         if (!maybe_media_feature_id.has_value())
             return nullptr;
         auto media_feature_id = maybe_media_feature_id.value();
-        auto maybe_left_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.left_value);
+        auto maybe_left_value = materialize_rust_media_feature_value(media_feature_id, media_feature_test.left_value_syntax_kind, media_feature_test.left_value);
         if (!maybe_left_value.has_value())
             return nullptr;
-        auto maybe_right_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.right_value);
+        auto maybe_right_value = materialize_rust_media_feature_value(media_feature_id, media_feature_test.right_value_syntax_kind, media_feature_test.right_value);
         if (!maybe_right_value.has_value())
             return nullptr;
 
@@ -261,181 +340,6 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature(Vector<ComponentValu
         return {};
 
     return media_feature;
-}
-
-static bool is_media_feature_value_token(ComponentValue const& component_value)
-{
-    if (!component_value.is_token())
-        return true;
-    switch (component_value.token().type()) {
-    case Token::Type::Ident:
-    case Token::Type::Function:
-    case Token::Type::AtKeyword:
-    case Token::Type::Hash:
-    case Token::Type::String:
-    case Token::Type::BadString:
-    case Token::Type::Url:
-    case Token::Type::BadUrl:
-    case Token::Type::Number:
-    case Token::Type::Percentage:
-    case Token::Type::Dimension:
-    case Token::Type::Whitespace:
-    case Token::Type::Comma:
-        return true;
-    case Token::Type::Delim:
-        // FIXME: What list of delimiters should we actually allow here?
-        return !first_is_one_of(component_value.token().delim(), static_cast<u32>('<'), static_cast<u32>('>'), static_cast<u32>('='));
-    case Token::Type::Invalid:
-    case Token::Type::EndOfFile:
-    case Token::Type::CDO:
-    case Token::Type::CDC:
-    case Token::Type::Colon:
-    case Token::Type::Semicolon:
-    case Token::Type::OpenSquare:
-    case Token::Type::CloseSquare:
-    case Token::Type::OpenParen:
-    case Token::Type::CloseParen:
-    case Token::Type::OpenCurly:
-    case Token::Type::CloseCurly:
-        return false;
-    }
-    VERIFY_NOT_REACHED();
-}
-
-// `<mf-value>`, https://www.w3.org/TR/mediaqueries-4/#typedef-mf-value
-Optional<MediaFeatureValue> Parser::parse_media_feature_value(MediaFeatureID media_feature, TokenStream<ComponentValue>& tokens)
-{
-    {
-        auto transaction = tokens.begin_transaction();
-        auto value = [this](MediaFeatureID media_feature, TokenStream<ComponentValue>& tokens) -> Optional<MediaFeatureValue> {
-            auto context_guard = push_temporary_value_parsing_context(SpecialContext::MediaCondition);
-
-            // One branch for each member of the MediaFeatureValueType enum:
-            // Identifiers
-            if (tokens.next_token().is(Token::Type::Ident)) {
-                auto transaction = tokens.begin_transaction();
-                tokens.discard_whitespace();
-                auto keyword = parse_keyword_value(tokens);
-                if (keyword && media_feature_accepts_keyword(media_feature, keyword->to_keyword())) {
-                    transaction.commit();
-                    return MediaFeatureValue(MediaFeatureValue::Type::Ident, keyword.release_nonnull());
-                }
-            }
-
-            // Boolean (<mq-boolean> in the spec: a 1 or 0)
-            if (media_feature_accepts_type(media_feature, MediaFeatureValueType::Boolean)) {
-                auto transaction = tokens.begin_transaction();
-                tokens.discard_whitespace();
-                if (auto integer = parse_integer_value(tokens, infinite_integer_range)) {
-                    if (integer->is_calculated() || first_is_one_of(integer->as_integer().integer(), 0, 1)) {
-                        transaction.commit();
-                        return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
-                    }
-                }
-            }
-
-            // Integer
-            if (media_feature_accepts_type(media_feature, MediaFeatureValueType::Integer)) {
-                auto transaction = tokens.begin_transaction();
-                if (auto integer = parse_integer_value(tokens, infinite_integer_range)) {
-                    transaction.commit();
-                    return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
-                }
-            }
-
-            // Length
-            if (media_feature_accepts_type(media_feature, MediaFeatureValueType::Length)) {
-                auto transaction = tokens.begin_transaction();
-                tokens.discard_whitespace();
-                if (auto length = parse_length_value(tokens, infinite_range)) {
-                    transaction.commit();
-                    return MediaFeatureValue(MediaFeatureValue::Type::Length, length.release_nonnull());
-                }
-
-                // https://drafts.csswg.org/mediaqueries-5/#typedef-mf-value
-                // <mf-value> = <number> | <dimension> | <ident> | <ratio>
-                //
-                // https://drafts.csswg.org/css-values-4/#lengths
-                // "For zero lengths the unit identifier is optional"
-                //
-                // https://drafts.csswg.org/css-values-4/#zero-value
-                // "Values of '0' can be written without units, even if the
-                // value type doesn't allow 'unitless zeroes'."
-                if (tokens.has_next_token()) {
-                    auto const& token = tokens.next_token();
-                    if (auto calc = parse_calculated_value(token, { .accepted_ranges_by_type = { { ValueType::Number, infinite_range } } }); calc && calc->as_calculated().resolves_to_number()) {
-                        if (auto resolved_number = calc->as_calculated().resolve_number({}); resolved_number.has_value() && *resolved_number == 0) {
-                            tokens.discard_a_token();
-                            transaction.commit();
-                            return MediaFeatureValue(MediaFeatureValue::Type::Length, LengthStyleValue::create(Length::make_px(0)));
-                        }
-                    }
-                }
-            }
-
-            // Ratio
-            if (media_feature_accepts_type(media_feature, MediaFeatureValueType::Ratio)) {
-                auto transaction = tokens.begin_transaction();
-                tokens.discard_whitespace();
-                if (auto ratio = parse_ratio_value(tokens)) {
-                    transaction.commit();
-                    return MediaFeatureValue(MediaFeatureValue::Type::Ratio, ratio.release_nonnull());
-                }
-            }
-
-            // Resolution
-            if (media_feature_accepts_type(media_feature, MediaFeatureValueType::Resolution)) {
-                auto transaction = tokens.begin_transaction();
-                tokens.discard_whitespace();
-                if (auto resolution = parse_resolution_value(tokens, infinite_range)) {
-                    transaction.commit();
-                    return MediaFeatureValue(MediaFeatureValue::Type::Resolution, resolution.release_nonnull());
-                }
-            }
-
-            return {};
-        }(media_feature, tokens);
-
-        if (value.has_value()) {
-            tokens.discard_whitespace();
-
-            // Only returned the value if there are no trailing tokens.
-            // Otherwise, the transaction gets reverted and we consume all the value tokens below.
-            if (!is_media_feature_value_token(tokens.next_token())) {
-                transaction.commit();
-                return value.release_value();
-            }
-        }
-    }
-
-    // Parsing failed somehow, so wrap all the tokens into an "unknown" MediaFeatureValue if possible.
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    Vector<ComponentValue> unknown_tokens;
-
-    // Consume any tokens that could be part of a value.
-    while (tokens.has_next_token()) {
-        if (is_media_feature_value_token(tokens.next_token())) {
-            unknown_tokens.append(tokens.consume_a_token());
-        } else {
-            break;
-        }
-    }
-
-    if (!unknown_tokens.is_empty()) {
-        transaction.commit();
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<mf-value>"_fly_string,
-            .value_string = MUST(String::join(""sv, unknown_tokens)),
-            .description = "Unrecognized type"_string,
-        });
-        // NB: We only use this for serialization so the substitution function presence is irrelevant and we can just
-        //     set it to empty.
-        return MediaFeatureValue(MediaFeatureValue::Type::Unknown, move(UnresolvedStyleValue::create(move(unknown_tokens), {})));
-    }
-
-    return {};
 }
 
 template<typename NestedDeclarationsRule>
