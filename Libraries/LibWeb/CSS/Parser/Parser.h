@@ -676,6 +676,7 @@ Optional<CSS::Selector::PseudoElementSelector> parse_pseudo_element_selector(CSS
 CSS::CSSRule* parse_css_rule(CSS::Parser::ParsingParams const&, StringView);
 RefPtr<CSS::MediaQuery> parse_media_query(CSS::Parser::ParsingParams const&, StringView);
 Vector<NonnullRefPtr<CSS::MediaQuery>> parse_media_query_list(CSS::Parser::ParsingParams const&, StringView);
+bool media_query_list_matches_environment(CSS::Parser::ParsingParams const&, DOM::Document const&, StringView);
 RefPtr<CSS::Supports> parse_css_supports(CSS::Parser::ParsingParams const&, StringView);
 Vector<CSS::Parser::ComponentValue> parse_component_values_list(CSS::Parser::ParsingParams const&, StringView);
 GC::Ref<JS::Realm> internal_css_realm();

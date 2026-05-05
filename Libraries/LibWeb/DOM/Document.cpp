@@ -2045,8 +2045,7 @@ void Document::obtain_theme_color()
             auto context = CSS::Parser::ParsingParams { document() };
             auto media = element.attribute(HTML::AttributeNames::media);
             if (media.has_value()) {
-                auto query = parse_media_query(context, media.value());
-                if (query.is_null() || !query->evaluate(*this))
+                if (!media_query_list_matches_environment(context, *this, media.value()))
                     return TraversalDecision::Continue;
             }
 

@@ -18,6 +18,7 @@
 #include <LibWeb/CSS/Keyword.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/Infra/CharacterTypes.h>
 
 namespace Web {
 
@@ -135,6 +136,22 @@ RefPtr<CSS::MediaQuery> parse_media_query(CSS::Parser::ParsingParams const& cont
 Vector<NonnullRefPtr<CSS::MediaQuery>> parse_media_query_list(CSS::Parser::ParsingParams const& context, StringView string)
 {
     return CSS::Parser::Parser::create(context, string).parse_as_media_query_list();
+}
+
+bool media_query_list_matches_environment(CSS::Parser::ParsingParams const& context, DOM::Document const& document, StringView string)
+{
+    // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#matches-the-environment
+    // A string matches the environment of the user if it is the empty string, a string
+    // consisting of only ASCII whitespace, or is a media query list that matches the user's
+    // environment according to the definitions given in Media Queries.
+    if (string.trim(Infra::ASCII_WHITESPACE).is_empty())
+        return true;
+
+    for (auto& media_query : parse_media_query_list(context, string)) {
+        if (media_query->evaluate(document))
+            return true;
+    }
+    return false;
 }
 
 RefPtr<CSS::Supports> parse_css_supports(CSS::Parser::ParsingParams const& context, StringView string)
