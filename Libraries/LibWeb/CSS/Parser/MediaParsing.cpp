@@ -121,8 +121,10 @@ RefPtr<MediaQuery> Parser::parse_as_media_query()
 
 OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&& media_feature_test)
 {
-    auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
-        return media_feature_id_from_u8(media_feature.id);
+    auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> MediaFeatureID {
+        auto media_feature_id = media_feature_id_from_u8(media_feature.id);
+        VERIFY(media_feature_id.has_value());
+        return media_feature_id.release_value();
     };
 
     auto materialize_unknown_media_feature_value = [](Vector<ComponentValue> const& component_values) -> MediaFeatureValue {
@@ -232,17 +234,11 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     };
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
-        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        if (!maybe_media_feature_id.has_value())
-            return nullptr;
-        return MediaFeature::boolean(maybe_media_feature_id.value());
+        return MediaFeature::boolean(media_feature_id_from_rust(media_feature_test.feature));
     }
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Plain) {
-        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        if (!maybe_media_feature_id.has_value())
-            return nullptr;
-        auto media_feature_id = maybe_media_feature_id.value();
+        auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
         auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
@@ -259,10 +255,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     }
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeNameFirst) {
-        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        if (!maybe_media_feature_id.has_value())
-            return nullptr;
-        auto media_feature_id = maybe_media_feature_id.value();
+        auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
         auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
@@ -270,10 +263,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     }
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeValueFirst) {
-        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        if (!maybe_media_feature_id.has_value())
-            return nullptr;
-        auto media_feature_id = maybe_media_feature_id.value();
+        auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
         auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
@@ -281,10 +271,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     }
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Range) {
-        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        if (!maybe_media_feature_id.has_value())
-            return nullptr;
-        auto media_feature_id = maybe_media_feature_id.value();
+        auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
         auto maybe_left_value = materialize_rust_media_feature_value(media_feature_test.left_value_syntax_kind, media_feature_test.left_value);
         if (!maybe_left_value.has_value())
             return nullptr;
