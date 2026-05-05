@@ -318,6 +318,29 @@ pub unsafe extern "C" fn rust_css_parse_page_selector_list(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_keyframe_selector_list(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    selector_callback: unsafe extern "C" fn(ctx: *mut c_void, selector: f64),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_keyframe_selector_list(input, |selector| {
+                selector_callback(ctx, selector);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_media_condition(

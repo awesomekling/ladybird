@@ -1056,6 +1056,27 @@ Optional<PageSelectorList> RustComponentValueParser::parse_a_page_selector_list(
     return move(builder.selectors);
 }
 
+Optional<Vector<Percentage>> RustComponentValueParser::parse_a_keyframe_selector_list(StringView input, StringView encoding)
+{
+    Vector<Percentage> selectors;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_keyframe_selector_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &selectors,
+        [](void* raw_selectors, double selector) {
+            auto& selectors = *static_cast<Vector<Percentage>*>(raw_selectors);
+            selectors.append(Percentage(selector));
+        });
+
+    if (!parsed)
+        return {};
+
+    return move(selectors);
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,

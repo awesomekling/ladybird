@@ -37,6 +37,7 @@
 #include <LibWeb/CSS/FontFace.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/PropertyName.h>
@@ -538,45 +539,15 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
             }
         }
 
-        auto selectors = Vector<Percentage> {};
-        TokenStream child_tokens { qualified_rule.prelude };
-        while (child_tokens.has_next_token()) {
-            child_tokens.discard_whitespace();
-            if (!child_tokens.has_next_token())
-                break;
-            auto& next_token = child_tokens.next_token();
-            if (!next_token.is_token()) {
-                ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                    .rule_name = "keyframe"_fly_string,
-                    .prelude = child_tokens.dump_string(),
-                    .description = "Invalid selector."_string,
-                });
-                break;
-            }
-            auto read_a_selector = false;
-            if (next_token.is_ident("from"sv)) {
-                child_tokens.discard_a_token(); // from
-                selectors.append(Percentage(0));
-                read_a_selector = true;
-            } else if (next_token.is_ident("to"sv)) {
-                child_tokens.discard_a_token(); // to
-                selectors.append(Percentage(100));
-                read_a_selector = true;
-            } else if (next_token.is(Token::Type::Percentage)) {
-                child_tokens.discard_a_token(); // <percentage>
-                selectors.append(Percentage(next_token.token().percentage()));
-                read_a_selector = true;
-            }
-
-            if (read_a_selector) {
-                child_tokens.discard_whitespace();
-                if (child_tokens.next_token().is(Token::Type::Comma)) {
-                    child_tokens.discard_a_token(); // ,
-                    continue;
-                }
-            }
-
-            break;
+        auto serialized_keyframe_selector_list = serialize_component_values_for_reparsing(qualified_rule.prelude);
+        auto maybe_selectors = RustComponentValueParser::parse_a_keyframe_selector_list(serialized_keyframe_selector_list.bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_selectors.has_value()) {
+            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
+                .rule_name = "keyframe"_fly_string,
+                .prelude = serialized_keyframe_selector_list,
+                .description = "Invalid selector."_string,
+            });
+            return;
         }
 
         PropertiesAndCustomProperties properties;
@@ -584,7 +555,7 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
             extract_property(declaration, properties);
         });
         auto style = CSSStyleProperties::create(realm(), move(properties.properties), move(properties.custom_properties));
-        for (auto& selector : selectors) {
+        for (auto& selector : maybe_selectors.value()) {
             auto keyframe_rule = CSSKeyframeRule::create(realm(), selector, *style);
             keyframes.append(keyframe_rule);
         }

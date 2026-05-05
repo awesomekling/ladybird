@@ -128,6 +128,8 @@ pub(crate) struct PageSelector {
     pseudo_classes: Vec<CssPagePseudoClassKind>,
 }
 
+pub(crate) type KeyframeSelector = f64;
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MediaFeatureTest {
     component_value: ComponentValue,
@@ -632,6 +634,25 @@ where
         for pseudo_class in selector.pseudo_classes {
             pseudo_class_callback(pseudo_class);
         }
+    }
+
+    true
+}
+
+pub(crate) fn parse_a_keyframe_selector_list<S>(filtered_input: &[u8], mut selector_callback: S) -> bool
+where
+    S: FnMut(KeyframeSelector),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(selectors) = parser.parse_a_keyframe_selector_list() else {
+        return false;
+    };
+
+    for selector in selectors {
+        selector_callback(selector);
     }
 
     true
@@ -1929,6 +1950,59 @@ impl ComponentValueParser {
             } else if self.has_next_component_value() {
                 return None;
             }
+        }
+
+        Some(selector_list)
+    }
+
+    // https://drafts.csswg.org/css-animations-1/#typedef-keyframe-selector
+    fn parse_a_keyframe_selector_list(&mut self) -> Option<Vec<KeyframeSelector>> {
+        // <keyframe-selector> = from | to | <percentage [0,100]>
+        //
+        // The <<keyframe-selector>> for a <<keyframe-block>> consists of a comma-separated list of percentage values or
+        // the keywords ''from'' or ''to''.
+        let mut selector_list = Vec::new();
+
+        self.discard_whitespace();
+        loop {
+            let selector = match self.next_component_value() {
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                })) if value.eq_ignore_ascii_case("from") => Some(0.0),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                })) if value.eq_ignore_ascii_case("to") => Some(100.0),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Percentage { number },
+                    ..
+                })) if (0.0..=100.0).contains(&number.value()) => Some(number.value()),
+                _ => None,
+            }?;
+            self.index += 1;
+            selector_list.push(selector);
+
+            self.discard_whitespace();
+            if matches!(
+                self.next_component_value(),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Comma,
+                    ..
+                }))
+            ) {
+                self.index += 1;
+                self.discard_whitespace();
+                if !self.has_next_component_value() {
+                    return None;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if self.has_next_component_value() {
+            return None;
         }
 
         Some(selector_list)
@@ -4010,8 +4084,8 @@ mod tests {
         MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_media_query, parse_a_media_test, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, strip_whitespace,
+        component_values_parse_as_value_type, parse_a_keyframe_selector_list, parse_a_media_query, parse_a_media_test,
+        parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4097,6 +4171,12 @@ mod tests {
         );
 
         parsed.then(|| selectors.into_inner())
+    }
+
+    fn parse_keyframe_selector_list(input: &str) -> Option<Vec<f64>> {
+        let mut selectors = Vec::new();
+        let parsed = parse_a_keyframe_selector_list(input.as_bytes(), |selector| selectors.push(selector));
+        parsed.then_some(selectors)
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -4761,6 +4841,23 @@ mod tests {
         assert_eq!(parse_page_selector_list(","), None);
         assert_eq!(parse_page_selector_list(":unknown"), None);
         assert_eq!(parse_page_selector_list("invoice :left"), None);
+    }
+
+    #[test]
+    fn parses_keyframe_selector_lists() {
+        assert_eq!(
+            parse_keyframe_selector_list("from, 50%, to"),
+            Some(vec![0.0, 50.0, 100.0])
+        );
+        assert_eq!(parse_keyframe_selector_list("0%, 100%"), Some(vec![0.0, 100.0]));
+    }
+
+    #[test]
+    fn rejects_invalid_keyframe_selector_lists() {
+        assert_eq!(parse_keyframe_selector_list("0"), None);
+        assert_eq!(parse_keyframe_selector_list("from,"), None);
+        assert_eq!(parse_keyframe_selector_list("101%"), None);
+        assert_eq!(parse_keyframe_selector_list("from, via"), None);
     }
 
     #[test]
