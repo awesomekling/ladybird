@@ -88,11 +88,26 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list(TokenStream<T
 
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(StringView input, StringView encoding)
 {
-    auto comma_separated_lists = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(input, encoding);
     AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
-    for (auto& media_query_parts : comma_separated_lists) {
-        auto stream = TokenStream(media_query_parts);
-        media_queries.append(parse_media_query(stream));
+    auto rust_media_queries = RustComponentValueParser::parse_a_media_query_list(input, encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
+
+    for (auto& rust_media_query : rust_media_queries) {
+        if (!rust_media_query.is_valid) {
+            // "A media query that does not match the grammar in the previous section must be replaced by `not all`
+            // during parsing." - https://www.w3.org/TR/mediaqueries-5/#error-handling
+            media_queries.append(MediaQuery::create_not_all());
+            continue;
+        }
+
+        auto media_query = MediaQuery::create();
+        media_query->m_negated = rust_media_query.is_negated;
+        if (rust_media_query.media_type.has_value())
+            media_query->m_media_type = rust_media_query.media_type.release_value();
+        if (rust_media_query.media_condition)
+            media_query->m_media_condition = move(rust_media_query.media_condition);
+        media_queries.append(media_query);
     }
 
     return media_queries;

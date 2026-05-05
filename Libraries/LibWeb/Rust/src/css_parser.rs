@@ -340,6 +340,15 @@ pub struct CssMediaFeatureValue {
     pub component_value: CssComponentValue,
 }
 
+#[repr(C)]
+pub struct CssMediaQuery {
+    pub is_valid: bool,
+    pub is_negated: bool,
+    pub has_media_condition: bool,
+    pub media_type_ptr: *const u8,
+    pub media_type_len: usize,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -459,6 +468,61 @@ pub(crate) fn parse_a_media_feature<M, V>(
 
     media_feature_callback(css_media_feature_from_syntax(&media_feature));
     emit_media_feature_values(&media_feature, filtered_input_string, &mut media_feature_value_callback);
+}
+
+pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
+    filtered_input: &[u8],
+    mut media_query_callback: Q,
+    mut event_callback: E,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) where
+    Q: FnMut(CssMediaQuery),
+    E: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    for media_query in parser.parse_a_media_query_list() {
+        match media_query {
+            MediaQuerySyntax::Invalid => {
+                media_query_callback(CssMediaQuery {
+                    is_valid: false,
+                    is_negated: false,
+                    has_media_condition: false,
+                    media_type_ptr: std::ptr::null(),
+                    media_type_len: 0,
+                });
+            }
+            MediaQuerySyntax::Valid {
+                modifier,
+                media_type,
+                condition,
+            } => {
+                media_query_callback(CssMediaQuery {
+                    is_valid: true,
+                    is_negated: modifier == MediaQueryModifier::Not,
+                    has_media_condition: condition.is_some(),
+                    media_type_ptr: media_type
+                        .as_ref()
+                        .map_or(std::ptr::null(), |media_type| media_type.as_ptr()),
+                    media_type_len: media_type.as_ref().map_or(0, String::len),
+                });
+                if let Some(condition) = condition {
+                    emit_boolean_expression(
+                        &condition,
+                        filtered_input_string,
+                        &mut event_callback,
+                        &mut component_value_callback,
+                        &mut media_feature_callback,
+                        &mut media_feature_value_callback,
+                    );
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)

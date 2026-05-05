@@ -355,131 +355,207 @@ struct RustMediaFeatureTestBuilder {
     }
 };
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression)
-{
-    struct BooleanExpressionBuilder {
-        enum class FrameType : u8 {
-            Not,
-            Parens,
-            And,
-            Or,
-            Test,
-            GeneralEnclosed,
-        };
+struct RustBooleanExpressionBuilder {
+    enum class FrameType : u8 {
+        Not,
+        Parens,
+        And,
+        Or,
+        Test,
+        GeneralEnclosed,
+    };
 
-        struct Frame {
-            FrameType type;
-            Vector<NonnullOwnPtr<BooleanExpression>> children;
-        };
+    struct Frame {
+        FrameType type;
+        Vector<NonnullOwnPtr<BooleanExpression>> children;
+    };
 
-        Vector<Frame> stack;
-        OwnPtr<BooleanExpression> root;
-        ComponentValueBuilder component_value_builder;
-        Optional<RustMediaFeatureTestBuilder> media_feature;
-        BooleanExpressionTestParser parse_test;
-        MatchResult result_for_general_enclosed;
-        bool invalid { false };
+    Vector<Frame> stack;
+    OwnPtr<BooleanExpression> root;
+    ComponentValueBuilder component_value_builder;
+    Optional<RustMediaFeatureTestBuilder> media_feature;
+    AK::Function<OwnPtr<BooleanExpression>(Optional<RustComponentValueParser::MediaFeatureTest>&&, Vector<ComponentValue>&&)> parse_test;
+    MatchResult result_for_general_enclosed;
+    bool invalid { false };
 
-        void append_expression(OwnPtr<BooleanExpression> expression)
-        {
-            if (!expression) {
+    void append_expression(OwnPtr<BooleanExpression> expression)
+    {
+        if (!expression) {
+            invalid = true;
+            return;
+        }
+
+        if (stack.is_empty()) {
+            if (root) {
                 invalid = true;
                 return;
             }
+            root = expression.release_nonnull();
+            return;
+        }
 
-            if (stack.is_empty()) {
-                if (root) {
-                    invalid = true;
-                    return;
-                }
-                root = expression.release_nonnull();
+        stack.last().children.append(expression.release_nonnull());
+    }
+
+    void end_frame(FrameType expected_type)
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == expected_type);
+
+        switch (expected_type) {
+        case FrameType::Not:
+            if (frame.children.size() != 1) {
+                invalid = true;
                 return;
             }
-
-            stack.last().children.append(expression.release_nonnull());
-        }
-
-        void end_frame(FrameType expected_type)
-        {
-            VERIFY(!stack.is_empty());
-            auto frame = stack.take_last();
-            VERIFY(frame.type == expected_type);
-
-            switch (expected_type) {
-            case FrameType::Not:
-                if (frame.children.size() != 1) {
-                    invalid = true;
-                    return;
-                }
-                append_expression(BooleanNotExpression::create(frame.children.take_first()));
+            append_expression(BooleanNotExpression::create(frame.children.take_first()));
+            return;
+        case FrameType::Parens:
+            if (frame.children.size() != 1) {
+                invalid = true;
                 return;
-            case FrameType::Parens:
-                if (frame.children.size() != 1) {
-                    invalid = true;
-                    return;
-                }
-                append_expression(BooleanExpressionInParens::create(frame.children.take_first()));
-                return;
-            case FrameType::And:
-                if (frame.children.is_empty()) {
-                    invalid = true;
-                    return;
-                }
-                append_expression(BooleanAndExpression::create(move(frame.children)));
-                return;
-            case FrameType::Or:
-                if (frame.children.is_empty()) {
-                    invalid = true;
-                    return;
-                }
-                append_expression(BooleanOrExpression::create(move(frame.children)));
-                return;
-            case FrameType::Test:
-            case FrameType::GeneralEnclosed:
-                VERIFY_NOT_REACHED();
             }
+            append_expression(BooleanExpressionInParens::create(frame.children.take_first()));
+            return;
+        case FrameType::And:
+            if (frame.children.is_empty()) {
+                invalid = true;
+                return;
+            }
+            append_expression(BooleanAndExpression::create(move(frame.children)));
+            return;
+        case FrameType::Or:
+            if (frame.children.is_empty()) {
+                invalid = true;
+                return;
+            }
+            append_expression(BooleanOrExpression::create(move(frame.children)));
+            return;
+        case FrameType::Test:
+        case FrameType::GeneralEnclosed:
+            VERIFY_NOT_REACHED();
         }
+    }
 
-        void end_test()
-        {
-            VERIFY(!stack.is_empty());
-            auto frame = stack.take_last();
-            VERIFY(frame.type == FrameType::Test);
-            VERIFY(frame.children.is_empty());
-            VERIFY(component_value_builder.stack.is_empty());
+    void end_test()
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == FrameType::Test);
+        VERIFY(frame.children.is_empty());
+        VERIFY(component_value_builder.stack.is_empty());
 
-            Optional<String> general_enclosed_fallback;
-            if (component_value_builder.root_values.size() == 1)
-                general_enclosed_fallback = component_value_builder.root_values.first().to_string();
+        Optional<String> general_enclosed_fallback;
+        if (component_value_builder.root_values.size() == 1)
+            general_enclosed_fallback = component_value_builder.root_values.first().to_string();
 
-            Optional<MediaFeatureTest> media_feature_test;
-            if (media_feature.has_value())
-                media_feature_test = media_feature->build();
+        Optional<RustComponentValueParser::MediaFeatureTest> media_feature_test;
+        if (media_feature.has_value())
+            media_feature_test = media_feature->build();
 
-            auto expression = parse_test(move(media_feature_test), move(component_value_builder.root_values));
-            if (!expression && general_enclosed_fallback.has_value())
-                expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), result_for_general_enclosed);
-            append_expression(move(expression));
-            component_value_builder = {};
-            media_feature = {};
-        }
+        auto expression = parse_test(move(media_feature_test), move(component_value_builder.root_values));
+        if (!expression && general_enclosed_fallback.has_value())
+            expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), result_for_general_enclosed);
+        append_expression(move(expression));
+        component_value_builder = {};
+        media_feature = {};
+    }
 
-        void end_general_enclosed()
-        {
-            VERIFY(!stack.is_empty());
-            auto frame = stack.take_last();
-            VERIFY(frame.type == FrameType::GeneralEnclosed);
-            VERIFY(frame.children.is_empty());
-            VERIFY(component_value_builder.stack.is_empty());
-            VERIFY(component_value_builder.root_values.size() == 1);
+    void end_general_enclosed()
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == FrameType::GeneralEnclosed);
+        VERIFY(frame.children.is_empty());
+        VERIFY(component_value_builder.stack.is_empty());
+        VERIFY(component_value_builder.root_values.size() == 1);
 
-            auto serialized_contents = component_value_builder.root_values.first().to_string();
-            append_expression(GeneralEnclosed::create(move(serialized_contents), result_for_general_enclosed));
-            component_value_builder = {};
-        }
+        auto serialized_contents = component_value_builder.root_values.first().to_string();
+        append_expression(GeneralEnclosed::create(move(serialized_contents), result_for_general_enclosed));
+        component_value_builder = {};
+    }
+};
+
+static void process_boolean_expression_event(RustBooleanExpressionBuilder& builder, FFI::CssBooleanExpressionEventKind event)
+{
+    switch (event) {
+    case FFI::CssBooleanExpressionEventKind::Invalid:
+        builder.invalid = true;
+        break;
+    case FFI::CssBooleanExpressionEventKind::NotStart:
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::Not });
+        break;
+    case FFI::CssBooleanExpressionEventKind::ParensStart:
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::Parens });
+        break;
+    case FFI::CssBooleanExpressionEventKind::AndStart:
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::And });
+        break;
+    case FFI::CssBooleanExpressionEventKind::OrStart:
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::Or });
+        break;
+    case FFI::CssBooleanExpressionEventKind::TestStart:
+        builder.component_value_builder = {};
+        builder.media_feature = {};
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::Test });
+        break;
+    case FFI::CssBooleanExpressionEventKind::GeneralEnclosedStart:
+        builder.component_value_builder = {};
+        builder.stack.append({ .type = RustBooleanExpressionBuilder::FrameType::GeneralEnclosed });
+        break;
+    case FFI::CssBooleanExpressionEventKind::NotEnd:
+        builder.end_frame(RustBooleanExpressionBuilder::FrameType::Not);
+        break;
+    case FFI::CssBooleanExpressionEventKind::ParensEnd:
+        builder.end_frame(RustBooleanExpressionBuilder::FrameType::Parens);
+        break;
+    case FFI::CssBooleanExpressionEventKind::AndEnd:
+        builder.end_frame(RustBooleanExpressionBuilder::FrameType::And);
+        break;
+    case FFI::CssBooleanExpressionEventKind::OrEnd:
+        builder.end_frame(RustBooleanExpressionBuilder::FrameType::Or);
+        break;
+    case FFI::CssBooleanExpressionEventKind::TestEnd:
+        builder.end_test();
+        break;
+    case FFI::CssBooleanExpressionEventKind::GeneralEnclosedEnd:
+        builder.end_general_enclosed();
+        break;
+    }
+}
+
+static void set_boolean_expression_media_feature(RustBooleanExpressionBuilder& builder, FFI::CssMediaFeature const* media_feature)
+{
+    builder.media_feature = RustMediaFeatureTestBuilder {
+        .feature = *media_feature,
+    };
+}
+
+static void append_boolean_expression_media_feature_value(RustBooleanExpressionBuilder& builder, FFI::CssMediaFeatureValue const* media_feature_value)
+{
+    VERIFY(builder.media_feature.has_value());
+
+    auto append_to_builder = [&](ComponentValueBuilder& component_value_builder) {
+        append_component_value_token(component_value_builder, media_feature_value->component_value.kind, RustTokenizer::token_from_ffi(media_feature_value->component_value.token));
     };
 
-    BooleanExpressionBuilder builder {
+    switch (media_feature_value->kind) {
+    case FFI::CssMediaFeatureValueKind::Value:
+        append_to_builder(builder.media_feature->value_builder);
+        break;
+    case FFI::CssMediaFeatureValueKind::LeftValue:
+        append_to_builder(builder.media_feature->left_value_builder);
+        break;
+    case FFI::CssMediaFeatureValueKind::RightValue:
+        append_to_builder(builder.media_feature->right_value_builder);
+        break;
+    }
+}
+
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression)
+{
+    RustBooleanExpressionBuilder builder {
         .parse_test = move(parse_test),
         .result_for_general_enclosed = result_for_general_enclosed,
     };
@@ -491,80 +567,19 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
         filtered_input_bytes.size(),
         &builder,
         [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
-            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
-            switch (event) {
-            case FFI::CssBooleanExpressionEventKind::Invalid:
-                builder.invalid = true;
-                break;
-            case FFI::CssBooleanExpressionEventKind::NotStart:
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Not });
-                break;
-            case FFI::CssBooleanExpressionEventKind::ParensStart:
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Parens });
-                break;
-            case FFI::CssBooleanExpressionEventKind::AndStart:
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::And });
-                break;
-            case FFI::CssBooleanExpressionEventKind::OrStart:
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Or });
-                break;
-            case FFI::CssBooleanExpressionEventKind::TestStart:
-                builder.component_value_builder = {};
-                builder.media_feature = {};
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Test });
-                break;
-            case FFI::CssBooleanExpressionEventKind::GeneralEnclosedStart:
-                builder.component_value_builder = {};
-                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::GeneralEnclosed });
-                break;
-            case FFI::CssBooleanExpressionEventKind::NotEnd:
-                builder.end_frame(BooleanExpressionBuilder::FrameType::Not);
-                break;
-            case FFI::CssBooleanExpressionEventKind::ParensEnd:
-                builder.end_frame(BooleanExpressionBuilder::FrameType::Parens);
-                break;
-            case FFI::CssBooleanExpressionEventKind::AndEnd:
-                builder.end_frame(BooleanExpressionBuilder::FrameType::And);
-                break;
-            case FFI::CssBooleanExpressionEventKind::OrEnd:
-                builder.end_frame(BooleanExpressionBuilder::FrameType::Or);
-                break;
-            case FFI::CssBooleanExpressionEventKind::TestEnd:
-                builder.end_test();
-                break;
-            case FFI::CssBooleanExpressionEventKind::GeneralEnclosedEnd:
-                builder.end_general_enclosed();
-                break;
-            }
+            auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
+            process_boolean_expression_event(builder, event);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
-            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
-            builder.media_feature = RustMediaFeatureTestBuilder {
-                .feature = *media_feature,
-            };
+            auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
+            set_boolean_expression_media_feature(builder, media_feature);
         },
         [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
-            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
-            VERIFY(builder.media_feature.has_value());
-
-            auto append_to_builder = [&](ComponentValueBuilder& component_value_builder) {
-                append_component_value_token(component_value_builder, media_feature_value->component_value.kind, RustTokenizer::token_from_ffi(media_feature_value->component_value.token));
-            };
-
-            switch (media_feature_value->kind) {
-            case FFI::CssMediaFeatureValueKind::Value:
-                append_to_builder(builder.media_feature->value_builder);
-                break;
-            case FFI::CssMediaFeatureValueKind::LeftValue:
-                append_to_builder(builder.media_feature->left_value_builder);
-                break;
-            case FFI::CssMediaFeatureValueKind::RightValue:
-                append_to_builder(builder.media_feature->right_value_builder);
-                break;
-            }
+            auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
+            append_boolean_expression_media_feature_value(builder, media_feature_value);
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
-            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
+            auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
             append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
@@ -646,6 +661,107 @@ Optional<RustComponentValueParser::MediaFeatureTest> RustComponentValueParser::p
     if (!builder.has_value())
         return {};
     return builder->build();
+}
+
+Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
+{
+    struct MediaQueryListBuilder {
+        Vector<MediaQuerySyntax> media_queries;
+        Optional<RustBooleanExpressionBuilder> media_condition_builder;
+        AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test;
+
+        void finish_media_condition()
+        {
+            if (!media_condition_builder.has_value())
+                return;
+
+            VERIFY(!media_queries.is_empty());
+            auto& media_query = media_queries.last();
+            if (media_condition_builder->invalid || !media_condition_builder->stack.is_empty() || !media_condition_builder->root) {
+                media_query.is_valid = false;
+                media_condition_builder = {};
+                return;
+            }
+
+            VERIFY(media_condition_builder->component_value_builder.stack.is_empty());
+            media_query.media_condition = media_condition_builder->root.release_nonnull();
+            media_condition_builder = {};
+        }
+
+        void start_media_query(FFI::CssMediaQuery const* rust_media_query)
+        {
+            finish_media_condition();
+
+            if (!rust_media_query->is_valid) {
+                media_queries.append(MediaQuerySyntax {});
+                return;
+            }
+
+            Optional<MediaQuery::MediaType> media_type;
+            if (rust_media_query->media_type_len > 0) {
+                auto media_type_name = fly_string_from_ffi_bytes(rust_media_query->media_type_ptr, rust_media_query->media_type_len);
+                media_type = MediaQuery::MediaType {
+                    .name = media_type_name,
+                    .known_type = media_type_from_string(media_type_name),
+                };
+            }
+
+            media_queries.append(MediaQuerySyntax {
+                .is_valid = true,
+                .is_negated = rust_media_query->is_negated,
+                .media_type = media_type,
+            });
+
+            if (rust_media_query->has_media_condition) {
+                media_condition_builder = RustBooleanExpressionBuilder {
+                    .parse_test = [this](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+                        if (!media_feature.has_value())
+                            return nullptr;
+                        return parse_test(media_feature.release_value(), move(component_values));
+                    },
+                    .result_for_general_enclosed = MatchResult::Unknown,
+                };
+            }
+        }
+    };
+
+    MediaQueryListBuilder builder {
+        .parse_test = move(parse_test),
+    };
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_media_query_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssMediaQuery const* media_query) {
+            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            builder.start_media_query(media_query);
+        },
+        [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
+            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            process_boolean_expression_event(*builder.media_condition_builder, event);
+        },
+        [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
+            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            set_boolean_expression_media_feature(*builder.media_condition_builder, media_feature);
+        },
+        [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
+            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            append_boolean_expression_media_feature_value(*builder.media_condition_builder, media_feature_value);
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            append_component_value_token(builder.media_condition_builder->component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    builder.finish_media_condition();
+    return move(builder.media_queries);
 }
 
 struct RuleEventBuilder {
