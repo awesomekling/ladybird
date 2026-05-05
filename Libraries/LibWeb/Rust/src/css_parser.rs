@@ -729,6 +729,22 @@ where
     true
 }
 
+pub(crate) fn parse_a_counter_style_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_a_counter_style_name() else {
+        return false;
+    };
+
+    name_callback(&name);
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2188,6 +2204,27 @@ impl ComponentValueParser {
         };
         self.index += 1;
         Some(name_part)
+    }
+
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
+    fn parse_a_counter_style_name(&mut self) -> Option<String> {
+        // <counter-style-name> is a <custom-ident> that is not an ASCII case-insensitive match for none.
+        self.discard_whitespace();
+        let name = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if is_valid_custom_ident(value, &["none"]) => value.clone(),
+            _ => return None,
+        };
+        self.index += 1;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(name)
     }
 
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
@@ -4294,9 +4331,10 @@ mod tests {
         MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_custom_property_name, parse_a_keyframe_selector_list,
-        parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
-        parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition, strip_whitespace,
+        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4414,6 +4452,12 @@ mod tests {
         let mut names = Vec::new();
         let parsed = parse_a_layer_name_list(input.as_bytes(), |name| names.push(name.to_string()));
         parsed.then_some(names)
+    }
+
+    fn parse_counter_style_name(input: &str) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_a_counter_style_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
+        parsed.then_some(name).flatten()
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -5161,6 +5205,24 @@ mod tests {
         assert_eq!(parse_layer_name_list("base,"), None);
         assert_eq!(parse_layer_name_list("base components"), None);
         assert_eq!(parse_layer_name_list("base, initial"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_names() {
+        assert_eq!(
+            parse_counter_style_name("custom-counter"),
+            Some("custom-counter".to_string())
+        );
+        assert_eq!(parse_counter_style_name("disc"), Some("disc".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_names() {
+        assert_eq!(parse_counter_style_name("none"), None);
+        assert_eq!(parse_counter_style_name("default"), None);
+        assert_eq!(parse_counter_style_name("inherit"), None);
+        assert_eq!(parse_counter_style_name("custom-counter extra"), None);
+        assert_eq!(parse_counter_style_name("\"custom-counter\""), None);
     }
 
     #[test]

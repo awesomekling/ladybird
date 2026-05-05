@@ -34,6 +34,7 @@
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSSupportsRule.h>
 #include <LibWeb/CSS/ContainerQuery.h>
+#include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/FontFace.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -774,25 +775,24 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
         return nullptr;
     }
 
-    auto name = parse_counter_style_name(prelude_stream);
+    auto serialized_counter_style_name = serialize_component_values_for_reparsing(rule.prelude);
+    auto name = RustComponentValueParser::parse_a_counter_style_name(serialized_counter_style_name.bytes_as_string_view(), "utf-8"sv);
     if (!name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_counter_style_name,
             .description = "Missing counter style name."_string,
         });
         return nullptr;
     }
 
-    prelude_stream.discard_whitespace();
-    if (prelude_stream.has_next_token()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@counter-style"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Trailing tokens after name in prelude."_string,
-        });
-        return nullptr;
-    }
+    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+    // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
+    // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
+    // @counter-style rule, and in the counter() functions.
+    auto const& keyword = keyword_from_string(name.value());
+    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+        name = name->to_ascii_lowercase();
 
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
     // When used here, to define a counter style, it also cannot be any of the non-overridable counter-style names
@@ -800,7 +800,7 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
     if (CSSCounterStyleRule::matches_non_overridable_counter_style_name(name.value()) && m_is_ua_style_sheet != IsUAStyleSheet::Yes) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_counter_style_name,
             .description = "Non-overridable counter style name."_string,
         });
         return nullptr;

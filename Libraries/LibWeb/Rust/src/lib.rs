@@ -440,6 +440,30 @@ pub unsafe extern "C" fn rust_css_parse_layer_name_list(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_counter_style_name(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_counter_style_name(input, |name| {
+                name_callback(ctx, name.as_ptr(), name.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_media_condition(
     input: *const u8,
     input_len: usize,

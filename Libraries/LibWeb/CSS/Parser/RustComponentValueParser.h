@@ -68,6 +68,7 @@ public:
     static Optional<FlyString> parse_a_custom_property_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
+    static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);

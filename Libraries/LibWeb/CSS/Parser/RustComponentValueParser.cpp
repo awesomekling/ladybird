@@ -1162,6 +1162,27 @@ Optional<Vector<FlyString>> RustComponentValueParser::parse_a_layer_name_list(St
     return names;
 }
 
+Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringView input, StringView encoding)
+{
+    Optional<FlyString> name;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_name(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &name,
+        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
+            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
+            name = fly_string_from_ffi_bytes(name_ptr, name_len);
+        });
+
+    if (!parsed)
+        return {};
+
+    return name;
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,
