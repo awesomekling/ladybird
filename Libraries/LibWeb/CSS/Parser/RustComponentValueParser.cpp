@@ -248,6 +248,21 @@ Optional<ComponentValue> RustComponentValueParser::parse_a_component_value(Strin
     return builder.root_values.take_first();
 }
 
+FFI::CssValueTypeSyntaxKind RustComponentValueParser::parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    tokens.discard_whitespace();
+    if (!tokens.has_next_token())
+        return FFI::CssValueTypeSyntaxKind::Invalid;
+
+    auto component_value_source = tokens.next_token().original_source_text();
+    auto component_value_source_bytes = component_value_source.bytes();
+    return FFI::rust_css_parse_value_type(
+        component_value_source_bytes.data(),
+        component_value_source_bytes.size(),
+        value_type_id);
+}
+
 Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding)
 {
     struct DeclarationBuilder {
