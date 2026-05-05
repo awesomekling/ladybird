@@ -1376,26 +1376,22 @@ CSSRule* Parser::parse_as_css_rule()
 
 Optional<Rule> Parser::parse_as_rule()
 {
-    return parse_a_rule(m_token_stream);
+    return RustComponentValueParser::parse_a_rule(m_input, m_encoding);
 }
 
 Optional<Declaration> Parser::parse_as_declaration()
 {
-    m_rule_context.append(RuleContext::Style);
-    auto guard = ScopeGuard { [&] { m_rule_context.take_last(); } };
-    return parse_a_declaration(m_token_stream);
+    return RustComponentValueParser::parse_a_declaration(m_input, m_encoding);
 }
 
 Vector<RuleOrListOfDeclarations> Parser::parse_as_blocks_contents()
 {
-    m_rule_context.append(RuleContext::Style);
-    auto guard = ScopeGuard { [&] { m_rule_context.take_last(); } };
-    return parse_a_blocks_contents(m_token_stream);
+    return RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding);
 }
 
 Vector<Rule> Parser::parse_as_rules()
 {
-    return parse_a_stylesheets_contents(m_token_stream);
+    return RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding);
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-rule
