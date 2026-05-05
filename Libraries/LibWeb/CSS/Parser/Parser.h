@@ -282,8 +282,6 @@ private:
     void consume_a_function_and_do_nothing(TokenStream<Token>&);
     // TODO: consume_a_unicode_range_value()
 
-    OwnPtr<GeneralEnclosed> parse_general_enclosed(TokenStream<ComponentValue>&, MatchResult);
-
     enum class AllowBlankLayerName {
         No,
         Yes,
@@ -601,10 +599,6 @@ private:
     OwnPtr<BooleanExpression> materialize_rust_media_test(Vector<ComponentValue> const&);
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
-
-    using ParseTest = AK::Function<OwnPtr<BooleanExpression>(TokenStream<ComponentValue>&)> const&;
-    OwnPtr<BooleanExpression> parse_boolean_expression(TokenStream<ComponentValue>&, MatchResult result_for_general_enclosed, ParseTest parse_test);
-    OwnPtr<BooleanExpression> parse_boolean_expression_group(TokenStream<ComponentValue>&, MatchResult result_for_general_enclosed, ParseTest parse_test);
 
     OwnPtr<BooleanExpression> parse_supports_feature(TokenStream<ComponentValue>&);
     OwnPtr<Supports::Declaration> parse_supports_declaration(TokenStream<ComponentValue>&);

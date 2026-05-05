@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleValues/AnchorSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AnchorStyleValue.h>
@@ -5269,52 +5270,58 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
     //   media( <media-feature> | <media-condition> ) |
     //   style( <style-query> )
 
-    auto transaction = tokens.begin_transaction();
-
     // <boolean-expr[ <if-test> ]>
-    auto parsed_boolean_expression = parse_boolean_expression(tokens, MatchResult::False, [&](TokenStream<ComponentValue>& test_tokens) -> OwnPtr<BooleanExpression> {
-        auto const& maybe_function_token = test_tokens.consume_a_token();
+    {
+        auto transaction = tokens.begin_transaction();
+        Vector<ComponentValue> if_condition;
+        while (tokens.has_next_token())
+            if_condition.append(tokens.consume_a_token());
 
-        if (!maybe_function_token.is_function())
+        auto serialized_if_condition = serialize_component_values_for_reparsing(if_condition);
+        auto parsed_boolean_expression = RustComponentValueParser::parse_an_if_condition(serialized_if_condition.bytes_as_string_view(), "utf-8"sv, [&](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+            TokenStream<ComponentValue> test_tokens { component_values };
+            auto const& maybe_function_token = test_tokens.consume_a_token();
+
+            if (!maybe_function_token.is_function())
+                return nullptr;
+
+            auto const& function = maybe_function_token.function();
+            TokenStream argument_tokens { function.value };
+
+            // supports( [ <ident> : <declaration-value> ] | <supports-condition> )
+            if (function.name.equals_ignoring_ascii_case("supports"sv)) {
+                // [ <ident> : <declaration-value> ]
+                m_rule_context.append(RuleContext::SupportsCondition);
+                auto maybe_supports_declaration = parse_supports_declaration(argument_tokens);
+                m_rule_context.take_last();
+
+                if (maybe_supports_declaration)
+                    return maybe_supports_declaration;
+
+                // <supports-condition>
+                if (auto maybe_supports_condition = materialize_rust_supports_condition(function.value))
+                    return maybe_supports_condition;
+
+                return nullptr;
+            }
+
+            // media( <media-feature> | <media-condition> )
+            if (function.name.equals_ignoring_ascii_case("media"sv)) {
+                return materialize_rust_media_test(function.value);
+            }
+
+            // FIXME: Support style()
             return nullptr;
+        });
 
-        auto const& function = maybe_function_token.function();
-        TokenStream argument_tokens { function.value };
-
-        // supports( [ <ident> : <declaration-value> ] | <supports-condition> )
-        if (function.name.equals_ignoring_ascii_case("supports"sv)) {
-            // [ <ident> : <declaration-value> ]
-            m_rule_context.append(RuleContext::SupportsCondition);
-            auto maybe_supports_declaration = parse_supports_declaration(argument_tokens);
-            m_rule_context.take_last();
-
-            if (maybe_supports_declaration)
-                return maybe_supports_declaration;
-
-            // <supports-condition>
-            if (auto maybe_supports_condition = materialize_rust_supports_condition(function.value))
-                return maybe_supports_condition;
-
-            return nullptr;
+        if (parsed_boolean_expression) {
+            transaction.commit();
+            return parsed_boolean_expression;
         }
-
-        // media( <media-feature> | <media-condition> )
-        if (function.name.equals_ignoring_ascii_case("media"sv)) {
-            return materialize_rust_media_test(function.value);
-        }
-
-        // FIXME: Support style()
-        return nullptr;
-    });
-
-    tokens.discard_whitespace();
-
-    if (parsed_boolean_expression && !tokens.has_next_token()) {
-        transaction.commit();
-        return parsed_boolean_expression;
     }
 
     // else
+    auto transaction = tokens.begin_transaction();
     if (parse_all_as_single_keyword_value(tokens, Keyword::Else)) {
         transaction.commit();
         // The else keyword represents a condition that is always true.

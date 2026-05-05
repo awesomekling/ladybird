@@ -92,6 +92,7 @@ pub(crate) enum BooleanExpression {
 pub(crate) enum BooleanExpressionTest {
     SupportsFeature(Vec<ComponentValue>),
     MediaFeature(Box<MediaFeatureTest>),
+    IfTest(Vec<ComponentValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -188,6 +189,7 @@ struct ComponentValueParser {
 enum BooleanExpressionTestKind {
     SupportsFeature,
     MediaFeature,
+    IfTest,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +521,38 @@ pub(crate) fn parse_a_supports_condition<E, C>(
     let mut parser = ComponentValueParser::new(component_values);
     if parser
         .parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature)
+        .is_none()
+        || parser.has_next_component_value()
+    {
+        event_callback(CssBooleanExpressionEventKind::Invalid);
+        return;
+    }
+
+    let boolean_expression = parser
+        .boolean_expression
+        .take()
+        .expect("parsed expression must be present");
+    emit_boolean_expression(
+        &boolean_expression,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+        &mut |_| {},
+        &mut |_| {},
+    );
+}
+
+pub(crate) fn parse_an_if_condition<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
+where
+    E: FnMut(CssBooleanExpressionEventKind),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    if parser
+        .parse_a_boolean_expression(BooleanExpressionTestKind::IfTest)
         .is_none()
         || parser.has_next_component_value()
     {
@@ -1292,6 +1326,13 @@ fn emit_boolean_expression<E, C, M, V>(
             }
             event_callback(CssBooleanExpressionEventKind::TestEnd);
         }
+        BooleanExpression::Test(BooleanExpressionTest::IfTest(component_values)) => {
+            event_callback(CssBooleanExpressionEventKind::TestStart);
+            for component_value in component_values {
+                emit_component_value(component_value, filtered_input, component_value_callback);
+            }
+            event_callback(CssBooleanExpressionEventKind::TestEnd);
+        }
         BooleanExpression::Test(BooleanExpressionTest::MediaFeature(media_feature)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
             media_feature_callback(css_media_feature_from_syntax(&media_feature.kind));
@@ -1664,6 +1705,7 @@ impl ComponentValueParser {
         match test_kind {
             BooleanExpressionTestKind::SupportsFeature => self.parse_supports_feature(),
             BooleanExpressionTestKind::MediaFeature => self.parse_media_feature(),
+            BooleanExpressionTestKind::IfTest => self.parse_if_test(),
         }
     }
 
@@ -1733,6 +1775,28 @@ impl ComponentValueParser {
                 component_value,
                 kind,
             })));
+        }
+
+        None
+    }
+
+    // https://drafts.csswg.org/css-values-5/#typedef-if-condition
+    fn parse_if_test(&mut self) -> Option<BooleanExpressionTest> {
+        // <if-test> =
+        //   supports( [ <ident> : <declaration-value> ] | <supports-condition> ) |
+        //   media( <media-feature> | <media-condition> ) |
+        //   style( <style-query> )
+        let component_value = self.next_component_value()?.clone();
+        let ComponentValue::Function(function) = &component_value else {
+            return None;
+        };
+
+        if function.name.eq_ignore_ascii_case("supports")
+            || function.name.eq_ignore_ascii_case("media")
+            || function.name.eq_ignore_ascii_case("style")
+        {
+            self.index += 1;
+            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
         }
 
         None
@@ -3798,7 +3862,7 @@ mod tests {
         Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_media_query,
-        parse_a_media_test, parse_a_value_type, strip_whitespace,
+        parse_a_media_test, parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3852,6 +3916,12 @@ mod tests {
             |_| {},
         );
         (events, media_feature_count)
+    }
+
+    fn parse_if_condition(input: &str) -> Vec<CssBooleanExpressionEventKind> {
+        let mut events = Vec::new();
+        parse_an_if_condition(input.as_bytes(), |event| events.push(event), |_| {});
+        events
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -4457,6 +4527,42 @@ mod tests {
             ]
         );
         assert_eq!(media_feature_count, 2);
+    }
+
+    #[test]
+    fn parses_if_boolean_expression() {
+        let events = parse_if_condition("supports(width: 1px) and media(width >= 100px)");
+        assert_eq!(
+            events,
+            vec![
+                CssBooleanExpressionEventKind::AndStart,
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd,
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd,
+                CssBooleanExpressionEventKind::AndEnd,
+            ]
+        );
+
+        let events = parse_if_condition("not style(--foo: bar)");
+        assert_eq!(
+            events,
+            vec![
+                CssBooleanExpressionEventKind::NotStart,
+                CssBooleanExpressionEventKind::TestStart,
+                CssBooleanExpressionEventKind::TestEnd,
+                CssBooleanExpressionEventKind::NotEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_if_boolean_expression() {
+        let events = parse_if_condition("else");
+        assert_eq!(events, vec![CssBooleanExpressionEventKind::Invalid]);
+
+        let events = parse_if_condition("supports(width: 1px) or media(width >= 100px) and style(--foo: bar)");
+        assert_eq!(events, vec![CssBooleanExpressionEventKind::Invalid]);
     }
 
     #[test]
