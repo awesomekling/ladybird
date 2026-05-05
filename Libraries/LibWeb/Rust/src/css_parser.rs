@@ -97,10 +97,57 @@ pub struct CssComponentValue {
     pub token: CssToken,
 }
 
+#[repr(C)]
+pub struct CssDeclaration {
+    pub is_valid: bool,
+    pub name_ptr: *const u8,
+    pub name_len: usize,
+    pub important: bool,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
 {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    for component_value in parser.parse_a_list_of_component_values() {
+        emit_component_value(&component_value, filtered_input_string, &mut callback);
+    }
+}
+
+pub(crate) fn parse_a_declaration<D, C>(
+    filtered_input: &[u8],
+    mut declaration_callback: D,
+    mut component_value_callback: C,
+) where
+    D: FnMut(CssDeclaration),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let Some(declaration) = parser.parse_a_declaration() else {
+        declaration_callback(CssDeclaration {
+            is_valid: false,
+            name_ptr: std::ptr::null(),
+            name_len: 0,
+            important: false,
+        });
+        return;
+    };
+
+    let (name_ptr, name_len) = string_parts(&declaration.name);
+    declaration_callback(CssDeclaration {
+        is_valid: true,
+        name_ptr,
+        name_len,
+        important: declaration.important,
+    });
+
+    for component_value in declaration.value {
+        emit_component_value(&component_value, filtered_input_string, &mut component_value_callback);
+    }
+}
+
+fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     let mut tokens = Vec::new();
     let filtered_input_string = std::str::from_utf8(filtered_input)
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
@@ -108,10 +155,11 @@ where
         tokens.push(token.clone());
     });
 
-    let mut parser = Parser::new(tokens);
-    for component_value in parser.parse_a_list_of_component_values() {
-        emit_component_value(&component_value, filtered_input_string, &mut callback);
-    }
+    (Parser::new(tokens), filtered_input_string)
+}
+
+fn string_parts(string: &str) -> (*const u8, usize) {
+    (string.as_ptr(), string.len())
 }
 
 fn emit_component_value<F>(component_value: &ComponentValue, filtered_input: &str, callback: &mut F)

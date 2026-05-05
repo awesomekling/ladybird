@@ -16,6 +16,13 @@ namespace Web::CSS::Parser {
 // U+FFFD REPLACEMENT CHARACTER
 static constexpr u32 REPLACEMENT_CHARACTER = 0xFFFD;
 
+static FlyString fly_string_from_ffi_bytes(u8 const* bytes, size_t length)
+{
+    if (length == 0)
+        return {};
+    return FlyString::from_utf8_without_validation({ bytes, length });
+}
+
 static String decode_and_filter_code_points(StringView input, StringView encoding)
 {
     // https://www.w3.org/TR/css-syntax-3/#css-filter-code-points
@@ -162,6 +169,62 @@ Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_value
 
     VERIFY(builder.stack.is_empty());
     return move(builder.root_values);
+}
+
+Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding)
+{
+    struct DeclarationBuilder {
+        Optional<Declaration> declaration;
+        ComponentValueBuilder component_value_builder;
+    };
+
+    DeclarationBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_declaration(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssDeclaration const* ffi_declaration) {
+            auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);
+            if (!ffi_declaration->is_valid)
+                return;
+
+            builder.declaration = Declaration {
+                .name = fly_string_from_ffi_bytes(ffi_declaration->name_ptr, ffi_declaration->name_len),
+                .value = {},
+                .important = ffi_declaration->important ? Important::Yes : Important::No,
+            };
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);
+            auto token = RustTokenizer::token_from_ffi(component_value->token);
+            switch (component_value->kind) {
+            case FFI::CssComponentValueKind::Token:
+                builder.component_value_builder.append(ComponentValue { move(token) });
+                break;
+            case FFI::CssComponentValueKind::FunctionStart:
+                builder.component_value_builder.start_function(move(token));
+                break;
+            case FFI::CssComponentValueKind::FunctionEnd:
+                builder.component_value_builder.end_function(move(token));
+                break;
+            case FFI::CssComponentValueKind::SimpleBlockStart:
+                builder.component_value_builder.start_simple_block(move(token));
+                break;
+            case FFI::CssComponentValueKind::SimpleBlockEnd:
+                builder.component_value_builder.end_simple_block(move(token));
+                break;
+            }
+        });
+
+    VERIFY(builder.component_value_builder.stack.is_empty());
+    if (!builder.declaration.has_value())
+        return {};
+
+    builder.declaration->value = move(builder.component_value_builder.root_values);
+    return builder.declaration;
 }
 
 }

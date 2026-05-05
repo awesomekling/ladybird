@@ -27,6 +27,26 @@ static void expect_rust_component_values_match_cpp(StringView input)
     EXPECT_EQ(dump_component_values(rust_values), dump_component_values(cpp_values));
 }
 
+static String dump_declaration(Optional<Web::CSS::Parser::Declaration> const& declaration)
+{
+    if (!declaration.has_value())
+        return "<invalid>"_string;
+
+    StringBuilder builder;
+    builder.appendff("{}\n", declaration->name);
+    builder.appendff("{}\n", declaration->important == Web::CSS::Important::Yes ? "important"sv : "normal"sv);
+    builder.append(dump_component_values(declaration->value));
+    return builder.to_string_without_validation();
+}
+
+static void expect_rust_declaration_matches_cpp(StringView input)
+{
+    auto cpp_declaration = Web::CSS::Parser::Parser::create(Web::CSS::Parser::ParsingParams {}, input).parse_as_declaration();
+    auto rust_declaration = Web::CSS::Parser::RustComponentValueParser::parse_a_declaration(input, "utf-8"sv);
+
+    EXPECT_EQ(dump_declaration(rust_declaration), dump_declaration(cpp_declaration));
+}
+
 }
 
 TEST_CASE(basic_values)
@@ -53,4 +73,13 @@ TEST_CASE(eof_terminated_blocks_and_functions)
 {
     expect_rust_component_values_match_cpp("{ color: red"sv);
     expect_rust_component_values_match_cpp("calc(1px + 2px"sv);
+}
+
+TEST_CASE(declarations)
+{
+    expect_rust_declaration_matches_cpp("color: red"sv);
+    expect_rust_declaration_matches_cpp("margin: calc(1px + var(--gap)) ! important"sv);
+    expect_rust_declaration_matches_cpp("--foo: { red } blue"sv);
+    expect_rust_declaration_matches_cpp("color: { red } blue"sv);
+    expect_rust_declaration_matches_cpp("@media screen"sv);
 }
