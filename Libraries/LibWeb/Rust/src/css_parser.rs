@@ -343,6 +343,19 @@ pub enum CssMediaFeatureValueKind {
     RightValue,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureValueSyntaxKind {
+    Ident,
+    Boolean,
+    Integer,
+    Length,
+    Ratio,
+    Resolution,
+    Unknown,
+    Invalid,
+}
+
 #[repr(C)]
 pub struct CssMediaFeature {
     pub syntax_kind: CssMediaFeatureSyntaxKind,
@@ -356,6 +369,7 @@ pub struct CssMediaFeature {
 #[repr(C)]
 pub struct CssMediaFeatureValue {
     pub kind: CssMediaFeatureValueKind,
+    pub syntax_kind: CssMediaFeatureValueSyntaxKind,
     pub component_value: CssComponentValue,
 }
 
@@ -1038,6 +1052,7 @@ fn emit_boolean_expression<E, C, M, V>(
 
 fn emit_media_feature_value<C>(
     kind: CssMediaFeatureValueKind,
+    syntax_kind: CssMediaFeatureValueSyntaxKind,
     component_values: &[ComponentValue],
     filtered_input: &str,
     callback: &mut C,
@@ -1046,7 +1061,11 @@ fn emit_media_feature_value<C>(
 {
     for component_value in component_values {
         emit_component_value(component_value, filtered_input, &mut |component_value| {
-            callback(CssMediaFeatureValue { kind, component_value });
+            callback(CssMediaFeatureValue {
+                kind,
+                syntax_kind,
+                component_value,
+            });
         });
     }
 }
@@ -1057,29 +1076,60 @@ where
 {
     match syntax {
         MediaFeatureSyntax::Boolean(_) => {}
-        MediaFeatureSyntax::Plain { value, .. }
-        | MediaFeatureSyntax::HalfRangeNameFirst { value, .. }
-        | MediaFeatureSyntax::HalfRangeValueFirst { value, .. } => {
-            emit_media_feature_value(CssMediaFeatureValueKind::Value, value, filtered_input, callback);
+        MediaFeatureSyntax::Plain { name, value }
+        | MediaFeatureSyntax::HalfRangeNameFirst { name, value, .. }
+        | MediaFeatureSyntax::HalfRangeValueFirst { name, value, .. } => {
+            emit_media_feature_value(
+                CssMediaFeatureValueKind::Value,
+                css_media_feature_value_syntax_kind_from_syntax(component_values_parse_as_mf_value_syntax(
+                    name.id, value,
+                )),
+                value,
+                filtered_input,
+                callback,
+            );
         }
         MediaFeatureSyntax::Range {
             left_value,
+            name,
             right_value,
             ..
         } => {
             emit_media_feature_value(
                 CssMediaFeatureValueKind::LeftValue,
+                css_media_feature_value_syntax_kind_from_syntax(component_values_parse_as_mf_value_syntax(
+                    name.id, left_value,
+                )),
                 left_value,
                 filtered_input,
                 callback,
             );
             emit_media_feature_value(
                 CssMediaFeatureValueKind::RightValue,
+                css_media_feature_value_syntax_kind_from_syntax(component_values_parse_as_mf_value_syntax(
+                    name.id,
+                    right_value,
+                )),
                 right_value,
                 filtered_input,
                 callback,
             );
         }
+    }
+}
+
+fn css_media_feature_value_syntax_kind_from_syntax(
+    syntax_kind: MediaFeatureValueSyntaxKind,
+) -> CssMediaFeatureValueSyntaxKind {
+    match syntax_kind {
+        MediaFeatureValueSyntaxKind::Ident => CssMediaFeatureValueSyntaxKind::Ident,
+        MediaFeatureValueSyntaxKind::Boolean => CssMediaFeatureValueSyntaxKind::Boolean,
+        MediaFeatureValueSyntaxKind::Integer => CssMediaFeatureValueSyntaxKind::Integer,
+        MediaFeatureValueSyntaxKind::Length => CssMediaFeatureValueSyntaxKind::Length,
+        MediaFeatureValueSyntaxKind::Ratio => CssMediaFeatureValueSyntaxKind::Ratio,
+        MediaFeatureValueSyntaxKind::Resolution => CssMediaFeatureValueSyntaxKind::Resolution,
+        MediaFeatureValueSyntaxKind::Unknown => CssMediaFeatureValueSyntaxKind::Unknown,
+        MediaFeatureValueSyntaxKind::Invalid => CssMediaFeatureValueSyntaxKind::Invalid,
     }
 }
 

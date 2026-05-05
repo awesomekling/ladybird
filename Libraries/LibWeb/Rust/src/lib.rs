@@ -25,7 +25,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
     CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaQuery, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssValueTypeSyntaxKind,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
