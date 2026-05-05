@@ -95,6 +95,16 @@ pub(crate) enum BooleanExpressionTest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SyntaxNode {
+    Universal,
+    Type(String),
+    Ident(String),
+    Multiplier(Box<SyntaxNode>),
+    CommaSeparatedMultiplier(Box<SyntaxNode>),
+    Alternatives(Vec<SyntaxNode>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MediaQuerySyntax {
     Valid {
         modifier: MediaQueryModifier,
@@ -438,6 +448,12 @@ pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> Cs
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     component_values_parse_as_value_type(value_type_id, &component_values)
+}
+
+fn parse_as_syntax_string(input: &str, limit_single_component_ident_to_custom_ident: bool) -> Option<SyntaxNode> {
+    let (mut parser, _) = parser_from_filtered_input(input.as_bytes());
+    let component_values = parser.parse_a_list_of_component_values();
+    component_values_parse_as_syntax(&component_values, limit_single_component_ident_to_custom_ident)
 }
 
 pub(crate) fn parse_a_supports_condition<E, C>(
@@ -1658,6 +1674,16 @@ fn component_value_is_ident(component_value: Option<&ComponentValue>, expected: 
     )
 }
 
+fn component_value_is_delim(component_value: Option<&ComponentValue>, expected: char) -> bool {
+    matches!(
+        component_value,
+        Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Delim { value },
+            ..
+        })) if *value == expected as u32
+    )
+}
+
 fn is_paren_block(block: &SimpleBlock) -> bool {
     matches!(block.token.token_type, TokenType::OpenParen)
 }
@@ -1784,6 +1810,223 @@ fn component_values_parse_as_value_type(
     component_values: &[ComponentValue],
 ) -> CssValueTypeSyntaxKind {
     component_values_parse_as_generated_value_type(value_type_id, component_values)
+}
+
+// https://drafts.csswg.org/css-values-5/#typedef-syntax
+fn component_values_parse_as_syntax(
+    component_values: &[ComponentValue],
+    limit_single_component_ident_to_custom_ident: bool,
+) -> Option<SyntaxNode> {
+    // <syntax> = '*' | <syntax-component> [ <syntax-combinator> <syntax-component> ]* | <syntax-string>
+    // <syntax-component> = <syntax-single-component> <syntax-multiplier>?
+    //                    | '<' transform-list '>'
+    // <syntax-single-component> = '<' <syntax-type-name> '>' | <ident>
+    // <syntax-type-name> = angle | color | custom-ident | image | integer
+    //                    | length | length-percentage | number
+    //                    | percentage | resolution | string | time
+    //                    | url | transform-function
+    // <syntax-combinator> = '|'
+    // <syntax-multiplier> = [ '#' | '+' ]
+    //
+    // <syntax-string> = <string>
+    // FIXME: Eventually, extend this to also parse *any* CSS grammar, not just for the <syntax> type.
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+
+    // '*'
+    if component_value_is_delim(parser.next_component_value(), '*') {
+        parser.index += 1;
+        parser.discard_whitespace();
+        if parser.next_component_value().is_some() {
+            return None;
+        }
+        return Some(SyntaxNode::Universal);
+    }
+
+    // <syntax-string> = <string>
+    // A <syntax-string> is a <string> whose value successfully parses as a <syntax>, and represents the same value as
+    // that <syntax> would.
+    // NB: For now, this is the only time a string is allowed in a <syntax>.
+    if let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::String { value },
+        ..
+    })) = parser.next_component_value()
+    {
+        let value = value.clone();
+        parser.index += 1;
+        parser.discard_whitespace();
+        if parser.next_component_value().is_some() {
+            return None;
+        }
+        return parse_as_syntax_string(&value, limit_single_component_ident_to_custom_ident);
+    }
+
+    // <syntax-component> [ <syntax-combinator> <syntax-component> ]*
+    let mut syntax_components = vec![parse_syntax_component(
+        &mut parser,
+        limit_single_component_ident_to_custom_ident,
+    )?];
+
+    parser.discard_whitespace();
+    while parser.next_component_value().is_some() {
+        let combinator = parse_syntax_combinator(&mut parser);
+        parser.discard_whitespace();
+        let component = parse_syntax_component(&mut parser, limit_single_component_ident_to_custom_ident);
+        parser.discard_whitespace();
+        if combinator.is_none() || component.is_none() {
+            return None;
+        }
+
+        // FIXME: Make this logic smarter once we have more than one type of combinator.
+        // For now, assume we're always making an AlternativesSyntaxNode.
+        debug_assert_eq!(combinator, Some('|'));
+
+        syntax_components.push(component.expect("checked above"));
+    }
+
+    if syntax_components.len() == 1 {
+        return syntax_components.pop();
+    }
+    Some(SyntaxNode::Alternatives(syntax_components))
+}
+
+fn parse_syntax_component(
+    parser: &mut ComponentValueParser,
+    limit_single_component_ident_to_custom_ident: bool,
+) -> Option<SyntaxNode> {
+    // <syntax-component> = <syntax-single-component> <syntax-multiplier>?
+    //                    | '<' transform-list '>'
+    let saved_index = parser.index;
+    parser.discard_whitespace();
+
+    // '<' transform-list '>'
+    if component_value_is_delim(parser.next_component_value(), '<') {
+        parser.index += 1;
+        let ident_token = parser.consume_the_next_component_value();
+        let end_token = parser.consume_the_next_component_value();
+
+        if component_value_is_ident(ident_token.as_ref(), "transform-list")
+            && component_value_is_delim(end_token.as_ref(), '>')
+        {
+            return Some(SyntaxNode::Type("transform-list".to_string()));
+        }
+
+        parser.index = saved_index;
+    }
+
+    // <syntax-single-component> <syntax-multiplier>?
+    let syntax_single_component = parse_syntax_single_component(parser, limit_single_component_ident_to_custom_ident)?;
+
+    match parse_syntax_multiplier(parser) {
+        None => Some(syntax_single_component),
+        Some('#') => Some(SyntaxNode::CommaSeparatedMultiplier(Box::new(syntax_single_component))),
+        Some('+') => Some(SyntaxNode::Multiplier(Box::new(syntax_single_component))),
+        _ => None,
+    }
+}
+
+fn parse_syntax_single_component(
+    parser: &mut ComponentValueParser,
+    limit_single_component_ident_to_custom_ident: bool,
+) -> Option<SyntaxNode> {
+    // <syntax-single-component> = '<' <syntax-type-name> '>' | <ident>
+    // <syntax-type-name> = angle | color | custom-ident | image | integer
+    //                    | length | length-percentage | number
+    //                    | percentage | resolution | string | time
+    //                    | url | transform-function
+    let saved_index = parser.index;
+    parser.discard_whitespace();
+
+    // <ident>
+    if let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    {
+        let value = value.clone();
+        // AD-HOC: Some users (i.e. the @property syntax descriptor) only allow custom idents here,
+        //         https://github.com/w3c/csswg-drafts/issues/13614
+        if limit_single_component_ident_to_custom_ident
+            && (matches_css_wide_keyword(&value) || value.eq_ignore_ascii_case("default"))
+        {
+            return None;
+        }
+
+        parser.index += 1;
+        return Some(SyntaxNode::Ident(value));
+    }
+
+    // '<' <syntax-type-name> '>'
+    if component_value_is_delim(parser.next_component_value(), '<') {
+        parser.index += 1;
+        let type_name = parser.consume_the_next_component_value();
+        let end_token = parser.consume_the_next_component_value();
+
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = type_name
+            && component_value_is_delim(end_token.as_ref(), '>')
+            && is_syntax_type_name(&value)
+        {
+            return Some(SyntaxNode::Type(value));
+        }
+    }
+
+    parser.index = saved_index;
+    None
+}
+
+static SYNTAX_TYPE_NAMES: &[&str] = &[
+    "angle",
+    "color",
+    "custom-ident",
+    "image",
+    "integer",
+    "length",
+    "length-percentage",
+    "number",
+    "percentage",
+    "resolution",
+    "string",
+    "time",
+    "url",
+    "transform-function",
+];
+
+fn is_syntax_type_name(value: &str) -> bool {
+    SYNTAX_TYPE_NAMES
+        .iter()
+        .any(|type_name| value.eq_ignore_ascii_case(type_name))
+}
+
+fn parse_syntax_multiplier(parser: &mut ComponentValueParser) -> Option<char> {
+    // <syntax-multiplier> = [ '#' | '+' ]
+    let saved_index = parser.index;
+    let delim = parser.consume_the_next_component_value();
+    if component_value_is_delim(delim.as_ref(), '#') {
+        return Some('#');
+    }
+    if component_value_is_delim(delim.as_ref(), '+') {
+        return Some('+');
+    }
+
+    parser.index = saved_index;
+    None
+}
+
+fn parse_syntax_combinator(parser: &mut ComponentValueParser) -> Option<char> {
+    // <syntax-combinator> = '|'
+    let saved_index = parser.index;
+    parser.discard_whitespace();
+
+    if component_value_is_delim(parser.next_component_value(), '|') {
+        parser.index += 1;
+        return Some('|');
+    }
+
+    parser.index = saved_index;
+    None
 }
 
 fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
@@ -3427,9 +3670,10 @@ mod tests {
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssValueTypeSyntaxKind, MediaFeatureNameKind,
         MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_value_type, parse_a_media_query,
-        parse_a_media_test, parse_a_value_type, strip_whitespace,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_value_type, parse_a_media_query, parse_a_media_test, parse_a_value_type,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3487,6 +3731,14 @@ mod tests {
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
         component_values_parse_as_value_type(value_type_id, &parse(input))
+    }
+
+    fn parse_syntax(input: &str) -> Option<SyntaxNode> {
+        component_values_parse_as_syntax(&parse(input), false)
+    }
+
+    fn parse_limited_syntax(input: &str) -> Option<SyntaxNode> {
+        component_values_parse_as_syntax(&parse(input), true)
     }
 
     #[test]
@@ -3565,6 +3817,69 @@ mod tests {
             panic!("expected a function");
         };
         assert_eq!(function.name, "calc");
+    }
+
+    #[test]
+    fn parses_syntax() {
+        assert_eq!(parse_syntax("*"), Some(SyntaxNode::Universal));
+        assert_eq!(parse_syntax("thing"), Some(SyntaxNode::Ident("thing".to_string())));
+        assert_eq!(parse_syntax("<number>"), Some(SyntaxNode::Type("number".to_string())));
+        assert_eq!(
+            parse_syntax("<number>+"),
+            Some(SyntaxNode::Multiplier(Box::new(SyntaxNode::Type("number".to_string()))))
+        );
+        assert_eq!(
+            parse_syntax("<string>#"),
+            Some(SyntaxNode::CommaSeparatedMultiplier(Box::new(SyntaxNode::Type(
+                "string".to_string()
+            ))))
+        );
+        assert_eq!(
+            parse_syntax("well | <number>+ | <string>#"),
+            Some(SyntaxNode::Alternatives(vec![
+                SyntaxNode::Ident("well".to_string()),
+                SyntaxNode::Multiplier(Box::new(SyntaxNode::Type("number".to_string()))),
+                SyntaxNode::CommaSeparatedMultiplier(Box::new(SyntaxNode::Type("string".to_string()))),
+            ]))
+        );
+        assert_eq!(
+            parse_syntax(r#""<number>""#),
+            Some(SyntaxNode::Type("number".to_string()))
+        );
+        assert_eq!(
+            parse_syntax("<transform-list>"),
+            Some(SyntaxNode::Type("transform-list".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_syntax() {
+        assert!(parse_syntax("").is_none());
+        assert!(parse_syntax(" ").is_none());
+        assert!(parse_syntax("<number").is_none());
+        assert!(parse_syntax("thing |").is_none());
+        assert!(parse_syntax("* | *").is_none());
+        assert!(parse_syntax("<transform-list>+").is_none());
+        assert!(parse_syntax("<transform-list>#").is_none());
+        assert!(parse_syntax("<woozle>").is_none());
+        assert!(parse_syntax("<number> <integer>").is_none());
+        assert!(parse_syntax("thingy whatsit").is_none());
+        assert!(parse_syntax("<number> +").is_none());
+        assert!(parse_syntax("<number> #").is_none());
+    }
+
+    #[test]
+    fn limits_single_component_ident_to_custom_ident_for_syntax() {
+        assert_eq!(
+            parse_limited_syntax("thing"),
+            Some(SyntaxNode::Ident("thing".to_string()))
+        );
+        assert!(parse_limited_syntax("inherit").is_none());
+        assert!(parse_limited_syntax("initial").is_none());
+        assert!(parse_limited_syntax("unset").is_none());
+        assert!(parse_limited_syntax("revert").is_none());
+        assert!(parse_limited_syntax("revert-layer").is_none());
+        assert!(parse_limited_syntax("default").is_none());
     }
 
     #[test]
