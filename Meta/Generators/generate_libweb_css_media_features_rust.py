@@ -27,9 +27,9 @@ def write_rust_file(out: TextIO, media_feature_data: dict) -> None:
 #[repr(u8)]
 pub(crate) enum MediaFeatureId {""")
 
-    for name in media_feature_data:
+    for index, name in enumerate(media_feature_data):
         out.write(f"""
-    {title_casify(name)},""")
+    {title_casify(name)} = {index},""")
 
     out.write("""
 }
