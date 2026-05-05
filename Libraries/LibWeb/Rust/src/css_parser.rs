@@ -213,6 +213,28 @@ pub(crate) fn parse_a_blocks_contents<E, C>(
     );
 }
 
+pub(crate) fn parse_a_stylesheets_contents<E, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let rules = parser.parse_a_stylesheets_contents();
+    event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesStart));
+    for rule in &rules {
+        emit_rule(
+            rule,
+            filtered_input_string,
+            &mut event_callback,
+            &mut component_value_callback,
+        );
+    }
+    event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesEnd));
+}
+
 fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     let mut tokens = Vec::new();
     let filtered_input_string = std::str::from_utf8(filtered_input)

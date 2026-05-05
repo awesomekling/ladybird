@@ -128,6 +128,7 @@ public:
     Optional<Rule> parse_as_rule();
     Optional<Declaration> parse_as_declaration();
     Vector<RuleOrListOfDeclarations> parse_as_blocks_contents();
+    Vector<Rule> parse_as_rules();
     Optional<StyleProperty> parse_as_supports_condition();
     GC::RootVector<GC::Ref<CSSRule>> parse_as_stylesheet_contents();
 

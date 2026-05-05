@@ -1393,6 +1393,11 @@ Vector<RuleOrListOfDeclarations> Parser::parse_as_blocks_contents()
     return parse_a_blocks_contents(m_token_stream);
 }
 
+Vector<Rule> Parser::parse_as_rules()
+{
+    return parse_a_stylesheets_contents(m_token_stream);
+}
+
 // https://drafts.csswg.org/css-syntax/#parse-rule
 template<typename T>
 Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)

@@ -462,4 +462,31 @@ Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_conten
     return move(builder.rules_or_lists_of_declarations);
 }
 
+Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView input, StringView encoding)
+{
+    RuleEventBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_stylesheet_contents(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssRuleEvent const* event) {
+            apply_rule_event(*static_cast<RuleEventBuilder*>(raw_builder), *event);
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<RuleEventBuilder*>(raw_builder);
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    verify_rule_event_builder_is_empty(builder);
+    Vector<Rule> rules;
+    for (auto& rule_or_list : builder.rules_or_lists_of_declarations) {
+        VERIFY(rule_or_list.has<Rule>());
+        rules.append(move(rule_or_list.get<Rule>()));
+    }
+    return rules;
+}
+
 }

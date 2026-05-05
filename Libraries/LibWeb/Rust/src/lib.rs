@@ -187,3 +187,34 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
         });
     }
 }
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_a_stylesheets_contents(
+                input,
+                |event| {
+                    event_callback(ctx, &raw const event);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            );
+        });
+    }
+}

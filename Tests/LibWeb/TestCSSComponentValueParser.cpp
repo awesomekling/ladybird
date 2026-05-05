@@ -120,6 +120,22 @@ static void expect_rust_blocks_contents_match_cpp(StringView input)
     EXPECT_EQ(dump_rule_or_list_of_declarations(rust_blocks_contents), dump_rule_or_list_of_declarations(cpp_blocks_contents));
 }
 
+static String dump_rules(Vector<Web::CSS::Parser::Rule> const& rules)
+{
+    StringBuilder builder;
+    for (auto const& rule : rules)
+        dump_rule(builder, rule);
+    return builder.to_string_without_validation();
+}
+
+static void expect_rust_stylesheet_contents_match_cpp(StringView input)
+{
+    auto cpp_rules = Web::CSS::Parser::Parser::create(Web::CSS::Parser::ParsingParams {}, input).parse_as_rules();
+    auto rust_rules = Web::CSS::Parser::RustComponentValueParser::parse_a_stylesheets_contents(input, "utf-8"sv);
+
+    EXPECT_EQ(dump_rules(rust_rules), dump_rules(cpp_rules));
+}
+
 }
 
 TEST_CASE(basic_values)
@@ -172,4 +188,12 @@ TEST_CASE(blocks_contents)
     expect_rust_blocks_contents_match_cpp("color: red; @media screen { color: green } & { color: blue }"sv);
     expect_rust_blocks_contents_match_cpp("--foo: { red } blue; color: green"sv);
     expect_rust_blocks_contents_match_cpp("color: { red } blue; width: 1px"sv);
+}
+
+TEST_CASE(stylesheet_contents)
+{
+    expect_rust_stylesheet_contents_match_cpp("a { color: red } b { color: blue }"sv);
+    expect_rust_stylesheet_contents_match_cpp("@media screen { a { color: red } } @layer foo;"sv);
+    expect_rust_stylesheet_contents_match_cpp("<!-- a { color: red } --> b { color: blue }"sv);
+    expect_rust_stylesheet_contents_match_cpp("@container size(width > 1px) { & { color: green } }"sv);
 }

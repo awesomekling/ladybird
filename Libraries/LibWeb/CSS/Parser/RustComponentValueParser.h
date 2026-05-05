@@ -21,6 +21,7 @@ public:
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
+    static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding);
 };
 
 }
