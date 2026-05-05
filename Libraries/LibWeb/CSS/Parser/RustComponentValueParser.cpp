@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/CharacterTypes.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
+#include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
@@ -156,6 +157,22 @@ static void append_component_value_token(ComponentValueBuilder& builder, FFI::Cs
     }
 }
 
+static void set_original_value_text_for_custom_property(Declaration& declaration)
+{
+    // https://drafts.csswg.org/css-syntax/#consume-declaration
+    // If decl’s name is a custom property name string, then set decl’s original text to the
+    // segment of the original source text string corresponding to the tokens of decl’s value.
+    if (!is_a_custom_property_name_string(declaration.name))
+        return;
+
+    // TODO: If the Rust parser emitted the original source segment directly, we could use
+    //       that instead of having to reconstruct it.
+    StringBuilder original_text;
+    for (auto const& value : declaration.value)
+        original_text.append(value.original_source_text());
+    declaration.original_value_text = original_text.to_string_without_validation();
+}
+
 Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_values(StringView input, StringView encoding)
 {
     ComponentValueBuilder builder;
@@ -211,6 +228,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
         return {};
 
     builder.declaration->value = move(builder.component_value_builder.root_values);
+    set_original_value_text_for_custom_property(*builder.declaration);
     return builder.declaration;
 }
 
@@ -405,6 +423,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         VERIFY(builder.component_value_builder.stack.is_empty());
         auto declaration = frame.declaration.release_value();
         declaration.value = move(builder.component_value_builder.root_values);
+        set_original_value_text_for_custom_property(declaration);
         builder.component_value_builder = {};
         builder.append_declaration(move(declaration));
         break;

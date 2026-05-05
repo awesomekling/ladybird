@@ -35,6 +35,7 @@ static String dump_declaration(Optional<Web::CSS::Parser::Declaration> const& de
     StringBuilder builder;
     builder.appendff("{}\n", declaration->name);
     builder.appendff("{}\n", declaration->important == Web::CSS::Important::Yes ? "important"sv : "normal"sv);
+    builder.appendff("{}\n", declaration->original_value_text.value_or({}));
     builder.append(dump_component_values(declaration->value));
     return builder.to_string_without_validation();
 }
@@ -169,6 +170,8 @@ TEST_CASE(declarations)
     expect_rust_declaration_matches_cpp("color: red"sv);
     expect_rust_declaration_matches_cpp("margin: calc(1px + var(--gap)) ! important"sv);
     expect_rust_declaration_matches_cpp("--foo: { red } blue"sv);
+    expect_rust_declaration_matches_cpp("--image: url(image.svg)"sv);
+    expect_rust_declaration_matches_cpp("--image: url(\"image.svg\")"sv);
     expect_rust_declaration_matches_cpp("color: { red } blue"sv);
     expect_rust_declaration_matches_cpp("@media screen"sv);
 }
