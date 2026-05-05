@@ -332,17 +332,6 @@ String serialize_a_media_query_list(Vector<NonnullRefPtr<MediaQuery>> const& med
     return MUST(String::join(", "sv, media_queries));
 }
 
-Optional<MediaQuery::KnownMediaType> media_type_from_string(StringView name)
-{
-    if (name.equals_ignoring_ascii_case("all"sv))
-        return MediaQuery::KnownMediaType::All;
-    if (name.equals_ignoring_ascii_case("print"sv))
-        return MediaQuery::KnownMediaType::Print;
-    if (name.equals_ignoring_ascii_case("screen"sv))
-        return MediaQuery::KnownMediaType::Screen;
-    return {};
-}
-
 StringView to_string(MediaQuery::KnownMediaType media_type)
 {
     switch (media_type) {

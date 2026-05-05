@@ -220,7 +220,6 @@ private:
 
 String serialize_a_media_query_list(Vector<NonnullRefPtr<MediaQuery>> const&);
 
-Optional<MediaQuery::KnownMediaType> media_type_from_string(StringView);
 StringView to_string(MediaQuery::KnownMediaType);
 
 }
