@@ -373,11 +373,22 @@ pub struct CssMediaFeatureValue {
     pub component_value: CssComponentValue,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaTypeKind {
+    None,
+    All,
+    Print,
+    Screen,
+    Unknown,
+}
+
 #[repr(C)]
 pub struct CssMediaQuery {
     pub is_valid: bool,
     pub is_negated: bool,
     pub has_media_condition: bool,
+    pub media_type_kind: CssMediaTypeKind,
     pub media_type_ptr: *const u8,
     pub media_type_len: usize,
 }
@@ -546,6 +557,7 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
                     is_valid: false,
                     is_negated: false,
                     has_media_condition: false,
+                    media_type_kind: CssMediaTypeKind::None,
                     media_type_ptr: std::ptr::null(),
                     media_type_len: 0,
                 });
@@ -559,6 +571,9 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
                     is_valid: true,
                     is_negated: modifier == MediaQueryModifier::Not,
                     has_media_condition: condition.is_some(),
+                    media_type_kind: media_type
+                        .as_ref()
+                        .map_or(CssMediaTypeKind::None, |media_type| css_media_type_kind(media_type)),
                     media_type_ptr: media_type
                         .as_ref()
                         .map_or(std::ptr::null(), |media_type| media_type.as_ptr()),
@@ -577,6 +592,19 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
             }
         }
     }
+}
+
+fn css_media_type_kind(media_type: &str) -> CssMediaTypeKind {
+    if media_type.eq_ignore_ascii_case("all") {
+        return CssMediaTypeKind::All;
+    }
+    if media_type.eq_ignore_ascii_case("print") {
+        return CssMediaTypeKind::Print;
+    }
+    if media_type.eq_ignore_ascii_case("screen") {
+        return CssMediaTypeKind::Screen;
+    }
+    CssMediaTypeKind::Unknown
 }
 
 pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)

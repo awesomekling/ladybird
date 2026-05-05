@@ -385,6 +385,22 @@ static void set_media_feature_value_syntax_kind(Optional<FFI::CssMediaFeatureVal
     target = syntax_kind;
 }
 
+static Optional<MediaQuery::KnownMediaType> media_type_from_rust(FFI::CssMediaTypeKind media_type_kind)
+{
+    switch (media_type_kind) {
+    case FFI::CssMediaTypeKind::None:
+    case FFI::CssMediaTypeKind::Unknown:
+        return {};
+    case FFI::CssMediaTypeKind::All:
+        return MediaQuery::KnownMediaType::All;
+    case FFI::CssMediaTypeKind::Print:
+        return MediaQuery::KnownMediaType::Print;
+    case FFI::CssMediaTypeKind::Screen:
+        return MediaQuery::KnownMediaType::Screen;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 struct RustBooleanExpressionBuilder {
     enum class FrameType : u8 {
         Not,
@@ -738,7 +754,7 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
                 auto media_type_name = fly_string_from_ffi_bytes(rust_media_query->media_type_ptr, rust_media_query->media_type_len);
                 media_type = MediaQuery::MediaType {
                     .name = media_type_name,
-                    .known_type = media_type_from_string(media_type_name),
+                    .known_type = media_type_from_rust(rust_media_query->media_type_kind),
                 };
             }
 
