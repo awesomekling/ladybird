@@ -335,7 +335,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     return builder.declaration;
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, void (*rust_parse_boolean_expression)(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*)))
 {
     struct BooleanExpressionBuilder {
         enum class FrameType : u8 {
@@ -356,6 +356,7 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
         OwnPtr<BooleanExpression> root;
         ComponentValueBuilder component_value_builder;
         AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test;
+        MatchResult result_for_general_enclosed;
         bool invalid { false };
 
         void append_expression(OwnPtr<BooleanExpression> expression)
@@ -432,7 +433,7 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
 
             auto expression = parse_test(move(component_value_builder.root_values));
             if (!expression && general_enclosed_fallback.has_value())
-                expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), MatchResult::False);
+                expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), result_for_general_enclosed);
             append_expression(move(expression));
             component_value_builder = {};
         }
@@ -447,18 +448,19 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
             VERIFY(component_value_builder.root_values.size() == 1);
 
             auto serialized_contents = component_value_builder.root_values.first().to_string();
-            append_expression(GeneralEnclosed::create(move(serialized_contents), MatchResult::False));
+            append_expression(GeneralEnclosed::create(move(serialized_contents), result_for_general_enclosed));
             component_value_builder = {};
         }
     };
 
     BooleanExpressionBuilder builder {
         .parse_test = move(parse_test),
+        .result_for_general_enclosed = result_for_general_enclosed,
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
 
-    FFI::rust_css_parse_supports_condition(
+    rust_parse_boolean_expression(
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
         &builder,
@@ -519,6 +521,16 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
     VERIFY(builder.stack.is_empty());
     VERIFY(builder.component_value_builder.stack.is_empty());
     return move(builder.root);
+}
+
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
+{
+    return parse_a_boolean_expression(input, encoding, MatchResult::False, move(parse_test), FFI::rust_css_parse_supports_condition);
+}
+
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
+{
+    return parse_a_boolean_expression(input, encoding, MatchResult::Unknown, move(parse_test), FFI::rust_css_parse_media_condition);
 }
 
 struct RuleEventBuilder {

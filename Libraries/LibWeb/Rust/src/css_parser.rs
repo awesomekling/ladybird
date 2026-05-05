@@ -86,6 +86,12 @@ struct ComponentValueParser {
     boolean_expression: Option<BooleanExpression>,
 }
 
+#[derive(Clone, Copy)]
+enum BooleanExpressionTestKind {
+    SupportsFeature,
+    MediaFeature,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Nested {
     No,
@@ -254,7 +260,44 @@ pub(crate) fn parse_a_supports_condition<E, C>(
     parser.rule_context.pop();
 
     let mut parser = ComponentValueParser::new(component_values);
-    if parser.parse_a_supports_condition().is_none() || parser.has_next_component_value() {
+    if parser
+        .parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature)
+        .is_none()
+        || parser.has_next_component_value()
+    {
+        event_callback(CssBooleanExpressionEventKind::Invalid);
+        return;
+    }
+
+    let boolean_expression = parser
+        .boolean_expression
+        .take()
+        .expect("parsed expression must be present");
+    emit_boolean_expression(
+        &boolean_expression,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
+}
+
+pub(crate) fn parse_a_media_condition<E, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssBooleanExpressionEventKind),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    if parser
+        .parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature)
+        .is_none()
+        || parser.has_next_component_value()
+    {
         event_callback(CssBooleanExpressionEventKind::Invalid);
         return;
     }
@@ -739,15 +782,14 @@ impl ComponentValueParser {
         self.next_component_value().is_some()
     }
 
-    // https://drafts.csswg.org/css-conditional-3/#typedef-supports-condition
-    fn parse_a_supports_condition(&mut self) -> Option<()> {
-        self.boolean_expression = self.parse_boolean_expression();
+    fn parse_a_boolean_expression(&mut self, test_kind: BooleanExpressionTestKind) -> Option<()> {
+        self.boolean_expression = self.parse_boolean_expression(test_kind);
         self.boolean_expression.as_ref()?;
         Some(())
     }
 
     // https://drafts.csswg.org/css-values-5/#typedef-boolean-expr
-    fn parse_boolean_expression(&mut self) -> Option<BooleanExpression> {
+    fn parse_boolean_expression(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpression> {
         // <boolean-expr[ <test> ]> = not <boolean-expr-group> | <boolean-expr-group>
         //                            [ [ and <boolean-expr-group> ]*
         //                            | [ or <boolean-expr-group> ]* ]
@@ -759,7 +801,7 @@ impl ComponentValueParser {
             self.index += 1;
             self.discard_whitespace();
 
-            let child = self.parse_boolean_expression_group()?;
+            let child = self.parse_boolean_expression_group(test_kind)?;
             self.discard_whitespace();
             return Some(BooleanExpression::Not(Box::new(child)));
         }
@@ -799,7 +841,7 @@ impl ComponentValueParser {
             }
 
             self.discard_whitespace();
-            children.push(self.parse_boolean_expression_group()?);
+            children.push(self.parse_boolean_expression_group(test_kind)?);
             self.discard_whitespace();
         }
 
@@ -818,7 +860,7 @@ impl ComponentValueParser {
         }
     }
 
-    fn parse_boolean_expression_group(&mut self) -> Option<BooleanExpression> {
+    fn parse_boolean_expression_group(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpression> {
         // <boolean-expr-group> = <test> | ( <boolean-expr[ <test> ]> ) | <general-enclosed>
 
         // `( <boolean-expr[ <test> ]> )`
@@ -828,7 +870,7 @@ impl ComponentValueParser {
             let saved_index = self.index;
             self.index += 1;
             let mut child_parser = ComponentValueParser::new(block.value);
-            if let Some(expression) = child_parser.parse_boolean_expression()
+            if let Some(expression) = child_parser.parse_boolean_expression(test_kind)
                 && !child_parser.has_next_component_value()
             {
                 return Some(BooleanExpression::Parens(Box::new(expression)));
@@ -837,7 +879,7 @@ impl ComponentValueParser {
         }
 
         // `<test>`
-        if let Some(test) = self.parse_supports_feature() {
+        if let Some(test) = self.parse_test(test_kind) {
             return Some(BooleanExpression::Test(vec![test]));
         }
 
@@ -847,6 +889,13 @@ impl ComponentValueParser {
         }
 
         None
+    }
+
+    fn parse_test(&mut self, test_kind: BooleanExpressionTestKind) -> Option<ComponentValue> {
+        match test_kind {
+            BooleanExpressionTestKind::SupportsFeature => self.parse_supports_feature(),
+            BooleanExpressionTestKind::MediaFeature => self.parse_media_feature(),
+        }
     }
 
     // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
@@ -897,6 +946,20 @@ impl ComponentValueParser {
                 self.index += 1;
                 return Some(component_value);
             }
+        }
+
+        None
+    }
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature
+    fn parse_media_feature(&mut self) -> Option<ComponentValue> {
+        // <media-feature> = [ <mf-plain> | <mf-boolean> | <mf-range> ]
+        let component_value = self.next_component_value()?.clone();
+        if let ComponentValue::SimpleBlock(block) = &component_value
+            && is_paren_block(block)
+        {
+            self.index += 1;
+            return Some(component_value);
         }
 
         None
@@ -2076,7 +2139,8 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BooleanExpression, ComponentValue, ComponentValueParser, Parser, Rule, RuleContext, RuleOrListOfDeclarations,
+        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations,
     };
     use crate::css_tokenizer::{self, TokenType};
 
@@ -2172,7 +2236,7 @@ mod tests {
     fn parses_supports_boolean_expression() {
         let component_values = parse("(color: green) and (width: 50px)");
         let mut parser = ComponentValueParser::new(component_values);
-        parser.parse_a_supports_condition();
+        parser.parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature);
 
         let Some(BooleanExpression::And(children)) = parser.boolean_expression else {
             panic!("expected an and expression");
@@ -2185,12 +2249,25 @@ mod tests {
     fn parses_supports_general_enclosed() {
         let component_values = parse("florb(123)");
         let mut parser = ComponentValueParser::new(component_values);
-        parser.parse_a_supports_condition();
+        parser.parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature);
 
         assert!(matches!(
             parser.boolean_expression,
             Some(BooleanExpression::GeneralEnclosed(_))
         ));
+    }
+
+    #[test]
+    fn parses_media_boolean_expression() {
+        let component_values = parse("(width <= 600px) or (hover)");
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature);
+
+        let Some(BooleanExpression::Or(children)) = parser.boolean_expression else {
+            panic!("expected an or expression");
+        };
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().all(|child| matches!(child, BooleanExpression::Test(_))));
     }
 
     #[test]

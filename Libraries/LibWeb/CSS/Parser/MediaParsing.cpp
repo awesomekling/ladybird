@@ -17,11 +17,42 @@
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
+#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 
 namespace Web::CSS::Parser {
+
+static void serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
+{
+    if (component_value.is_token()) {
+        auto original_source_text = component_value.original_source_text();
+        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
+        return;
+    }
+
+    if (component_value.is_block()) {
+        auto const& block = component_value.block();
+        builder.append(block.token.bracket_string());
+        for (auto const& child : block.value)
+            serialize_component_value_for_reparsing(builder, child);
+        builder.append(block.token.bracket_mirror_string());
+        return;
+    }
+
+    if (component_value.is_function()) {
+        auto const& function = component_value.function();
+        serialize_an_identifier(builder, function.name);
+        builder.append('(');
+        for (auto const& child : function.value)
+            serialize_component_value_for_reparsing(builder, child);
+        builder.append(')');
+        return;
+    }
+
+    builder.append(component_value.to_string());
+}
 
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
@@ -167,9 +198,13 @@ NonnullRefPtr<MediaQuery> Parser::parse_media_query(TokenStream<ComponentValue>&
 // `<media-condition>`, https://www.w3.org/TR/mediaqueries-4/#typedef-media-condition
 OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentValue>& tokens)
 {
-    return parse_boolean_expression(tokens, MatchResult::Unknown, [this](TokenStream<ComponentValue>& outer_tokens) -> OwnPtr<BooleanExpression> {
-        auto transaction = outer_tokens.begin_transaction();
+    StringBuilder serialized_media_condition;
+    auto transaction = tokens.begin_transaction();
+    while (tokens.has_next_token())
+        serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
 
+    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        TokenStream<ComponentValue> outer_tokens { component_values };
         outer_tokens.discard_whitespace();
 
         if (!(outer_tokens.next_token().is_block() && outer_tokens.next_token().block().is_paren()))
@@ -179,13 +214,18 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
 
         TokenStream inner_tokens { block.value };
 
-        if (auto maybe_media_feature = parse_media_feature(inner_tokens)) {
-            transaction.commit();
+        if (auto maybe_media_feature = parse_media_feature(inner_tokens))
             return maybe_media_feature;
-        }
 
         return nullptr;
     });
+
+    if (media_condition) {
+        transaction.commit();
+        return media_condition;
+    }
+
+    return nullptr;
 }
 
 // `<media-feature>`, https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature

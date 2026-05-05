@@ -202,6 +202,37 @@ pub unsafe extern "C" fn rust_css_parse_supports_condition(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_media_condition(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_a_media_condition(
+                input,
+                |event| {
+                    event_callback(ctx, event);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            );
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_declaration(
     input: *const u8,
     input_len: usize,

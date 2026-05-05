@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/Parser/RuleContext.h>
 #include <LibWeb/CSS/Parser/Types.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
 
@@ -27,10 +28,14 @@ public:
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
     static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
+    static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
     static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding);
+
+private:
+    static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, void (*rust_parse_boolean_expression)(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*)));
 };
 
 }
