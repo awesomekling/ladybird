@@ -77,8 +77,27 @@ pub(crate) enum BooleanExpression {
     Parens(Box<BooleanExpression>),
     And(Vec<BooleanExpression>),
     Or(Vec<BooleanExpression>),
-    Test(Vec<ComponentValue>),
+    Test(BooleanExpressionTest),
     GeneralEnclosed(ComponentValue),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum BooleanExpressionTest {
+    SupportsFeature(Vec<ComponentValue>),
+    MediaFeature(Box<MediaFeatureSyntax>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MediaFeatureSyntax {
+    component_value: ComponentValue,
+    kind: MediaFeatureSyntaxKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaFeatureSyntaxKind {
+    Boolean,
+    Plain,
+    Range,
 }
 
 struct ComponentValueParser {
@@ -732,11 +751,16 @@ fn emit_boolean_expression<E, C>(
             }
             event_callback(CssBooleanExpressionEventKind::OrEnd);
         }
-        BooleanExpression::Test(component_values) => {
+        BooleanExpression::Test(BooleanExpressionTest::SupportsFeature(component_values)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
             for component_value in component_values {
                 emit_component_value(component_value, filtered_input, component_value_callback);
             }
+            event_callback(CssBooleanExpressionEventKind::TestEnd);
+        }
+        BooleanExpression::Test(BooleanExpressionTest::MediaFeature(media_feature)) => {
+            event_callback(CssBooleanExpressionEventKind::TestStart);
+            emit_component_value(&media_feature.component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::TestEnd);
         }
         BooleanExpression::GeneralEnclosed(component_value) => {
@@ -881,7 +905,7 @@ impl ComponentValueParser {
 
         // `<test>`
         if let Some(test) = self.parse_test(test_kind) {
-            return Some(BooleanExpression::Test(vec![test]));
+            return Some(BooleanExpression::Test(test));
         }
 
         // `<general-enclosed>`
@@ -892,7 +916,7 @@ impl ComponentValueParser {
         None
     }
 
-    fn parse_test(&mut self, test_kind: BooleanExpressionTestKind) -> Option<ComponentValue> {
+    fn parse_test(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpressionTest> {
         match test_kind {
             BooleanExpressionTestKind::SupportsFeature => self.parse_supports_feature(),
             BooleanExpressionTestKind::MediaFeature => self.parse_media_feature(),
@@ -900,7 +924,7 @@ impl ComponentValueParser {
     }
 
     // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
-    fn parse_supports_feature(&mut self) -> Option<ComponentValue> {
+    fn parse_supports_feature(&mut self) -> Option<BooleanExpressionTest> {
         // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
         //                    | <supports-font-format-fn> | <supports-env-fn>
         //                    | <supports-decl>
@@ -912,7 +936,7 @@ impl ComponentValueParser {
             && component_values_start_like_a_declaration(&block.value)
         {
             self.index += 1;
-            return Some(component_value);
+            return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
         }
 
         let ComponentValue::Function(function) = &component_value else {
@@ -922,7 +946,7 @@ impl ComponentValueParser {
         // `<supports-selector-fn> = selector( <complex-selector> )`
         if function.name.eq_ignore_ascii_case("selector") {
             self.index += 1;
-            return Some(component_value);
+            return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
         }
 
         // `<supports-font-tech-fn> = font-tech( <font-tech> )`
@@ -945,7 +969,7 @@ impl ComponentValueParser {
             ) && parser.next_component_value().is_none()
             {
                 self.index += 1;
-                return Some(component_value);
+                return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
             }
         }
 
@@ -953,15 +977,18 @@ impl ComponentValueParser {
     }
 
     // https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature
-    fn parse_media_feature(&mut self) -> Option<ComponentValue> {
+    fn parse_media_feature(&mut self) -> Option<BooleanExpressionTest> {
         // <media-feature> = [ <mf-plain> | <mf-boolean> | <mf-range> ]
         let component_value = self.next_component_value()?.clone();
         if let ComponentValue::SimpleBlock(block) = &component_value
             && is_paren_block(block)
-            && component_values_parse_as_media_feature(&block.value)
+            && let Some(kind) = component_values_parse_as_media_feature(&block.value)
         {
             self.index += 1;
-            return Some(component_value);
+            return Some(BooleanExpressionTest::MediaFeature(Box::new(MediaFeatureSyntax {
+                component_value,
+                kind,
+            })));
         }
 
         None
@@ -1058,11 +1085,21 @@ fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
     true
 }
 
-fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntaxKind> {
     let component_values = strip_whitespace(component_values);
-    component_values_parse_as_mf_boolean(component_values)
-        || component_values_parse_as_mf_plain(component_values)
-        || component_values_parse_as_mf_range(component_values)
+    if component_values_parse_as_mf_boolean(component_values) {
+        return Some(MediaFeatureSyntaxKind::Boolean);
+    }
+
+    if component_values_parse_as_mf_plain(component_values) {
+        return Some(MediaFeatureSyntaxKind::Plain);
+    }
+
+    if component_values_parse_as_mf_range(component_values) {
+        return Some(MediaFeatureSyntaxKind::Range);
+    }
+
+    None
 }
 
 fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> bool {
