@@ -204,11 +204,11 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
     while (tokens.has_next_token())
         serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
 
-    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](FFI::CssMediaFeature const& media_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
-        if (media_feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
-            if (media_feature.id > to_underlying(MediaFeatureID::Width))
+    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
+            if (media_feature_test.feature.id > to_underlying(MediaFeatureID::Width))
                 return nullptr;
-            auto media_feature_id = static_cast<MediaFeatureID>(media_feature.id);
+            auto media_feature_id = static_cast<MediaFeatureID>(media_feature_test.feature.id);
             return MediaFeature::boolean(media_feature_id);
         }
 

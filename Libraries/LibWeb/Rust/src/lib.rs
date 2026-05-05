@@ -19,8 +19,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
+    CssMediaFeatureValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -213,6 +213,10 @@ pub unsafe extern "C" fn rust_css_parse_media_condition(
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
     media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -228,6 +232,9 @@ pub unsafe extern "C" fn rust_css_parse_media_condition(
                 },
                 |media_feature| {
                     media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);

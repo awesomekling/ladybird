@@ -299,6 +299,14 @@ pub enum CssMediaFeatureComparison {
     GreaterThanOrEqual,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureValueKind {
+    Value,
+    LeftValue,
+    RightValue,
+}
+
 #[repr(C)]
 pub struct CssMediaFeature {
     pub syntax_kind: CssMediaFeatureSyntaxKind,
@@ -307,6 +315,12 @@ pub struct CssMediaFeature {
     pub comparison: CssMediaFeatureComparison,
     pub left_comparison: CssMediaFeatureComparison,
     pub right_comparison: CssMediaFeatureComparison,
+}
+
+#[repr(C)]
+pub struct CssMediaFeatureValue {
+    pub kind: CssMediaFeatureValueKind,
+    pub component_value: CssComponentValue,
 }
 
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
@@ -369,17 +383,20 @@ pub(crate) fn parse_a_supports_condition<E, C>(
         &mut event_callback,
         &mut component_value_callback,
         &mut |_| {},
+        &mut |_| {},
     );
 }
 
-pub(crate) fn parse_a_media_condition<E, M, C>(
+pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
     mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
     mut component_value_callback: C,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -405,6 +422,7 @@ pub(crate) fn parse_a_media_condition<E, M, C>(
         &mut event_callback,
         &mut component_value_callback,
         &mut media_feature_callback,
+        &mut media_feature_value_callback,
     );
 }
 
@@ -791,16 +809,18 @@ fn emit_component_value_list<E, C>(
     event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
 }
 
-fn emit_boolean_expression<E, C, M>(
+fn emit_boolean_expression<E, C, M, V>(
     expression: &BooleanExpression,
     filtered_input: &str,
     event_callback: &mut E,
     component_value_callback: &mut C,
     media_feature_callback: &mut M,
+    media_feature_value_callback: &mut V,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     C: FnMut(CssComponentValue),
     M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
 {
     match expression {
         BooleanExpression::Not(child) => {
@@ -811,6 +831,7 @@ fn emit_boolean_expression<E, C, M>(
                 event_callback,
                 component_value_callback,
                 media_feature_callback,
+                media_feature_value_callback,
             );
             event_callback(CssBooleanExpressionEventKind::NotEnd);
         }
@@ -822,6 +843,7 @@ fn emit_boolean_expression<E, C, M>(
                 event_callback,
                 component_value_callback,
                 media_feature_callback,
+                media_feature_value_callback,
             );
             event_callback(CssBooleanExpressionEventKind::ParensEnd);
         }
@@ -834,6 +856,7 @@ fn emit_boolean_expression<E, C, M>(
                     event_callback,
                     component_value_callback,
                     media_feature_callback,
+                    media_feature_value_callback,
                 );
             }
             event_callback(CssBooleanExpressionEventKind::AndEnd);
@@ -847,6 +870,7 @@ fn emit_boolean_expression<E, C, M>(
                     event_callback,
                     component_value_callback,
                     media_feature_callback,
+                    media_feature_value_callback,
                 );
             }
             event_callback(CssBooleanExpressionEventKind::OrEnd);
@@ -861,6 +885,7 @@ fn emit_boolean_expression<E, C, M>(
         BooleanExpression::Test(BooleanExpressionTest::MediaFeature(media_feature)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
             media_feature_callback(css_media_feature_from_syntax(&media_feature.kind));
+            emit_media_feature_values(&media_feature.kind, filtered_input, media_feature_value_callback);
             emit_component_value(&media_feature.component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::TestEnd);
         }
@@ -868,6 +893,53 @@ fn emit_boolean_expression<E, C, M>(
             event_callback(CssBooleanExpressionEventKind::GeneralEnclosedStart);
             emit_component_value(component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::GeneralEnclosedEnd);
+        }
+    }
+}
+
+fn emit_media_feature_value<C>(
+    kind: CssMediaFeatureValueKind,
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+    callback: &mut C,
+) where
+    C: FnMut(CssMediaFeatureValue),
+{
+    for component_value in component_values {
+        emit_component_value(component_value, filtered_input, &mut |component_value| {
+            callback(CssMediaFeatureValue { kind, component_value });
+        });
+    }
+}
+
+fn emit_media_feature_values<C>(syntax: &MediaFeatureSyntax, filtered_input: &str, callback: &mut C)
+where
+    C: FnMut(CssMediaFeatureValue),
+{
+    match syntax {
+        MediaFeatureSyntax::Boolean(_) => {}
+        MediaFeatureSyntax::Plain { value, .. }
+        | MediaFeatureSyntax::HalfRangeNameFirst { value, .. }
+        | MediaFeatureSyntax::HalfRangeValueFirst { value, .. } => {
+            emit_media_feature_value(CssMediaFeatureValueKind::Value, value, filtered_input, callback);
+        }
+        MediaFeatureSyntax::Range {
+            left_value,
+            right_value,
+            ..
+        } => {
+            emit_media_feature_value(
+                CssMediaFeatureValueKind::LeftValue,
+                left_value,
+                filtered_input,
+                callback,
+            );
+            emit_media_feature_value(
+                CssMediaFeatureValueKind::RightValue,
+                right_value,
+                filtered_input,
+                callback,
+            );
         }
     }
 }
