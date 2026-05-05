@@ -194,6 +194,37 @@ Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_value
     return move(builder.root_values);
 }
 
+Vector<Vector<ComponentValue>> RustComponentValueParser::parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding)
+{
+    struct CommaSeparatedListBuilder {
+        Vector<Vector<ComponentValue>> groups;
+        ComponentValueBuilder component_value_builder;
+    };
+
+    CommaSeparatedListBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_comma_separated_component_values(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder) {
+            auto& builder = *static_cast<CommaSeparatedListBuilder*>(raw_builder);
+            VERIFY(builder.component_value_builder.stack.is_empty());
+            builder.groups.append(move(builder.component_value_builder.root_values));
+            builder.component_value_builder = {};
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<CommaSeparatedListBuilder*>(raw_builder);
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    VERIFY(builder.component_value_builder.stack.is_empty());
+    VERIFY(builder.component_value_builder.root_values.is_empty());
+    return move(builder.groups);
+}
+
 Optional<ComponentValue> RustComponentValueParser::parse_a_component_value(StringView input, StringView encoding)
 {
     ComponentValueBuilder builder;

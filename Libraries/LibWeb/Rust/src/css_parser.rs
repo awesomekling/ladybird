@@ -189,6 +189,23 @@ where
     }
 }
 
+pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
+    filtered_input: &[u8],
+    mut group_callback: G,
+    mut component_value_callback: C,
+) where
+    G: FnMut(),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    for group in parser.parse_a_comma_separated_list_of_component_values() {
+        for component_value in group {
+            emit_component_value(&component_value, filtered_input_string, &mut component_value_callback);
+        }
+        group_callback();
+    }
+}
+
 pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -664,6 +681,36 @@ impl Parser {
 
         // 2. Consume a list of component values from input, and return the result.
         self.consume_a_list_of_component_values(None, Nested::No)
+    }
+
+    // https://drafts.csswg.org/css-syntax/#parse-comma-separated-list-of-component-values
+    pub(crate) fn parse_a_comma_separated_list_of_component_values(&mut self) -> Vec<Vec<ComponentValue>> {
+        // To parse a comma-separated list of component values from input:
+        // 1. Normalize input, and set input to the result.
+        // NOTE: This is done automatically before creating the Parser.
+
+        // 2. Let groups be an empty list.
+        let mut groups = Vec::new();
+
+        // 3. While input is not empty:
+        let mut just_consumed_comma = false;
+        while !matches!(self.next_input_token().token_type, TokenType::EndOfFile) {
+            // 1. Consume a list of component values from input, with <comma-token> as the stop token,
+            // and append the result to groups.
+            groups.push(self.consume_a_list_of_component_values(Some(TokenType::Comma), Nested::No));
+
+            // 2. Discard a token from input.
+            just_consumed_comma = matches!(self.consume_the_next_input_token().token_type, TokenType::Comma);
+        }
+
+        // AD-HOC: Also append an empty group if there was a trailing comma.
+        // Some related spec discussion: https://github.com/w3c/csswg-drafts/issues/11254
+        if just_consumed_comma {
+            groups.push(Vec::new());
+        }
+
+        // 4. Return groups.
+        groups
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-component-value
@@ -1694,6 +1741,25 @@ mod tests {
 
         assert!(parse_with("", Parser::parse_a_component_value).is_none());
         assert!(parse_with("a b", Parser::parse_a_component_value).is_none());
+    }
+
+    #[test]
+    fn parses_comma_separated_component_values() {
+        let groups = parse_with(
+            "calc(1px, 2px),, rgb(1, 2, 3),",
+            Parser::parse_a_comma_separated_list_of_component_values,
+        );
+
+        assert_eq!(groups.len(), 4);
+        assert_eq!(groups[0].len(), 1);
+        assert!(groups[1].is_empty());
+        assert_eq!(groups[2].len(), 2);
+        assert!(groups[3].is_empty());
+
+        let ComponentValue::Function(function) = &groups[0][0] else {
+            panic!("expected a function");
+        };
+        assert_eq!(function.name, "calc");
     }
 
     #[test]

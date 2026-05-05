@@ -2038,8 +2038,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
     // 1. Let unparsed sizes list be the result of parsing a comma-separated list of component values
     //    from the value of element's sizes attribute (or the empty string, if the attribute is absent).
-    // NOTE: The sizes attribute has already been tokenized into m_token_stream by this point.
-    auto unparsed_sizes_list = parse_a_comma_separated_list_of_component_values(m_token_stream);
+    auto unparsed_sizes_list = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(m_input, m_encoding);
 
     // 2. Let size be null.
     RefPtr<StyleValue const> size;
