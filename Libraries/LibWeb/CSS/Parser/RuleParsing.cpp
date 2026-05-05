@@ -41,7 +41,6 @@
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/PropertyName.h>
-#include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
@@ -475,50 +474,16 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
         return {};
     }
 
-    prelude_stream.discard_whitespace();
-    auto& token = prelude_stream.consume_a_token();
-    if (!token.is_token()) {
+    auto serialized_keyframes_name = serialize_component_values_for_reparsing(rule.prelude);
+    auto name = RustComponentValueParser::parse_a_keyframes_name(serialized_keyframes_name.bytes_as_string_view(), "utf-8"sv);
+    if (!name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@keyframes"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Name must be a <string> or <ident>."_string,
-        });
-        return {};
-    }
-
-    auto name_token = token.token();
-    prelude_stream.discard_whitespace();
-
-    if (prelude_stream.has_next_token()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@keyframes"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Trailing tokens after name in prelude."_string,
-        });
-        return {};
-    }
-
-    if (name_token.is(Token::Type::Ident) && !is_valid_custom_ident(name_token.ident(), { { "none"sv } })) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@keyframes"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_keyframes_name,
             .description = "Invalid name."_string,
         });
         return {};
     }
-
-    if (!name_token.is(Token::Type::String) && !name_token.is(Token::Type::Ident)) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@keyframes"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Name must be a <string> or <ident>."_string,
-        });
-        return {};
-    }
-
-    // Store the logical keyframes name instead of the serialized token text so @keyframes "foo" and
-    // animation-name: "foo" compare on the same value.
-    auto name = name_token.is(Token::Type::String) ? name_token.string() : name_token.ident();
 
     GC::RootVector<GC::Ref<CSSRule>> keyframes(realm().heap());
     rule.for_each_as_qualified_rule_list([&](auto& qualified_rule) {
@@ -561,7 +526,7 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
         }
     });
 
-    return CSSKeyframesRule::create(realm(), name, CSSRuleList::create(realm(), keyframes));
+    return CSSKeyframesRule::create(realm(), name.release_value(), CSSRuleList::create(realm(), keyframes));
 }
 
 GC::Ptr<CSSNamespaceRule> Parser::convert_to_namespace_rule(AtRule const& rule)
