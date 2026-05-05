@@ -582,49 +582,127 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
-    const ALL_MEDIA_TYPE: &[u8] = b"all";
-
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     for media_query in parser.parse_a_media_query_list() {
-        match media_query {
-            MediaQuerySyntax::Invalid => {
-                // https://www.w3.org/TR/mediaqueries-5/#error-handling
-                // A media query that does not match the grammar in the previous section must be
-                // replaced by `not all` during parsing.
-                media_query_callback(CssMediaQuery {
-                    is_negated: true,
-                    has_media_condition: false,
-                    media_type_kind: CssMediaTypeKind::All,
-                    media_type_ptr: ALL_MEDIA_TYPE.as_ptr(),
-                    media_type_len: ALL_MEDIA_TYPE.len(),
-                });
-            }
-            MediaQuerySyntax::Valid {
-                modifier,
-                media_type,
-                condition,
-            } => {
-                media_query_callback(CssMediaQuery {
-                    is_negated: modifier == MediaQueryModifier::Not,
-                    has_media_condition: condition.is_some(),
-                    media_type_kind: media_type
-                        .as_ref()
-                        .map_or(CssMediaTypeKind::None, |media_type| css_media_type_kind(media_type)),
-                    media_type_ptr: media_type
-                        .as_ref()
-                        .map_or(std::ptr::null(), |media_type| media_type.as_ptr()),
-                    media_type_len: media_type.as_ref().map_or(0, String::len),
-                });
-                if let Some(condition) = condition {
-                    emit_boolean_expression(
-                        &condition,
-                        filtered_input_string,
-                        &mut event_callback,
-                        &mut component_value_callback,
-                        &mut media_feature_callback,
-                        &mut media_feature_value_callback,
-                    );
-                }
+        emit_media_query_syntax(
+            media_query,
+            filtered_input_string,
+            &mut media_query_callback,
+            &mut event_callback,
+            &mut media_feature_callback,
+            &mut media_feature_value_callback,
+            &mut component_value_callback,
+        );
+    }
+}
+
+pub(crate) fn parse_a_media_query<Q, E, M, V, C>(
+    filtered_input: &[u8],
+    mut media_query_callback: Q,
+    mut event_callback: E,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) -> bool
+where
+    Q: FnMut(CssMediaQuery),
+    E: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let media_query_list = parser.parse_a_media_query_list();
+
+    // https://www.w3.org/TR/cssom-1/#parse-a-media-query
+    // To parse a media query from a string string:
+    // 1. Let list be the result of parse a media query list for string.
+    // 2. If list is empty, return a MediaQuery object representing "not all".
+    if media_query_list.is_empty() {
+        emit_not_all_media_query(&mut media_query_callback);
+        return true;
+    }
+
+    // 3. If list contains more than one MediaQuery object, return null.
+    if media_query_list.len() > 1 {
+        return false;
+    }
+
+    // 4. Return a MediaQuery object representing the sole media query in list.
+    emit_media_query_syntax(
+        media_query_list.into_iter().next().expect("list must contain one item"),
+        filtered_input_string,
+        &mut media_query_callback,
+        &mut event_callback,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
+        &mut component_value_callback,
+    );
+    true
+}
+
+fn emit_not_all_media_query<Q>(media_query_callback: &mut Q)
+where
+    Q: FnMut(CssMediaQuery),
+{
+    const ALL_MEDIA_TYPE: &[u8] = b"all";
+
+    media_query_callback(CssMediaQuery {
+        is_negated: true,
+        has_media_condition: false,
+        media_type_kind: CssMediaTypeKind::All,
+        media_type_ptr: ALL_MEDIA_TYPE.as_ptr(),
+        media_type_len: ALL_MEDIA_TYPE.len(),
+    });
+}
+
+fn emit_media_query_syntax<Q, E, M, V, C>(
+    media_query: MediaQuerySyntax,
+    filtered_input_string: &str,
+    media_query_callback: &mut Q,
+    event_callback: &mut E,
+    media_feature_callback: &mut M,
+    media_feature_value_callback: &mut V,
+    component_value_callback: &mut C,
+) where
+    Q: FnMut(CssMediaQuery),
+    E: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+    C: FnMut(CssComponentValue),
+{
+    match media_query {
+        MediaQuerySyntax::Invalid => {
+            // https://www.w3.org/TR/mediaqueries-5/#error-handling
+            // A media query that does not match the grammar in the previous section must be
+            // replaced by `not all` during parsing.
+            emit_not_all_media_query(media_query_callback);
+        }
+        MediaQuerySyntax::Valid {
+            modifier,
+            media_type,
+            condition,
+        } => {
+            media_query_callback(CssMediaQuery {
+                is_negated: modifier == MediaQueryModifier::Not,
+                has_media_condition: condition.is_some(),
+                media_type_kind: media_type
+                    .as_ref()
+                    .map_or(CssMediaTypeKind::None, |media_type| css_media_type_kind(media_type)),
+                media_type_ptr: media_type
+                    .as_ref()
+                    .map_or(std::ptr::null(), |media_type| media_type.as_ptr()),
+                media_type_len: media_type.as_ref().map_or(0, String::len),
+            });
+            if let Some(condition) = condition {
+                emit_boolean_expression(
+                    &condition,
+                    filtered_input_string,
+                    event_callback,
+                    component_value_callback,
+                    media_feature_callback,
+                    media_feature_value_callback,
+                );
             }
         }
     }
@@ -3347,10 +3425,11 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_value_type, parse_a_media_test, parse_a_value_type, strip_whitespace,
+        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssValueTypeSyntaxKind, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_value_type, parse_a_media_query,
+        parse_a_media_test, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3376,6 +3455,21 @@ mod tests {
 
     fn parse_media_query_list(input: &str) -> Vec<MediaQuerySyntax> {
         parse_with(input, Parser::parse_a_media_query_list)
+    }
+
+    fn parse_media_query(input: &str) -> (bool, Option<CssMediaQuery>) {
+        let mut media_query = None;
+        let did_parse = parse_a_media_query(
+            input.as_bytes(),
+            |parsed_media_query| {
+                media_query = Some(parsed_media_query);
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+            |_| {},
+        );
+        (did_parse, media_query)
     }
 
     fn parse_media_test(input: &str) -> (Vec<CssBooleanExpressionEventKind>, usize) {
@@ -3866,6 +3960,27 @@ mod tests {
     fn ignores_whitespace_only_media_query_lists() {
         assert!(parse_media_query_list("").is_empty());
         assert!(parse_media_query_list(" \t\n").is_empty());
+    }
+
+    #[test]
+    fn parses_single_media_queries() {
+        let (did_parse, media_query) = parse_media_query("");
+        assert!(did_parse);
+        let media_query = media_query.expect("expected a media query");
+        assert!(media_query.is_negated);
+        assert!(!media_query.has_media_condition);
+        assert_eq!(media_query.media_type_kind, CssMediaTypeKind::All);
+
+        let (did_parse, media_query) = parse_media_query("screen and (hover)");
+        assert!(did_parse);
+        let media_query = media_query.expect("expected a media query");
+        assert!(!media_query.is_negated);
+        assert!(media_query.has_media_condition);
+        assert_eq!(media_query.media_type_kind, CssMediaTypeKind::Screen);
+
+        let (did_parse, media_query) = parse_media_query("screen, print");
+        assert!(!did_parse);
+        assert!(media_query.is_none());
     }
 
     #[test]

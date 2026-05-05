@@ -596,6 +596,7 @@ private:
 
     OwnPtr<BooleanExpression> materialize_rust_media_condition(Vector<ComponentValue> const&);
     OwnPtr<BooleanExpression> materialize_rust_media_test(Vector<ComponentValue> const&);
+    NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
 
     using ParseTest = AK::Function<OwnPtr<BooleanExpression>(TokenStream<ComponentValue>&)> const&;

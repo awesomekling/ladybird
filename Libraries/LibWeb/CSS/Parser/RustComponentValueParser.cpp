@@ -602,6 +602,12 @@ static void append_boolean_expression_media_feature_value(RustBooleanExpressionB
     }
 }
 
+using MediaQueryCallback = void (*)(void*, FFI::CssMediaQuery const*);
+using BooleanExpressionEventCallback = void (*)(void*, FFI::CssBooleanExpressionEventKind);
+using MediaFeatureCallback = void (*)(void*, FFI::CssMediaFeature const*);
+using MediaFeatureValueCallback = void (*)(void*, FFI::CssMediaFeatureValue const*);
+using ComponentValueCallback = void (*)(void*, FFI::CssComponentValue const*);
+
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression)
 {
     RustBooleanExpressionBuilder builder {
@@ -686,109 +692,150 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_test(StringVie
         });
 }
 
-Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
-{
-    struct MediaQueryListBuilder {
-        Vector<MediaQuerySyntax> media_queries;
-        Optional<RustBooleanExpressionBuilder> media_condition_builder;
-        AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test;
+struct MediaQuerySyntaxBuilder {
+    Vector<RustComponentValueParser::MediaQuerySyntax> media_queries;
+    Optional<RustBooleanExpressionBuilder> media_condition_builder;
+    AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> parse_test;
 
-        static MediaQuerySyntax create_not_all_media_query_syntax()
-        {
-            return MediaQuerySyntax {
-                .is_negated = true,
-                .media_type = MediaQuery::MediaType {
-                    .name = "all"_fly_string,
-                    .known_type = MediaQuery::KnownMediaType::All,
-                },
+    static RustComponentValueParser::MediaQuerySyntax create_not_all_media_query_syntax()
+    {
+        return RustComponentValueParser::MediaQuerySyntax {
+            .is_negated = true,
+            .media_type = MediaQuery::MediaType {
+                .name = "all"_fly_string,
+                .known_type = MediaQuery::KnownMediaType::All,
+            },
+        };
+    }
+
+    void finish_media_condition()
+    {
+        if (!media_condition_builder.has_value())
+            return;
+
+        VERIFY(!media_queries.is_empty());
+        auto& media_query = media_queries.last();
+        if (media_condition_builder->invalid || !media_condition_builder->stack.is_empty() || !media_condition_builder->root) {
+            media_query = create_not_all_media_query_syntax();
+            media_condition_builder = {};
+            return;
+        }
+
+        VERIFY(media_condition_builder->component_value_builder.stack.is_empty());
+        media_query.media_condition = media_condition_builder->root.release_nonnull();
+        media_condition_builder = {};
+    }
+
+    void start_media_query(FFI::CssMediaQuery const* rust_media_query)
+    {
+        finish_media_condition();
+
+        Optional<MediaQuery::MediaType> media_type;
+        if (rust_media_query->media_type_len > 0) {
+            auto media_type_name = fly_string_from_ffi_bytes(rust_media_query->media_type_ptr, rust_media_query->media_type_len);
+            media_type = MediaQuery::MediaType {
+                .name = media_type_name,
+                .known_type = media_type_from_rust(rust_media_query->media_type_kind),
             };
         }
 
-        void finish_media_condition()
-        {
-            if (!media_condition_builder.has_value())
-                return;
+        media_queries.append(RustComponentValueParser::MediaQuerySyntax {
+            .is_negated = rust_media_query->is_negated,
+            .media_type = media_type,
+        });
 
-            VERIFY(!media_queries.is_empty());
-            auto& media_query = media_queries.last();
-            if (media_condition_builder->invalid || !media_condition_builder->stack.is_empty() || !media_condition_builder->root) {
-                media_query = create_not_all_media_query_syntax();
-                media_condition_builder = {};
-                return;
-            }
-
-            VERIFY(media_condition_builder->component_value_builder.stack.is_empty());
-            media_query.media_condition = media_condition_builder->root.release_nonnull();
-            media_condition_builder = {};
+        if (rust_media_query->has_media_condition) {
+            media_condition_builder = RustBooleanExpressionBuilder {
+                .parse_test = [this](Optional<RustComponentValueParser::MediaFeatureTest>&& media_feature, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+                    if (!media_feature.has_value())
+                        return nullptr;
+                    return parse_test(media_feature.release_value());
+                },
+                .result_for_general_enclosed = MatchResult::Unknown,
+            };
         }
+    }
+};
 
-        void start_media_query(FFI::CssMediaQuery const* rust_media_query)
-        {
-            finish_media_condition();
-
-            Optional<MediaQuery::MediaType> media_type;
-            if (rust_media_query->media_type_len > 0) {
-                auto media_type_name = fly_string_from_ffi_bytes(rust_media_query->media_type_ptr, rust_media_query->media_type_len);
-                media_type = MediaQuery::MediaType {
-                    .name = media_type_name,
-                    .known_type = media_type_from_rust(rust_media_query->media_type_kind),
-                };
-            }
-
-            media_queries.append(MediaQuerySyntax {
-                .is_negated = rust_media_query->is_negated,
-                .media_type = media_type,
-            });
-
-            if (rust_media_query->has_media_condition) {
-                media_condition_builder = RustBooleanExpressionBuilder {
-                    .parse_test = [this](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
-                        if (!media_feature.has_value())
-                            return nullptr;
-                        return parse_test(media_feature.release_value());
-                    },
-                    .result_for_general_enclosed = MatchResult::Unknown,
-                };
-            }
-        }
-    };
-
-    MediaQueryListBuilder builder {
-        .parse_test = move(parse_test),
-    };
+static void parse_media_query_syntax(
+    StringView input,
+    StringView encoding,
+    MediaQuerySyntaxBuilder& builder,
+    AK::Function<void(u8 const*, size_t, void*, MediaQueryCallback, BooleanExpressionEventCallback, MediaFeatureCallback, MediaFeatureValueCallback, ComponentValueCallback)> parse)
+{
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
 
-    FFI::rust_css_parse_media_query_list(
+    parse(
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
         &builder,
         [](void* raw_builder, FFI::CssMediaQuery const* media_query) {
-            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            auto& builder = *static_cast<MediaQuerySyntaxBuilder*>(raw_builder);
             builder.start_media_query(media_query);
         },
         [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
-            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            auto& builder = *static_cast<MediaQuerySyntaxBuilder*>(raw_builder);
             VERIFY(builder.media_condition_builder.has_value());
             process_boolean_expression_event(*builder.media_condition_builder, event);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
-            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            auto& builder = *static_cast<MediaQuerySyntaxBuilder*>(raw_builder);
             VERIFY(builder.media_condition_builder.has_value());
             set_boolean_expression_media_feature(*builder.media_condition_builder, media_feature);
         },
         [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
-            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            auto& builder = *static_cast<MediaQuerySyntaxBuilder*>(raw_builder);
             VERIFY(builder.media_condition_builder.has_value());
             append_boolean_expression_media_feature_value(*builder.media_condition_builder, media_feature_value);
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
-            auto& builder = *static_cast<MediaQueryListBuilder*>(raw_builder);
+            auto& builder = *static_cast<MediaQuerySyntaxBuilder*>(raw_builder);
             VERIFY(builder.media_condition_builder.has_value());
             append_component_value_token(builder.media_condition_builder->component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
     builder.finish_media_condition();
+}
+
+Optional<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
+{
+    MediaQuerySyntaxBuilder builder {
+        .parse_test = move(parse_test),
+    };
+
+    auto parsed_media_query = false;
+    parse_media_query_syntax(
+        input,
+        encoding,
+        builder,
+        [&parsed_media_query](u8 const* input, size_t input_size, void* context, auto media_query_callback, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
+            parsed_media_query = FFI::rust_css_parse_media_query(input, input_size, context, media_query_callback, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
+        });
+
+    if (!parsed_media_query) {
+        VERIFY(builder.media_queries.is_empty());
+        return {};
+    }
+
+    VERIFY(builder.media_queries.size() == 1);
+    return builder.media_queries.take_first();
+}
+
+Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
+{
+    MediaQuerySyntaxBuilder builder {
+        .parse_test = move(parse_test),
+    };
+
+    parse_media_query_syntax(
+        input,
+        encoding,
+        builder,
+        [](u8 const* input, size_t input_size, void* context, auto media_query_callback, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
+            FFI::rust_css_parse_media_query_list(input, input_size, context, media_query_callback, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
+        });
+
     return move(builder.media_queries);
 }
 
