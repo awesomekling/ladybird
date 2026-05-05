@@ -3029,7 +3029,9 @@ mod tests {
         component_values_parse_as_value_type, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
-    use crate::generated_media_features::MediaFeatureId;
+    use crate::generated_media_features::{
+        MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
+    };
     use crate::generated_value_types::ValueTypeId;
 
     fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
@@ -3277,6 +3279,21 @@ mod tests {
         assert!(parse_media_feature_syntax("100px <= width >= 200px").is_none());
         assert!(parse_media_feature_syntax("100px = width = 200px").is_none());
         assert!(parse_media_feature_syntax("width <> 100px").is_none());
+    }
+
+    #[test]
+    fn knows_generated_media_feature_value_metadata() {
+        assert!(media_feature_accepts_type(
+            MediaFeatureId::Width,
+            MediaFeatureValueType::Length
+        ));
+        assert!(!media_feature_accepts_type(
+            MediaFeatureId::Width,
+            MediaFeatureValueType::Integer
+        ));
+        assert!(media_feature_accepts_identifier(MediaFeatureId::Hover, "none"));
+        assert!(media_feature_accepts_identifier(MediaFeatureId::Hover, "HOVER"));
+        assert!(!media_feature_accepts_identifier(MediaFeatureId::Hover, "fine"));
     }
 
     #[test]
