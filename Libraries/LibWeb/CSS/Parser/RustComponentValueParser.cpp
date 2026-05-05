@@ -335,7 +335,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     return builder.declaration;
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, AK::Function<void(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*))> rust_parse_boolean_expression)
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression)
 {
     struct BooleanExpressionBuilder {
         enum class FrameType : u8 {
@@ -355,7 +355,8 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
         Vector<Frame> stack;
         OwnPtr<BooleanExpression> root;
         ComponentValueBuilder component_value_builder;
-        AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test;
+        Optional<FFI::CssMediaFeature> media_feature;
+        AK::Function<OwnPtr<BooleanExpression>(Optional<FFI::CssMediaFeature> const&, Vector<ComponentValue>&&)> parse_test;
         MatchResult result_for_general_enclosed;
         bool invalid { false };
 
@@ -431,11 +432,12 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
             if (component_value_builder.root_values.size() == 1)
                 general_enclosed_fallback = component_value_builder.root_values.first().to_string();
 
-            auto expression = parse_test(move(component_value_builder.root_values));
+            auto expression = parse_test(media_feature, move(component_value_builder.root_values));
             if (!expression && general_enclosed_fallback.has_value())
                 expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), result_for_general_enclosed);
             append_expression(move(expression));
             component_value_builder = {};
+            media_feature = {};
         }
 
         void end_general_enclosed()
@@ -484,6 +486,7 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
                 break;
             case FFI::CssBooleanExpressionEventKind::TestStart:
                 builder.component_value_builder = {};
+                builder.media_feature = {};
                 builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Test });
                 break;
             case FFI::CssBooleanExpressionEventKind::GeneralEnclosedStart:
@@ -510,6 +513,10 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
                 break;
             }
         },
+        [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
+            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
+            builder.media_feature = *media_feature;
+        },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
             append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
@@ -525,16 +532,32 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
 
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
 {
-    return parse_a_boolean_expression(input, encoding, MatchResult::False, move(parse_test), [](u8 const* input, size_t input_size, void* context, auto event_callback, auto component_value_callback) {
-        FFI::rust_css_parse_supports_condition(input, input_size, context, event_callback, component_value_callback);
-    });
+    return parse_a_boolean_expression(
+        input,
+        encoding,
+        MatchResult::False,
+        [parse_test = move(parse_test)](Optional<FFI::CssMediaFeature> const&, Vector<ComponentValue>&& component_values) mutable {
+            return parse_test(move(component_values));
+        },
+        [](u8 const* input, size_t input_size, void* context, auto event_callback, auto, auto component_value_callback) {
+            FFI::rust_css_parse_supports_condition(input, input_size, context, event_callback, component_value_callback);
+        });
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(FFI::CssMediaFeature const&, Vector<ComponentValue>&&)> parse_test)
 {
-    return parse_a_boolean_expression(input, encoding, MatchResult::Unknown, move(parse_test), [](u8 const* input, size_t input_size, void* context, auto event_callback, auto component_value_callback) {
-        FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, [](void*, FFI::CssMediaFeature const*) { }, component_value_callback);
-    });
+    return parse_a_boolean_expression(
+        input,
+        encoding,
+        MatchResult::Unknown,
+        [parse_test = move(parse_test)](Optional<FFI::CssMediaFeature> const& media_feature, Vector<ComponentValue>&& component_values) mutable -> OwnPtr<BooleanExpression> {
+            if (!media_feature.has_value())
+                return nullptr;
+            return parse_test(media_feature.value(), move(component_values));
+        },
+        [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto component_value_callback) {
+            FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, media_feature_callback, component_value_callback);
+        });
 }
 
 struct RuleEventBuilder {

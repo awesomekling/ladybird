@@ -28,14 +28,20 @@ public:
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
     static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
-    static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
+    static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(FFI::CssMediaFeature const&, Vector<ComponentValue>&&)> parse_test);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
     static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding);
 
 private:
-    static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, AK::Function<void(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*))> rust_parse_boolean_expression);
+    using BooleanExpressionEventCallback = void (*)(void*, FFI::CssBooleanExpressionEventKind);
+    using MediaFeatureCallback = void (*)(void*, FFI::CssMediaFeature const*);
+    using ComponentValueCallback = void (*)(void*, FFI::CssComponentValue const*);
+    using BooleanExpressionTestParser = AK::Function<OwnPtr<BooleanExpression>(Optional<FFI::CssMediaFeature> const&, Vector<ComponentValue>&&)>;
+    using RustBooleanExpressionParser = AK::Function<void(u8 const*, size_t, void*, BooleanExpressionEventCallback, MediaFeatureCallback, ComponentValueCallback)>;
+
+    static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression);
 };
 
 }
