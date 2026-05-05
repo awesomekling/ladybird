@@ -55,7 +55,7 @@ def json_is_valid(value_type_data: dict[str, Any], json_path: str) -> bool:
             is_valid = False
 
         for field_name in value_type_definition:
-            if field_name in ("spec", "grammar", "__comment"):
+            if field_name in ("spec", "grammar", "branches", "__comment"):
                 continue
 
             print(

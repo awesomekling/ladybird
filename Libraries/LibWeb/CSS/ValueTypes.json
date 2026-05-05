@@ -2,11 +2,35 @@
     "<font-weight-absolute>": {
         "spec": "https://drafts.csswg.org/css-fonts-4/#font-weight-absolute-values",
         "grammar": "normal | bold | <number [1,1000]>",
+        "branches": [
+            {
+                "name": "Normal",
+                "syntax": { "type": "ident", "value": "normal" }
+            },
+            {
+                "name": "Bold",
+                "syntax": { "type": "ident", "value": "bold" }
+            },
+            {
+                "name": "Number",
+                "syntax": { "type": "number", "min": 1.0, "max": 1000.0 }
+            }
+        ],
         "__comment": "FIXME: The spec defines this wrapped in a group i.e. '[ normal | bold | <number [1,1000]> ]' but our CSS grammar parser doesn't currently know how to handle that"
     },
     "<symbol>": {
         "spec": "https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol",
         "grammar": "<string> | <custom-ident>",
+        "branches": [
+            {
+                "name": "String",
+                "syntax": { "type": "string" }
+            },
+            {
+                "name": "CustomIdent",
+                "syntax": { "type": "custom-ident" }
+            }
+        ],
         "__comment": "AD-HOC: The spec actually defines this as '<string> | <image> | <custom-ident>' but the image portion is considered at-risk and no other browser supports it"
     }
 }
