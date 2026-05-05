@@ -3031,6 +3031,7 @@ mod tests {
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
         MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
+        media_feature_identifier_is_falsey,
     };
     use crate::generated_value_types::ValueTypeId;
 
@@ -3294,6 +3295,8 @@ mod tests {
         assert!(media_feature_accepts_identifier(MediaFeatureId::Hover, "none"));
         assert!(media_feature_accepts_identifier(MediaFeatureId::Hover, "HOVER"));
         assert!(!media_feature_accepts_identifier(MediaFeatureId::Hover, "fine"));
+        assert!(media_feature_identifier_is_falsey(MediaFeatureId::Hover, "none"));
+        assert!(!media_feature_identifier_is_falsey(MediaFeatureId::Hover, "hover"));
     }
 
     #[test]

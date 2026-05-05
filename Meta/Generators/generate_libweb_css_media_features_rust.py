@@ -142,6 +142,29 @@ pub(crate) fn media_feature_accepts_identifier(media_feature_id: MediaFeatureId,
     out.write("""
     }
 }
+
+#[allow(dead_code)]
+pub(crate) fn media_feature_identifier_is_falsey(media_feature_id: MediaFeatureId, identifier: &str) -> bool {
+    match media_feature_id {""")
+
+    for name, feature in media_feature_data.items():
+        false_keywords = feature.get("false-keywords", [])
+        if not false_keywords:
+            out.write(f"""
+        MediaFeatureId::{title_casify(name)} => false,""")
+            continue
+
+        out.write(f"""
+        MediaFeatureId::{title_casify(name)} => """)
+        for index, keyword_name in enumerate(false_keywords):
+            if index > 0:
+                out.write(" || ")
+            out.write(f"identifier.eq_ignore_ascii_case({rust_string_literal(keyword_name)})")
+        out.write(",")
+
+    out.write("""
+    }
+}
 """)
 
 
