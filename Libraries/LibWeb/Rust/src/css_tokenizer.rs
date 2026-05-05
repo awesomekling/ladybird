@@ -77,25 +77,27 @@ pub struct CssToken {
     pub end_column: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Position {
     line: usize,
     column: usize,
 }
 
-#[derive(Clone, Copy)]
-struct NumericValue {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NumericValue {
     number_type: CssNumberType,
     value: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Token {
-    token_type: TokenType,
+    pub(crate) token_type: TokenType,
     original_source_range: Range<usize>,
     range: Range<Position>,
 }
 
-enum TokenType {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum TokenType {
     EndOfFile,
     Ident { value: String },
     Function { name: String },

@@ -7,6 +7,7 @@
 #[path = "../../../RustAllocator.rs"]
 mod rust_allocator;
 
+mod css_parser;
 mod css_tokenizer;
 
 use std::ffi::c_void;
