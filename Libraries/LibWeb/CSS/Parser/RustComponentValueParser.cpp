@@ -335,6 +335,26 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     return builder.declaration;
 }
 
+struct RustMediaFeatureTestBuilder {
+    FFI::CssMediaFeature feature;
+    ComponentValueBuilder value_builder;
+    ComponentValueBuilder left_value_builder;
+    ComponentValueBuilder right_value_builder;
+
+    RustComponentValueParser::MediaFeatureTest build()
+    {
+        VERIFY(value_builder.stack.is_empty());
+        VERIFY(left_value_builder.stack.is_empty());
+        VERIFY(right_value_builder.stack.is_empty());
+        return RustComponentValueParser::MediaFeatureTest {
+            .feature = feature,
+            .value = move(value_builder.root_values),
+            .left_value = move(left_value_builder.root_values),
+            .right_value = move(right_value_builder.root_values),
+        };
+    }
+};
+
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression)
 {
     struct BooleanExpressionBuilder {
@@ -352,30 +372,10 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
             Vector<NonnullOwnPtr<BooleanExpression>> children;
         };
 
-        struct MediaFeatureTestBuilder {
-            FFI::CssMediaFeature feature;
-            ComponentValueBuilder value_builder;
-            ComponentValueBuilder left_value_builder;
-            ComponentValueBuilder right_value_builder;
-
-            MediaFeatureTest build()
-            {
-                VERIFY(value_builder.stack.is_empty());
-                VERIFY(left_value_builder.stack.is_empty());
-                VERIFY(right_value_builder.stack.is_empty());
-                return MediaFeatureTest {
-                    .feature = feature,
-                    .value = move(value_builder.root_values),
-                    .left_value = move(left_value_builder.root_values),
-                    .right_value = move(right_value_builder.root_values),
-                };
-            }
-        };
-
         Vector<Frame> stack;
         OwnPtr<BooleanExpression> root;
         ComponentValueBuilder component_value_builder;
-        Optional<MediaFeatureTestBuilder> media_feature;
+        Optional<RustMediaFeatureTestBuilder> media_feature;
         BooleanExpressionTestParser parse_test;
         MatchResult result_for_general_enclosed;
         bool invalid { false };
@@ -539,7 +539,7 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
             auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
-            builder.media_feature = BooleanExpressionBuilder::MediaFeatureTestBuilder {
+            builder.media_feature = RustMediaFeatureTestBuilder {
                 .feature = *media_feature,
             };
         },
@@ -604,6 +604,48 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(Stri
         [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
             FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
         });
+}
+
+Optional<RustComponentValueParser::MediaFeatureTest> RustComponentValueParser::parse_a_media_feature(StringView input, StringView encoding)
+{
+    Optional<RustMediaFeatureTestBuilder> builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_media_feature(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
+            auto& builder = *static_cast<Optional<RustMediaFeatureTestBuilder>*>(raw_builder);
+            builder = RustMediaFeatureTestBuilder {
+                .feature = *media_feature,
+            };
+        },
+        [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
+            auto& builder = *static_cast<Optional<RustMediaFeatureTestBuilder>*>(raw_builder);
+            VERIFY(builder.has_value());
+
+            auto append_to_builder = [&](ComponentValueBuilder& component_value_builder) {
+                append_component_value_token(component_value_builder, media_feature_value->component_value.kind, RustTokenizer::token_from_ffi(media_feature_value->component_value.token));
+            };
+
+            switch (media_feature_value->kind) {
+            case FFI::CssMediaFeatureValueKind::Value:
+                append_to_builder(builder->value_builder);
+                break;
+            case FFI::CssMediaFeatureValueKind::LeftValue:
+                append_to_builder(builder->left_value_builder);
+                break;
+            case FFI::CssMediaFeatureValueKind::RightValue:
+                append_to_builder(builder->right_value_builder);
+                break;
+            }
+        });
+
+    if (!builder.has_value())
+        return {};
+    return builder->build();
 }
 
 struct RuleEventBuilder {

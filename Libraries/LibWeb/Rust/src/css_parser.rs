@@ -426,6 +426,24 @@ pub(crate) fn parse_a_media_condition<E, M, V, C>(
     );
 }
 
+pub(crate) fn parse_a_media_feature<M, V>(
+    filtered_input: &[u8],
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+) where
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let Some(media_feature) = component_values_parse_as_media_feature(&component_values) else {
+        return;
+    };
+
+    media_feature_callback(css_media_feature_from_syntax(&media_feature));
+    emit_media_feature_values(&media_feature, filtered_input_string, &mut media_feature_value_callback);
+}
+
 pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),

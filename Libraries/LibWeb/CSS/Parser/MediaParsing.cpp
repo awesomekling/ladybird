@@ -109,6 +109,111 @@ RefPtr<MediaQuery> Parser::parse_as_media_query()
     return nullptr;
 }
 
+OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&& media_feature_test)
+{
+    auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
+        if (media_feature.id > to_underlying(MediaFeatureID::Width))
+            return {};
+        return static_cast<MediaFeatureID>(media_feature.id);
+    };
+
+    auto parse_rust_media_feature_value = [this](MediaFeatureID media_feature_id, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
+        TokenStream value_tokens { component_values };
+        auto maybe_value = parse_media_feature_value(media_feature_id, value_tokens);
+        if (!maybe_value.has_value())
+            return {};
+        value_tokens.discard_whitespace();
+        if (value_tokens.has_next_token())
+            return {};
+        return maybe_value.release_value();
+    };
+
+    auto media_feature_comparison_from_rust = [](FFI::CssMediaFeatureComparison comparison) -> MediaFeature::Comparison {
+        switch (comparison) {
+        case FFI::CssMediaFeatureComparison::Equal:
+            return MediaFeature::Comparison::Equal;
+        case FFI::CssMediaFeatureComparison::LessThan:
+            return MediaFeature::Comparison::LessThan;
+        case FFI::CssMediaFeatureComparison::LessThanOrEqual:
+            return MediaFeature::Comparison::LessThanOrEqual;
+        case FFI::CssMediaFeatureComparison::GreaterThan:
+            return MediaFeature::Comparison::GreaterThan;
+        case FFI::CssMediaFeatureComparison::GreaterThanOrEqual:
+            return MediaFeature::Comparison::GreaterThanOrEqual;
+        }
+        VERIFY_NOT_REACHED();
+    };
+
+    if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
+        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+        if (!maybe_media_feature_id.has_value())
+            return nullptr;
+        return MediaFeature::boolean(maybe_media_feature_id.value());
+    }
+
+    if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Plain) {
+        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+        if (!maybe_media_feature_id.has_value())
+            return nullptr;
+        auto media_feature_id = maybe_media_feature_id.value();
+        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        if (!maybe_value.has_value())
+            return nullptr;
+
+        switch (media_feature_test.feature.name_kind) {
+        case FFI::CssMediaFeatureNameKind::Normal:
+            return MediaFeature::plain(media_feature_id, maybe_value.release_value());
+        case FFI::CssMediaFeatureNameKind::Min:
+            return MediaFeature::min(media_feature_id, maybe_value.release_value());
+        case FFI::CssMediaFeatureNameKind::Max:
+            return MediaFeature::max(media_feature_id, maybe_value.release_value());
+        }
+        VERIFY_NOT_REACHED();
+    }
+
+    if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeNameFirst) {
+        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+        if (!maybe_media_feature_id.has_value())
+            return nullptr;
+        auto media_feature_id = maybe_media_feature_id.value();
+        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        if (!maybe_value.has_value() || maybe_value->is_ident())
+            return nullptr;
+        return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
+    }
+
+    if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeValueFirst) {
+        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+        if (!maybe_media_feature_id.has_value())
+            return nullptr;
+        auto media_feature_id = maybe_media_feature_id.value();
+        auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+        if (!maybe_value.has_value())
+            return nullptr;
+        return MediaFeature::half_range(maybe_value.release_value(), media_feature_comparison_from_rust(media_feature_test.feature.comparison), media_feature_id);
+    }
+
+    if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Range) {
+        auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+        if (!maybe_media_feature_id.has_value())
+            return nullptr;
+        auto media_feature_id = maybe_media_feature_id.value();
+        auto maybe_left_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.left_value);
+        if (!maybe_left_value.has_value())
+            return nullptr;
+        auto maybe_right_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.right_value);
+        if (!maybe_right_value.has_value())
+            return nullptr;
+
+        auto left_comparison = media_feature_comparison_from_rust(media_feature_test.feature.left_comparison);
+        if (left_comparison == MediaFeature::Comparison::Equal || maybe_left_value->is_ident() || maybe_right_value->is_ident())
+            return nullptr;
+        return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
+    }
+
+    return nullptr;
+}
+
 // `<media-query>`, https://www.w3.org/TR/mediaqueries-4/#typedef-media-query
 NonnullRefPtr<MediaQuery> Parser::parse_media_query(TokenStream<ComponentValue>& tokens)
 {
@@ -205,107 +310,7 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
         serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
 
     auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
-        auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
-            if (media_feature.id > to_underlying(MediaFeatureID::Width))
-                return {};
-            return static_cast<MediaFeatureID>(media_feature.id);
-        };
-
-        auto parse_rust_media_feature_value = [this](MediaFeatureID media_feature_id, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
-            TokenStream value_tokens { component_values };
-            auto maybe_value = parse_media_feature_value(media_feature_id, value_tokens);
-            if (!maybe_value.has_value())
-                return {};
-            value_tokens.discard_whitespace();
-            if (value_tokens.has_next_token())
-                return {};
-            return maybe_value.release_value();
-        };
-
-        auto media_feature_comparison_from_rust = [](FFI::CssMediaFeatureComparison comparison) -> MediaFeature::Comparison {
-            switch (comparison) {
-            case FFI::CssMediaFeatureComparison::Equal:
-                return MediaFeature::Comparison::Equal;
-            case FFI::CssMediaFeatureComparison::LessThan:
-                return MediaFeature::Comparison::LessThan;
-            case FFI::CssMediaFeatureComparison::LessThanOrEqual:
-                return MediaFeature::Comparison::LessThanOrEqual;
-            case FFI::CssMediaFeatureComparison::GreaterThan:
-                return MediaFeature::Comparison::GreaterThan;
-            case FFI::CssMediaFeatureComparison::GreaterThanOrEqual:
-                return MediaFeature::Comparison::GreaterThanOrEqual;
-            }
-            VERIFY_NOT_REACHED();
-        };
-
-        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
-            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-            if (!maybe_media_feature_id.has_value())
-                return nullptr;
-            return MediaFeature::boolean(maybe_media_feature_id.value());
-        }
-
-        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Plain) {
-            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-            if (!maybe_media_feature_id.has_value())
-                return nullptr;
-            auto media_feature_id = maybe_media_feature_id.value();
-            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
-            if (!maybe_value.has_value())
-                return nullptr;
-
-            switch (media_feature_test.feature.name_kind) {
-            case FFI::CssMediaFeatureNameKind::Normal:
-                return MediaFeature::plain(media_feature_id, maybe_value.release_value());
-            case FFI::CssMediaFeatureNameKind::Min:
-                return MediaFeature::min(media_feature_id, maybe_value.release_value());
-            case FFI::CssMediaFeatureNameKind::Max:
-                return MediaFeature::max(media_feature_id, maybe_value.release_value());
-            }
-            VERIFY_NOT_REACHED();
-        }
-
-        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeNameFirst) {
-            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-            if (!maybe_media_feature_id.has_value())
-                return nullptr;
-            auto media_feature_id = maybe_media_feature_id.value();
-            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
-            if (!maybe_value.has_value() || maybe_value->is_ident())
-                return nullptr;
-            return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
-        }
-
-        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeValueFirst) {
-            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-            if (!maybe_media_feature_id.has_value())
-                return nullptr;
-            auto media_feature_id = maybe_media_feature_id.value();
-            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
-            if (!maybe_value.has_value())
-                return nullptr;
-            return MediaFeature::half_range(maybe_value.release_value(), media_feature_comparison_from_rust(media_feature_test.feature.comparison), media_feature_id);
-        }
-
-        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Range) {
-            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-            if (!maybe_media_feature_id.has_value())
-                return nullptr;
-            auto media_feature_id = maybe_media_feature_id.value();
-            auto maybe_left_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.left_value);
-            if (!maybe_left_value.has_value())
-                return nullptr;
-            auto maybe_right_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.right_value);
-            if (!maybe_right_value.has_value())
-                return nullptr;
-
-            auto left_comparison = media_feature_comparison_from_rust(media_feature_test.feature.left_comparison);
-            if (left_comparison == MediaFeature::Comparison::Equal || maybe_left_value->is_ident() || maybe_right_value->is_ident())
-                return nullptr;
-            return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
-        }
-
-        return nullptr;
+        return materialize_rust_media_feature_test(move(media_feature_test));
     });
 
     if (media_condition) {
@@ -322,19 +327,19 @@ OwnPtr<MediaFeature> Parser::parse_media_feature(TokenStream<ComponentValue>& in
     auto transaction = inner_tokens.begin_transaction();
 
     StringBuilder serialized_media_feature;
-    serialized_media_feature.append('(');
     while (inner_tokens.has_next_token())
         serialize_component_value_for_reparsing(serialized_media_feature, inner_tokens.consume_a_token());
-    serialized_media_feature.append(')');
 
-    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(serialized_media_feature.string_view(), "utf-8"sv);
-    TokenStream outer_tokens { component_values };
-    auto media_condition = parse_media_condition(outer_tokens);
-    if (!media_condition || !is<MediaFeature>(*media_condition))
+    auto media_feature_test = RustComponentValueParser::parse_a_media_feature(serialized_media_feature.string_view(), "utf-8"sv);
+    if (!media_feature_test.has_value())
+        return {};
+
+    auto media_feature = materialize_rust_media_feature_test(media_feature_test.release_value());
+    if (!media_feature)
         return {};
 
     transaction.commit();
-    return media_condition.release_nonnull<MediaFeature>();
+    return media_feature;
 }
 
 Optional<MediaQuery::MediaType> Parser::parse_media_type(TokenStream<ComponentValue>& tokens)

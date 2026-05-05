@@ -23,6 +23,7 @@
 #include <LibWeb/CSS/Parser/ComponentValue.h>
 #include <LibWeb/CSS/Parser/GeneratedValueTypesParsing.h>
 #include <LibWeb/CSS/Parser/RuleContext.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Tokenizer.h>
 #include <LibWeb/CSS/Parser/Types.h>
@@ -596,6 +597,7 @@ private:
     NonnullRefPtr<MediaQuery> parse_media_query(TokenStream<ComponentValue>&);
     OwnPtr<BooleanExpression> parse_media_condition(TokenStream<ComponentValue>&);
     OwnPtr<MediaFeature> parse_media_feature(TokenStream<ComponentValue>&);
+    OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
     Optional<MediaQuery::MediaType> parse_media_type(TokenStream<ComponentValue>&);
     Optional<MediaFeatureValue> parse_media_feature_value(MediaFeatureID, TokenStream<ComponentValue>&);
 
