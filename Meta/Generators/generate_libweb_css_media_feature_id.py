@@ -126,7 +126,6 @@ enum class MediaFeatureID : {underlying_type} {{""")
     out.write("""
 };
 
-Optional<MediaFeatureID> media_feature_id_from_string(StringView);
 Optional<MediaFeatureID> media_feature_id_from_u8(u8);
 StringView string_from_media_feature_id(MediaFeatureID);
 
@@ -139,22 +138,8 @@ bool media_feature_keyword_is_falsey(MediaFeatureID, Keyword);
 def write_implementation_file(out: TextIO, media_feature_data: dict) -> None:
     out.write("""
 #include <LibWeb/CSS/MediaFeatureID.h>
-#include <LibWeb/Infra/Strings.h>
 
 namespace Web::CSS {
-
-Optional<MediaFeatureID> media_feature_id_from_string(StringView string)
-{""")
-
-    for name in media_feature_data:
-        out.write(f"""
-    if (string.equals_ignoring_ascii_case("{name}"sv))
-        return MediaFeatureID::{title_casify(name)};
-""")
-
-    out.write("""
-    return {};
-}
 
 Optional<MediaFeatureID> media_feature_id_from_u8(u8 value)
 {
