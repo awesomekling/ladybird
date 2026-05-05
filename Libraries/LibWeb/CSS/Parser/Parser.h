@@ -594,6 +594,9 @@ private:
     ParseErrorOr<Selector::SimpleSelector> parse_pseudo_element_simple_selector(TokenStream<ComponentValue>&);
     ParseErrorOr<Optional<Selector::SimpleSelector>> parse_simple_selector(TokenStream<ComponentValue>&);
 
+    static String serialize_component_values_for_reparsing(Vector<ComponentValue> const&);
+
+    OwnPtr<BooleanExpression> materialize_rust_supports_condition(Vector<ComponentValue> const&);
     OwnPtr<BooleanExpression> materialize_rust_media_condition(Vector<ComponentValue> const&);
     OwnPtr<BooleanExpression> materialize_rust_media_test(Vector<ComponentValue> const&);
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);
@@ -603,7 +606,6 @@ private:
     OwnPtr<BooleanExpression> parse_boolean_expression(TokenStream<ComponentValue>&, MatchResult result_for_general_enclosed, ParseTest parse_test);
     OwnPtr<BooleanExpression> parse_boolean_expression_group(TokenStream<ComponentValue>&, MatchResult result_for_general_enclosed, ParseTest parse_test);
 
-    OwnPtr<BooleanExpression> parse_supports_condition(TokenStream<ComponentValue>&);
     OwnPtr<BooleanExpression> parse_supports_feature(TokenStream<ComponentValue>&);
     OwnPtr<Supports::Declaration> parse_supports_declaration(TokenStream<ComponentValue>&);
 

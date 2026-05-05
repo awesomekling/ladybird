@@ -32,6 +32,7 @@
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
+#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/Sizing.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
@@ -238,6 +239,58 @@ RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringVi
     return {};
 }
 
+static void serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
+{
+    if (component_value.is_token()) {
+        auto original_source_text = component_value.original_source_text();
+        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
+        return;
+    }
+
+    if (component_value.is_block()) {
+        auto const& block = component_value.block();
+        builder.append(block.token.bracket_string());
+        for (auto const& child : block.value)
+            serialize_component_value_for_reparsing(builder, child);
+        builder.append(block.token.bracket_mirror_string());
+        return;
+    }
+
+    if (component_value.is_function()) {
+        auto const& function = component_value.function();
+        serialize_an_identifier(builder, function.name);
+        builder.append('(');
+        for (auto const& child : function.value)
+            serialize_component_value_for_reparsing(builder, child);
+        builder.append(')');
+        return;
+    }
+
+    builder.append(component_value.to_string());
+}
+
+String Parser::serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values)
+        serialize_component_value_for_reparsing(builder, component_value);
+    return builder.to_string_without_validation();
+}
+
+OwnPtr<BooleanExpression> Parser::materialize_rust_supports_condition(Vector<ComponentValue> const& component_values)
+{
+    auto serialized_supports_condition = serialize_component_values_for_reparsing(component_values);
+
+    m_rule_context.append(RuleContext::SupportsCondition);
+    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(serialized_supports_condition.bytes_as_string_view(), "utf-8"sv, [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        TokenStream<ComponentValue> token_stream { component_values };
+        return parse_supports_feature(token_stream);
+    });
+    m_rule_context.take_last();
+
+    return maybe_condition;
+}
+
 // https://drafts.csswg.org/css-values-5/#typedef-boolean-expr
 OwnPtr<BooleanExpression> Parser::parse_boolean_expression(TokenStream<ComponentValue>& tokens, MatchResult result_for_general_enclosed, ParseTest parse_test)
 {
@@ -352,16 +405,6 @@ OwnPtr<BooleanExpression> Parser::parse_boolean_expression_group(TokenStream<Com
         return general_enclosed.release_nonnull();
 
     return {};
-}
-
-// https://drafts.csswg.org/css-conditional-3/#typedef-supports-condition
-OwnPtr<BooleanExpression> Parser::parse_supports_condition(TokenStream<ComponentValue>& tokens)
-{
-    m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_condition = parse_boolean_expression(tokens, MatchResult::False, [this](auto& tokens) { return parse_supports_feature(tokens); });
-    m_rule_context.take_last();
-
-    return maybe_condition;
 }
 
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature

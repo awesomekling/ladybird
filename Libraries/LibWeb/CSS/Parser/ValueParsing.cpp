@@ -5292,7 +5292,7 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
                 return maybe_supports_declaration;
 
             // <supports-condition>
-            if (auto maybe_supports_condition = parse_supports_condition(argument_tokens))
+            if (auto maybe_supports_condition = materialize_rust_supports_condition(function.value))
                 return maybe_supports_condition;
 
             return nullptr;

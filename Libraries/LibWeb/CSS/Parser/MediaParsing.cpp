@@ -18,50 +18,11 @@
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
-#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 
 namespace Web::CSS::Parser {
-
-static void serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
-{
-    if (component_value.is_token()) {
-        auto original_source_text = component_value.original_source_text();
-        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
-        return;
-    }
-
-    if (component_value.is_block()) {
-        auto const& block = component_value.block();
-        builder.append(block.token.bracket_string());
-        for (auto const& child : block.value)
-            serialize_component_value_for_reparsing(builder, child);
-        builder.append(block.token.bracket_mirror_string());
-        return;
-    }
-
-    if (component_value.is_function()) {
-        auto const& function = component_value.function();
-        serialize_an_identifier(builder, function.name);
-        builder.append('(');
-        for (auto const& child : function.value)
-            serialize_component_value_for_reparsing(builder, child);
-        builder.append(')');
-        return;
-    }
-
-    builder.append(component_value.to_string());
-}
-
-static String serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
-{
-    StringBuilder builder;
-    for (auto const& component_value : component_values)
-        serialize_component_value_for_reparsing(builder, component_value);
-    return builder.to_string_without_validation();
-}
 
 NonnullRefPtr<MediaQuery> Parser::materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&& rust_media_query)
 {
