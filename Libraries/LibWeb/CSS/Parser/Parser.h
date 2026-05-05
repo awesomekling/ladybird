@@ -184,7 +184,7 @@ public:
     static ParseErrorOr<void> collect_arbitrary_substitution_function_presence(ComponentValue const&, SubstitutionFunctionsPresence&);
 
 private:
-    Parser(ParsingParams const&, Vector<Token>);
+    Parser(ParsingParams const&, Vector<Token>, String input, String encoding);
 
     // "Parse a stylesheet" is intended to be the normal parser entry point, for parsing stylesheets.
     struct ParsedStyleSheet {
@@ -624,6 +624,8 @@ private:
     ParsingMode m_parsing_mode { ParsingMode::Normal };
     IsUAStyleSheet m_is_ua_style_sheet { IsUAStyleSheet::No };
 
+    String m_input;
+    String m_encoding;
     Vector<Token> m_tokens;
     TokenStream<Token> m_token_stream;
 

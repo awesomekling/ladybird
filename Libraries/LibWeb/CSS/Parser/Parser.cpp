@@ -27,6 +27,7 @@
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
@@ -75,14 +76,21 @@ ParsingParams::ParsingParams(DOM::Document const& document, ParsingMode mode)
 Parser Parser::create(ParsingParams const& context, StringView input, StringView encoding)
 {
     auto tokens = RustTokenizer::tokenize(input, encoding);
-    return Parser { context, move(tokens) };
+    return Parser {
+        context,
+        move(tokens),
+        String::from_utf8_without_validation(input.bytes()),
+        String::from_utf8_without_validation(encoding.bytes())
+    };
 }
 
-Parser::Parser(ParsingParams const& context, Vector<Token> tokens)
+Parser::Parser(ParsingParams const& context, Vector<Token> tokens, String input, String encoding)
     : m_document(context.document)
     , m_realm(context.realm)
     , m_parsing_mode(context.mode)
     , m_is_ua_style_sheet(context.is_ua_style_sheet)
+    , m_input(move(input))
+    , m_encoding(move(encoding))
     , m_tokens(move(tokens))
     , m_token_stream(m_tokens)
     , m_value_context(move(context.value_context))
@@ -1968,7 +1976,7 @@ FlyString Parser::random_value_sharing_auto_name() const
 
 Vector<ComponentValue> Parser::parse_as_list_of_component_values()
 {
-    return parse_a_list_of_component_values(m_token_stream);
+    return RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
 }
 
 RefPtr<StyleValue const> Parser::parse_as_css_value(PropertyID property_id)
