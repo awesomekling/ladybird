@@ -2001,7 +2001,7 @@ Vector<ComponentValue> Parser::parse_as_list_of_component_values()
 
 RefPtr<StyleValue const> Parser::parse_as_css_value(PropertyID property_id)
 {
-    auto component_values = parse_a_list_of_component_values(m_token_stream);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     auto tokens = TokenStream(component_values);
     auto parsed_value = parse_css_value(property_id, tokens);
     if (parsed_value.is_error())
@@ -2011,7 +2011,7 @@ RefPtr<StyleValue const> Parser::parse_as_css_value(PropertyID property_id)
 
 RefPtr<StyleValue const> Parser::parse_as_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id)
 {
-    auto component_values = parse_a_list_of_component_values(m_token_stream);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     auto tokens = TokenStream(component_values);
     auto parsed_value = parse_descriptor_value(at_rule_id, descriptor_name_and_id, tokens);
     if (parsed_value.is_error())
@@ -2021,7 +2021,7 @@ RefPtr<StyleValue const> Parser::parse_as_descriptor_value(AtRuleID at_rule_id, 
 
 RefPtr<StyleValue const> Parser::parse_as_type(ValueType value_type)
 {
-    auto component_values = parse_a_list_of_component_values(m_token_stream);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     TokenStream tokens { component_values };
     return parse_value(value_type, tokens);
 }
