@@ -222,6 +222,22 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
             return maybe_value.release_value();
         };
 
+        auto media_feature_comparison_from_rust = [](FFI::CssMediaFeatureComparison comparison) -> MediaFeature::Comparison {
+            switch (comparison) {
+            case FFI::CssMediaFeatureComparison::Equal:
+                return MediaFeature::Comparison::Equal;
+            case FFI::CssMediaFeatureComparison::LessThan:
+                return MediaFeature::Comparison::LessThan;
+            case FFI::CssMediaFeatureComparison::LessThanOrEqual:
+                return MediaFeature::Comparison::LessThanOrEqual;
+            case FFI::CssMediaFeatureComparison::GreaterThan:
+                return MediaFeature::Comparison::GreaterThan;
+            case FFI::CssMediaFeatureComparison::GreaterThanOrEqual:
+                return MediaFeature::Comparison::GreaterThanOrEqual;
+            }
+            VERIFY_NOT_REACHED();
+        };
+
         if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
             auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
             if (!maybe_media_feature_id.has_value())
@@ -247,6 +263,46 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
                 return MediaFeature::max(media_feature_id, maybe_value.release_value());
             }
             VERIFY_NOT_REACHED();
+        }
+
+        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeNameFirst) {
+            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+            if (!maybe_media_feature_id.has_value())
+                return nullptr;
+            auto media_feature_id = maybe_media_feature_id.value();
+            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+            if (!maybe_value.has_value() || maybe_value->is_ident())
+                return nullptr;
+            return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
+        }
+
+        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeValueFirst) {
+            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+            if (!maybe_media_feature_id.has_value())
+                return nullptr;
+            auto media_feature_id = maybe_media_feature_id.value();
+            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+            if (!maybe_value.has_value())
+                return nullptr;
+            return MediaFeature::half_range(maybe_value.release_value(), media_feature_comparison_from_rust(media_feature_test.feature.comparison), media_feature_id);
+        }
+
+        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Range) {
+            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+            if (!maybe_media_feature_id.has_value())
+                return nullptr;
+            auto media_feature_id = maybe_media_feature_id.value();
+            auto maybe_left_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.left_value);
+            if (!maybe_left_value.has_value())
+                return nullptr;
+            auto maybe_right_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.right_value);
+            if (!maybe_right_value.has_value())
+                return nullptr;
+
+            auto left_comparison = media_feature_comparison_from_rust(media_feature_test.feature.left_comparison);
+            if (left_comparison == MediaFeature::Comparison::Equal || maybe_left_value->is_ident() || maybe_right_value->is_ident())
+                return nullptr;
+            return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
         }
 
         TokenStream<ComponentValue> outer_tokens { component_values };
