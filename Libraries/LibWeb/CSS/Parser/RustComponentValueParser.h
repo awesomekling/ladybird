@@ -43,6 +43,11 @@ public:
         OwnPtr<BooleanExpression> media_condition;
     };
 
+    enum class AllowBlankLayerName : u8 {
+        No,
+        Yes,
+    };
+
     static Optional<ComponentValue> parse_a_component_value(StringView input, StringView encoding);
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
@@ -61,6 +66,8 @@ public:
     static Optional<Vector<Percentage>> parse_a_keyframe_selector_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_keyframes_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_property_name(StringView input, StringView encoding);
+    static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
+    static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);

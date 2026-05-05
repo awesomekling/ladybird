@@ -690,6 +690,45 @@ where
     true
 }
 
+pub(crate) fn parse_a_layer_name<N>(filtered_input: &[u8], allow_blank_layer_name: bool, mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_a_layer_name(allow_blank_layer_name) else {
+        return false;
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    name_callback(&name);
+    true
+}
+
+pub(crate) fn parse_a_layer_name_list<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(names) = parser.parse_a_layer_name_list() else {
+        return false;
+    };
+
+    for name in names {
+        name_callback(&name);
+    }
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2087,6 +2126,70 @@ impl ComponentValueParser {
         Some(name)
     }
 
+    // https://drafts.csswg.org/css-cascade-5/#typedef-layer-name
+    fn parse_a_layer_name(&mut self, allow_blank_layer_name: bool) -> Option<String> {
+        // <layer-name> = <ident> [ '.' <ident> ]*
+        self.discard_whitespace();
+        if allow_blank_layer_name && !self.has_next_component_value() {
+            return Some(String::new());
+        }
+
+        let mut name = self.consume_a_layer_name_part()?;
+        while component_value_is_delim(self.next_component_value(), '.') {
+            self.index += 1;
+            let name_part = self.consume_a_layer_name_part()?;
+            name.push('.');
+            name.push_str(&name_part);
+        }
+
+        Some(name)
+    }
+
+    // https://drafts.csswg.org/css-cascade-5/#layering
+    fn parse_a_layer_name_list(&mut self) -> Option<Vec<String>> {
+        // @layer <layer-name>#;
+        let mut names = Vec::new();
+        self.discard_whitespace();
+        if !self.has_next_component_value() {
+            return None;
+        }
+
+        loop {
+            let name = self.parse_a_layer_name(false)?;
+            names.push(name);
+            self.discard_whitespace();
+
+            if !self.has_next_component_value() {
+                break;
+            }
+
+            if !component_value_is_comma(self.next_component_value()) {
+                return None;
+            }
+            self.index += 1;
+            self.discard_whitespace();
+            if !self.has_next_component_value() {
+                return None;
+            }
+        }
+
+        Some(names)
+    }
+
+    fn consume_a_layer_name_part(&mut self) -> Option<String> {
+        // "The CSS-wide keywords are reserved for future use, and cause the rule to be invalid at parse time
+        // if used as an <ident> in the <layer-name>."
+        let name_part = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if !matches_css_wide_keyword(value) => value.clone(),
+            _ => return None,
+        };
+        self.index += 1;
+        Some(name_part)
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
@@ -2129,6 +2232,16 @@ fn component_value_is_delim(component_value: Option<&ComponentValue>, expected: 
             token_type: TokenType::Delim { value },
             ..
         })) if *value == expected as u32
+    )
+}
+
+fn component_value_is_comma(component_value: Option<&ComponentValue>) -> bool {
+    matches!(
+        component_value,
+        Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Comma,
+            ..
+        }))
     )
 }
 
@@ -4182,8 +4295,8 @@ mod tests {
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_custom_property_name, parse_a_keyframe_selector_list,
-        parse_a_keyframes_name, parse_a_media_query, parse_a_media_test, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, strip_whitespace,
+        parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
+        parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4287,6 +4400,20 @@ mod tests {
         let mut name = None;
         let parsed = parse_a_custom_property_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
+    }
+
+    fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_a_layer_name(input.as_bytes(), allow_blank_layer_name, |parsed_name| {
+            name = Some(parsed_name.to_string())
+        });
+        parsed.then_some(name).flatten()
+    }
+
+    fn parse_layer_name_list(input: &str) -> Option<Vec<String>> {
+        let mut names = Vec::new();
+        let parsed = parse_a_layer_name_list(input.as_bytes(), |name| names.push(name.to_string()));
+        parsed.then_some(names)
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -4996,6 +5123,44 @@ mod tests {
         assert_eq!(parse_custom_property_name("color"), None);
         assert_eq!(parse_custom_property_name("--accent extra"), None);
         assert_eq!(parse_custom_property_name("\"--accent\""), None);
+    }
+
+    #[test]
+    fn parses_layer_names() {
+        assert_eq!(parse_layer_name("components", false), Some("components".to_string()));
+        assert_eq!(
+            parse_layer_name("components.buttons", false),
+            Some("components.buttons".to_string())
+        );
+        assert_eq!(parse_layer_name(" ", true), Some(String::new()));
+    }
+
+    #[test]
+    fn rejects_invalid_layer_names() {
+        assert_eq!(parse_layer_name("", false), None);
+        assert_eq!(parse_layer_name("inherit", false), None);
+        assert_eq!(parse_layer_name("components . buttons", false), None);
+        assert_eq!(parse_layer_name("components, buttons", false), None);
+    }
+
+    #[test]
+    fn parses_layer_name_lists() {
+        assert_eq!(
+            parse_layer_name_list("base, components.buttons, theme"),
+            Some(vec![
+                "base".to_string(),
+                "components.buttons".to_string(),
+                "theme".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_layer_name_lists() {
+        assert_eq!(parse_layer_name_list(""), None);
+        assert_eq!(parse_layer_name_list("base,"), None);
+        assert_eq!(parse_layer_name_list("base components"), None);
+        assert_eq!(parse_layer_name_list("base, initial"), None);
     }
 
     #[test]

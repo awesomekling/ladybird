@@ -281,11 +281,6 @@ private:
     void consume_a_function_and_do_nothing(TokenStream<Token>&);
     // TODO: consume_a_unicode_range_value()
 
-    enum class AllowBlankLayerName {
-        No,
-        Yes,
-    };
-    Optional<FlyString> parse_layer_name(TokenStream<ComponentValue>&, AllowBlankLayerName);
     Optional<Vector<FlyString>> parse_comma_separated_family_name_list(TokenStream<ComponentValue>&);
 
     struct FunctionPrelude {

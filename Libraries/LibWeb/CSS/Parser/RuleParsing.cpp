@@ -268,10 +268,9 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     } else if (tokens.next_token().is_function("layer"sv)) {
         auto layer_transaction = tokens.begin_transaction();
         auto& layer_function = tokens.consume_a_token().function();
-        TokenStream layer_tokens { layer_function.value };
-        auto name = parse_layer_name(layer_tokens, AllowBlankLayerName::No);
-        layer_tokens.discard_whitespace();
-        if (!name.has_value() || layer_tokens.has_next_token()) {
+        auto serialized_layer_name = serialize_component_values_for_reparsing(layer_function.value);
+        auto name = RustComponentValueParser::parse_a_layer_name(serialized_layer_name.bytes_as_string_view(), "utf-8"sv, RustComponentValueParser::AllowBlankLayerName::No);
+        if (!name.has_value()) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@import"_fly_string,
                 .prelude = tokens.dump_string(),
@@ -314,46 +313,6 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     return CSSImportRule::create(realm(), url.release_value(), const_cast<DOM::Document*>(m_document.ptr()), move(layer), move(supports), MediaList::create(realm(), move(media_query_list)));
 }
 
-Optional<FlyString> Parser::parse_layer_name(TokenStream<ComponentValue>& tokens, AllowBlankLayerName allow_blank_layer_name)
-{
-    // https://drafts.csswg.org/css-cascade-5/#typedef-layer-name
-    // <layer-name> = <ident> [ '.' <ident> ]*
-
-    // "The CSS-wide keywords are reserved for future use, and cause the rule to be invalid at parse time if used as an <ident> in the <layer-name>."
-    auto is_valid_layer_name_part = [](auto& token) {
-        return token.is(Token::Type::Ident) && !is_css_wide_keyword(token.token().ident());
-    };
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token() && allow_blank_layer_name == AllowBlankLayerName::Yes) {
-        // No name present, just return a blank one
-        return FlyString();
-    }
-
-    auto& first_name_token = tokens.consume_a_token();
-    if (!is_valid_layer_name_part(first_name_token))
-        return {};
-
-    StringBuilder builder;
-    builder.append(first_name_token.token().ident());
-
-    while (tokens.has_next_token()) {
-        // Repeatedly parse `'.' <ident>`
-        if (!tokens.next_token().is_delim('.'))
-            break;
-        tokens.discard_a_token(); // '.'
-
-        auto& name_token = tokens.consume_a_token();
-        if (!is_valid_layer_name_part(name_token))
-            return {};
-        builder.appendff(".{}", name_token.token().ident());
-    }
-
-    transaction.commit();
-    return builder.to_fly_string_without_validation();
-}
-
 template<typename NestedDeclarationsRule>
 GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested)
 {
@@ -366,24 +325,14 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
 
         // First, the name
         FlyString layer_name = {};
-        auto prelude_tokens = TokenStream { rule.prelude };
-        if (auto maybe_name = parse_layer_name(prelude_tokens, AllowBlankLayerName::Yes); maybe_name.has_value()) {
+        auto serialized_layer_name = serialize_component_values_for_reparsing(rule.prelude);
+        if (auto maybe_name = RustComponentValueParser::parse_a_layer_name(serialized_layer_name.bytes_as_string_view(), "utf-8"sv, RustComponentValueParser::AllowBlankLayerName::Yes); maybe_name.has_value()) {
             layer_name = maybe_name.release_value();
         } else {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@layer"_fly_string,
-                .prelude = prelude_tokens.dump_string(),
+                .prelude = serialized_layer_name,
                 .description = "Not a valid layer name."_string,
-            });
-            return {};
-        }
-
-        prelude_tokens.discard_whitespace();
-        if (prelude_tokens.has_next_token()) {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "@layer"_fly_string,
-                .prelude = prelude_tokens.dump_string(),
-                .description = "Trailing tokens after name in prelude."_string,
             });
             return {};
         }
@@ -406,46 +355,18 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
 
     // CSSLayerStatementRule
     // @layer <layer-name>#;
-    auto prelude_tokens = TokenStream { rule.prelude };
-    prelude_tokens.discard_whitespace();
-    Vector<FlyString> layer_names;
-    while (prelude_tokens.has_next_token()) {
-        // Comma
-        if (!layer_names.is_empty()) {
-            if (auto comma = prelude_tokens.consume_a_token(); !comma.is(Token::Type::Comma)) {
-                ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                    .rule_name = "@layer"_fly_string,
-                    .prelude = prelude_tokens.dump_string(),
-                    .description = "Missing comma between layer names."_string,
-                });
-                return {};
-            }
-            prelude_tokens.discard_whitespace();
-        }
-
-        if (auto name = parse_layer_name(prelude_tokens, AllowBlankLayerName::No); name.has_value()) {
-            layer_names.append(name.release_value());
-        } else {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "@layer"_fly_string,
-                .prelude = prelude_tokens.dump_string(),
-                .description = "Contains invalid layer name."_string,
-            });
-            return {};
-        }
-        prelude_tokens.discard_whitespace();
-    }
-
-    if (layer_names.is_empty()) {
+    auto serialized_layer_names = serialize_component_values_for_reparsing(rule.prelude);
+    auto layer_names = RustComponentValueParser::parse_a_layer_name_list(serialized_layer_names.bytes_as_string_view(), "utf-8"sv);
+    if (!layer_names.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@layer"_fly_string,
-            .prelude = prelude_tokens.dump_string(),
-            .description = "No layer names provided."_string,
+            .prelude = serialized_layer_names,
+            .description = "Contains invalid layer name."_string,
         });
         return {};
     }
 
-    return CSSLayerStatementRule::create(realm(), move(layer_names));
+    return CSSLayerStatementRule::create(realm(), layer_names.release_value());
 }
 
 GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
