@@ -239,6 +239,7 @@ private:
 
     template<typename T>
     Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list(TokenStream<T>&);
+    Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list_from_string(StringView, StringView encoding);
     template<typename T>
     RefPtr<Supports> parse_a_supports(TokenStream<T>&);
 

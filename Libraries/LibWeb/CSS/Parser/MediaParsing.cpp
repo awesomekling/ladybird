@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/StringBuilder.h>
 #include <LibWeb/CSS/CSSFunctionDeclarations.h>
 #include <LibWeb/CSS/CSSMediaRule.h>
 #include <LibWeb/CSS/CSSNestedDeclarations.h>
@@ -32,15 +33,7 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
     if (!m_token_stream.has_next_token())
         return {};
 
-    auto comma_separated_lists = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(m_input, m_encoding);
-
-    AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
-    for (auto& media_query_parts : comma_separated_lists) {
-        auto stream = TokenStream(media_query_parts);
-        media_queries.append(parse_media_query(stream));
-    }
-
-    return media_queries;
+    return parse_a_media_query_list_from_string(m_input, m_encoding);
 }
 
 template<typename T>
@@ -54,8 +47,16 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list(TokenStream<T
     if (!tokens.has_next_token())
         return {};
 
-    auto comma_separated_lists = parse_a_comma_separated_list_of_component_values(tokens);
+    StringBuilder serialized_media_query_list;
+    while (tokens.has_next_token())
+        serialized_media_query_list.append(tokens.consume_a_token().original_source_text());
 
+    return parse_a_media_query_list_from_string(serialized_media_query_list.string_view(), "utf-8"sv);
+}
+
+Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(StringView input, StringView encoding)
+{
+    auto comma_separated_lists = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(input, encoding);
     AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
     for (auto& media_query_parts : comma_separated_lists) {
         auto stream = TokenStream(media_query_parts);
