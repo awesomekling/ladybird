@@ -205,11 +205,48 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
         serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
 
     auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
+            if (media_feature.id > to_underlying(MediaFeatureID::Width))
+                return {};
+            return static_cast<MediaFeatureID>(media_feature.id);
+        };
+
+        auto parse_rust_media_feature_value = [this](MediaFeatureID media_feature_id, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
+            TokenStream value_tokens { component_values };
+            auto maybe_value = parse_media_feature_value(media_feature_id, value_tokens);
+            if (!maybe_value.has_value())
+                return {};
+            value_tokens.discard_whitespace();
+            if (value_tokens.has_next_token())
+                return {};
+            return maybe_value.release_value();
+        };
+
         if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Boolean) {
-            if (media_feature_test.feature.id > to_underlying(MediaFeatureID::Width))
+            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+            if (!maybe_media_feature_id.has_value())
                 return nullptr;
-            auto media_feature_id = static_cast<MediaFeatureID>(media_feature_test.feature.id);
-            return MediaFeature::boolean(media_feature_id);
+            return MediaFeature::boolean(maybe_media_feature_id.value());
+        }
+
+        if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Plain) {
+            auto maybe_media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
+            if (!maybe_media_feature_id.has_value())
+                return nullptr;
+            auto media_feature_id = maybe_media_feature_id.value();
+            auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
+            if (!maybe_value.has_value())
+                return nullptr;
+
+            switch (media_feature_test.feature.name_kind) {
+            case FFI::CssMediaFeatureNameKind::Normal:
+                return MediaFeature::plain(media_feature_id, maybe_value.release_value());
+            case FFI::CssMediaFeatureNameKind::Min:
+                return MediaFeature::min(media_feature_id, maybe_value.release_value());
+            case FFI::CssMediaFeatureNameKind::Max:
+                return MediaFeature::max(media_feature_id, maybe_value.release_value());
+            }
+            VERIFY_NOT_REACHED();
         }
 
         TokenStream<ComponentValue> outer_tokens { component_values };
