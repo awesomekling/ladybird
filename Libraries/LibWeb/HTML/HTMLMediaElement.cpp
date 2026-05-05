@@ -15,6 +15,7 @@
 #include <LibWeb/Bindings/HTMLMediaElement.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentObserver.h>
@@ -810,8 +811,17 @@ public:
             return;
         }
 
-        // FIXME: 3: ⌛ If candidate has a media attribute whose value does not match the environment,
-        //           then end the synchronous section, and jump down to the failed with elements step below.
+        // 3. ⌛ If candidate has a media attribute whose value does not match the environment,
+        //    then end the synchronous section, and jump down to the failed with elements step below.
+        if (auto maybe_media = m_candidate->get_attribute(HTML::AttributeNames::media); maybe_media.has_value()) {
+            if (!media_query_list_matches_environment(
+                    CSS::Parser::ParsingParams { m_candidate->document() },
+                    m_candidate->document(),
+                    *maybe_media)) {
+                failed_with_elements();
+                return;
+            }
+        }
 
         // 4. ⌛ Let urlRecord be the result of encoding-parsing a URL given candidate's src attribute's value, relative to candidate's node document when the src attribute was last changed.
         auto url_record = m_candidate->document().encoding_parse_url(candidate_src);

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<video id="video">
+    <source media="not all, all" src="../../../Assets/test-webm.webm">
+</video>
+<script>
+    const video = document.getElementById("video");
+
+    asyncTest(done => {
+        video.addEventListener("canplaythrough", () => {
+            println(`selected source with matching media query list: ${video.currentSrc.endsWith("/Assets/test-webm.webm")}`);
+            done();
+        });
+        video.load();
+    });
+</script>
