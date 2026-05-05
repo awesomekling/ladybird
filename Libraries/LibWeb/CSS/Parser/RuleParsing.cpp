@@ -668,39 +668,16 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         return {};
     }
 
-    prelude_stream.discard_whitespace();
-    auto const& token = prelude_stream.consume_a_token();
-    if (!token.is_token()) {
+    auto serialized_custom_property_name = serialize_component_values_for_reparsing(rule.prelude);
+    auto name = RustComponentValueParser::parse_a_custom_property_name(serialized_custom_property_name.bytes_as_string_view(), "utf-8"sv);
+    if (!name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@property"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Name must be an ident."_string,
-        });
-        return {};
-    }
-
-    auto name_token = token.token();
-    prelude_stream.discard_whitespace();
-
-    if (prelude_stream.has_next_token()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@property"_fly_string,
-            .prelude = prelude_stream.dump_string(),
-            .description = "Trailing tokens after name in prelude."_string,
-        });
-        return {};
-    }
-
-    if (!name_token.is(Token::Type::Ident) || !is_a_custom_property_name_string(name_token.ident())) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@property"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_custom_property_name,
             .description = "Name must be an ident starting with '--'."_string,
         });
         return {};
     }
-
-    auto const& name = name_token.ident();
 
     Optional<FlyString> syntax_maybe;
     Optional<bool> inherits_maybe;
@@ -772,7 +749,7 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         }
     }
 
-    return CSSPropertyRule::create(realm(), name, syntax_maybe.value(), inherits_maybe.value(), move(initial_value_maybe));
+    return CSSPropertyRule::create(realm(), name.release_value(), syntax_maybe.value(), inherits_maybe.value(), move(initial_value_maybe));
 }
 
 // https://drafts.csswg.org/css-conditional-5/#container-rule

@@ -674,6 +674,22 @@ where
     true
 }
 
+pub(crate) fn parse_a_custom_property_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_a_custom_property_name() else {
+        return false;
+    };
+
+    name_callback(&name);
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2049,6 +2065,28 @@ impl ComponentValueParser {
         Some(name)
     }
 
+    // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
+    fn parse_a_custom_property_name(&mut self) -> Option<String> {
+        // The <custom-property-name> production corresponds to this: it’s defined as any <dashed-ident>
+        // (a valid identifier that starts with two dashes), except -- itself, which is reserved for future use by CSS.
+        self.discard_whitespace();
+        let name = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if is_a_custom_property_name_string(value) => value.clone(),
+            _ => return None,
+        };
+        self.index += 1;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(name)
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
@@ -2677,6 +2715,10 @@ fn matches_css_wide_keyword(value: &str) -> bool {
         || value.eq_ignore_ascii_case("unset")
         || value.eq_ignore_ascii_case("revert")
         || value.eq_ignore_ascii_case("revert-layer")
+}
+
+fn is_a_custom_property_name_string(value: &str) -> bool {
+    value.starts_with("--") && value != "--"
 }
 
 fn component_values_parse_as_mf_name(
@@ -4139,9 +4181,9 @@ mod tests {
         MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_keyframe_selector_list, parse_a_keyframes_name,
-        parse_a_media_query, parse_a_media_test, parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition,
-        strip_whitespace,
+        component_values_parse_as_value_type, parse_a_custom_property_name, parse_a_keyframe_selector_list,
+        parse_a_keyframes_name, parse_a_media_query, parse_a_media_test, parse_a_page_selector_list,
+        parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4238,6 +4280,12 @@ mod tests {
     fn parse_keyframes_name(input: &str) -> Option<String> {
         let mut name = None;
         let parsed = parse_a_keyframes_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
+        parsed.then_some(name).flatten()
+    }
+
+    fn parse_custom_property_name(input: &str) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_a_custom_property_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
     }
 
@@ -4935,6 +4983,19 @@ mod tests {
         assert_eq!(parse_keyframes_name("inherit"), None);
         assert_eq!(parse_keyframes_name("slide extra"), None);
         assert_eq!(parse_keyframes_name("1"), None);
+    }
+
+    #[test]
+    fn parses_custom_property_names() {
+        assert_eq!(parse_custom_property_name("--accent"), Some("--accent".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_custom_property_names() {
+        assert_eq!(parse_custom_property_name("--"), None);
+        assert_eq!(parse_custom_property_name("color"), None);
+        assert_eq!(parse_custom_property_name("--accent extra"), None);
+        assert_eq!(parse_custom_property_name("\"--accent\""), None);
     }
 
     #[test]
