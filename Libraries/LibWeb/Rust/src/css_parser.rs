@@ -70,6 +70,22 @@ pub(crate) struct Declaration {
     pub(crate) important: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum BooleanExpression {
+    Not(Box<BooleanExpression>),
+    Parens(Box<BooleanExpression>),
+    And(Vec<BooleanExpression>),
+    Or(Vec<BooleanExpression>),
+    Test(Vec<ComponentValue>),
+    GeneralEnclosed(ComponentValue),
+}
+
+struct ComponentValueParser {
+    component_values: Vec<ComponentValue>,
+    index: usize,
+    boolean_expression: Option<BooleanExpression>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Nested {
     No,
@@ -179,6 +195,24 @@ pub struct CssRuleEvent {
     pub is_block_rule: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssBooleanExpressionEventKind {
+    Invalid,
+    NotStart,
+    NotEnd,
+    ParensStart,
+    ParensEnd,
+    AndStart,
+    AndEnd,
+    OrStart,
+    OrEnd,
+    TestStart,
+    TestEnd,
+    GeneralEnclosedStart,
+    GeneralEnclosedEnd,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -204,6 +238,37 @@ pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
         }
         group_callback();
     }
+}
+
+pub(crate) fn parse_a_supports_condition<E, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssBooleanExpressionEventKind),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    parser.rule_context.push(RuleContext::SupportsCondition);
+    let component_values = parser.parse_a_list_of_component_values();
+    parser.rule_context.pop();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    if parser.parse_a_supports_condition().is_none() || parser.has_next_component_value() {
+        event_callback(CssBooleanExpressionEventKind::Invalid);
+        return;
+    }
+
+    let boolean_expression = parser
+        .boolean_expression
+        .take()
+        .expect("parsed expression must be present");
+    emit_boolean_expression(
+        &boolean_expression,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
 }
 
 pub(crate) fn parse_a_component_value<F>(filtered_input: &[u8], mut callback: F)
@@ -587,6 +652,345 @@ fn emit_component_value_list<E, C>(
         emit_component_value(component_value, filtered_input, component_value_callback);
     }
     event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
+}
+
+fn emit_boolean_expression<E, C>(
+    expression: &BooleanExpression,
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssBooleanExpressionEventKind),
+    C: FnMut(CssComponentValue),
+{
+    match expression {
+        BooleanExpression::Not(child) => {
+            event_callback(CssBooleanExpressionEventKind::NotStart);
+            emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            event_callback(CssBooleanExpressionEventKind::NotEnd);
+        }
+        BooleanExpression::Parens(child) => {
+            event_callback(CssBooleanExpressionEventKind::ParensStart);
+            emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            event_callback(CssBooleanExpressionEventKind::ParensEnd);
+        }
+        BooleanExpression::And(children) => {
+            event_callback(CssBooleanExpressionEventKind::AndStart);
+            for child in children {
+                emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            }
+            event_callback(CssBooleanExpressionEventKind::AndEnd);
+        }
+        BooleanExpression::Or(children) => {
+            event_callback(CssBooleanExpressionEventKind::OrStart);
+            for child in children {
+                emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            }
+            event_callback(CssBooleanExpressionEventKind::OrEnd);
+        }
+        BooleanExpression::Test(component_values) => {
+            event_callback(CssBooleanExpressionEventKind::TestStart);
+            for component_value in component_values {
+                emit_component_value(component_value, filtered_input, component_value_callback);
+            }
+            event_callback(CssBooleanExpressionEventKind::TestEnd);
+        }
+        BooleanExpression::GeneralEnclosed(component_value) => {
+            event_callback(CssBooleanExpressionEventKind::GeneralEnclosedStart);
+            emit_component_value(component_value, filtered_input, component_value_callback);
+            event_callback(CssBooleanExpressionEventKind::GeneralEnclosedEnd);
+        }
+    }
+}
+
+impl ComponentValueParser {
+    fn new(component_values: Vec<ComponentValue>) -> Self {
+        Self {
+            component_values,
+            index: 0,
+            boolean_expression: None,
+        }
+    }
+
+    fn next_component_value(&self) -> Option<&ComponentValue> {
+        self.component_values.get(self.index)
+    }
+
+    fn consume_the_next_component_value(&mut self) -> Option<ComponentValue> {
+        let component_value = self.next_component_value()?.clone();
+        self.index += 1;
+        Some(component_value)
+    }
+
+    fn discard_whitespace(&mut self) {
+        while matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            }))
+        ) {
+            self.index += 1;
+        }
+    }
+
+    fn has_next_component_value(&mut self) -> bool {
+        self.discard_whitespace();
+        self.next_component_value().is_some()
+    }
+
+    // https://drafts.csswg.org/css-conditional-3/#typedef-supports-condition
+    fn parse_a_supports_condition(&mut self) -> Option<()> {
+        self.boolean_expression = self.parse_boolean_expression();
+        self.boolean_expression.as_ref()?;
+        Some(())
+    }
+
+    // https://drafts.csswg.org/css-values-5/#typedef-boolean-expr
+    fn parse_boolean_expression(&mut self) -> Option<BooleanExpression> {
+        // <boolean-expr[ <test> ]> = not <boolean-expr-group> | <boolean-expr-group>
+        //                            [ [ and <boolean-expr-group> ]*
+        //                            | [ or <boolean-expr-group> ]* ]
+        let saved_index = self.index;
+        self.discard_whitespace();
+
+        // `not <boolean-expr-group>`
+        if component_value_is_ident(self.next_component_value(), "not") {
+            self.index += 1;
+            self.discard_whitespace();
+
+            let child = self.parse_boolean_expression_group()?;
+            self.discard_whitespace();
+            return Some(BooleanExpression::Not(Box::new(child)));
+        }
+
+        // `<boolean-expr-group>
+        //   [ [ and <boolean-expr-group> ]*
+        //   | [ or <boolean-expr-group> ]* ]`
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Combinator {
+            And,
+            Or,
+        }
+
+        let mut children = Vec::new();
+        let mut combinator = None;
+
+        while self.next_component_value().is_some() {
+            if !children.is_empty() {
+                let maybe_combinator = if component_value_is_ident(self.next_component_value(), "and") {
+                    Some(Combinator::And)
+                } else if component_value_is_ident(self.next_component_value(), "or") {
+                    Some(Combinator::Or)
+                } else {
+                    None
+                };
+
+                let maybe_combinator = maybe_combinator?;
+                if let Some(combinator) = combinator {
+                    if maybe_combinator != combinator {
+                        self.index = saved_index;
+                        return None;
+                    }
+                } else {
+                    combinator = Some(maybe_combinator);
+                }
+                self.index += 1;
+            }
+
+            self.discard_whitespace();
+            children.push(self.parse_boolean_expression_group()?);
+            self.discard_whitespace();
+        }
+
+        if children.is_empty() {
+            self.index = saved_index;
+            return None;
+        }
+
+        if children.len() == 1 {
+            return children.pop();
+        }
+
+        match combinator.expect("multiple children must have a combinator") {
+            Combinator::And => Some(BooleanExpression::And(children)),
+            Combinator::Or => Some(BooleanExpression::Or(children)),
+        }
+    }
+
+    fn parse_boolean_expression_group(&mut self) -> Option<BooleanExpression> {
+        // <boolean-expr-group> = <test> | ( <boolean-expr[ <test> ]> ) | <general-enclosed>
+
+        // `( <boolean-expr[ <test> ]> )`
+        if let Some(ComponentValue::SimpleBlock(block)) = self.next_component_value().cloned()
+            && is_paren_block(&block)
+        {
+            let saved_index = self.index;
+            self.index += 1;
+            let mut child_parser = ComponentValueParser::new(block.value);
+            if let Some(expression) = child_parser.parse_boolean_expression()
+                && !child_parser.has_next_component_value()
+            {
+                return Some(BooleanExpression::Parens(Box::new(expression)));
+            }
+            self.index = saved_index;
+        }
+
+        // `<test>`
+        if let Some(test) = self.parse_supports_feature() {
+            return Some(BooleanExpression::Test(vec![test]));
+        }
+
+        // `<general-enclosed>`
+        if let Some(general_enclosed) = self.parse_general_enclosed() {
+            return Some(BooleanExpression::GeneralEnclosed(general_enclosed));
+        }
+
+        None
+    }
+
+    // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
+    fn parse_supports_feature(&mut self) -> Option<ComponentValue> {
+        // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
+        //                    | <supports-font-format-fn> | <supports-env-fn>
+        //                    | <supports-decl>
+        let component_value = self.next_component_value()?.clone();
+
+        // `<supports-decl> = ( <declaration> )`
+        if let ComponentValue::SimpleBlock(block) = &component_value
+            && is_paren_block(block)
+            && component_values_start_like_a_declaration(&block.value)
+        {
+            self.index += 1;
+            return Some(component_value);
+        }
+
+        let ComponentValue::Function(function) = &component_value else {
+            return None;
+        };
+
+        // `<supports-selector-fn> = selector( <complex-selector> )`
+        if function.name.eq_ignore_ascii_case("selector") {
+            self.index += 1;
+            return Some(component_value);
+        }
+
+        // `<supports-font-tech-fn> = font-tech( <font-tech> )`
+        // `<supports-font-format-fn> = font-format( <font-format> )`
+        // `<supports-env-fn> = env( <ident> )`
+        if function.name.eq_ignore_ascii_case("font-tech")
+            || function.name.eq_ignore_ascii_case("font-format")
+            || function.name.eq_ignore_ascii_case("env")
+        {
+            let mut parser = ComponentValueParser::new(function.value.clone());
+            parser.discard_whitespace();
+            let ident = parser.consume_the_next_component_value();
+            parser.discard_whitespace();
+            if matches!(
+                ident,
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { .. },
+                    ..
+                }))
+            ) && parser.next_component_value().is_none()
+            {
+                self.index += 1;
+                return Some(component_value);
+            }
+        }
+
+        None
+    }
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
+    fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
+        // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
+        //
+        // https://drafts.csswg.org/css-syntax-3/#typedef-any-value
+        // "The <any-value> production is identical to <declaration-value>",
+        // and <declaration-value> does not contain "<<bad-string-token>>,
+        // <<bad-url-token>>, unmatched <<)-token>>, <<]-token>>, or
+        // <<}-token>>".
+        let component_value = self.next_component_value()?.clone();
+        let contains_only_any_value = match &component_value {
+            ComponentValue::Function(function) => contains_only_any_value(&function.value),
+            ComponentValue::SimpleBlock(block) if is_paren_block(block) => contains_only_any_value(&block.value),
+            _ => false,
+        };
+
+        if contains_only_any_value {
+            self.index += 1;
+            return Some(component_value);
+        }
+
+        None
+    }
+}
+
+fn component_value_is_ident(component_value: Option<&ComponentValue>, expected: &str) -> bool {
+    matches!(
+        component_value,
+        Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) if value.eq_ignore_ascii_case(expected)
+    )
+}
+
+fn is_paren_block(block: &SimpleBlock) -> bool {
+    matches!(block.token.token_type, TokenType::OpenParen)
+}
+
+fn component_values_start_like_a_declaration(component_values: &[ComponentValue]) -> bool {
+    let mut non_whitespace = component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value));
+
+    matches!(
+        (non_whitespace.next(), non_whitespace.next()),
+        (
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { .. },
+                ..
+            })),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        )
+    )
+}
+
+fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
+    for component_value in component_values {
+        match component_value {
+            ComponentValue::Function(function) => {
+                if !contains_only_any_value(&function.value) {
+                    return false;
+                }
+            }
+            ComponentValue::SimpleBlock(block) => {
+                if !contains_only_any_value(&block.value) {
+                    return false;
+                }
+            }
+            ComponentValue::PreservedToken(token) => match token.token_type {
+                TokenType::EndOfFile
+                | TokenType::BadString
+                | TokenType::BadUrl
+                | TokenType::Function { .. }
+                | TokenType::OpenCurly
+                | TokenType::OpenParen
+                | TokenType::OpenSquare
+                | TokenType::CloseCurly
+                | TokenType::CloseParen
+                | TokenType::CloseSquare => return false,
+                _ => {}
+            },
+        }
+    }
+
+    true
 }
 
 impl Parser {
@@ -1671,7 +2075,9 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComponentValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations};
+    use super::{
+        BooleanExpression, ComponentValue, ComponentValueParser, Parser, Rule, RuleContext, RuleOrListOfDeclarations,
+    };
     use crate::css_tokenizer::{self, TokenType};
 
     fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
@@ -1760,6 +2166,31 @@ mod tests {
             panic!("expected a function");
         };
         assert_eq!(function.name, "calc");
+    }
+
+    #[test]
+    fn parses_supports_boolean_expression() {
+        let component_values = parse("(color: green) and (width: 50px)");
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_supports_condition();
+
+        let Some(BooleanExpression::And(children)) = parser.boolean_expression else {
+            panic!("expected an and expression");
+        };
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().all(|child| matches!(child, BooleanExpression::Test(_))));
+    }
+
+    #[test]
+    fn parses_supports_general_enclosed() {
+        let component_values = parse("florb(123)");
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_supports_condition();
+
+        assert!(matches!(
+            parser.boolean_expression,
+            Some(BooleanExpression::GeneralEnclosed(_))
+        ));
     }
 
     #[test]

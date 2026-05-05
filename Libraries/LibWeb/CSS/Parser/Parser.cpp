@@ -226,11 +226,13 @@ RefPtr<Supports> Parser::parse_a_supports(TokenStream<T>& tokens)
 
 RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringView encoding)
 {
-    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(input, encoding);
-    TokenStream<ComponentValue> token_stream { component_values };
-    auto maybe_condition = parse_supports_condition(token_stream);
-    token_stream.discard_whitespace();
-    if (maybe_condition && !token_stream.has_next_token())
+    m_rule_context.append(RuleContext::SupportsCondition);
+    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(input, encoding, [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        TokenStream<ComponentValue> token_stream { component_values };
+        return parse_supports_feature(token_stream);
+    });
+    m_rule_context.take_last();
+    if (maybe_condition)
         return Supports::create(maybe_condition.release_nonnull());
 
     return {};

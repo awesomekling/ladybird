@@ -14,7 +14,8 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssComponentValue, CssComponentValueKind, CssDeclaration, CssRuleContext, CssRuleEvent, CssRuleEventKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssRuleContext,
+    CssRuleEvent, CssRuleEventKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -161,6 +162,37 @@ pub unsafe extern "C" fn rust_css_parse_component_value(
             css_parser::parse_a_component_value(input, |component_value| {
                 callback(ctx, &raw const component_value);
             });
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_supports_condition(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_a_supports_condition(
+                input,
+                |event| {
+                    event_callback(ctx, event);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            );
         });
     }
 }

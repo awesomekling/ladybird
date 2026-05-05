@@ -335,6 +335,192 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     return builder.declaration;
 }
 
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
+{
+    struct BooleanExpressionBuilder {
+        enum class FrameType : u8 {
+            Not,
+            Parens,
+            And,
+            Or,
+            Test,
+            GeneralEnclosed,
+        };
+
+        struct Frame {
+            FrameType type;
+            Vector<NonnullOwnPtr<BooleanExpression>> children;
+        };
+
+        Vector<Frame> stack;
+        OwnPtr<BooleanExpression> root;
+        ComponentValueBuilder component_value_builder;
+        AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test;
+        bool invalid { false };
+
+        void append_expression(OwnPtr<BooleanExpression> expression)
+        {
+            if (!expression) {
+                invalid = true;
+                return;
+            }
+
+            if (stack.is_empty()) {
+                if (root) {
+                    invalid = true;
+                    return;
+                }
+                root = expression.release_nonnull();
+                return;
+            }
+
+            stack.last().children.append(expression.release_nonnull());
+        }
+
+        void end_frame(FrameType expected_type)
+        {
+            VERIFY(!stack.is_empty());
+            auto frame = stack.take_last();
+            VERIFY(frame.type == expected_type);
+
+            switch (expected_type) {
+            case FrameType::Not:
+                if (frame.children.size() != 1) {
+                    invalid = true;
+                    return;
+                }
+                append_expression(BooleanNotExpression::create(frame.children.take_first()));
+                return;
+            case FrameType::Parens:
+                if (frame.children.size() != 1) {
+                    invalid = true;
+                    return;
+                }
+                append_expression(BooleanExpressionInParens::create(frame.children.take_first()));
+                return;
+            case FrameType::And:
+                if (frame.children.is_empty()) {
+                    invalid = true;
+                    return;
+                }
+                append_expression(BooleanAndExpression::create(move(frame.children)));
+                return;
+            case FrameType::Or:
+                if (frame.children.is_empty()) {
+                    invalid = true;
+                    return;
+                }
+                append_expression(BooleanOrExpression::create(move(frame.children)));
+                return;
+            case FrameType::Test:
+            case FrameType::GeneralEnclosed:
+                VERIFY_NOT_REACHED();
+            }
+        }
+
+        void end_test()
+        {
+            VERIFY(!stack.is_empty());
+            auto frame = stack.take_last();
+            VERIFY(frame.type == FrameType::Test);
+            VERIFY(frame.children.is_empty());
+            VERIFY(component_value_builder.stack.is_empty());
+
+            Optional<String> general_enclosed_fallback;
+            if (component_value_builder.root_values.size() == 1)
+                general_enclosed_fallback = component_value_builder.root_values.first().to_string();
+
+            auto expression = parse_test(move(component_value_builder.root_values));
+            if (!expression && general_enclosed_fallback.has_value())
+                expression = GeneralEnclosed::create(general_enclosed_fallback.release_value(), MatchResult::False);
+            append_expression(move(expression));
+            component_value_builder = {};
+        }
+
+        void end_general_enclosed()
+        {
+            VERIFY(!stack.is_empty());
+            auto frame = stack.take_last();
+            VERIFY(frame.type == FrameType::GeneralEnclosed);
+            VERIFY(frame.children.is_empty());
+            VERIFY(component_value_builder.stack.is_empty());
+            VERIFY(component_value_builder.root_values.size() == 1);
+
+            auto serialized_contents = component_value_builder.root_values.first().to_string();
+            append_expression(GeneralEnclosed::create(move(serialized_contents), MatchResult::False));
+            component_value_builder = {};
+        }
+    };
+
+    BooleanExpressionBuilder builder {
+        .parse_test = move(parse_test),
+    };
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_supports_condition(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
+            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
+            switch (event) {
+            case FFI::CssBooleanExpressionEventKind::Invalid:
+                builder.invalid = true;
+                break;
+            case FFI::CssBooleanExpressionEventKind::NotStart:
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Not });
+                break;
+            case FFI::CssBooleanExpressionEventKind::ParensStart:
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Parens });
+                break;
+            case FFI::CssBooleanExpressionEventKind::AndStart:
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::And });
+                break;
+            case FFI::CssBooleanExpressionEventKind::OrStart:
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Or });
+                break;
+            case FFI::CssBooleanExpressionEventKind::TestStart:
+                builder.component_value_builder = {};
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::Test });
+                break;
+            case FFI::CssBooleanExpressionEventKind::GeneralEnclosedStart:
+                builder.component_value_builder = {};
+                builder.stack.append({ .type = BooleanExpressionBuilder::FrameType::GeneralEnclosed });
+                break;
+            case FFI::CssBooleanExpressionEventKind::NotEnd:
+                builder.end_frame(BooleanExpressionBuilder::FrameType::Not);
+                break;
+            case FFI::CssBooleanExpressionEventKind::ParensEnd:
+                builder.end_frame(BooleanExpressionBuilder::FrameType::Parens);
+                break;
+            case FFI::CssBooleanExpressionEventKind::AndEnd:
+                builder.end_frame(BooleanExpressionBuilder::FrameType::And);
+                break;
+            case FFI::CssBooleanExpressionEventKind::OrEnd:
+                builder.end_frame(BooleanExpressionBuilder::FrameType::Or);
+                break;
+            case FFI::CssBooleanExpressionEventKind::TestEnd:
+                builder.end_test();
+                break;
+            case FFI::CssBooleanExpressionEventKind::GeneralEnclosedEnd:
+                builder.end_general_enclosed();
+                break;
+            }
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<BooleanExpressionBuilder*>(raw_builder);
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    if (builder.invalid)
+        return nullptr;
+
+    VERIFY(builder.stack.is_empty());
+    VERIFY(builder.component_value_builder.stack.is_empty());
+    return move(builder.root);
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,

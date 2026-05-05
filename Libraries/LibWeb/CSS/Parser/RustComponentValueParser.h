@@ -6,9 +6,12 @@
 
 #pragma once
 
+#include <AK/Function.h>
 #include <AK/Optional.h>
+#include <AK/OwnPtr.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
+#include <LibWeb/CSS/BooleanExpression.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
 #include <LibWeb/CSS/Parser/RuleContext.h>
 #include <LibWeb/CSS/Parser/Types.h>
@@ -23,6 +26,7 @@ public:
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
+    static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
