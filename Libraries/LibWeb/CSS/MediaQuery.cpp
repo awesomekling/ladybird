@@ -14,18 +14,6 @@
 
 namespace Web::CSS {
 
-NonnullRefPtr<MediaQuery> MediaQuery::create_not_all()
-{
-    auto media_query = new MediaQuery;
-    media_query->m_negated = true;
-    media_query->m_media_type = {
-        .name = "all"_fly_string,
-        .known_type = KnownMediaType::All,
-    };
-
-    return adopt_ref(*media_query);
-}
-
 String MediaFeatureValue::to_string(SerializationMode mode) const
 {
     StringBuilder builder;

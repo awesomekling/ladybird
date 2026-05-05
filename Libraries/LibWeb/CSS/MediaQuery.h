@@ -197,7 +197,6 @@ public:
         Optional<KnownMediaType> known_type;
     };
 
-    static NonnullRefPtr<MediaQuery> create_not_all();
     static NonnullRefPtr<MediaQuery> create() { return adopt_ref(*new MediaQuery); }
 
     bool matches() const { return m_matches; }
