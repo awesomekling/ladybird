@@ -204,7 +204,7 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
     while (tokens.has_next_token())
         serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
 
-    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
         auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
             if (media_feature.id > to_underlying(MediaFeatureID::Width))
                 return {};
@@ -305,19 +305,6 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
             return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
         }
 
-        TokenStream<ComponentValue> outer_tokens { component_values };
-        outer_tokens.discard_whitespace();
-
-        if (!(outer_tokens.next_token().is_block() && outer_tokens.next_token().block().is_paren()))
-            return nullptr;
-
-        auto const& block = outer_tokens.consume_a_token().block();
-
-        TokenStream inner_tokens { block.value };
-
-        if (auto maybe_media_feature = parse_media_feature(inner_tokens))
-            return maybe_media_feature;
-
         return nullptr;
     });
 
@@ -332,254 +319,22 @@ OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentVal
 // `<media-feature>`, https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature
 OwnPtr<MediaFeature> Parser::parse_media_feature(TokenStream<ComponentValue>& inner_tokens)
 {
-    // `<media-feature> = [ <mf-plain> | <mf-boolean> | <mf-range> ]`
     auto transaction = inner_tokens.begin_transaction();
 
-    // `<mf-name> = <ident>`
-    struct MediaFeatureName {
-        enum Type {
-            Normal,
-            Min,
-            Max
-        } type;
-        MediaFeatureID id;
-    };
-    auto parse_mf_name = [](auto& tokens, bool allow_min_max_prefix) -> Optional<MediaFeatureName> {
-        auto transaction = tokens.begin_transaction();
-        auto& token = tokens.consume_a_token();
-        if (token.is(Token::Type::Ident)) {
-            auto name = token.token().ident();
-            if (auto id = media_feature_id_from_string(name); id.has_value()) {
-                transaction.commit();
-                return MediaFeatureName { MediaFeatureName::Type::Normal, id.value() };
-            }
+    StringBuilder serialized_media_feature;
+    serialized_media_feature.append('(');
+    while (inner_tokens.has_next_token())
+        serialize_component_value_for_reparsing(serialized_media_feature, inner_tokens.consume_a_token());
+    serialized_media_feature.append(')');
 
-            if (allow_min_max_prefix && (name.starts_with_bytes("min-"sv, CaseSensitivity::CaseInsensitive) || name.starts_with_bytes("max-"sv, CaseSensitivity::CaseInsensitive))) {
-                auto adjusted_name = name.bytes_as_string_view().substring_view(4);
-                if (auto id = media_feature_id_from_string(adjusted_name); id.has_value() && media_feature_type_is_range(id.value())) {
-                    transaction.commit();
-                    return MediaFeatureName {
-                        name.starts_with_bytes("min-"sv, CaseSensitivity::CaseInsensitive) ? MediaFeatureName::Type::Min : MediaFeatureName::Type::Max,
-                        id.value()
-                    };
-                }
-            }
-        }
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(serialized_media_feature.string_view(), "utf-8"sv);
+    TokenStream outer_tokens { component_values };
+    auto media_condition = parse_media_condition(outer_tokens);
+    if (!media_condition || !is<MediaFeature>(*media_condition))
         return {};
-    };
 
-    // `<mf-boolean> = <mf-name>`
-    auto parse_mf_boolean = [&](auto& tokens) -> OwnPtr<MediaFeature> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        if (auto maybe_name = parse_mf_name(tokens, false); maybe_name.has_value()) {
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token()) {
-                transaction.commit();
-                return MediaFeature::boolean(maybe_name->id);
-            }
-        }
-
-        return {};
-    };
-
-    // `<mf-plain> = <mf-name> : <mf-value>`
-    auto parse_mf_plain = [&](auto& tokens) -> OwnPtr<MediaFeature> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        if (auto maybe_name = parse_mf_name(tokens, true); maybe_name.has_value()) {
-            tokens.discard_whitespace();
-            if (tokens.consume_a_token().is(Token::Type::Colon)) {
-                tokens.discard_whitespace();
-                if (auto maybe_value = parse_media_feature_value(maybe_name->id, tokens); maybe_value.has_value()) {
-                    tokens.discard_whitespace();
-                    if (!tokens.has_next_token()) {
-                        transaction.commit();
-                        switch (maybe_name->type) {
-                        case MediaFeatureName::Type::Normal:
-                            return MediaFeature::plain(maybe_name->id, maybe_value.release_value());
-                        case MediaFeatureName::Type::Min:
-                            return MediaFeature::min(maybe_name->id, maybe_value.release_value());
-                        case MediaFeatureName::Type::Max:
-                            return MediaFeature::max(maybe_name->id, maybe_value.release_value());
-                        }
-                        VERIFY_NOT_REACHED();
-                    }
-                }
-            }
-        }
-        return {};
-    };
-
-    // `<mf-lt> = '<' '='?
-    //  <mf-gt> = '>' '='?
-    //  <mf-eq> = '='
-    //  <mf-comparison> = <mf-lt> | <mf-gt> | <mf-eq>`
-    auto parse_comparison = [](auto& tokens) -> Optional<MediaFeature::Comparison> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        auto& first = tokens.consume_a_token();
-        if (first.is(Token::Type::Delim)) {
-            auto first_delim = first.token().delim();
-            if (first_delim == '=') {
-                transaction.commit();
-                return MediaFeature::Comparison::Equal;
-            }
-            if (first_delim == '<') {
-                auto& second = tokens.next_token();
-                if (second.is_delim('=')) {
-                    tokens.discard_a_token();
-                    transaction.commit();
-                    return MediaFeature::Comparison::LessThanOrEqual;
-                }
-                transaction.commit();
-                return MediaFeature::Comparison::LessThan;
-            }
-            if (first_delim == '>') {
-                auto& second = tokens.next_token();
-                if (second.is_delim('=')) {
-                    tokens.discard_a_token();
-                    transaction.commit();
-                    return MediaFeature::Comparison::GreaterThanOrEqual;
-                }
-                transaction.commit();
-                return MediaFeature::Comparison::GreaterThan;
-            }
-        }
-
-        return {};
-    };
-
-    auto comparisons_match = [](MediaFeature::Comparison a, MediaFeature::Comparison b) -> bool {
-        switch (a) {
-        case MediaFeature::Comparison::Equal:
-            return b == MediaFeature::Comparison::Equal;
-        case MediaFeature::Comparison::LessThan:
-        case MediaFeature::Comparison::LessThanOrEqual:
-            return b == MediaFeature::Comparison::LessThan || b == MediaFeature::Comparison::LessThanOrEqual;
-        case MediaFeature::Comparison::GreaterThan:
-        case MediaFeature::Comparison::GreaterThanOrEqual:
-            return b == MediaFeature::Comparison::GreaterThan || b == MediaFeature::Comparison::GreaterThanOrEqual;
-        }
-        VERIFY_NOT_REACHED();
-    };
-
-    // `<mf-range> = <mf-name> <mf-comparison> <mf-value>
-    //             | <mf-value> <mf-comparison> <mf-name>
-    //             | <mf-value> <mf-lt> <mf-name> <mf-lt> <mf-value>
-    //             | <mf-value> <mf-gt> <mf-name> <mf-gt> <mf-value>`
-    auto parse_mf_range = [&](auto& tokens) -> OwnPtr<MediaFeature> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        // `<mf-name> <mf-comparison> <mf-value>`
-        // NOTE: We have to check for <mf-name> first, since all <mf-name>s will also parse as <mf-value>.
-        if (auto maybe_name = parse_mf_name(tokens, false); maybe_name.has_value()) {
-            tokens.discard_whitespace();
-            if (auto maybe_comparison = parse_comparison(tokens); maybe_comparison.has_value()) {
-                tokens.discard_whitespace();
-                if (auto maybe_value = parse_media_feature_value(maybe_name->id, tokens); maybe_value.has_value()) {
-                    tokens.discard_whitespace();
-                    if (!tokens.has_next_token() && !maybe_value->is_ident()) {
-                        transaction.commit();
-                        return MediaFeature::half_range(maybe_name->id, maybe_comparison.release_value(), maybe_value.release_value());
-                    }
-                }
-            }
-        }
-
-        //  `<mf-value> <mf-comparison> <mf-name>
-        // | <mf-value> <mf-lt> <mf-name> <mf-lt> <mf-value>
-        // | <mf-value> <mf-gt> <mf-name> <mf-gt> <mf-value>`
-        // NOTE: To parse the first value, we need to first find and parse the <mf-name> so we know what value types to parse.
-        //       To allow for <mf-value> to be any number of tokens long, we scan forward until we find a comparison, and then
-        //       treat the next non-whitespace token as the <mf-name>, which should be correct as long as they don't add a value
-        //       type that can include a comparison in it. :^)
-        Optional<MediaFeatureName> maybe_name;
-        {
-            // This transaction is never committed, we just use it to rewind automatically.
-            auto temp_transaction = tokens.begin_transaction();
-            while (tokens.has_next_token() && !maybe_name.has_value()) {
-                if (auto maybe_comparison = parse_comparison(tokens); maybe_comparison.has_value()) {
-                    // We found a comparison, so the next non-whitespace token should be the <mf-name>
-                    tokens.discard_whitespace();
-                    maybe_name = parse_mf_name(tokens, false);
-                    break;
-                }
-                tokens.discard_a_token();
-                tokens.discard_whitespace();
-            }
-        }
-
-        // Now, we can parse the range properly.
-        if (maybe_name.has_value()) {
-            if (auto maybe_left_value = parse_media_feature_value(maybe_name->id, tokens); maybe_left_value.has_value()) {
-                tokens.discard_whitespace();
-                if (auto maybe_left_comparison = parse_comparison(tokens); maybe_left_comparison.has_value()) {
-                    tokens.discard_whitespace();
-                    tokens.discard_a_token(); // The <mf-name> which we already parsed above.
-                    tokens.discard_whitespace();
-
-                    if (!tokens.has_next_token()) {
-                        transaction.commit();
-                        return MediaFeature::half_range(maybe_left_value.release_value(), maybe_left_comparison.release_value(), maybe_name->id);
-                    }
-
-                    if (auto maybe_right_comparison = parse_comparison(tokens); maybe_right_comparison.has_value()) {
-                        tokens.discard_whitespace();
-                        if (auto maybe_right_value = parse_media_feature_value(maybe_name->id, tokens); maybe_right_value.has_value()) {
-                            tokens.discard_whitespace();
-                            // For this to be valid, the following must be true:
-                            // - Comparisons must either both be >/>= or both be </<=.
-                            // - Neither comparison can be `=`.
-                            // - Neither value can be an ident.
-                            auto left_comparison = maybe_left_comparison.release_value();
-                            auto right_comparison = maybe_right_comparison.release_value();
-
-                            if (!tokens.has_next_token()
-                                && comparisons_match(left_comparison, right_comparison)
-                                && left_comparison != MediaFeature::Comparison::Equal
-                                && !maybe_left_value->is_ident() && !maybe_right_value->is_ident()) {
-                                transaction.commit();
-                                return MediaFeature::range(maybe_left_value.release_value(), left_comparison, maybe_name->id, right_comparison, maybe_right_value.release_value());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return {};
-    };
-
-    if (auto maybe_mf_boolean = parse_mf_boolean(inner_tokens)) {
-        inner_tokens.discard_whitespace();
-        if (inner_tokens.has_next_token())
-            return nullptr;
-        transaction.commit();
-        return maybe_mf_boolean.release_nonnull();
-    }
-
-    if (auto maybe_mf_plain = parse_mf_plain(inner_tokens)) {
-        inner_tokens.discard_whitespace();
-        if (inner_tokens.has_next_token())
-            return nullptr;
-        transaction.commit();
-        return maybe_mf_plain.release_nonnull();
-    }
-
-    if (auto maybe_mf_range = parse_mf_range(inner_tokens)) {
-        inner_tokens.discard_whitespace();
-        if (inner_tokens.has_next_token())
-            return nullptr;
-        transaction.commit();
-        return maybe_mf_range.release_nonnull();
-    }
-
-    return {};
+    transaction.commit();
+    return media_condition.release_nonnull<MediaFeature>();
 }
 
 Optional<MediaQuery::MediaType> Parser::parse_media_type(TokenStream<ComponentValue>& tokens)
