@@ -198,7 +198,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
             return nullptr;
         auto media_feature_id = maybe_media_feature_id.value();
         auto maybe_value = parse_rust_media_feature_value(media_feature_id, media_feature_test.value);
-        if (!maybe_value.has_value() || maybe_value->is_ident())
+        if (!maybe_value.has_value() || media_feature_test.value_syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Ident)
             return nullptr;
         return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
     }
@@ -227,7 +227,9 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
             return nullptr;
 
         auto left_comparison = media_feature_comparison_from_rust(media_feature_test.feature.left_comparison);
-        if (left_comparison == MediaFeature::Comparison::Equal || maybe_left_value->is_ident() || maybe_right_value->is_ident())
+        if (left_comparison == MediaFeature::Comparison::Equal
+            || media_feature_test.left_value_syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Ident
+            || media_feature_test.right_value_syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Ident)
             return nullptr;
         return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
     }
