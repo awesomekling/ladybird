@@ -12,6 +12,9 @@ mod css_tokenizer;
 mod generated_media_features {
     include!(concat!(env!("OUT_DIR"), "/generated_media_features.rs"));
 }
+mod generated_value_types {
+    include!(concat!(env!("OUT_DIR"), "/generated_value_types.rs"));
+}
 
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
