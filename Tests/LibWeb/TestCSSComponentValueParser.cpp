@@ -47,6 +47,63 @@ static void expect_rust_declaration_matches_cpp(StringView input)
     EXPECT_EQ(dump_declaration(rust_declaration), dump_declaration(cpp_declaration));
 }
 
+static void dump_rule_or_list_of_declarations(StringBuilder&, Web::CSS::Parser::RuleOrListOfDeclarations const&);
+
+static void dump_rule(StringBuilder& builder, Web::CSS::Parser::Rule const& rule)
+{
+    rule.visit(
+        [&](Web::CSS::Parser::AtRule const& at_rule) {
+            builder.appendff("@{}{}\n", at_rule.name, at_rule.is_block_rule ? " block"sv : ""sv);
+            builder.append("prelude\n"sv);
+            builder.append(dump_component_values(at_rule.prelude));
+            builder.append("children\n"sv);
+            for (auto const& child : at_rule.child_rules_and_lists_of_declarations)
+                dump_rule_or_list_of_declarations(builder, child);
+        },
+        [&](Web::CSS::Parser::QualifiedRule const& qualified_rule) {
+            builder.append("qualified\n"sv);
+            builder.append("prelude\n"sv);
+            builder.append(dump_component_values(qualified_rule.prelude));
+            builder.append("declarations\n"sv);
+            for (auto const& declaration : qualified_rule.declarations)
+                builder.append(dump_declaration(declaration));
+            builder.append("children\n"sv);
+            for (auto const& child : qualified_rule.child_rules)
+                dump_rule_or_list_of_declarations(builder, child);
+        });
+}
+
+static void dump_rule_or_list_of_declarations(StringBuilder& builder, Web::CSS::Parser::RuleOrListOfDeclarations const& rule_or_list_of_declarations)
+{
+    rule_or_list_of_declarations.visit(
+        [&](Web::CSS::Parser::Rule const& rule) {
+            dump_rule(builder, rule);
+        },
+        [&](Vector<Web::CSS::Parser::Declaration, 0> const& declarations) {
+            builder.append("list-of-declarations\n"sv);
+            for (auto const& declaration : declarations)
+                builder.append(dump_declaration(declaration));
+        });
+}
+
+static String dump_rule(Optional<Web::CSS::Parser::Rule> const& rule)
+{
+    if (!rule.has_value())
+        return "<invalid>"_string;
+
+    StringBuilder builder;
+    dump_rule(builder, *rule);
+    return builder.to_string_without_validation();
+}
+
+static void expect_rust_rule_matches_cpp(StringView input)
+{
+    auto cpp_rule = Web::CSS::Parser::Parser::create(Web::CSS::Parser::ParsingParams {}, input).parse_as_rule();
+    auto rust_rule = Web::CSS::Parser::RustComponentValueParser::parse_a_rule(input, "utf-8"sv);
+
+    EXPECT_EQ(dump_rule(rust_rule), dump_rule(cpp_rule));
+}
+
 }
 
 TEST_CASE(basic_values)
@@ -82,4 +139,13 @@ TEST_CASE(declarations)
     expect_rust_declaration_matches_cpp("--foo: { red } blue"sv);
     expect_rust_declaration_matches_cpp("color: { red } blue"sv);
     expect_rust_declaration_matches_cpp("@media screen"sv);
+}
+
+TEST_CASE(rules)
+{
+    expect_rust_rule_matches_cpp("a { color: red }"sv);
+    expect_rust_rule_matches_cpp("@media screen { a { color: red } }"sv);
+    expect_rust_rule_matches_cpp("@layer foo;"sv);
+    expect_rust_rule_matches_cpp("a { color: red; @media screen { color: green } & { color: blue } }"sv);
+    expect_rust_rule_matches_cpp("a { --foo: { red } blue }"sv);
 }

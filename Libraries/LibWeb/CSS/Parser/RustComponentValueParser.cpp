@@ -135,6 +135,27 @@ struct ComponentValueBuilder {
     }
 };
 
+static void append_component_value_token(ComponentValueBuilder& builder, FFI::CssComponentValueKind kind, Token token)
+{
+    switch (kind) {
+    case FFI::CssComponentValueKind::Token:
+        builder.append(ComponentValue { move(token) });
+        break;
+    case FFI::CssComponentValueKind::FunctionStart:
+        builder.start_function(move(token));
+        break;
+    case FFI::CssComponentValueKind::FunctionEnd:
+        builder.end_function(move(token));
+        break;
+    case FFI::CssComponentValueKind::SimpleBlockStart:
+        builder.start_simple_block(move(token));
+        break;
+    case FFI::CssComponentValueKind::SimpleBlockEnd:
+        builder.end_simple_block(move(token));
+        break;
+    }
+}
+
 Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_values(StringView input, StringView encoding)
 {
     ComponentValueBuilder builder;
@@ -147,24 +168,7 @@ Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_value
         &builder,
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             auto& builder = *static_cast<ComponentValueBuilder*>(raw_builder);
-            auto token = RustTokenizer::token_from_ffi(component_value->token);
-            switch (component_value->kind) {
-            case FFI::CssComponentValueKind::Token:
-                builder.append(ComponentValue { move(token) });
-                break;
-            case FFI::CssComponentValueKind::FunctionStart:
-                builder.start_function(move(token));
-                break;
-            case FFI::CssComponentValueKind::FunctionEnd:
-                builder.end_function(move(token));
-                break;
-            case FFI::CssComponentValueKind::SimpleBlockStart:
-                builder.start_simple_block(move(token));
-                break;
-            case FFI::CssComponentValueKind::SimpleBlockEnd:
-                builder.end_simple_block(move(token));
-                break;
-            }
+            append_component_value_token(builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
     VERIFY(builder.stack.is_empty());
@@ -199,24 +203,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);
-            auto token = RustTokenizer::token_from_ffi(component_value->token);
-            switch (component_value->kind) {
-            case FFI::CssComponentValueKind::Token:
-                builder.component_value_builder.append(ComponentValue { move(token) });
-                break;
-            case FFI::CssComponentValueKind::FunctionStart:
-                builder.component_value_builder.start_function(move(token));
-                break;
-            case FFI::CssComponentValueKind::FunctionEnd:
-                builder.component_value_builder.end_function(move(token));
-                break;
-            case FFI::CssComponentValueKind::SimpleBlockStart:
-                builder.component_value_builder.start_simple_block(move(token));
-                break;
-            case FFI::CssComponentValueKind::SimpleBlockEnd:
-                builder.component_value_builder.end_simple_block(move(token));
-                break;
-            }
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
     VERIFY(builder.component_value_builder.stack.is_empty());
@@ -225,6 +212,214 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
 
     builder.declaration->value = move(builder.component_value_builder.root_values);
     return builder.declaration;
+}
+
+Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding)
+{
+    struct RuleBuilder {
+        enum class FrameType : u8 {
+            AtRule,
+            QualifiedRule,
+            Declaration,
+            ListOfDeclarations,
+            Prelude,
+            ChildRules,
+            Declarations,
+        };
+
+        struct Frame {
+            FrameType type;
+            Optional<Rule> rule;
+            Optional<Declaration> declaration;
+            Vector<Declaration, 0> declarations;
+        };
+
+        Optional<Rule> rule;
+        Vector<Frame> stack;
+        ComponentValueBuilder component_value_builder;
+
+        void append_rule(Rule completed_rule)
+        {
+            if (stack.is_empty()) {
+                VERIFY(!rule.has_value());
+                rule = move(completed_rule);
+                return;
+            }
+
+            VERIFY(stack.last().type == FrameType::ChildRules);
+            VERIFY(stack.size() >= 2);
+            auto& parent = stack[stack.size() - 2];
+            parent.rule->visit(
+                [&](AtRule& at_rule) {
+                    at_rule.child_rules_and_lists_of_declarations.append(RuleOrListOfDeclarations { move(completed_rule) });
+                },
+                [&](QualifiedRule& qualified_rule) {
+                    qualified_rule.child_rules.append(RuleOrListOfDeclarations { move(completed_rule) });
+                });
+        }
+
+        void append_declaration(Declaration completed_declaration)
+        {
+            VERIFY(!stack.is_empty());
+            auto& parent = stack.last();
+            switch (parent.type) {
+            case FrameType::Declarations:
+                VERIFY(stack.size() >= 2);
+                stack[stack.size() - 2].rule->get<QualifiedRule>().declarations.append(move(completed_declaration));
+                break;
+            case FrameType::ListOfDeclarations:
+                parent.declarations.append(move(completed_declaration));
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+
+        void append_list_of_declarations(Vector<Declaration, 0> declarations)
+        {
+            VERIFY(!stack.is_empty());
+            VERIFY(stack.last().type == FrameType::ChildRules);
+            VERIFY(stack.size() >= 2);
+            auto& parent = stack[stack.size() - 2];
+            parent.rule->visit(
+                [&](AtRule& at_rule) {
+                    at_rule.child_rules_and_lists_of_declarations.append(RuleOrListOfDeclarations { move(declarations) });
+                },
+                [&](QualifiedRule& qualified_rule) {
+                    qualified_rule.child_rules.append(RuleOrListOfDeclarations { move(declarations) });
+                });
+        }
+    };
+
+    RuleBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_rule(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssRuleEvent const* event) {
+            auto& builder = *static_cast<RuleBuilder*>(raw_builder);
+            switch (event->kind) {
+            case FFI::CssRuleEventKind::Invalid:
+                builder.rule = {};
+                break;
+            case FFI::CssRuleEventKind::AtRuleStart:
+                builder.stack.append({
+                    .type = RuleBuilder::FrameType::AtRule,
+                    .rule = Rule { AtRule {
+                        .name = fly_string_from_ffi_bytes(event->name_ptr, event->name_len),
+                        .prelude = {},
+                        .child_rules_and_lists_of_declarations = {},
+                        .is_block_rule = event->is_block_rule,
+                    } },
+                });
+                break;
+            case FFI::CssRuleEventKind::AtRuleEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::AtRule);
+                builder.append_rule(frame.rule.release_value());
+                break;
+            }
+            case FFI::CssRuleEventKind::QualifiedRuleStart:
+                builder.stack.append({
+                    .type = RuleBuilder::FrameType::QualifiedRule,
+                    .rule = Rule { QualifiedRule {
+                        .prelude = {},
+                        .declarations = {},
+                        .child_rules = {},
+                    } },
+                });
+                break;
+            case FFI::CssRuleEventKind::QualifiedRuleEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::QualifiedRule);
+                builder.append_rule(frame.rule.release_value());
+                break;
+            }
+            case FFI::CssRuleEventKind::PreludeStart:
+                builder.component_value_builder = {};
+                builder.stack.append({ .type = RuleBuilder::FrameType::Prelude });
+                break;
+            case FFI::CssRuleEventKind::PreludeEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::Prelude);
+                VERIFY(builder.component_value_builder.stack.is_empty());
+                VERIFY(!builder.stack.is_empty());
+                builder.stack.last().rule->visit(
+                    [&](AtRule& at_rule) {
+                        at_rule.prelude = move(builder.component_value_builder.root_values);
+                    },
+                    [&](QualifiedRule& qualified_rule) {
+                        qualified_rule.prelude = move(builder.component_value_builder.root_values);
+                    });
+                builder.component_value_builder = {};
+                break;
+            }
+            case FFI::CssRuleEventKind::ChildRulesStart:
+                builder.stack.append({ .type = RuleBuilder::FrameType::ChildRules });
+                break;
+            case FFI::CssRuleEventKind::ChildRulesEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::ChildRules);
+                break;
+            }
+            case FFI::CssRuleEventKind::DeclarationsStart:
+                builder.stack.append({ .type = RuleBuilder::FrameType::Declarations });
+                break;
+            case FFI::CssRuleEventKind::DeclarationsEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::Declarations);
+                break;
+            }
+            case FFI::CssRuleEventKind::ListOfDeclarationsStart:
+                builder.stack.append({ .type = RuleBuilder::FrameType::ListOfDeclarations });
+                break;
+            case FFI::CssRuleEventKind::ListOfDeclarationsEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::ListOfDeclarations);
+                builder.append_list_of_declarations(move(frame.declarations));
+                break;
+            }
+            case FFI::CssRuleEventKind::DeclarationStart:
+                builder.component_value_builder = {};
+                builder.stack.append({
+                    .type = RuleBuilder::FrameType::Declaration,
+                    .declaration = Declaration {
+                        .name = fly_string_from_ffi_bytes(event->name_ptr, event->name_len),
+                        .value = {},
+                        .important = event->important ? Important::Yes : Important::No,
+                    },
+                });
+                break;
+            case FFI::CssRuleEventKind::DeclarationEnd: {
+                VERIFY(!builder.stack.is_empty());
+                auto frame = builder.stack.take_last();
+                VERIFY(frame.type == RuleBuilder::FrameType::Declaration);
+                VERIFY(builder.component_value_builder.stack.is_empty());
+                auto declaration = frame.declaration.release_value();
+                declaration.value = move(builder.component_value_builder.root_values);
+                builder.component_value_builder = {};
+                builder.append_declaration(move(declaration));
+                break;
+            }
+            }
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<RuleBuilder*>(raw_builder);
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    VERIFY(builder.stack.is_empty());
+    VERIFY(builder.component_value_builder.stack.is_empty());
+    return builder.rule;
 }
 
 }

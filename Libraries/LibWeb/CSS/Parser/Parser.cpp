@@ -1374,6 +1374,11 @@ CSSRule* Parser::parse_as_css_rule()
     return {};
 }
 
+Optional<Rule> Parser::parse_as_rule()
+{
+    return parse_a_rule(m_token_stream);
+}
+
 Optional<Declaration> Parser::parse_as_declaration()
 {
     m_rule_context.append(RuleContext::Style);

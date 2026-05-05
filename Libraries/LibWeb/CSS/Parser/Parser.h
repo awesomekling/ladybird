@@ -125,6 +125,7 @@ public:
     PropertiesAndCustomProperties parse_as_property_declaration_block();
     Vector<Descriptor> parse_as_descriptor_declaration_block(AtRuleID);
     CSSRule* parse_as_css_rule();
+    Optional<Rule> parse_as_rule();
     Optional<Declaration> parse_as_declaration();
     Optional<StyleProperty> parse_as_supports_condition();
     GC::RootVector<GC::Ref<CSSRule>> parse_as_stylesheet_contents();

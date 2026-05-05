@@ -105,6 +105,35 @@ pub struct CssDeclaration {
     pub important: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssRuleEventKind {
+    Invalid,
+    AtRuleStart,
+    AtRuleEnd,
+    QualifiedRuleStart,
+    QualifiedRuleEnd,
+    PreludeStart,
+    PreludeEnd,
+    ChildRulesStart,
+    ChildRulesEnd,
+    DeclarationsStart,
+    DeclarationsEnd,
+    ListOfDeclarationsStart,
+    ListOfDeclarationsEnd,
+    DeclarationStart,
+    DeclarationEnd,
+}
+
+#[repr(C)]
+pub struct CssRuleEvent {
+    pub kind: CssRuleEventKind,
+    pub name_ptr: *const u8,
+    pub name_len: usize,
+    pub important: bool,
+    pub is_block_rule: bool,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -147,6 +176,25 @@ pub(crate) fn parse_a_declaration<D, C>(
     }
 }
 
+pub(crate) fn parse_a_rule<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
+where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let Some(rule) = parser.parse_a_rule() else {
+        event_callback(CssRuleEvent::new(CssRuleEventKind::Invalid));
+        return;
+    };
+
+    emit_rule(
+        &rule,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
+}
+
 fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     let mut tokens = Vec::new();
     let filtered_input_string = std::str::from_utf8(filtered_input)
@@ -160,6 +208,18 @@ fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
 
 fn string_parts(string: &str) -> (*const u8, usize) {
     (string.as_ptr(), string.len())
+}
+
+impl CssRuleEvent {
+    fn new(kind: CssRuleEventKind) -> Self {
+        Self {
+            kind,
+            name_ptr: std::ptr::null(),
+            name_len: 0,
+            important: false,
+            is_block_rule: false,
+        }
+    }
 }
 
 fn emit_component_value<F>(component_value: &ComponentValue, filtered_input: &str, callback: &mut F)
@@ -215,6 +275,125 @@ where
         kind,
         token: token.as_ffi(filtered_input),
     });
+}
+
+fn emit_rule<E, C>(rule: &Rule, filtered_input: &str, event_callback: &mut E, component_value_callback: &mut C)
+where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    match rule {
+        Rule::AtRule(at_rule) => {
+            let (name_ptr, name_len) = string_parts(&at_rule.name);
+            event_callback(CssRuleEvent {
+                kind: CssRuleEventKind::AtRuleStart,
+                name_ptr,
+                name_len,
+                important: false,
+                is_block_rule: at_rule.is_block_rule,
+            });
+            emit_component_value_list(
+                &at_rule.prelude,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+            );
+            emit_rule_or_list_of_declarations_list(
+                &at_rule.child_rules_and_lists_of_declarations,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+            );
+            event_callback(CssRuleEvent::new(CssRuleEventKind::AtRuleEnd));
+        }
+        Rule::QualifiedRule(qualified_rule) => {
+            event_callback(CssRuleEvent::new(CssRuleEventKind::QualifiedRuleStart));
+            emit_component_value_list(
+                &qualified_rule.prelude,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+            );
+            event_callback(CssRuleEvent::new(CssRuleEventKind::DeclarationsStart));
+            for declaration in &qualified_rule.declarations {
+                emit_declaration(declaration, filtered_input, event_callback, component_value_callback);
+            }
+            event_callback(CssRuleEvent::new(CssRuleEventKind::DeclarationsEnd));
+            emit_rule_or_list_of_declarations_list(
+                &qualified_rule.child_rules,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+            );
+            event_callback(CssRuleEvent::new(CssRuleEventKind::QualifiedRuleEnd));
+        }
+    }
+}
+
+fn emit_rule_or_list_of_declarations_list<E, C>(
+    rules_or_lists_of_declarations: &[RuleOrListOfDeclarations],
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesStart));
+    for rule_or_list_of_declarations in rules_or_lists_of_declarations {
+        match rule_or_list_of_declarations {
+            RuleOrListOfDeclarations::Rule(rule) => {
+                emit_rule(rule, filtered_input, event_callback, component_value_callback);
+            }
+            RuleOrListOfDeclarations::ListOfDeclarations(declarations) => {
+                event_callback(CssRuleEvent::new(CssRuleEventKind::ListOfDeclarationsStart));
+                for declaration in declarations {
+                    emit_declaration(declaration, filtered_input, event_callback, component_value_callback);
+                }
+                event_callback(CssRuleEvent::new(CssRuleEventKind::ListOfDeclarationsEnd));
+            }
+        }
+    }
+    event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesEnd));
+}
+
+fn emit_declaration<E, C>(
+    declaration: &Declaration,
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (name_ptr, name_len) = string_parts(&declaration.name);
+    event_callback(CssRuleEvent {
+        kind: CssRuleEventKind::DeclarationStart,
+        name_ptr,
+        name_len,
+        important: declaration.important,
+        is_block_rule: false,
+    });
+    for value in &declaration.value {
+        emit_component_value(value, filtered_input, component_value_callback);
+    }
+    event_callback(CssRuleEvent::new(CssRuleEventKind::DeclarationEnd));
+}
+
+fn emit_component_value_list<E, C>(
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeStart));
+    for component_value in component_values {
+        emit_component_value(component_value, filtered_input, component_value_callback);
+    }
+    event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
 }
 
 impl Parser {
