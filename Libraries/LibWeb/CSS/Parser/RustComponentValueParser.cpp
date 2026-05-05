@@ -173,6 +173,8 @@ static void set_original_value_text_for_custom_property(Declaration& declaration
     declaration.original_value_text = original_text.to_string_without_validation();
 }
 
+static FFI::CssRuleContext rule_context_to_ffi(RuleContext);
+
 Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_values(StringView input, StringView encoding)
 {
     ComponentValueBuilder builder;
@@ -229,6 +231,53 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     FFI::rust_css_parse_declaration(
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssDeclaration const* ffi_declaration) {
+            auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);
+            if (!ffi_declaration->is_valid)
+                return;
+
+            builder.declaration = Declaration {
+                .name = fly_string_from_ffi_bytes(ffi_declaration->name_ptr, ffi_declaration->name_len),
+                .value = {},
+                .important = ffi_declaration->important ? Important::Yes : Important::No,
+            };
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);
+            append_component_value_token(builder.component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    VERIFY(builder.component_value_builder.stack.is_empty());
+    if (!builder.declaration.has_value())
+        return {};
+
+    builder.declaration->value = move(builder.component_value_builder.root_values);
+    set_original_value_text_for_custom_property(*builder.declaration);
+    return builder.declaration;
+}
+
+Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context)
+{
+    struct DeclarationBuilder {
+        Optional<Declaration> declaration;
+        ComponentValueBuilder component_value_builder;
+    };
+
+    DeclarationBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    Vector<FFI::CssRuleContext> ffi_rule_context;
+    ffi_rule_context.ensure_capacity(rule_context.size());
+    for (auto context : rule_context)
+        ffi_rule_context.unchecked_append(rule_context_to_ffi(context));
+
+    FFI::rust_css_parse_declaration_with_context(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        ffi_rule_context.data(),
+        ffi_rule_context.size(),
         &builder,
         [](void* raw_builder, FFI::CssDeclaration const* ffi_declaration) {
             auto& builder = *static_cast<DeclarationBuilder*>(raw_builder);

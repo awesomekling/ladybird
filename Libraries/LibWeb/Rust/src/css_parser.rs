@@ -232,6 +232,40 @@ pub(crate) fn parse_a_declaration<D, C>(
     }
 }
 
+pub(crate) fn parse_a_declaration_with_context<D, C>(
+    filtered_input: &[u8],
+    rule_context: &[CssRuleContext],
+    mut declaration_callback: D,
+    mut component_value_callback: C,
+) where
+    D: FnMut(CssDeclaration),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    parser.rule_context = rule_context.iter().map(|context| RuleContext::from(*context)).collect();
+    let Some(declaration) = parser.parse_a_declaration_with_current_context() else {
+        declaration_callback(CssDeclaration {
+            is_valid: false,
+            name_ptr: std::ptr::null(),
+            name_len: 0,
+            important: false,
+        });
+        return;
+    };
+
+    let (name_ptr, name_len) = string_parts(&declaration.name);
+    declaration_callback(CssDeclaration {
+        is_valid: true,
+        name_ptr,
+        name_len,
+        important: declaration.important,
+    });
+
+    for component_value in declaration.value {
+        emit_component_value(&component_value, filtered_input_string, &mut component_value_callback);
+    }
+}
+
 pub(crate) fn parse_a_rule<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
 where
     E: FnMut(CssRuleEvent),
@@ -607,15 +641,19 @@ impl Parser {
         // 1. Normalize input, and set input to the result.
         // NOTE: This is done automatically before creating the Parser.
 
+        self.rule_context.push(RuleContext::Style);
+        let declaration = self.parse_a_declaration_with_current_context();
+        self.rule_context.pop();
+        declaration
+    }
+
+    fn parse_a_declaration_with_current_context(&mut self) -> Option<Declaration> {
         // 2. Discard whitespace from input.
         self.discard_whitespace();
 
         // 3. Consume a declaration from input. If anything was returned, return it.
         // Otherwise, return a syntax error.
-        self.rule_context.push(RuleContext::Style);
-        let declaration = self.consume_a_declaration(Nested::No);
-        self.rule_context.pop();
-        declaration
+        self.consume_a_declaration(Nested::No)
     }
 
     // https://drafts.csswg.org/css-syntax/#parse-list-of-component-values

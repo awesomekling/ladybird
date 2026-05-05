@@ -167,6 +167,44 @@ pub unsafe extern "C" fn rust_css_parse_declaration(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - `rule_context` and `rule_context_len` must point to a valid rule context slice
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_declaration_with_context(
+    input: *const u8,
+    input_len: usize,
+    rule_context: *const CssRuleContext,
+    rule_context_len: usize,
+    ctx: *mut c_void,
+    declaration_callback: unsafe extern "C" fn(ctx: *mut c_void, declaration: *const CssDeclaration),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+            let Some(rule_context) = slice_from_raw(rule_context, rule_context_len) else {
+                return;
+            };
+
+            css_parser::parse_a_declaration_with_context(
+                input,
+                rule_context,
+                |declaration| {
+                    declaration_callback(ctx, &raw const declaration);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            );
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]

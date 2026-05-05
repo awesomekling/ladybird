@@ -1452,7 +1452,7 @@ Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<T>&
 Optional<StyleProperty> Parser::parse_as_supports_condition()
 {
     m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_declaration = parse_a_declaration(m_token_stream);
+    auto maybe_declaration = RustComponentValueParser::parse_a_declaration(m_input, m_encoding, m_rule_context);
     m_rule_context.take_last();
     if (maybe_declaration.has_value()) {
         if (auto maybe_property_and_name = convert_to_style_property(maybe_declaration.release_value()); maybe_property_and_name.has_value())
