@@ -5301,11 +5301,11 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
         // media( <media-feature> | <media-condition> )
         if (function.name.equals_ignoring_ascii_case("media"sv)) {
             // <media-feature>
-            if (auto maybe_media_feature = parse_media_feature(argument_tokens))
+            if (auto maybe_media_feature = materialize_rust_media_feature(function.value))
                 return maybe_media_feature;
 
             // <media-condition>
-            if (auto maybe_media_condition = parse_media_condition(argument_tokens))
+            if (auto maybe_media_condition = materialize_rust_media_condition(function.value))
                 return maybe_media_condition;
 
             return nullptr;

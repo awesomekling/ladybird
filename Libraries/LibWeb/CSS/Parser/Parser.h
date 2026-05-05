@@ -594,8 +594,8 @@ private:
     ParseErrorOr<Selector::SimpleSelector> parse_pseudo_element_simple_selector(TokenStream<ComponentValue>&);
     ParseErrorOr<Optional<Selector::SimpleSelector>> parse_simple_selector(TokenStream<ComponentValue>&);
 
-    OwnPtr<BooleanExpression> parse_media_condition(TokenStream<ComponentValue>&);
-    OwnPtr<MediaFeature> parse_media_feature(TokenStream<ComponentValue>&);
+    OwnPtr<BooleanExpression> materialize_rust_media_condition(Vector<ComponentValue> const&);
+    OwnPtr<MediaFeature> materialize_rust_media_feature(Vector<ComponentValue> const&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
     Optional<MediaFeatureValue> parse_media_feature_value(MediaFeatureID, TokenStream<ComponentValue>&);
 

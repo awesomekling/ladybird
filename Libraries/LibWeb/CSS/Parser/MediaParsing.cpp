@@ -55,6 +55,14 @@ static void serialize_component_value_for_reparsing(StringBuilder& builder, Comp
     builder.append(component_value.to_string());
 }
 
+static String serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values)
+        serialize_component_value_for_reparsing(builder, component_value);
+    return builder.to_string_without_validation();
+}
+
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
     // https://www.w3.org/TR/mediaqueries-4/#mq-list
@@ -229,36 +237,22 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     return nullptr;
 }
 
-// `<media-condition>`, https://www.w3.org/TR/mediaqueries-4/#typedef-media-condition
-OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentValue>& tokens)
+OwnPtr<BooleanExpression> Parser::materialize_rust_media_condition(Vector<ComponentValue> const& component_values)
 {
-    StringBuilder serialized_media_condition;
-    auto transaction = tokens.begin_transaction();
-    while (tokens.has_next_token())
-        serialize_component_value_for_reparsing(serialized_media_condition, tokens.consume_a_token());
+    auto serialized_media_condition = serialize_component_values_for_reparsing(component_values);
 
-    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
         return materialize_rust_media_feature_test(move(media_feature_test));
     });
 
-    if (media_condition) {
-        transaction.commit();
-        return media_condition;
-    }
-
-    return nullptr;
+    return media_condition;
 }
 
-// `<media-feature>`, https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature
-OwnPtr<MediaFeature> Parser::parse_media_feature(TokenStream<ComponentValue>& inner_tokens)
+OwnPtr<MediaFeature> Parser::materialize_rust_media_feature(Vector<ComponentValue> const& component_values)
 {
-    auto transaction = inner_tokens.begin_transaction();
+    auto serialized_media_feature = serialize_component_values_for_reparsing(component_values);
 
-    StringBuilder serialized_media_feature;
-    while (inner_tokens.has_next_token())
-        serialize_component_value_for_reparsing(serialized_media_feature, inner_tokens.consume_a_token());
-
-    auto media_feature_test = RustComponentValueParser::parse_a_media_feature(serialized_media_feature.string_view(), "utf-8"sv);
+    auto media_feature_test = RustComponentValueParser::parse_a_media_feature(serialized_media_feature.bytes_as_string_view(), "utf-8"sv);
     if (!media_feature_test.has_value())
         return {};
 
@@ -266,7 +260,6 @@ OwnPtr<MediaFeature> Parser::parse_media_feature(TokenStream<ComponentValue>& in
     if (!media_feature)
         return {};
 
-    transaction.commit();
     return media_feature;
 }
 

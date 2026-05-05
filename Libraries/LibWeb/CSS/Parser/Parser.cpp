@@ -2133,8 +2133,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
         // 5. Parse the remaining component values in unparsed size as a <media-condition>.
         //    If it does not parse correctly, or it does parse correctly but the <media-condition> evaluates to false, continue.
-        TokenStream token_stream { unparsed_size };
-        auto media_condition = parse_media_condition(token_stream);
+        auto media_condition = materialize_rust_media_condition(unparsed_size);
         if (!media_condition)
             continue;
 
