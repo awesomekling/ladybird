@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 
 use crate::css_tokenizer::{CssToken, Token, TokenType};
-use crate::generated_media_features::{media_feature_id_from_string, media_feature_type_is_range};
+use crate::generated_media_features::{MediaFeatureId, media_feature_id_from_string, media_feature_type_is_range};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ComponentValue {
@@ -84,20 +84,52 @@ pub(crate) enum BooleanExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpressionTest {
     SupportsFeature(Vec<ComponentValue>),
-    MediaFeature(Box<MediaFeatureSyntax>),
+    MediaFeature(Box<MediaFeatureTest>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct MediaFeatureSyntax {
+pub(crate) struct MediaFeatureTest {
     component_value: ComponentValue,
-    kind: MediaFeatureSyntaxKind,
+    kind: MediaFeatureSyntax,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MediaFeatureSyntax {
+    Boolean(MediaFeatureName),
+    Plain {
+        name: MediaFeatureName,
+        value: Vec<ComponentValue>,
+    },
+    HalfRangeNameFirst {
+        name: MediaFeatureName,
+        comparison: MfComparison,
+        value: Vec<ComponentValue>,
+    },
+    HalfRangeValueFirst {
+        value: Vec<ComponentValue>,
+        comparison: MfComparison,
+        name: MediaFeatureName,
+    },
+    Range {
+        left_value: Vec<ComponentValue>,
+        left_comparison: MfComparison,
+        name: MediaFeatureName,
+        right_comparison: MfComparison,
+        right_value: Vec<ComponentValue>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MediaFeatureSyntaxKind {
-    Boolean,
-    Plain,
-    Range,
+pub(crate) struct MediaFeatureName {
+    kind: MediaFeatureNameKind,
+    id: MediaFeatureId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaFeatureNameKind {
+    Normal,
+    Min,
+    Max,
 }
 
 struct ComponentValueParser {
@@ -985,7 +1017,7 @@ impl ComponentValueParser {
             && let Some(kind) = component_values_parse_as_media_feature(&block.value)
         {
             self.index += 1;
-            return Some(BooleanExpressionTest::MediaFeature(Box::new(MediaFeatureSyntax {
+            return Some(BooleanExpressionTest::MediaFeature(Box::new(MediaFeatureTest {
                 component_value,
                 kind,
             })));
@@ -1085,31 +1117,31 @@ fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
     true
 }
 
-fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntaxKind> {
+fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
     let component_values = strip_whitespace(component_values);
-    if component_values_parse_as_mf_boolean(component_values) {
-        return Some(MediaFeatureSyntaxKind::Boolean);
+    if let Some(boolean) = component_values_parse_as_mf_boolean(component_values) {
+        return Some(boolean);
     }
 
-    if component_values_parse_as_mf_plain(component_values) {
-        return Some(MediaFeatureSyntaxKind::Plain);
+    if let Some(plain) = component_values_parse_as_mf_plain(component_values) {
+        return Some(plain);
     }
 
-    if component_values_parse_as_mf_range(component_values) {
-        return Some(MediaFeatureSyntaxKind::Range);
+    if let Some(range) = component_values_parse_as_mf_range(component_values) {
+        return Some(range);
     }
 
     None
 }
 
-fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
     // <mf-boolean> = <mf-name>
-    component_values_parse_as_mf_name(component_values, AllowMinMaxPrefix::No)
+    component_values_parse_as_mf_name(component_values, AllowMinMaxPrefix::No).map(MediaFeatureSyntax::Boolean)
 }
 
-fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
     // <mf-plain> = <mf-name> : <mf-value>
-    let Some(colon_index) = component_values.iter().position(|component_value| {
+    let colon_index = component_values.iter().position(|component_value| {
         matches!(
             component_value,
             ComponentValue::PreservedToken(Token {
@@ -1117,16 +1149,22 @@ fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> bo
                 ..
             })
         )
-    }) else {
-        return false;
-    };
+    })?;
 
     let name = strip_whitespace(&component_values[..colon_index]);
     let value = strip_whitespace(&component_values[colon_index + 1..]);
-    component_values_parse_as_mf_name(name, AllowMinMaxPrefix::Yes) && component_values_parse_as_mf_value(value)
+    let name = component_values_parse_as_mf_name(name, AllowMinMaxPrefix::Yes)?;
+    if !component_values_parse_as_mf_value(value) {
+        return None;
+    }
+
+    Some(MediaFeatureSyntax::Plain {
+        name,
+        value: value.to_vec(),
+    })
 }
 
-fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
     // <mf-range> = <mf-name> <mf-comparison> <mf-value>
     //             | <mf-value> <mf-comparison> <mf-name>
     //             | <mf-value> <mf-lt> <mf-name> <mf-lt> <mf-value>
@@ -1147,15 +1185,32 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bo
 
     if comparison_indices.len() == 1 {
         let comparison_index = comparison_indices[0];
-        let (_, comparison_end) = parse_mf_comparison_at(component_values, comparison_index)
+        let (comparison, comparison_end) = parse_mf_comparison_at(component_values, comparison_index)
             .expect("comparison index must parse as a comparison");
         let left = strip_whitespace(&component_values[..comparison_index]);
         let right = strip_whitespace(&component_values[comparison_end..]);
 
-        return (component_values_parse_as_mf_name(left, AllowMinMaxPrefix::No)
-            && component_values_parse_as_mf_value(right))
-            || (component_values_parse_as_mf_value(left)
-                && component_values_parse_as_mf_name(right, AllowMinMaxPrefix::No));
+        if let Some(name) = component_values_parse_as_mf_name(left, AllowMinMaxPrefix::No)
+            && component_values_parse_as_mf_value(right)
+        {
+            return Some(MediaFeatureSyntax::HalfRangeNameFirst {
+                name,
+                comparison,
+                value: right.to_vec(),
+            });
+        }
+
+        if component_values_parse_as_mf_value(left)
+            && let Some(name) = component_values_parse_as_mf_name(right, AllowMinMaxPrefix::No)
+        {
+            return Some(MediaFeatureSyntax::HalfRangeValueFirst {
+                value: left.to_vec(),
+                comparison,
+                name,
+            });
+        }
+
+        return None;
     }
 
     if comparison_indices.len() == 2 {
@@ -1167,18 +1222,27 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bo
             .expect("comparison index must parse as a comparison");
 
         if !mf_comparisons_are_range_compatible(left_comparison, right_comparison) {
-            return false;
+            return None;
         }
 
         let left_value = strip_whitespace(&component_values[..left_comparison_index]);
         let name = strip_whitespace(&component_values[left_comparison_end..right_comparison_index]);
         let right_value = strip_whitespace(&component_values[right_comparison_end..]);
-        return component_values_parse_as_mf_value(left_value)
-            && component_values_parse_as_mf_name(name, AllowMinMaxPrefix::No)
-            && component_values_parse_as_mf_value(right_value);
+        if component_values_parse_as_mf_value(left_value)
+            && let Some(name) = component_values_parse_as_mf_name(name, AllowMinMaxPrefix::No)
+            && component_values_parse_as_mf_value(right_value)
+        {
+            return Some(MediaFeatureSyntax::Range {
+                left_value: left_value.to_vec(),
+                left_comparison,
+                name,
+                right_comparison,
+                right_value: right_value.to_vec(),
+            });
+        }
     }
 
-    false
+    None
 }
 
 #[derive(Clone, Copy)]
@@ -1190,7 +1254,7 @@ enum AllowMinMaxPrefix {
 fn component_values_parse_as_mf_name(
     component_values: &[ComponentValue],
     allow_min_max_prefix: AllowMinMaxPrefix,
-) -> bool {
+) -> Option<MediaFeatureName> {
     let [
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
@@ -1198,32 +1262,47 @@ fn component_values_parse_as_mf_name(
         }),
     ] = component_values
     else {
-        return false;
+        return None;
     };
 
-    if media_feature_id_from_string(value).is_some() {
-        return true;
+    if let Some(id) = media_feature_id_from_string(value) {
+        return Some(MediaFeatureName {
+            kind: MediaFeatureNameKind::Normal,
+            id,
+        });
     }
 
     if matches!(allow_min_max_prefix, AllowMinMaxPrefix::No) {
-        return false;
+        return None;
     }
 
     let prefix = value.get(..4);
     if !matches!(prefix, Some(prefix) if prefix.eq_ignore_ascii_case("min-") || prefix.eq_ignore_ascii_case("max-")) {
-        return false;
+        return None;
     }
 
     let adjusted_name = &value[4..];
-    media_feature_id_from_string(adjusted_name).is_some_and(media_feature_type_is_range)
+    let id = media_feature_id_from_string(adjusted_name)?;
+    if !media_feature_type_is_range(id) {
+        return None;
+    }
+
+    Some(MediaFeatureName {
+        kind: if prefix.expect("prefix must be present").eq_ignore_ascii_case("min-") {
+            MediaFeatureNameKind::Min
+        } else {
+            MediaFeatureNameKind::Max
+        },
+        id,
+    })
 }
 
 fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bool {
     !component_values.is_empty() && component_values.iter().all(is_media_feature_value_component_value)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MfComparison {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MfComparison {
     Equal,
     LessThan,
     LessThanOrEqual,
