@@ -84,7 +84,7 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list(TokenStream<T
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(StringView input, StringView encoding)
 {
     AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
-    auto rust_media_queries = RustComponentValueParser::parse_a_media_query_list(input, encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+    auto rust_media_queries = RustComponentValueParser::parse_a_media_query_list(input, encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
         return materialize_rust_media_feature_test(move(media_feature_test));
     });
 
@@ -290,7 +290,7 @@ OwnPtr<BooleanExpression> Parser::materialize_rust_media_condition(Vector<Compon
 {
     auto serialized_media_condition = serialize_component_values_for_reparsing(component_values);
 
-    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
         return materialize_rust_media_feature_test(move(media_feature_test));
     });
 
@@ -301,7 +301,7 @@ OwnPtr<BooleanExpression> Parser::materialize_rust_media_test(Vector<ComponentVa
 {
     auto serialized_media_test = serialize_component_values_for_reparsing(component_values);
 
-    return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+    return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
         return materialize_rust_media_feature_test(move(media_feature_test));
     });
 }

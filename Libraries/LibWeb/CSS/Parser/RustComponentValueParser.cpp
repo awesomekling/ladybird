@@ -654,44 +654,44 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
         });
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
 {
     return parse_a_boolean_expression(
         input,
         encoding,
         MatchResult::Unknown,
-        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&& component_values) mutable -> OwnPtr<BooleanExpression> {
+        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&&) mutable -> OwnPtr<BooleanExpression> {
             if (!media_feature.has_value())
                 return nullptr;
-            return parse_test(media_feature.release_value(), move(component_values));
+            return parse_test(media_feature.release_value());
         },
         [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
             FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
         });
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_test(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_test(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
 {
     return parse_a_boolean_expression(
         input,
         encoding,
         MatchResult::False,
-        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&& component_values) mutable -> OwnPtr<BooleanExpression> {
+        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&&) mutable -> OwnPtr<BooleanExpression> {
             if (!media_feature.has_value())
                 return nullptr;
-            return parse_test(media_feature.release_value(), move(component_values));
+            return parse_test(media_feature.release_value());
         },
         [](u8 const* input, size_t input_size, void* context, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
             FFI::rust_css_parse_media_test(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
         });
 }
 
-Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test)
+Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
 {
     struct MediaQueryListBuilder {
         Vector<MediaQuerySyntax> media_queries;
         Optional<RustBooleanExpressionBuilder> media_condition_builder;
-        AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&, Vector<ComponentValue>&&)> parse_test;
+        AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test;
 
         void finish_media_condition()
         {
@@ -737,10 +737,10 @@ Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::par
 
             if (rust_media_query->has_media_condition) {
                 media_condition_builder = RustBooleanExpressionBuilder {
-                    .parse_test = [this](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+                    .parse_test = [this](Optional<MediaFeatureTest>&& media_feature, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
                         if (!media_feature.has_value())
                             return nullptr;
-                        return parse_test(media_feature.release_value(), move(component_values));
+                        return parse_test(media_feature.release_value());
                     },
                     .result_for_general_enclosed = MatchResult::Unknown,
                 };
