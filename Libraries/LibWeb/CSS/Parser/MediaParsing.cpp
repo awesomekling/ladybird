@@ -229,93 +229,6 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     return nullptr;
 }
 
-// `<media-query>`, https://www.w3.org/TR/mediaqueries-4/#typedef-media-query
-NonnullRefPtr<MediaQuery> Parser::parse_media_query(TokenStream<ComponentValue>& tokens)
-{
-    // `<media-query> = <media-condition>
-    //                | [ not | only ]? <media-type> [ and <media-condition-without-or> ]?`
-
-    // `[ not | only ]?`, Returns whether to negate the query
-    auto parse_initial_modifier = [](auto& tokens) -> Optional<bool> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        auto& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-
-        auto ident = token.token().ident();
-        if (ident.equals_ignoring_ascii_case("not"sv)) {
-            transaction.commit();
-            return true;
-        }
-        if (ident.equals_ignoring_ascii_case("only"sv)) {
-            transaction.commit();
-            return false;
-        }
-        return {};
-    };
-
-    auto invalid_media_query = [&](String&& description) {
-        // "A media query that does not match the grammar in the previous section must be replaced by `not all`
-        // during parsing." - https://www.w3.org/TR/mediaqueries-5/#error-handling
-        ErrorReporter::the().report(InvalidQueryError {
-            .query_type = "@media"_fly_string,
-            .value_string = tokens.dump_string(),
-            .description = move(description),
-        });
-        return MediaQuery::create_not_all();
-    };
-
-    auto media_query = MediaQuery::create();
-    tokens.discard_whitespace();
-
-    // `<media-condition>`
-    if (auto media_condition = parse_media_condition(tokens)) {
-        tokens.discard_whitespace();
-        if (tokens.has_next_token())
-            return invalid_media_query("Trailing tokens after <media-condition>"_string);
-        media_query->m_media_condition = media_condition.release_nonnull();
-        return media_query;
-    }
-
-    // `[ not | only ]?`
-    if (auto modifier = parse_initial_modifier(tokens); modifier.has_value()) {
-        media_query->m_negated = modifier.value();
-        tokens.discard_whitespace();
-    }
-
-    // `<media-type>`
-    if (auto media_type = parse_media_type(tokens); media_type.has_value()) {
-        media_query->m_media_type = media_type.release_value();
-        tokens.discard_whitespace();
-    } else {
-        // https://drafts.csswg.org/mediaqueries-4/#error-handling
-        // A media query that does not match the grammar in the previous section must be replaced by not all during parsing.
-        return invalid_media_query("Doesn't match `<media-query>`"_string);
-    }
-
-    if (!tokens.has_next_token())
-        return media_query;
-
-    // `[ and <media-condition-without-or> ]?`
-    if (auto const& maybe_and = tokens.consume_a_token(); maybe_and.is_ident("and"sv)) {
-        if (auto media_condition = parse_media_condition(tokens)) {
-            // "or" is disallowed at the top level
-            if (is<BooleanOrExpression>(*media_condition))
-                return invalid_media_query("Contains top-level `or`"_string);
-
-            tokens.discard_whitespace();
-            if (tokens.has_next_token())
-                return invalid_media_query("Trailing tokens after `<media-condition-without-or>`"_string);
-            media_query->m_media_condition = move(media_condition);
-            return media_query;
-        }
-        return invalid_media_query("Missing `<media-condition>` after `and`"_string);
-    }
-
-    return invalid_media_query("Trailing tokens after `<media-query>`"_string);
-}
-
 // `<media-condition>`, https://www.w3.org/TR/mediaqueries-4/#typedef-media-condition
 OwnPtr<BooleanExpression> Parser::parse_media_condition(TokenStream<ComponentValue>& tokens)
 {
@@ -355,30 +268,6 @@ OwnPtr<MediaFeature> Parser::parse_media_feature(TokenStream<ComponentValue>& in
 
     transaction.commit();
     return media_feature;
-}
-
-Optional<MediaQuery::MediaType> Parser::parse_media_type(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    auto const& token = tokens.consume_a_token();
-
-    if (!token.is(Token::Type::Ident))
-        return {};
-
-    // https://drafts.csswg.org/mediaqueries-3/#error-handling
-    // "However, an exception is made for media types ‘layer’, ‘not’, ‘and’, ‘only’, and ‘or’. Even though they do match
-    // the IDENT production, they must not be treated as unknown media types, but rather trigger the malformed query clause."
-    if (token.is_ident("layer"sv) || token.is_ident("not"sv) || token.is_ident("and"sv) || token.is_ident("only"sv) || token.is_ident("or"sv))
-        return {};
-
-    transaction.commit();
-
-    auto const& ident = token.token().ident();
-    return MediaQuery::MediaType {
-        .name = ident,
-        .known_type = media_type_from_string(ident),
-    };
 }
 
 static bool is_media_feature_value_token(ComponentValue const& component_value)
