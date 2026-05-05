@@ -199,4 +199,5 @@ TEST_CASE(stylesheet_contents)
     expect_rust_stylesheet_contents_match_cpp("@media screen { a { color: red } } @layer foo;"sv);
     expect_rust_stylesheet_contents_match_cpp("<!-- a { color: red } --> b { color: blue }"sv);
     expect_rust_stylesheet_contents_match_cpp("@container size(width > 1px) { & { color: green } }"sv);
+    expect_rust_stylesheet_contents_match_cpp("@keyframes foo { from { margin-top: 10px; animation-timing-function: ease; animation-name: none; animation: bar 1s infinite; } }"sv);
 }

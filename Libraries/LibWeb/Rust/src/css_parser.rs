@@ -1020,7 +1020,7 @@ impl Parser {
         }
 
         // 9. If decl is valid in the current context, return it; otherwise return nothing.
-        if self.is_declaration_valid_in_the_current_context() {
+        if self.is_declaration_valid_in_the_current_context(&declaration) {
             return Some(declaration);
         }
         None
@@ -1269,7 +1269,7 @@ fn contains_a_curly_block_and_non_whitespace(declaration_value: &[ComponentValue
 }
 
 impl Parser {
-    fn is_declaration_valid_in_the_current_context(&self) -> bool {
+    fn is_declaration_valid_in_the_current_context(&self, declaration: &Declaration) -> bool {
         let Some(context) = self.rule_context.last() else {
             return false;
         };
@@ -1277,7 +1277,13 @@ impl Parser {
         match context {
             RuleContext::Unknown => false,
             RuleContext::Style => true,
-            RuleContext::Keyframe => true,
+            RuleContext::Keyframe => {
+                // https://drafts.csswg.org/css-animations-1/#keyframes
+                // The <declaration-list> inside of <keyframe-block> accepts any CSS property except those defined in
+                // this specification, but does accept the animation-timing-function property and interprets it specially
+                // NB: animation-composition is defined in CSS Animations Level 2, so it is not excluded by this rule.
+                !is_animation_property_disallowed_in_keyframe(&declaration.name)
+            }
             RuleContext::AtContainer | RuleContext::AtLayer | RuleContext::AtMedia | RuleContext::AtSupports => self
                 .rule_context
                 .iter()
@@ -1445,6 +1451,30 @@ fn is_font_feature_value_type_at_keyword(name: &str) -> bool {
             "swash",
             "ornaments",
             "annotation",
+        ],
+    )
+}
+
+fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
+    first_is_one_of(
+        name,
+        &[
+            "animation",
+            "animation-delay",
+            "animation-direction",
+            "animation-duration",
+            "animation-fill-mode",
+            "animation-iteration-count",
+            "animation-name",
+            "animation-play-state",
+            "animation-timeline",
+            "-webkit-animation-delay",
+            "-webkit-animation-direction",
+            "-webkit-animation-duration",
+            "-webkit-animation-fill-mode",
+            "-webkit-animation-iteration-count",
+            "-webkit-animation-name",
+            "-webkit-animation-play-state",
         ],
     )
 }

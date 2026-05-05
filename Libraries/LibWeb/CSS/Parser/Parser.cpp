@@ -188,16 +188,16 @@ GC::RootVector<GC::Ref<CSSRule>> Parser::convert_rules(Vector<Rule> const& raw_r
 
 GC::RootVector<GC::Ref<CSSRule>> Parser::parse_as_stylesheet_contents()
 {
-    return convert_rules(parse_a_stylesheets_contents(m_token_stream));
+    return convert_rules(RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding));
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-a-css-stylesheet
 GC::Ref<CSS::CSSStyleSheet> Parser::parse_as_css_stylesheet(Optional<::URL::URL> location, GC::Ptr<MediaList> media_list)
 {
     // To parse a CSS stylesheet, first parse a stylesheet.
-    auto const& style_sheet = parse_a_stylesheet(m_token_stream, location);
+    auto rules = RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding);
 
-    auto rule_list = CSSRuleList::create(realm(), convert_rules(style_sheet.rules));
+    auto rule_list = CSSRuleList::create(realm(), convert_rules(rules));
     if (!media_list)
         media_list = MediaList::create(realm(), {});
     return CSSStyleSheet::create(realm(), rule_list, *media_list, move(location));
@@ -1369,7 +1369,7 @@ void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<T>& input, Ne
 
 CSSRule* Parser::parse_as_css_rule()
 {
-    if (auto maybe_rule = parse_a_rule(m_token_stream); maybe_rule.has_value())
+    if (auto maybe_rule = RustComponentValueParser::parse_a_rule(m_input, m_encoding); maybe_rule.has_value())
         return convert_to_rule<CSSNestedDeclarations>(maybe_rule.value(), Nested::No);
     return {};
 }
