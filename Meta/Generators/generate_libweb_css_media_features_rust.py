@@ -45,6 +45,7 @@ pub(crate) enum MediaFeatureValueType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum MediaFeatureId {""")
 
     for name in media_feature_data:
