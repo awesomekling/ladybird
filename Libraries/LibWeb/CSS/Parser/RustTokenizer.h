@@ -19,15 +19,10 @@ struct CssToken;
 
 namespace Web::CSS::Parser {
 
-class RustComponentValueParser;
-
 class WEB_API RustTokenizer {
 public:
     static Vector<Token> tokenize(StringView input, StringView encoding);
     static Token token_from_ffi(FFI::CssToken const&);
-
-private:
-    friend class RustComponentValueParser;
 };
 
 }
