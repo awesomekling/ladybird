@@ -32,6 +32,7 @@ def write_header_file(out: TextIO, media_feature_data: dict) -> None:
 
 #include <AK/StringView.h>
 #include <AK/Traits.h>
+#include <AK/Types.h>
 #include <LibWeb/CSS/Keyword.h>
 
 namespace Web::CSS {{
@@ -54,6 +55,7 @@ enum class MediaFeatureID : {underlying_type} {{""")
 };
 
 Optional<MediaFeatureID> media_feature_id_from_string(StringView);
+Optional<MediaFeatureID> media_feature_id_from_u8(u8);
 StringView string_from_media_feature_id(MediaFeatureID);
 
 bool media_feature_type_is_range(MediaFeatureID);
@@ -84,6 +86,21 @@ Optional<MediaFeatureID> media_feature_id_from_string(StringView string)
 
     out.write("""
     return {};
+}
+
+Optional<MediaFeatureID> media_feature_id_from_u8(u8 value)
+{
+    switch (value) {""")
+
+    for index, name in enumerate(media_feature_data):
+        out.write(f"""
+    case {index}:
+        return MediaFeatureID::{title_casify(name)};""")
+
+    out.write("""
+    default:
+        return {};
+    }
 }
 
 StringView string_from_media_feature_id(MediaFeatureID media_feature_id)

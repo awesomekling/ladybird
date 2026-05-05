@@ -135,9 +135,7 @@ RefPtr<MediaQuery> Parser::parse_as_media_query()
 OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&& media_feature_test)
 {
     auto media_feature_id_from_rust = [](FFI::CssMediaFeature const& media_feature) -> Optional<MediaFeatureID> {
-        if (media_feature.id > to_underlying(MediaFeatureID::Width))
-            return {};
-        return static_cast<MediaFeatureID>(media_feature.id);
+        return media_feature_id_from_u8(media_feature.id);
     };
 
     auto parse_rust_media_feature_value = [this](MediaFeatureID media_feature_id, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
