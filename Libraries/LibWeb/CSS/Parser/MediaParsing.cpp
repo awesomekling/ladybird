@@ -306,8 +306,6 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
             return nullptr;
 
         auto left_comparison = media_feature_comparison_from_rust(media_feature_test.feature.left_comparison);
-        if (left_comparison == MediaFeature::Comparison::Equal)
-            return nullptr;
         return MediaFeature::range(maybe_left_value.release_value(), left_comparison, media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.right_comparison), maybe_right_value.release_value());
     }
 
