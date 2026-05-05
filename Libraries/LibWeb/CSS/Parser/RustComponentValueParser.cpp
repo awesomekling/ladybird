@@ -352,6 +352,9 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
 
 struct RustMediaFeatureTestBuilder {
     FFI::CssMediaFeature feature;
+    Optional<FFI::CssMediaFeatureValueSyntaxKind> value_syntax_kind;
+    Optional<FFI::CssMediaFeatureValueSyntaxKind> left_value_syntax_kind;
+    Optional<FFI::CssMediaFeatureValueSyntaxKind> right_value_syntax_kind;
     ComponentValueBuilder value_builder;
     ComponentValueBuilder left_value_builder;
     ComponentValueBuilder right_value_builder;
@@ -363,12 +366,24 @@ struct RustMediaFeatureTestBuilder {
         VERIFY(right_value_builder.stack.is_empty());
         return RustComponentValueParser::MediaFeatureTest {
             .feature = feature,
+            .value_syntax_kind = value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
+            .left_value_syntax_kind = left_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
+            .right_value_syntax_kind = right_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
             .value = move(value_builder.root_values),
             .left_value = move(left_value_builder.root_values),
             .right_value = move(right_value_builder.root_values),
         };
     }
 };
+
+static void set_media_feature_value_syntax_kind(Optional<FFI::CssMediaFeatureValueSyntaxKind>& target, FFI::CssMediaFeatureValueSyntaxKind syntax_kind)
+{
+    if (target.has_value()) {
+        VERIFY(target.value() == syntax_kind);
+        return;
+    }
+    target = syntax_kind;
+}
 
 struct RustBooleanExpressionBuilder {
     enum class FrameType : u8 {
@@ -557,12 +572,15 @@ static void append_boolean_expression_media_feature_value(RustBooleanExpressionB
 
     switch (media_feature_value->kind) {
     case FFI::CssMediaFeatureValueKind::Value:
+        set_media_feature_value_syntax_kind(builder.media_feature->value_syntax_kind, media_feature_value->syntax_kind);
         append_to_builder(builder.media_feature->value_builder);
         break;
     case FFI::CssMediaFeatureValueKind::LeftValue:
+        set_media_feature_value_syntax_kind(builder.media_feature->left_value_syntax_kind, media_feature_value->syntax_kind);
         append_to_builder(builder.media_feature->left_value_builder);
         break;
     case FFI::CssMediaFeatureValueKind::RightValue:
+        set_media_feature_value_syntax_kind(builder.media_feature->right_value_syntax_kind, media_feature_value->syntax_kind);
         append_to_builder(builder.media_feature->right_value_builder);
         break;
     }
@@ -662,12 +680,15 @@ Optional<RustComponentValueParser::MediaFeatureTest> RustComponentValueParser::p
 
             switch (media_feature_value->kind) {
             case FFI::CssMediaFeatureValueKind::Value:
+                set_media_feature_value_syntax_kind(builder->value_syntax_kind, media_feature_value->syntax_kind);
                 append_to_builder(builder->value_builder);
                 break;
             case FFI::CssMediaFeatureValueKind::LeftValue:
+                set_media_feature_value_syntax_kind(builder->left_value_syntax_kind, media_feature_value->syntax_kind);
                 append_to_builder(builder->left_value_builder);
                 break;
             case FFI::CssMediaFeatureValueKind::RightValue:
+                set_media_feature_value_syntax_kind(builder->right_value_syntax_kind, media_feature_value->syntax_kind);
                 append_to_builder(builder->right_value_builder);
                 break;
             }

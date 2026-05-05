@@ -26,6 +26,9 @@ class WEB_API RustComponentValueParser {
 public:
     struct MediaFeatureTest {
         FFI::CssMediaFeature feature;
+        FFI::CssMediaFeatureValueSyntaxKind value_syntax_kind;
+        FFI::CssMediaFeatureValueSyntaxKind left_value_syntax_kind;
+        FFI::CssMediaFeatureValueSyntaxKind right_value_syntax_kind;
         Vector<ComponentValue> value;
         Vector<ComponentValue> left_value;
         Vector<ComponentValue> right_value;
