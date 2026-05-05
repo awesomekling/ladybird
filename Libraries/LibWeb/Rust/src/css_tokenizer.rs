@@ -144,6 +144,10 @@ impl Token {
         }
     }
 
+    pub(crate) fn original_source<'a>(&self, filtered_input: &'a str) -> Option<&'a str> {
+        filtered_input.get(self.original_source_range.clone())
+    }
+
     pub(crate) fn as_ffi(&self, filtered_input: &str) -> CssToken {
         let original_source =
             &filtered_input.as_bytes()[self.original_source_range.start..self.original_source_range.end];

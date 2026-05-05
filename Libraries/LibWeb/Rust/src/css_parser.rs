@@ -413,6 +413,28 @@ pub enum CssValueTypeSyntaxKind {
     SymbolCustomIdent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssSyntaxNodeKind {
+    Invalid,
+    Universal,
+    Type,
+    Ident,
+    MultiplierStart,
+    MultiplierEnd,
+    CommaSeparatedMultiplierStart,
+    CommaSeparatedMultiplierEnd,
+    AlternativesStart,
+    AlternativesEnd,
+}
+
+#[repr(C)]
+pub struct CssSyntaxNode {
+    pub kind: CssSyntaxNodeKind,
+    pub value_ptr: *const u8,
+    pub value_len: usize,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -453,7 +475,32 @@ pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> Cs
 fn parse_as_syntax_string(input: &str, limit_single_component_ident_to_custom_ident: bool) -> Option<SyntaxNode> {
     let (mut parser, _) = parser_from_filtered_input(input.as_bytes());
     let component_values = parser.parse_a_list_of_component_values();
-    component_values_parse_as_syntax(&component_values, limit_single_component_ident_to_custom_ident)
+    component_values_parse_as_syntax_with_source(
+        &component_values,
+        limit_single_component_ident_to_custom_ident,
+        Some(input),
+    )
+}
+
+pub(crate) fn parse_as_syntax<C>(
+    filtered_input: &[u8],
+    limit_single_component_ident_to_custom_ident: bool,
+    mut callback: C,
+) where
+    C: FnMut(CssSyntaxNode),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let Some(syntax_node) = component_values_parse_as_syntax_with_source(
+        &component_values,
+        limit_single_component_ident_to_custom_ident,
+        Some(filtered_input_string),
+    ) else {
+        callback(CssSyntaxNode::new(CssSyntaxNodeKind::Invalid));
+        return;
+    };
+
+    emit_syntax_node(&syntax_node, &mut callback);
 }
 
 pub(crate) fn parse_a_supports_condition<E, C>(
@@ -946,6 +993,16 @@ impl CssRuleEvent {
     }
 }
 
+impl CssSyntaxNode {
+    fn new(kind: CssSyntaxNodeKind) -> Self {
+        Self {
+            kind,
+            value_ptr: std::ptr::null(),
+            value_len: 0,
+        }
+    }
+}
+
 fn emit_component_value<F>(component_value: &ComponentValue, filtered_input: &str, callback: &mut F)
 where
     F: FnMut(CssComponentValue),
@@ -999,6 +1056,48 @@ where
         kind,
         token: token.as_ffi(filtered_input),
     });
+}
+
+fn emit_syntax_node<C>(syntax_node: &SyntaxNode, callback: &mut C)
+where
+    C: FnMut(CssSyntaxNode),
+{
+    match syntax_node {
+        SyntaxNode::Universal => callback(CssSyntaxNode::new(CssSyntaxNodeKind::Universal)),
+        SyntaxNode::Type(type_name) => {
+            let (value_ptr, value_len) = string_parts(type_name);
+            callback(CssSyntaxNode {
+                kind: CssSyntaxNodeKind::Type,
+                value_ptr,
+                value_len,
+            });
+        }
+        SyntaxNode::Ident(ident) => {
+            let (value_ptr, value_len) = string_parts(ident);
+            callback(CssSyntaxNode {
+                kind: CssSyntaxNodeKind::Ident,
+                value_ptr,
+                value_len,
+            });
+        }
+        SyntaxNode::Multiplier(child) => {
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::MultiplierStart));
+            emit_syntax_node(child, callback);
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::MultiplierEnd));
+        }
+        SyntaxNode::CommaSeparatedMultiplier(child) => {
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::CommaSeparatedMultiplierStart));
+            emit_syntax_node(child, callback);
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::CommaSeparatedMultiplierEnd));
+        }
+        SyntaxNode::Alternatives(children) => {
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::AlternativesStart));
+            for child in children {
+                emit_syntax_node(child, callback);
+            }
+            callback(CssSyntaxNode::new(CssSyntaxNodeKind::AlternativesEnd));
+        }
+    }
 }
 
 fn emit_rule<E, C>(rule: &Rule, filtered_input: &str, event_callback: &mut E, component_value_callback: &mut C)
@@ -1817,6 +1916,15 @@ fn component_values_parse_as_syntax(
     component_values: &[ComponentValue],
     limit_single_component_ident_to_custom_ident: bool,
 ) -> Option<SyntaxNode> {
+    component_values_parse_as_syntax_with_source(component_values, limit_single_component_ident_to_custom_ident, None)
+}
+
+// https://drafts.csswg.org/css-values-5/#typedef-syntax
+fn component_values_parse_as_syntax_with_source(
+    component_values: &[ComponentValue],
+    limit_single_component_ident_to_custom_ident: bool,
+    filtered_input: Option<&str>,
+) -> Option<SyntaxNode> {
     // <syntax> = '*' | <syntax-component> [ <syntax-combinator> <syntax-component> ]* | <syntax-string>
     // <syntax-component> = <syntax-single-component> <syntax-multiplier>?
     //                    | '<' transform-list '>'
@@ -1865,13 +1973,18 @@ fn component_values_parse_as_syntax(
     let mut syntax_components = vec![parse_syntax_component(
         &mut parser,
         limit_single_component_ident_to_custom_ident,
+        filtered_input,
     )?];
 
     parser.discard_whitespace();
     while parser.next_component_value().is_some() {
         let combinator = parse_syntax_combinator(&mut parser);
         parser.discard_whitespace();
-        let component = parse_syntax_component(&mut parser, limit_single_component_ident_to_custom_ident);
+        let component = parse_syntax_component(
+            &mut parser,
+            limit_single_component_ident_to_custom_ident,
+            filtered_input,
+        );
         parser.discard_whitespace();
         if combinator.is_none() || component.is_none() {
             return None;
@@ -1893,6 +2006,7 @@ fn component_values_parse_as_syntax(
 fn parse_syntax_component(
     parser: &mut ComponentValueParser,
     limit_single_component_ident_to_custom_ident: bool,
+    filtered_input: Option<&str>,
 ) -> Option<SyntaxNode> {
     // <syntax-component> = <syntax-single-component> <syntax-multiplier>?
     //                    | '<' transform-list '>'
@@ -1905,7 +2019,10 @@ fn parse_syntax_component(
         let ident_token = parser.consume_the_next_component_value();
         let end_token = parser.consume_the_next_component_value();
 
-        if component_value_is_ident(ident_token.as_ref(), "transform-list")
+        if let Some(ComponentValue::PreservedToken(token)) = ident_token
+            && let TokenType::Ident { value } = &token.token_type
+            && value == "transform-list"
+            && syntax_type_name_source_matches_value(&token, value, filtered_input)
             && component_value_is_delim(end_token.as_ref(), '>')
         {
             return Some(SyntaxNode::Type("transform-list".to_string()));
@@ -1915,7 +2032,8 @@ fn parse_syntax_component(
     }
 
     // <syntax-single-component> <syntax-multiplier>?
-    let syntax_single_component = parse_syntax_single_component(parser, limit_single_component_ident_to_custom_ident)?;
+    let syntax_single_component =
+        parse_syntax_single_component(parser, limit_single_component_ident_to_custom_ident, filtered_input)?;
 
     match parse_syntax_multiplier(parser) {
         None => Some(syntax_single_component),
@@ -1928,6 +2046,7 @@ fn parse_syntax_component(
 fn parse_syntax_single_component(
     parser: &mut ComponentValueParser,
     limit_single_component_ident_to_custom_ident: bool,
+    filtered_input: Option<&str>,
 ) -> Option<SyntaxNode> {
     // <syntax-single-component> = '<' <syntax-type-name> '>' | <ident>
     // <syntax-type-name> = angle | color | custom-ident | image | integer
@@ -1962,14 +2081,13 @@ fn parse_syntax_single_component(
         let type_name = parser.consume_the_next_component_value();
         let end_token = parser.consume_the_next_component_value();
 
-        if let Some(ComponentValue::PreservedToken(Token {
-            token_type: TokenType::Ident { value },
-            ..
-        })) = type_name
+        if let Some(ComponentValue::PreservedToken(token)) = type_name
+            && let TokenType::Ident { value } = &token.token_type
             && component_value_is_delim(end_token.as_ref(), '>')
-            && is_syntax_type_name(&value)
+            && is_syntax_type_name(value)
+            && syntax_type_name_source_matches_value(&token, value, filtered_input)
         {
-            return Some(SyntaxNode::Type(value));
+            return Some(SyntaxNode::Type(value.clone()));
         }
     }
 
@@ -1995,9 +2113,16 @@ static SYNTAX_TYPE_NAMES: &[&str] = &[
 ];
 
 fn is_syntax_type_name(value: &str) -> bool {
-    SYNTAX_TYPE_NAMES
-        .iter()
-        .any(|type_name| value.eq_ignore_ascii_case(type_name))
+    SYNTAX_TYPE_NAMES.contains(&value)
+}
+
+fn syntax_type_name_source_matches_value(token: &Token, value: &str, filtered_input: Option<&str>) -> bool {
+    let Some(filtered_input) = filtered_input else {
+        return true;
+    };
+    token
+        .original_source(filtered_input)
+        .is_some_and(|source| source == value)
 }
 
 fn parse_syntax_multiplier(parser: &mut ComponentValueParser) -> Option<char> {
@@ -3672,8 +3797,8 @@ mod tests {
         MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
         Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_value_type, parse_a_media_query, parse_a_media_test, parse_a_value_type,
-        strip_whitespace,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_media_query,
+        parse_a_media_test, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -3735,6 +3860,12 @@ mod tests {
 
     fn parse_syntax(input: &str) -> Option<SyntaxNode> {
         component_values_parse_as_syntax(&parse(input), false)
+    }
+
+    fn parse_syntax_with_source(input: &str) -> Option<SyntaxNode> {
+        let (mut parser, filtered_input) = super::parser_from_filtered_input(input.as_bytes());
+        let component_values = parser.parse_a_list_of_component_values();
+        component_values_parse_as_syntax_with_source(&component_values, false, Some(filtered_input))
     }
 
     fn parse_limited_syntax(input: &str) -> Option<SyntaxNode> {
@@ -3862,6 +3993,9 @@ mod tests {
         assert!(parse_syntax("<transform-list>+").is_none());
         assert!(parse_syntax("<transform-list>#").is_none());
         assert!(parse_syntax("<woozle>").is_none());
+        assert!(parse_syntax("<Number>").is_none());
+        assert!(parse_syntax("<LENGTH>").is_none());
+        assert!(parse_syntax_with_source(r"<\6c ength>").is_none());
         assert!(parse_syntax("<number> <integer>").is_none());
         assert!(parse_syntax("thingy whatsit").is_none());
         assert!(parse_syntax("<number> +").is_none());

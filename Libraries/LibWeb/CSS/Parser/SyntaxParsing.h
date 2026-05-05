@@ -8,6 +8,7 @@
 
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
+#include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>

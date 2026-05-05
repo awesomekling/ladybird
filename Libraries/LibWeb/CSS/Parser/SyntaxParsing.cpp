@@ -8,9 +8,11 @@
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/Parser/TokenStream.h>
+#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GuaranteedInvalidStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
@@ -19,6 +21,54 @@
 #include <LibWeb/CSS/ValueType.h>
 
 namespace Web::CSS::Parser {
+
+static bool serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
+{
+    if (component_value.is_token()) {
+        if (component_value.token().is(Token::Type::EndOfFile) || component_value.token().is(Token::Type::Invalid))
+            return false;
+
+        auto original_source_text = component_value.original_source_text();
+        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
+        return true;
+    }
+
+    if (component_value.is_block()) {
+        auto const& block = component_value.block();
+        builder.append(block.token.bracket_string());
+        for (auto const& child : block.value) {
+            if (!serialize_component_value_for_reparsing(builder, child))
+                return false;
+        }
+        builder.append(block.token.bracket_mirror_string());
+        return true;
+    }
+
+    if (component_value.is_function()) {
+        auto const& function = component_value.function();
+        serialize_an_identifier(builder, function.name);
+        builder.append('(');
+        for (auto const& child : function.value) {
+            if (!serialize_component_value_for_reparsing(builder, child))
+                return false;
+        }
+        builder.append(')');
+        return true;
+    }
+
+    builder.append(component_value.to_string());
+    return true;
+}
+
+static Optional<String> serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values) {
+        if (!serialize_component_value_for_reparsing(builder, component_value))
+            return {};
+    }
+    return builder.to_string_without_validation();
+}
 
 static OwnPtr<SyntaxNode> parse_syntax_single_component(TokenStream<ComponentValue>& tokens, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
 {
@@ -133,21 +183,6 @@ OwnPtr<SyntaxNode> parse_syntax_component(TokenStream<ComponentValue>& tokens, L
     }
 }
 
-static Optional<char> parse_syntax_combinator(TokenStream<ComponentValue>& tokens)
-{
-    // <syntax-combinator> = '|'
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    auto delim = tokens.consume_a_token();
-    if (delim.is_delim('|')) {
-        transaction.commit();
-        return delim.token().delim();
-    }
-
-    return {};
-}
-
 // https://drafts.csswg.org/css-values-5/#typedef-syntax
 OwnPtr<SyntaxNode> parse_as_syntax(Vector<ComponentValue> const& component_values, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
 {
@@ -164,61 +199,10 @@ OwnPtr<SyntaxNode> parse_as_syntax(Vector<ComponentValue> const& component_value
     //
     // <syntax-string> = <string>
     // FIXME: Eventually, extend this to also parse *any* CSS grammar, not just for the <syntax> type.
-
-    TokenStream tokens { component_values };
-    tokens.discard_whitespace();
-
-    // '*'
-    if (tokens.next_token().is_delim('*')) {
-        tokens.discard_a_token(); // '*'
-        tokens.discard_whitespace();
-        if (tokens.has_next_token())
-            return nullptr;
-        return UniversalSyntaxNode::create();
-    }
-
-    // <syntax-string> = <string>
-    // A <syntax-string> is a <string> whose value successfully parses as a <syntax>, and represents the same value as
-    // that <syntax> would.
-    // NB: For now, this is the only time a string is allowed in a <syntax>.
-    if (tokens.next_token().is(Token::Type::String)) {
-        auto string = tokens.consume_a_token().token().string();
-        tokens.discard_whitespace();
-        if (tokens.has_next_token())
-            return nullptr;
-
-        auto child_component_values = Parser::create(ParsingParams {}, string).parse_as_list_of_component_values();
-        return parse_as_syntax(child_component_values, limit_single_component_ident_to_custom_ident);
-    }
-
-    // <syntax-component> [ <syntax-combinator> <syntax-component> ]*
-    auto first = parse_syntax_component(tokens, limit_single_component_ident_to_custom_ident);
-    if (!first)
-        return nullptr;
-    Vector<NonnullOwnPtr<SyntaxNode>> syntax_components;
-    syntax_components.append(first.release_nonnull());
-
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        auto combinator = parse_syntax_combinator(tokens);
-        tokens.discard_whitespace();
-        auto component = parse_syntax_component(tokens, limit_single_component_ident_to_custom_ident);
-        tokens.discard_whitespace();
-        if (!combinator.has_value() || !component) {
-            dbgln("Failed parsing syntax portion, combinator = `{}`, component = `{}`", combinator, component);
-            return nullptr;
-        }
-
-        // FIXME: Make this logic smarter once we have more than one type of combinator.
-        // For now, assume we're always making an AlternativesSyntaxNode.
-        VERIFY(combinator == '|');
-
-        syntax_components.append(component.release_nonnull());
-    }
-
-    if (syntax_components.size() == 1)
-        return syntax_components.take_first();
-    return AlternativesSyntaxNode::create(move(syntax_components));
+    auto serialized_syntax = serialize_component_values_for_reparsing(component_values);
+    if (!serialized_syntax.has_value())
+        return {};
+    return RustComponentValueParser::parse_as_syntax(serialized_syntax->bytes_as_string_view(), "utf-8"sv, limit_single_component_ident_to_custom_ident);
 }
 
 NonnullRefPtr<StyleValue const> parse_with_a_syntax(ParsingParams const& parsing_params, Vector<ComponentValue> const& input, SyntaxNode const& syntax)

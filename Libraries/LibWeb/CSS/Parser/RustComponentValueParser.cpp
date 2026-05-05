@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/CharacterTypes.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
+#include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/RustFFI.h>
 
@@ -261,6 +262,127 @@ FFI::CssValueTypeSyntaxKind RustComponentValueParser::parse_a_value_type(u8 valu
         component_value_source_bytes.data(),
         component_value_source_bytes.size(),
         value_type_id);
+}
+
+struct RustSyntaxNodeBuilder {
+    enum class FrameType : u8 {
+        Multiplier,
+        CommaSeparatedMultiplier,
+        Alternatives,
+    };
+
+    struct Frame {
+        FrameType type;
+        Vector<NonnullOwnPtr<SyntaxNode>> children;
+    };
+
+    Vector<Frame> stack;
+    OwnPtr<SyntaxNode> root;
+    CaseSensitivity ident_case_sensitivity { CaseSensitivity::CaseInsensitive };
+    bool invalid { false };
+
+    void append_node(NonnullOwnPtr<SyntaxNode> node)
+    {
+        if (stack.is_empty()) {
+            if (root) {
+                invalid = true;
+                return;
+            }
+            root = move(node);
+            return;
+        }
+
+        stack.last().children.append(move(node));
+    }
+
+    void end_frame(FrameType expected_type)
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == expected_type);
+
+        switch (expected_type) {
+        case FrameType::Multiplier:
+            if (frame.children.size() != 1) {
+                invalid = true;
+                return;
+            }
+            append_node(MultiplierSyntaxNode::create(frame.children.take_first()));
+            return;
+        case FrameType::CommaSeparatedMultiplier:
+            if (frame.children.size() != 1) {
+                invalid = true;
+                return;
+            }
+            append_node(CommaSeparatedMultiplierSyntaxNode::create(frame.children.take_first()));
+            return;
+        case FrameType::Alternatives:
+            if (frame.children.is_empty()) {
+                invalid = true;
+                return;
+            }
+            append_node(AlternativesSyntaxNode::create(move(frame.children)));
+            return;
+        }
+
+        VERIFY_NOT_REACHED();
+    }
+};
+
+OwnPtr<SyntaxNode> RustComponentValueParser::parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
+{
+    RustSyntaxNodeBuilder builder;
+    builder.ident_case_sensitivity = limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes ? CaseSensitivity::CaseSensitive : CaseSensitivity::CaseInsensitive;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_as_syntax(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes,
+        &builder,
+        [](void* raw_builder, FFI::CssSyntaxNode const* syntax_node) {
+            auto& builder = *static_cast<RustSyntaxNodeBuilder*>(raw_builder);
+            switch (syntax_node->kind) {
+            case FFI::CssSyntaxNodeKind::Invalid:
+                builder.invalid = true;
+                return;
+            case FFI::CssSyntaxNodeKind::Universal:
+                builder.append_node(UniversalSyntaxNode::create());
+                return;
+            case FFI::CssSyntaxNodeKind::Type:
+                builder.append_node(TypeSyntaxNode::create(fly_string_from_ffi_bytes(syntax_node->value_ptr, syntax_node->value_len)));
+                return;
+            case FFI::CssSyntaxNodeKind::Ident:
+                builder.append_node(IdentSyntaxNode::create(fly_string_from_ffi_bytes(syntax_node->value_ptr, syntax_node->value_len), builder.ident_case_sensitivity));
+                return;
+            case FFI::CssSyntaxNodeKind::MultiplierStart:
+                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::Multiplier, {} });
+                return;
+            case FFI::CssSyntaxNodeKind::MultiplierEnd:
+                builder.end_frame(RustSyntaxNodeBuilder::FrameType::Multiplier);
+                return;
+            case FFI::CssSyntaxNodeKind::CommaSeparatedMultiplierStart:
+                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier, {} });
+                return;
+            case FFI::CssSyntaxNodeKind::CommaSeparatedMultiplierEnd:
+                builder.end_frame(RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier);
+                return;
+            case FFI::CssSyntaxNodeKind::AlternativesStart:
+                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::Alternatives, {} });
+                return;
+            case FFI::CssSyntaxNodeKind::AlternativesEnd:
+                builder.end_frame(RustSyntaxNodeBuilder::FrameType::Alternatives);
+                return;
+            }
+
+            VERIFY_NOT_REACHED();
+        });
+
+    VERIFY(builder.stack.is_empty());
+    if (builder.invalid)
+        return {};
+    return move(builder.root);
 }
 
 Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding)

@@ -26,7 +26,7 @@ pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
     CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
     CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssRuleContext,
-    CssRuleEvent, CssRuleEventKind, CssValueTypeSyntaxKind,
+    CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -193,6 +193,31 @@ pub unsafe extern "C" fn rust_css_parse_value_type(
 
             css_parser::parse_a_value_type(input, value_type_id)
         })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_as_syntax(
+    input: *const u8,
+    input_len: usize,
+    limit_single_component_ident_to_custom_ident: bool,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, syntax_node: *const CssSyntaxNode),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+
+            css_parser::parse_as_syntax(input, limit_single_component_ident_to_custom_ident, |syntax_node| {
+                callback(ctx, &raw const syntax_node);
+            });
+        });
     }
 }
 
