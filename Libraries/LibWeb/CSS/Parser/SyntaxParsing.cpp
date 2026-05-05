@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/GenericShorthands.h>
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -60,7 +59,7 @@ static bool serialize_component_value_for_reparsing(StringBuilder& builder, Comp
     return true;
 }
 
-static Optional<String> serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
+static Optional<String> serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const> component_values)
 {
     StringBuilder builder;
     for (auto const& component_value : component_values) {
@@ -70,72 +69,34 @@ static Optional<String> serialize_component_values_for_reparsing(Vector<Componen
     return builder.to_string_without_validation();
 }
 
-static OwnPtr<SyntaxNode> parse_syntax_single_component(TokenStream<ComponentValue>& tokens, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
+static bool consume_syntax_component_candidate_for_rust_reparsing(TokenStream<ComponentValue>& tokens)
 {
-    // <syntax-single-component> = '<' <syntax-type-name> '>' | <ident>
-    // <syntax-type-name> = angle | color | custom-ident | image | integer
-    //                    | length | length-percentage | number
-    //                    | percentage | resolution | string | time
-    //                    | url | transform-function
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
     // <ident>
     if (tokens.next_token().is(Token::Type::Ident)) {
-        auto ident = tokens.consume_a_token().token().ident();
-
-        // AD-HOC: Some users (i.e. the @property syntax descriptor) only allow custom idents here,
-        //         https://github.com/w3c/csswg-drafts/issues/13614
-        if (limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes && !is_valid_custom_ident(ident, {}))
-            return {};
-
-        transaction.commit();
-        return IdentSyntaxNode::create(ident, limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes ? CaseSensitivity::CaseSensitive : CaseSensitivity::CaseInsensitive);
+        tokens.discard_a_token();
+        if (tokens.next_token().is_delim('#') || tokens.next_token().is_delim('+'))
+            tokens.discard_a_token();
+        return true;
     }
 
     // '<' <syntax-type-name> '>'
     if (tokens.next_token().is_delim('<')) {
         tokens.discard_a_token(); // '<'
-        auto const& type_name = tokens.consume_a_token();
-        auto const& end_token = tokens.consume_a_token();
 
-        if (end_token.is_delim('>')
-            && type_name.is(Token::Type::Ident)
-            && first_is_one_of(type_name.token().ident(), "angle"sv,
-                "color"sv,
-                "custom-ident"sv,
-                "image"sv,
-                "integer"sv,
-                "length"sv,
-                "length-percentage"sv,
-                "number"sv,
-                "percentage"sv,
-                "resolution"sv,
-                "string"sv,
-                "time"sv,
-                "url"sv,
-                "transform-function"sv)) {
-            transaction.commit();
-            return TypeSyntaxNode::create(type_name.token().ident());
-        }
+        if (tokens.is_empty())
+            return false;
+        tokens.discard_a_token();
+
+        if (tokens.is_empty())
+            return false;
+        tokens.discard_a_token();
+
+        if (tokens.next_token().is_delim('#') || tokens.next_token().is_delim('+'))
+            tokens.discard_a_token();
+        return true;
     }
 
-    return nullptr;
-}
-
-static Optional<char> parse_syntax_multiplier(TokenStream<ComponentValue>& tokens)
-{
-    // <syntax-multiplier> = [ '#' | '+' ]
-    auto transaction = tokens.begin_transaction();
-
-    auto delim = tokens.consume_a_token();
-    if (delim.is_delim('#') || delim.is_delim('+')) {
-        transaction.commit();
-        return delim.token().delim();
-    }
-
-    return {};
+    return false;
 }
 
 OwnPtr<SyntaxNode> parse_syntax_component(TokenStream<ComponentValue>& tokens, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
@@ -146,41 +107,21 @@ OwnPtr<SyntaxNode> parse_syntax_component(TokenStream<ComponentValue>& tokens, L
     auto transaction = tokens.begin_transaction();
 
     tokens.discard_whitespace();
+    auto component_start = tokens.current_index();
 
-    // '<' transform-list '>'
-    if (tokens.next_token().is_delim('<')) {
-        auto transform_list_transaction = transaction.create_child();
-        tokens.discard_a_token(); // '<'
-        auto& ident_token = tokens.consume_a_token();
-        auto& end_token = tokens.consume_a_token();
-
-        if (ident_token.is_ident("transform-list"sv) && end_token.is_delim('>')) {
-            transform_list_transaction.commit();
-            return TypeSyntaxNode::create("transform-list"_fly_string);
-        }
-    }
-
-    // <syntax-single-component> <syntax-multiplier>?
-    auto syntax_single_component = parse_syntax_single_component(tokens, limit_single_component_ident_to_custom_ident);
-    if (!syntax_single_component)
+    if (!consume_syntax_component_candidate_for_rust_reparsing(tokens))
         return nullptr;
 
-    auto multiplier = parse_syntax_multiplier(tokens);
-    if (!multiplier.has_value()) {
+    auto serialized_syntax = serialize_component_values_for_reparsing(tokens.tokens_since(component_start));
+    if (!serialized_syntax.has_value())
+        return nullptr;
+
+    if (auto syntax_component = RustComponentValueParser::parse_as_syntax(serialized_syntax->bytes_as_string_view(), "utf-8"sv, limit_single_component_ident_to_custom_ident)) {
         transaction.commit();
-        return syntax_single_component.release_nonnull();
+        return syntax_component;
     }
 
-    switch (multiplier.value()) {
-    case '#':
-        transaction.commit();
-        return CommaSeparatedMultiplierSyntaxNode::create(syntax_single_component.release_nonnull());
-    case '+':
-        transaction.commit();
-        return MultiplierSyntaxNode::create(syntax_single_component.release_nonnull());
-    default:
-        return nullptr;
-    }
+    return nullptr;
 }
 
 // https://drafts.csswg.org/css-values-5/#typedef-syntax
