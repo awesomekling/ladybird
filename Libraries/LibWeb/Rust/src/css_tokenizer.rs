@@ -89,6 +89,12 @@ pub(crate) struct NumericValue {
     value: f64,
 }
 
+impl NumericValue {
+    pub(crate) fn value(&self) -> f64 {
+        self.value
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Token {
     pub(crate) token_type: TokenType,
