@@ -1912,19 +1912,22 @@ fn component_values_parse_as_mf_value_syntax(
     }
 
     if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Boolean)
-        && component_values_parse_as_mq_boolean(component_values)
+        && (component_values_parse_as_mq_boolean(component_values)
+            || component_values_parse_as_math_backed_mf_value(component_values))
     {
         return MediaFeatureValueSyntaxKind::Boolean;
     }
 
     if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Integer)
-        && component_values_parse_as_integer(component_values)
+        && (component_values_parse_as_integer(component_values)
+            || component_values_parse_as_math_backed_mf_value(component_values))
     {
         return MediaFeatureValueSyntaxKind::Integer;
     }
 
     if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Length)
-        && component_values_parse_as_length(component_values)
+        && (component_values_parse_as_length(component_values)
+            || component_values_parse_as_math_backed_mf_value(component_values))
     {
         return MediaFeatureValueSyntaxKind::Length;
     }
@@ -1936,12 +1939,17 @@ fn component_values_parse_as_mf_value_syntax(
     }
 
     if media_feature_accepts_type(media_feature_id, MediaFeatureValueType::Resolution)
-        && component_values_parse_as_resolution(component_values)
+        && (component_values_parse_as_resolution(component_values)
+            || component_values_parse_as_math_backed_mf_value(component_values))
     {
         return MediaFeatureValueSyntaxKind::Resolution;
     }
 
     MediaFeatureValueSyntaxKind::Unknown
+}
+
+fn component_values_parse_as_math_backed_mf_value(component_values: &[ComponentValue]) -> bool {
+    matches!(component_values, [ComponentValue::Function(_)])
 }
 
 fn component_values_parse_as_mq_boolean(component_values: &[ComponentValue]) -> bool {
@@ -3556,11 +3564,23 @@ mod tests {
             MediaFeatureValueSyntaxKind::Boolean
         );
         assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Grid, &parse("calc(1)")),
+            MediaFeatureValueSyntaxKind::Boolean
+        );
+        assert_eq!(
             component_values_parse_as_mf_value_syntax(MediaFeatureId::Color, &parse("8")),
             MediaFeatureValueSyntaxKind::Integer
         );
         assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Color, &parse("calc(8)")),
+            MediaFeatureValueSyntaxKind::Integer
+        );
+        assert_eq!(
             component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("100px")),
+            MediaFeatureValueSyntaxKind::Length
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Width, &parse("calc(100px)")),
             MediaFeatureValueSyntaxKind::Length
         );
         assert_eq!(
@@ -3573,6 +3593,10 @@ mod tests {
         );
         assert_eq!(
             component_values_parse_as_mf_value_syntax(MediaFeatureId::Resolution, &parse("96dpi")),
+            MediaFeatureValueSyntaxKind::Resolution
+        );
+        assert_eq!(
+            component_values_parse_as_mf_value_syntax(MediaFeatureId::Resolution, &parse("calc(96dpi)")),
             MediaFeatureValueSyntaxKind::Resolution
         );
     }
