@@ -1634,7 +1634,7 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
         let left = strip_whitespace(&component_values[..comparison_index]);
         let right = strip_whitespace(&component_values[comparison_end..]);
 
-        if let Some(name) = component_values_parse_as_mf_name(left, AllowMinMaxPrefix::No)
+        if let Some(name) = component_values_parse_as_mf_range_name(left)
             && component_values_parse_as_mf_value(right)
         {
             return Some(MediaFeatureSyntax::HalfRangeNameFirst {
@@ -1645,7 +1645,7 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
         }
 
         if component_values_parse_as_mf_value(left)
-            && let Some(name) = component_values_parse_as_mf_name(right, AllowMinMaxPrefix::No)
+            && let Some(name) = component_values_parse_as_mf_range_name(right)
         {
             return Some(MediaFeatureSyntax::HalfRangeValueFirst {
                 value: left.to_vec(),
@@ -1673,7 +1673,7 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
         let name = strip_whitespace(&component_values[left_comparison_end..right_comparison_index]);
         let right_value = strip_whitespace(&component_values[right_comparison_end..]);
         if component_values_parse_as_mf_value(left_value)
-            && let Some(name) = component_values_parse_as_mf_name(name, AllowMinMaxPrefix::No)
+            && let Some(name) = component_values_parse_as_mf_range_name(name)
             && component_values_parse_as_mf_value(right_value)
         {
             return Some(MediaFeatureSyntax::Range {
@@ -1805,6 +1805,18 @@ fn component_values_parse_as_mf_name(
         },
         id,
     })
+}
+
+fn component_values_parse_as_mf_range_name(component_values: &[ComponentValue]) -> Option<MediaFeatureName> {
+    let name = component_values_parse_as_mf_name(component_values, AllowMinMaxPrefix::No)?;
+
+    // The only significant difference between the two types is that “range” media features
+    // can be evaluated in a range context and accept “min-” and “max-” prefixes on their name.
+    if !media_feature_type_is_range(name.id) {
+        return None;
+    }
+
+    Some(name)
 }
 
 fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bool {
@@ -3258,6 +3270,10 @@ mod tests {
     #[test]
     fn rejects_invalid_media_feature_syntax_nodes() {
         assert!(parse_media_feature_syntax("min-hover: hover").is_none());
+        assert!(parse_media_feature_syntax("hover > 1").is_none());
+        assert!(parse_media_feature_syntax("hover = none").is_none());
+        assert!(parse_media_feature_syntax("1 < hover").is_none());
+        assert!(parse_media_feature_syntax("1 < hover < 2").is_none());
         assert!(parse_media_feature_syntax("100px <= width >= 200px").is_none());
         assert!(parse_media_feature_syntax("100px = width = 200px").is_none());
         assert!(parse_media_feature_syntax("width <> 100px").is_none());
