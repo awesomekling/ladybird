@@ -10,7 +10,9 @@
 
 use crate::css_tokenizer::{CssToken, Token, TokenType};
 use crate::generated_media_features::{MediaFeatureId, media_feature_id_from_string, media_feature_type_is_range};
-use crate::generated_value_types::{ValueTypeId, value_type_id_from_u8};
+use crate::generated_value_types::{
+    ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ComponentValue {
@@ -148,25 +150,6 @@ pub(crate) enum MediaFeatureNameKind {
     Normal,
     Min,
     Max,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum ValueTypeSyntax {
-    FontWeightAbsolute(FontWeightAbsoluteSyntax),
-    Symbol(SymbolSyntax),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum FontWeightAbsoluteSyntax {
-    Normal,
-    Bold,
-    Number(Vec<ComponentValue>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum SymbolSyntax {
-    String(Vec<ComponentValue>),
-    CustomIdent(Vec<ComponentValue>),
 }
 
 struct ComponentValueParser {
@@ -414,20 +397,7 @@ pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> Cs
 
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    match component_values_parse_as_value_type(value_type_id, &component_values) {
-        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Normal)) => {
-            CssValueTypeSyntaxKind::FontWeightAbsoluteNormal
-        }
-        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Bold)) => {
-            CssValueTypeSyntaxKind::FontWeightAbsoluteBold
-        }
-        Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Number(_))) => {
-            CssValueTypeSyntaxKind::FontWeightAbsoluteNumber
-        }
-        Some(ValueTypeSyntax::Symbol(SymbolSyntax::String(_))) => CssValueTypeSyntaxKind::SymbolString,
-        Some(ValueTypeSyntax::Symbol(SymbolSyntax::CustomIdent(_))) => CssValueTypeSyntaxKind::SymbolCustomIdent,
-        None => CssValueTypeSyntaxKind::Invalid,
-    }
+    component_values_parse_as_value_type(value_type_id, &component_values)
 }
 
 pub(crate) fn parse_a_supports_condition<E, C>(
@@ -1604,51 +1574,8 @@ fn component_values_parse_as_media_query(component_values: Vec<ComponentValue>) 
 fn component_values_parse_as_value_type(
     value_type_id: ValueTypeId,
     component_values: &[ComponentValue],
-) -> Option<ValueTypeSyntax> {
-    match value_type_id {
-        ValueTypeId::FontWeightAbsolute => component_values_parse_as_font_weight_absolute(component_values),
-        ValueTypeId::Symbol => component_values_parse_as_symbol(component_values),
-    }
-}
-
-fn component_values_parse_as_font_weight_absolute(component_values: &[ComponentValue]) -> Option<ValueTypeSyntax> {
-    // https://drafts.csswg.org/css-fonts-4/#typedef-font-weight-absolute
-    // <font-weight-absolute> = normal | bold | <number [1,1000]>
-    let component_values = strip_whitespace(component_values);
-
-    if component_values_parse_as_ident(component_values, "normal") {
-        return Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Normal));
-    }
-
-    if component_values_parse_as_ident(component_values, "bold") {
-        return Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Bold));
-    }
-
-    if component_values_parse_as_number(component_values, 1.0, 1000.0) {
-        return Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Number(
-            component_values.to_vec(),
-        )));
-    }
-
-    None
-}
-
-fn component_values_parse_as_symbol(component_values: &[ComponentValue]) -> Option<ValueTypeSyntax> {
-    // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
-    // <symbol> = <string> | <custom-ident>
-    let component_values = strip_whitespace(component_values);
-
-    if component_values_parse_as_string(component_values) {
-        return Some(ValueTypeSyntax::Symbol(SymbolSyntax::String(component_values.to_vec())));
-    }
-
-    if component_values_parse_as_custom_ident(component_values) {
-        return Some(ValueTypeSyntax::Symbol(SymbolSyntax::CustomIdent(
-            component_values.to_vec(),
-        )));
-    }
-
-    None
+) -> CssValueTypeSyntaxKind {
+    component_values_parse_as_generated_value_type(value_type_id, component_values)
 }
 
 fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
@@ -1768,7 +1695,7 @@ enum AllowMinMaxPrefix {
     Yes,
 }
 
-fn component_values_parse_as_ident(component_values: &[ComponentValue], expected: &str) -> bool {
+pub(crate) fn component_values_parse_as_ident(component_values: &[ComponentValue], expected: &str) -> bool {
     let [
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
@@ -1782,7 +1709,7 @@ fn component_values_parse_as_ident(component_values: &[ComponentValue], expected
     value.eq_ignore_ascii_case(expected)
 }
 
-fn component_values_parse_as_number(component_values: &[ComponentValue], min: f64, max: f64) -> bool {
+pub(crate) fn component_values_parse_as_number(component_values: &[ComponentValue], min: f64, max: f64) -> bool {
     let [component_value] = component_values else {
         return false;
     };
@@ -1799,7 +1726,7 @@ fn component_values_parse_as_number(component_values: &[ComponentValue], min: f6
     }
 }
 
-fn component_values_parse_as_string(component_values: &[ComponentValue]) -> bool {
+pub(crate) fn component_values_parse_as_string(component_values: &[ComponentValue]) -> bool {
     matches!(
         component_values,
         [ComponentValue::PreservedToken(Token {
@@ -1809,7 +1736,7 @@ fn component_values_parse_as_string(component_values: &[ComponentValue]) -> bool
     )
 }
 
-fn component_values_parse_as_custom_ident(component_values: &[ComponentValue]) -> bool {
+pub(crate) fn component_values_parse_as_custom_ident(component_values: &[ComponentValue]) -> bool {
     let [
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
@@ -1982,7 +1909,7 @@ fn is_media_feature_value_component_value(component_value: &ComponentValue) -> b
     }
 }
 
-fn strip_whitespace(component_values: &[ComponentValue]) -> &[ComponentValue] {
+pub(crate) fn strip_whitespace(component_values: &[ComponentValue]) -> &[ComponentValue] {
     let mut start = 0;
     let mut end = component_values.len();
     while start < end && is_whitespace_component_value(&component_values[start]) {
@@ -3084,9 +3011,9 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, FontWeightAbsoluteSyntax,
+        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CssValueTypeSyntaxKind,
         MediaFeatureNameKind, MediaFeatureSyntax, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule,
-        RuleContext, RuleOrListOfDeclarations, SymbolSyntax, ValueTypeSyntax, component_values_parse_as_media_feature,
+        RuleContext, RuleOrListOfDeclarations, component_values_parse_as_media_feature,
         component_values_parse_as_value_type, parse_a_value_type, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
@@ -3111,7 +3038,7 @@ mod tests {
         parse_with(input, Parser::parse_a_media_query_list)
     }
 
-    fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> Option<ValueTypeSyntax> {
+    fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
         component_values_parse_as_value_type(value_type_id, &parse(input))
     }
 
@@ -3340,57 +3267,68 @@ mod tests {
     fn parses_font_weight_absolute_syntax_nodes() {
         assert_eq!(
             parse_value_type("normal", ValueTypeId::FontWeightAbsolute),
-            Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Normal))
+            CssValueTypeSyntaxKind::FontWeightAbsoluteNormal
         );
         assert_eq!(
             parse_value_type("bold", ValueTypeId::FontWeightAbsolute),
-            Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Bold))
+            CssValueTypeSyntaxKind::FontWeightAbsoluteBold
         );
-
-        let Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Number(value))) =
-            parse_value_type("700", ValueTypeId::FontWeightAbsolute)
-        else {
-            panic!("expected a font-weight number");
-        };
-        assert_eq!(strip_whitespace(&value).len(), 1);
-
-        let Some(ValueTypeSyntax::FontWeightAbsolute(FontWeightAbsoluteSyntax::Number(value))) =
-            parse_value_type("calc(600 + 100)", ValueTypeId::FontWeightAbsolute)
-        else {
-            panic!("expected a font-weight calculation");
-        };
-        assert_eq!(strip_whitespace(&value).len(), 1);
+        assert_eq!(
+            parse_value_type("700", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::FontWeightAbsoluteNumber
+        );
+        assert_eq!(
+            parse_value_type("calc(600 + 100)", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::FontWeightAbsoluteNumber
+        );
     }
 
     #[test]
     fn rejects_invalid_font_weight_absolute_syntax_nodes() {
-        assert!(parse_value_type("lighter", ValueTypeId::FontWeightAbsolute).is_none());
-        assert!(parse_value_type("0", ValueTypeId::FontWeightAbsolute).is_none());
-        assert!(parse_value_type("1001", ValueTypeId::FontWeightAbsolute).is_none());
-        assert!(parse_value_type("700 800", ValueTypeId::FontWeightAbsolute).is_none());
+        assert_eq!(
+            parse_value_type("lighter", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("0", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("1001", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("700 800", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::Invalid
+        );
     }
 
     #[test]
     fn parses_symbol_syntax_nodes() {
-        let Some(ValueTypeSyntax::Symbol(SymbolSyntax::String(value))) = parse_value_type("\"*\"", ValueTypeId::Symbol)
-        else {
-            panic!("expected a string symbol");
-        };
-        assert_eq!(strip_whitespace(&value).len(), 1);
-
-        let Some(ValueTypeSyntax::Symbol(SymbolSyntax::CustomIdent(value))) =
-            parse_value_type("triangle", ValueTypeId::Symbol)
-        else {
-            panic!("expected a custom-ident symbol");
-        };
-        assert_eq!(strip_whitespace(&value).len(), 1);
+        assert_eq!(
+            parse_value_type("\"*\"", ValueTypeId::Symbol),
+            CssValueTypeSyntaxKind::SymbolString
+        );
+        assert_eq!(
+            parse_value_type("triangle", ValueTypeId::Symbol),
+            CssValueTypeSyntaxKind::SymbolCustomIdent
+        );
     }
 
     #[test]
     fn rejects_invalid_symbol_syntax_nodes() {
-        assert!(parse_value_type("inherit", ValueTypeId::Symbol).is_none());
-        assert!(parse_value_type("default", ValueTypeId::Symbol).is_none());
-        assert!(parse_value_type("triangle square", ValueTypeId::Symbol).is_none());
+        assert_eq!(
+            parse_value_type("inherit", ValueTypeId::Symbol),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("default", ValueTypeId::Symbol),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("triangle square", ValueTypeId::Symbol),
+            CssValueTypeSyntaxKind::Invalid
+        );
     }
 
     #[test]
