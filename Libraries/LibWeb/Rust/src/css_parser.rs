@@ -97,6 +97,29 @@ enum RuleContext {
     Margin,
 }
 
+// NB: Keep this in sync with Web::CSS::Parser::RuleContext in RuleContext.h.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssRuleContext {
+    Unknown,
+    Style,
+    AtContainer,
+    AtCounterStyle,
+    AtMedia,
+    AtFontFace,
+    AtFontFeatureValues,
+    FontFeatureValue,
+    AtFunction,
+    AtKeyframes,
+    Keyframe,
+    AtSupports,
+    SupportsCondition,
+    AtLayer,
+    AtProperty,
+    AtPage,
+    Margin,
+}
+
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     index: usize,
@@ -237,6 +260,26 @@ pub(crate) fn parse_a_blocks_contents<E, C>(
     );
 }
 
+pub(crate) fn parse_a_blocks_contents_with_context<E, C>(
+    filtered_input: &[u8],
+    rule_context: &[CssRuleContext],
+    mut event_callback: E,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    parser.rule_context = rule_context.iter().map(|context| RuleContext::from(*context)).collect();
+    let rules_or_lists_of_declarations = parser.parse_a_blocks_contents();
+    emit_rule_or_list_of_declarations_list(
+        &rules_or_lists_of_declarations,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
+}
+
 pub(crate) fn parse_a_stylesheets_contents<E, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -272,6 +315,30 @@ fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
 
 fn string_parts(string: &str) -> (*const u8, usize) {
     (string.as_ptr(), string.len())
+}
+
+impl From<CssRuleContext> for RuleContext {
+    fn from(value: CssRuleContext) -> Self {
+        match value {
+            CssRuleContext::Unknown => Self::Unknown,
+            CssRuleContext::Style => Self::Style,
+            CssRuleContext::AtContainer => Self::AtContainer,
+            CssRuleContext::AtCounterStyle => Self::AtCounterStyle,
+            CssRuleContext::AtMedia => Self::AtMedia,
+            CssRuleContext::AtFontFace => Self::AtFontFace,
+            CssRuleContext::AtFontFeatureValues => Self::AtFontFeatureValues,
+            CssRuleContext::FontFeatureValue => Self::FontFeatureValue,
+            CssRuleContext::AtFunction => Self::AtFunction,
+            CssRuleContext::AtKeyframes => Self::AtKeyframes,
+            CssRuleContext::Keyframe => Self::Keyframe,
+            CssRuleContext::AtSupports => Self::AtSupports,
+            CssRuleContext::SupportsCondition => Self::SupportsCondition,
+            CssRuleContext::AtLayer => Self::AtLayer,
+            CssRuleContext::AtProperty => Self::AtProperty,
+            CssRuleContext::AtPage => Self::AtPage,
+            CssRuleContext::Margin => Self::Margin,
+        }
+    }
 }
 
 impl CssRuleEvent {

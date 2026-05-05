@@ -437,6 +437,47 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 
+static FFI::CssRuleContext rule_context_to_ffi(RuleContext context)
+{
+    switch (context) {
+    case RuleContext::Unknown:
+        return FFI::CssRuleContext::Unknown;
+    case RuleContext::Style:
+        return FFI::CssRuleContext::Style;
+    case RuleContext::AtContainer:
+        return FFI::CssRuleContext::AtContainer;
+    case RuleContext::AtCounterStyle:
+        return FFI::CssRuleContext::AtCounterStyle;
+    case RuleContext::AtMedia:
+        return FFI::CssRuleContext::AtMedia;
+    case RuleContext::AtFontFace:
+        return FFI::CssRuleContext::AtFontFace;
+    case RuleContext::AtFontFeatureValues:
+        return FFI::CssRuleContext::AtFontFeatureValues;
+    case RuleContext::FontFeatureValue:
+        return FFI::CssRuleContext::FontFeatureValue;
+    case RuleContext::AtFunction:
+        return FFI::CssRuleContext::AtFunction;
+    case RuleContext::AtKeyframes:
+        return FFI::CssRuleContext::AtKeyframes;
+    case RuleContext::Keyframe:
+        return FFI::CssRuleContext::Keyframe;
+    case RuleContext::AtSupports:
+        return FFI::CssRuleContext::AtSupports;
+    case RuleContext::SupportsCondition:
+        return FFI::CssRuleContext::SupportsCondition;
+    case RuleContext::AtLayer:
+        return FFI::CssRuleContext::AtLayer;
+    case RuleContext::AtProperty:
+        return FFI::CssRuleContext::AtProperty;
+    case RuleContext::AtPage:
+        return FFI::CssRuleContext::AtPage;
+    case RuleContext::Margin:
+        return FFI::CssRuleContext::Margin;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding)
 {
     RuleEventBuilder builder;
@@ -461,13 +502,27 @@ Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringVi
 
 Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding)
 {
+    Vector<RuleContext> rule_context;
+    rule_context.append(RuleContext::Style);
+    return parse_a_blocks_contents(input, encoding, rule_context);
+}
+
+Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context)
+{
     RuleEventBuilder builder;
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
 
-    FFI::rust_css_parse_block_contents(
+    Vector<FFI::CssRuleContext> ffi_rule_context;
+    ffi_rule_context.ensure_capacity(rule_context.size());
+    for (auto context : rule_context)
+        ffi_rule_context.unchecked_append(rule_context_to_ffi(context));
+
+    FFI::rust_css_parse_block_contents_with_context(
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
+        ffi_rule_context.data(),
+        ffi_rule_context.size(),
         &builder,
         [](void* raw_builder, FFI::CssRuleEvent const* event) {
             apply_rule_event(*static_cast<RuleEventBuilder*>(raw_builder), *event);

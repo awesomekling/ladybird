@@ -13,7 +13,9 @@ mod css_tokenizer;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-pub use css_parser::{CssComponentValue, CssComponentValueKind, CssDeclaration, CssRuleEvent, CssRuleEventKind};
+pub use css_parser::{
+    CssComponentValue, CssComponentValueKind, CssDeclaration, CssRuleContext, CssRuleEvent, CssRuleEventKind,
+};
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
 fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
@@ -43,6 +45,19 @@ unsafe fn bytes_from_raw<'a>(bytes: *const u8, len: usize) -> Option<&'a [u8]> {
             return None;
         }
         Some(std::slice::from_raw_parts(bytes, len))
+    }
+}
+
+unsafe fn slice_from_raw<'a, T>(items: *const T, len: usize) -> Option<&'a [T]> {
+    unsafe {
+        if len == 0 {
+            return Some(&[]);
+        }
+        if items.is_null() {
+            eprintln!("slice_from_raw: null pointer with non-zero length {len}");
+            return None;
+        }
+        Some(std::slice::from_raw_parts(items, len))
     }
 }
 
@@ -177,6 +192,44 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
 
             css_parser::parse_a_blocks_contents(
                 input,
+                |event| {
+                    event_callback(ctx, &raw const event);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            );
+        });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `rule_context` and `rule_context_len` must point to a valid rule context slice
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
+    input: *const u8,
+    input_len: usize,
+    rule_context: *const CssRuleContext,
+    rule_context_len: usize,
+    ctx: *mut c_void,
+    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return;
+            };
+            let Some(rule_context) = slice_from_raw(rule_context, rule_context_len) else {
+                return;
+            };
+
+            css_parser::parse_a_blocks_contents_with_context(
+                input,
+                rule_context,
                 |event| {
                     event_callback(ctx, &raw const event);
                 },
