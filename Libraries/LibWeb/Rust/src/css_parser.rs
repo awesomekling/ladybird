@@ -1701,7 +1701,7 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
         let right = strip_whitespace(&component_values[comparison_end..]);
 
         if let Some(name) = component_values_parse_as_mf_range_name(left)
-            && component_values_parse_as_mf_value(right)
+            && component_values_parse_as_mf_range_value(name.id, right)
         {
             return Some(MediaFeatureSyntax::HalfRangeNameFirst {
                 name,
@@ -1712,6 +1712,7 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
 
         if component_values_parse_as_mf_value(left)
             && let Some(name) = component_values_parse_as_mf_range_name(right)
+            && component_values_parse_as_mf_range_value(name.id, left)
         {
             return Some(MediaFeatureSyntax::HalfRangeValueFirst {
                 value: left.to_vec(),
@@ -1738,9 +1739,9 @@ fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> Op
         let left_value = strip_whitespace(&component_values[..left_comparison_index]);
         let name = strip_whitespace(&component_values[left_comparison_end..right_comparison_index]);
         let right_value = strip_whitespace(&component_values[right_comparison_end..]);
-        if component_values_parse_as_mf_value(left_value)
-            && let Some(name) = component_values_parse_as_mf_range_name(name)
-            && component_values_parse_as_mf_value(right_value)
+        if let Some(name) = component_values_parse_as_mf_range_name(name)
+            && component_values_parse_as_mf_range_value(name.id, left_value)
+            && component_values_parse_as_mf_range_value(name.id, right_value)
         {
             return Some(MediaFeatureSyntax::Range {
                 left_value: left_value.to_vec(),
@@ -1887,6 +1888,15 @@ fn component_values_parse_as_mf_range_name(component_values: &[ComponentValue]) 
 
 fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bool {
     !component_values.is_empty() && component_values.iter().all(is_media_feature_value_component_value)
+}
+
+fn component_values_parse_as_mf_range_value(
+    media_feature_id: MediaFeatureId,
+    component_values: &[ComponentValue],
+) -> bool {
+    component_values_parse_as_mf_value(component_values)
+        && component_values_parse_as_mf_value_syntax(media_feature_id, component_values)
+            != MediaFeatureValueSyntaxKind::Ident
 }
 
 fn component_values_parse_as_mf_value_syntax(
@@ -3526,6 +3536,9 @@ mod tests {
         assert!(parse_media_feature_syntax("100px <= width >= 200px").is_none());
         assert!(parse_media_feature_syntax("100px = width = 200px").is_none());
         assert!(parse_media_feature_syntax("width <> 100px").is_none());
+        assert!(parse_media_feature_syntax("resolution > infinite").is_none());
+        assert!(parse_media_feature_syntax("infinite < resolution").is_none());
+        assert!(parse_media_feature_syntax("infinite < resolution < 200dpi").is_none());
     }
 
     #[test]
