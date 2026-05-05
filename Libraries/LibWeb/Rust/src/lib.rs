@@ -9,6 +9,10 @@ mod rust_allocator;
 
 mod css_parser;
 mod css_tokenizer;
+#[allow(dead_code)]
+mod generated_media_features {
+    include!(concat!(env!("OUT_DIR"), "/generated_media_features.rs"));
+}
 
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
