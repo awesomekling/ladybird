@@ -10,6 +10,7 @@ import json
 import sys
 
 from pathlib import Path
+from typing import Any
 from typing import TextIO
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -24,6 +25,85 @@ VALUE_TYPE_NAMES = {
     "<ratio>": "Ratio",
     "<resolution>": "Resolution",
 }
+
+
+def json_is_valid(media_feature_data: dict[str, Any], json_path: str) -> bool:
+    is_valid = True
+    most_recent_media_feature_name = ""
+
+    for media_feature_name, media_feature_definition in media_feature_data.items():
+        if media_feature_name.lower() < most_recent_media_feature_name.lower():
+            print(
+                f"{json_path}: Media feature `{media_feature_name}` is in the wrong position. Please keep this list alphabetical!",
+                file=sys.stderr,
+            )
+            is_valid = False
+
+        most_recent_media_feature_name = media_feature_name
+
+        if not isinstance(media_feature_definition, dict):
+            print(f"{json_path}: Media feature `{media_feature_name}` is not an object", file=sys.stderr)
+            is_valid = False
+            continue
+
+        if "type" not in media_feature_definition:
+            print(f"{json_path}: Media feature `{media_feature_name}` is missing a type", file=sys.stderr)
+            is_valid = False
+        elif media_feature_definition["type"] not in ("discrete", "range"):
+            print(
+                f"{json_path}: Media feature `{media_feature_name}` has an unsupported type `{media_feature_definition['type']}`",
+                file=sys.stderr,
+            )
+            is_valid = False
+
+        if "values" not in media_feature_definition:
+            print(f"{json_path}: Media feature `{media_feature_name}` is missing values", file=sys.stderr)
+            is_valid = False
+        elif not isinstance(media_feature_definition["values"], list):
+            print(f"{json_path}: Media feature `{media_feature_name}` has values that are not a list", file=sys.stderr)
+            is_valid = False
+        else:
+            for value in media_feature_definition["values"]:
+                if not isinstance(value, str):
+                    print(f"{json_path}: Media feature `{media_feature_name}` has a non-string value", file=sys.stderr)
+                    is_valid = False
+                    continue
+
+                if value.startswith("<") and value not in VALUE_TYPE_NAMES:
+                    print(
+                        f"{json_path}: Media feature `{media_feature_name}` has an unsupported value type `{value}`",
+                        file=sys.stderr,
+                    )
+                    is_valid = False
+
+        if "false-keywords" in media_feature_definition:
+            false_keywords = media_feature_definition["false-keywords"]
+            if not isinstance(false_keywords, list):
+                print(
+                    f"{json_path}: Media feature `{media_feature_name}` has false-keywords that are not a list",
+                    file=sys.stderr,
+                )
+                is_valid = False
+            else:
+                for false_keyword in false_keywords:
+                    if not isinstance(false_keyword, str):
+                        print(
+                            f"{json_path}: Media feature `{media_feature_name}` has a non-string false-keyword",
+                            file=sys.stderr,
+                        )
+                        is_valid = False
+
+        for field_name in media_feature_definition:
+            if field_name in ("type", "values", "false-keywords", "FIXME"):
+                continue
+
+            print(
+                f"{json_path}: Media feature `{media_feature_name}` has an unexpected field `{field_name}`",
+                file=sys.stderr,
+            )
+            is_valid = False
+
+    return is_valid
 
 
 def write_header_file(out: TextIO, media_feature_data: dict) -> None:
@@ -250,6 +330,12 @@ def main():
 
     with open(args.json, "r", encoding="utf-8") as input_file:
         media_feature_data = json.load(input_file)
+
+    if not isinstance(media_feature_data, dict):
+        raise RuntimeError(f"{args.json}: expected a JSON object")
+
+    if not json_is_valid(media_feature_data, args.json):
+        sys.exit(1)
 
     with open(args.header, "w", encoding="utf-8") as output_file:
         write_header_file(output_file, media_feature_data)
