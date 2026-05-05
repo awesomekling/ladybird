@@ -35,7 +35,7 @@ public:
     static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding);
 
 private:
-    static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, void (*rust_parse_boolean_expression)(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*)));
+    static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, AK::Function<void(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*))> rust_parse_boolean_expression);
 };
 
 }

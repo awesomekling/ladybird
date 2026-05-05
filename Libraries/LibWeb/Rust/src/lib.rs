@@ -18,8 +18,9 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssRuleContext,
-    CssRuleEvent, CssRuleEventKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -211,6 +212,7 @@ pub unsafe extern "C" fn rust_css_parse_media_condition(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -223,6 +225,9 @@ pub unsafe extern "C" fn rust_css_parse_media_condition(
                 input,
                 |event| {
                     event_callback(ctx, event);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);

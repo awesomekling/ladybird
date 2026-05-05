@@ -271,6 +271,44 @@ pub enum CssBooleanExpressionEventKind {
     GeneralEnclosedEnd,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureSyntaxKind {
+    Boolean,
+    Plain,
+    HalfRangeNameFirst,
+    HalfRangeValueFirst,
+    Range,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureNameKind {
+    Normal,
+    Min,
+    Max,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureComparison {
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
+#[repr(C)]
+pub struct CssMediaFeature {
+    pub syntax_kind: CssMediaFeatureSyntaxKind,
+    pub name_kind: CssMediaFeatureNameKind,
+    pub id: u8,
+    pub comparison: CssMediaFeatureComparison,
+    pub left_comparison: CssMediaFeatureComparison,
+    pub right_comparison: CssMediaFeatureComparison,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -330,15 +368,18 @@ pub(crate) fn parse_a_supports_condition<E, C>(
         filtered_input_string,
         &mut event_callback,
         &mut component_value_callback,
+        &mut |_| {},
     );
 }
 
-pub(crate) fn parse_a_media_condition<E, C>(
+pub(crate) fn parse_a_media_condition<E, M, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut media_feature_callback: M,
     mut component_value_callback: C,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -363,6 +404,7 @@ pub(crate) fn parse_a_media_condition<E, C>(
         filtered_input_string,
         &mut event_callback,
         &mut component_value_callback,
+        &mut media_feature_callback,
     );
 }
 
@@ -749,37 +791,63 @@ fn emit_component_value_list<E, C>(
     event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
 }
 
-fn emit_boolean_expression<E, C>(
+fn emit_boolean_expression<E, C, M>(
     expression: &BooleanExpression,
     filtered_input: &str,
     event_callback: &mut E,
     component_value_callback: &mut C,
+    media_feature_callback: &mut M,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     C: FnMut(CssComponentValue),
+    M: FnMut(CssMediaFeature),
 {
     match expression {
         BooleanExpression::Not(child) => {
             event_callback(CssBooleanExpressionEventKind::NotStart);
-            emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            emit_boolean_expression(
+                child,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+                media_feature_callback,
+            );
             event_callback(CssBooleanExpressionEventKind::NotEnd);
         }
         BooleanExpression::Parens(child) => {
             event_callback(CssBooleanExpressionEventKind::ParensStart);
-            emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+            emit_boolean_expression(
+                child,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+                media_feature_callback,
+            );
             event_callback(CssBooleanExpressionEventKind::ParensEnd);
         }
         BooleanExpression::And(children) => {
             event_callback(CssBooleanExpressionEventKind::AndStart);
             for child in children {
-                emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+                emit_boolean_expression(
+                    child,
+                    filtered_input,
+                    event_callback,
+                    component_value_callback,
+                    media_feature_callback,
+                );
             }
             event_callback(CssBooleanExpressionEventKind::AndEnd);
         }
         BooleanExpression::Or(children) => {
             event_callback(CssBooleanExpressionEventKind::OrStart);
             for child in children {
-                emit_boolean_expression(child, filtered_input, event_callback, component_value_callback);
+                emit_boolean_expression(
+                    child,
+                    filtered_input,
+                    event_callback,
+                    component_value_callback,
+                    media_feature_callback,
+                );
             }
             event_callback(CssBooleanExpressionEventKind::OrEnd);
         }
@@ -792,6 +860,7 @@ fn emit_boolean_expression<E, C>(
         }
         BooleanExpression::Test(BooleanExpressionTest::MediaFeature(media_feature)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
+            media_feature_callback(css_media_feature_from_syntax(&media_feature.kind));
             emit_component_value(&media_feature.component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::TestEnd);
         }
@@ -800,6 +869,78 @@ fn emit_boolean_expression<E, C>(
             emit_component_value(component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::GeneralEnclosedEnd);
         }
+    }
+}
+
+fn css_media_feature_from_syntax(syntax: &MediaFeatureSyntax) -> CssMediaFeature {
+    let (syntax_kind, name, comparison, left_comparison, right_comparison) = match syntax {
+        MediaFeatureSyntax::Boolean(name) => (
+            CssMediaFeatureSyntaxKind::Boolean,
+            *name,
+            MfComparison::Equal,
+            MfComparison::Equal,
+            MfComparison::Equal,
+        ),
+        MediaFeatureSyntax::Plain { name, .. } => (
+            CssMediaFeatureSyntaxKind::Plain,
+            *name,
+            MfComparison::Equal,
+            MfComparison::Equal,
+            MfComparison::Equal,
+        ),
+        MediaFeatureSyntax::HalfRangeNameFirst { name, comparison, .. } => (
+            CssMediaFeatureSyntaxKind::HalfRangeNameFirst,
+            *name,
+            *comparison,
+            MfComparison::Equal,
+            MfComparison::Equal,
+        ),
+        MediaFeatureSyntax::HalfRangeValueFirst { comparison, name, .. } => (
+            CssMediaFeatureSyntaxKind::HalfRangeValueFirst,
+            *name,
+            *comparison,
+            MfComparison::Equal,
+            MfComparison::Equal,
+        ),
+        MediaFeatureSyntax::Range {
+            left_comparison,
+            name,
+            right_comparison,
+            ..
+        } => (
+            CssMediaFeatureSyntaxKind::Range,
+            *name,
+            MfComparison::Equal,
+            *left_comparison,
+            *right_comparison,
+        ),
+    };
+
+    CssMediaFeature {
+        syntax_kind,
+        name_kind: css_media_feature_name_kind(name.kind),
+        id: name.id as u8,
+        comparison: css_media_feature_comparison(comparison),
+        left_comparison: css_media_feature_comparison(left_comparison),
+        right_comparison: css_media_feature_comparison(right_comparison),
+    }
+}
+
+fn css_media_feature_name_kind(kind: MediaFeatureNameKind) -> CssMediaFeatureNameKind {
+    match kind {
+        MediaFeatureNameKind::Normal => CssMediaFeatureNameKind::Normal,
+        MediaFeatureNameKind::Min => CssMediaFeatureNameKind::Min,
+        MediaFeatureNameKind::Max => CssMediaFeatureNameKind::Max,
+    }
+}
+
+fn css_media_feature_comparison(comparison: MfComparison) -> CssMediaFeatureComparison {
+    match comparison {
+        MfComparison::Equal => CssMediaFeatureComparison::Equal,
+        MfComparison::LessThan => CssMediaFeatureComparison::LessThan,
+        MfComparison::LessThanOrEqual => CssMediaFeatureComparison::LessThanOrEqual,
+        MfComparison::GreaterThan => CssMediaFeatureComparison::GreaterThan,
+        MfComparison::GreaterThanOrEqual => CssMediaFeatureComparison::GreaterThanOrEqual,
     }
 }
 

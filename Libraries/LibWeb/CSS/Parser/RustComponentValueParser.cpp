@@ -335,7 +335,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
     return builder.declaration;
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, void (*rust_parse_boolean_expression)(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*)))
+OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test, AK::Function<void(u8 const*, size_t, void*, void (*)(void*, FFI::CssBooleanExpressionEventKind), void (*)(void*, FFI::CssComponentValue const*))> rust_parse_boolean_expression)
 {
     struct BooleanExpressionBuilder {
         enum class FrameType : u8 {
@@ -525,12 +525,16 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
 
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
 {
-    return parse_a_boolean_expression(input, encoding, MatchResult::False, move(parse_test), FFI::rust_css_parse_supports_condition);
+    return parse_a_boolean_expression(input, encoding, MatchResult::False, move(parse_test), [](u8 const* input, size_t input_size, void* context, auto event_callback, auto component_value_callback) {
+        FFI::rust_css_parse_supports_condition(input, input_size, context, event_callback, component_value_callback);
+    });
 }
 
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
 {
-    return parse_a_boolean_expression(input, encoding, MatchResult::Unknown, move(parse_test), FFI::rust_css_parse_media_condition);
+    return parse_a_boolean_expression(input, encoding, MatchResult::Unknown, move(parse_test), [](u8 const* input, size_t input_size, void* context, auto event_callback, auto component_value_callback) {
+        FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, [](void*, FFI::CssMediaFeature const*) { }, component_value_callback);
+    });
 }
 
 struct RuleEventBuilder {
