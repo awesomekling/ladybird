@@ -957,6 +957,7 @@ impl ComponentValueParser {
         let component_value = self.next_component_value()?.clone();
         if let ComponentValue::SimpleBlock(block) = &component_value
             && is_paren_block(block)
+            && component_values_parse_as_media_feature(&block.value)
         {
             self.index += 1;
             return Some(component_value);
@@ -1054,6 +1055,214 @@ fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
     }
 
     true
+}
+
+fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> bool {
+    let component_values = strip_whitespace(component_values);
+    component_values_parse_as_mf_boolean(component_values)
+        || component_values_parse_as_mf_plain(component_values)
+        || component_values_parse_as_mf_range(component_values)
+}
+
+fn component_values_parse_as_mf_boolean(component_values: &[ComponentValue]) -> bool {
+    // <mf-boolean> = <mf-name>
+    component_values_parse_as_mf_name(component_values)
+}
+
+fn component_values_parse_as_mf_plain(component_values: &[ComponentValue]) -> bool {
+    // <mf-plain> = <mf-name> : <mf-value>
+    let Some(colon_index) = component_values.iter().position(|component_value| {
+        matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            })
+        )
+    }) else {
+        return false;
+    };
+
+    let name = strip_whitespace(&component_values[..colon_index]);
+    let value = strip_whitespace(&component_values[colon_index + 1..]);
+    component_values_parse_as_mf_name(name) && component_values_parse_as_mf_value(value)
+}
+
+fn component_values_parse_as_mf_range(component_values: &[ComponentValue]) -> bool {
+    // <mf-range> = <mf-name> <mf-comparison> <mf-value>
+    //             | <mf-value> <mf-comparison> <mf-name>
+    //             | <mf-value> <mf-lt> <mf-name> <mf-lt> <mf-value>
+    //             | <mf-value> <mf-gt> <mf-name> <mf-gt> <mf-value>
+    let comparison_indices: Vec<usize> = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, _)| parse_mf_comparison_at(component_values, index).map(|(_, end)| (index, end)))
+        .scan(0, |minimum_index, (index, end)| {
+            if index < *minimum_index {
+                return Some(None);
+            }
+            *minimum_index = end;
+            Some(Some(index))
+        })
+        .flatten()
+        .collect();
+
+    if comparison_indices.len() == 1 {
+        let comparison_index = comparison_indices[0];
+        let (_, comparison_end) = parse_mf_comparison_at(component_values, comparison_index)
+            .expect("comparison index must parse as a comparison");
+        let left = strip_whitespace(&component_values[..comparison_index]);
+        let right = strip_whitespace(&component_values[comparison_end..]);
+
+        return (component_values_parse_as_mf_name(left) && component_values_parse_as_mf_value(right))
+            || (component_values_parse_as_mf_value(left) && component_values_parse_as_mf_name(right));
+    }
+
+    if comparison_indices.len() == 2 {
+        let left_comparison_index = comparison_indices[0];
+        let (left_comparison, left_comparison_end) = parse_mf_comparison_at(component_values, left_comparison_index)
+            .expect("comparison index must parse as a comparison");
+        let right_comparison_index = comparison_indices[1];
+        let (right_comparison, right_comparison_end) = parse_mf_comparison_at(component_values, right_comparison_index)
+            .expect("comparison index must parse as a comparison");
+
+        if !mf_comparisons_are_range_compatible(left_comparison, right_comparison) {
+            return false;
+        }
+
+        let left_value = strip_whitespace(&component_values[..left_comparison_index]);
+        let name = strip_whitespace(&component_values[left_comparison_end..right_comparison_index]);
+        let right_value = strip_whitespace(&component_values[right_comparison_end..]);
+        return component_values_parse_as_mf_value(left_value)
+            && component_values_parse_as_mf_name(name)
+            && component_values_parse_as_mf_value(right_value);
+    }
+
+    false
+}
+
+fn component_values_parse_as_mf_name(component_values: &[ComponentValue]) -> bool {
+    matches!(
+        component_values,
+        [ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { .. },
+            ..
+        })]
+    )
+}
+
+fn component_values_parse_as_mf_value(component_values: &[ComponentValue]) -> bool {
+    !component_values.is_empty() && component_values.iter().all(is_media_feature_value_component_value)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MfComparison {
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
+fn parse_mf_comparison_at(component_values: &[ComponentValue], index: usize) -> Option<(MfComparison, usize)> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Delim { value },
+        ..
+    }) = component_values.get(index)?
+    else {
+        return None;
+    };
+
+    match *value {
+        value if value == '=' as u32 => Some((MfComparison::Equal, index + 1)),
+        value if value == '<' as u32 => {
+            if matches!(
+                component_values.get(index + 1),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Delim { value },
+                    ..
+                })) if *value == '=' as u32
+            ) {
+                Some((MfComparison::LessThanOrEqual, index + 2))
+            } else {
+                Some((MfComparison::LessThan, index + 1))
+            }
+        }
+        value if value == '>' as u32 => {
+            if matches!(
+                component_values.get(index + 1),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Delim { value },
+                    ..
+                })) if *value == '=' as u32
+            ) {
+                Some((MfComparison::GreaterThanOrEqual, index + 2))
+            } else {
+                Some((MfComparison::GreaterThan, index + 1))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn mf_comparisons_are_range_compatible(left: MfComparison, right: MfComparison) -> bool {
+    matches!(
+        (left, right),
+        (
+            MfComparison::LessThan | MfComparison::LessThanOrEqual,
+            MfComparison::LessThan | MfComparison::LessThanOrEqual
+        ) | (
+            MfComparison::GreaterThan | MfComparison::GreaterThanOrEqual,
+            MfComparison::GreaterThan | MfComparison::GreaterThanOrEqual
+        )
+    )
+}
+
+fn is_media_feature_value_component_value(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::Function(_) | ComponentValue::SimpleBlock(_) => true,
+        ComponentValue::PreservedToken(token) => match token.token_type {
+            TokenType::Ident { .. }
+            | TokenType::Function { .. }
+            | TokenType::AtKeyword { .. }
+            | TokenType::Hash { .. }
+            | TokenType::String { .. }
+            | TokenType::BadString
+            | TokenType::Url { .. }
+            | TokenType::BadUrl
+            | TokenType::Number { .. }
+            | TokenType::Percentage { .. }
+            | TokenType::Dimension { .. }
+            | TokenType::Whitespace
+            | TokenType::Comma => true,
+            TokenType::Delim { value } => {
+                !matches!(value, value if value == '<' as u32 || value == '>' as u32 || value == '=' as u32)
+            }
+            TokenType::EndOfFile
+            | TokenType::Cdo
+            | TokenType::Cdc
+            | TokenType::Colon
+            | TokenType::Semicolon
+            | TokenType::OpenSquare
+            | TokenType::CloseSquare
+            | TokenType::OpenParen
+            | TokenType::CloseParen
+            | TokenType::OpenCurly
+            | TokenType::CloseCurly => false,
+        },
+    }
+}
+
+fn strip_whitespace(component_values: &[ComponentValue]) -> &[ComponentValue] {
+    let mut start = 0;
+    let mut end = component_values.len();
+    while start < end && is_whitespace_component_value(&component_values[start]) {
+        start += 1;
+    }
+    while start < end && is_whitespace_component_value(&component_values[end - 1]) {
+        end -= 1;
+    }
+    &component_values[start..end]
 }
 
 impl Parser {
@@ -2268,6 +2477,18 @@ mod tests {
         };
         assert_eq!(children.len(), 2);
         assert!(children.iter().all(|child| matches!(child, BooleanExpression::Test(_))));
+    }
+
+    #[test]
+    fn parses_media_general_enclosed() {
+        let component_values = parse("(foo bar)");
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature);
+
+        assert!(matches!(
+            parser.boolean_expression,
+            Some(BooleanExpression::GeneralEnclosed(_))
+        ));
     }
 
     #[test]
