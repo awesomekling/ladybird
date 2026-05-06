@@ -870,39 +870,6 @@ GC::Ptr<CSSFontFaceRule> Parser::convert_to_font_face_rule(AtRule const& rule)
     return CSSFontFaceRule::create(realm(), CSSFontFaceDescriptors::create(realm(), descriptors.release_descriptors()));
 }
 
-Optional<Vector<FlyString>> Parser::parse_comma_separated_family_name_list(TokenStream<ComponentValue>& tokens)
-{
-    Vector<FlyString> family_names;
-    auto comma_separated_families = parse_a_comma_separated_list_of_component_values(tokens);
-
-    if (comma_separated_families.is_empty()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@font-feature-values"_fly_string,
-            .prelude = tokens.dump_string(),
-            .description = "Empty family name list."_string,
-        });
-        return {};
-    }
-
-    for (auto const& family_component_values : comma_separated_families) {
-        TokenStream family_stream { family_component_values };
-        auto family_name = parse_family_name_value(family_stream);
-
-        if (!family_name || family_stream.has_next_token()) {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "@font-feature-values"_fly_string,
-                .prelude = family_stream.dump_string(),
-                .description = "Invalid family name."_string,
-            });
-            return {};
-        }
-
-        family_names.append(string_from_style_value(family_name.release_nonnull()));
-    }
-
-    return family_names;
-}
-
 GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(AtRule const& rule)
 {
     // https://drafts.csswg.org/css-fonts-4/#font-feature-values-syntax
@@ -917,10 +884,17 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
         return nullptr;
     }
 
-    auto family_names = parse_comma_separated_family_name_list(prelude_stream);
+    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    auto family_names = RustComponentValueParser::parse_font_feature_values_family_name_list(serialized_prelude.bytes_as_string_view(), "utf-8"sv);
 
-    if (!family_names.has_value())
+    if (!family_names.has_value()) {
+        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
+            .rule_name = "@font-feature-values"_fly_string,
+            .prelude = serialized_prelude,
+            .description = "Invalid family name list."_string,
+        });
         return nullptr;
+    }
 
     auto font_feature_values_rule = CSSFontFeatureValuesRule::create(realm(), family_names.release_value());
 

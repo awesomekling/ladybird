@@ -1208,6 +1208,27 @@ Optional<RustComponentValueParser::NamespaceRulePrelude> RustComponentValueParse
     return namespace_rule_prelude;
 }
 
+Optional<Vector<FlyString>> RustComponentValueParser::parse_font_feature_values_family_name_list(StringView input, StringView encoding)
+{
+    Vector<FlyString> family_names;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_feature_values_family_name_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &family_names,
+        [](void* raw_family_names, u8 const* family_name_ptr, size_t family_name_len) {
+            auto& family_names = *static_cast<Vector<FlyString>*>(raw_family_names);
+            family_names.append(fly_string_from_ffi_bytes(family_name_ptr, family_name_len));
+        });
+
+    if (!parsed)
+        return {};
+
+    return family_names;
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,

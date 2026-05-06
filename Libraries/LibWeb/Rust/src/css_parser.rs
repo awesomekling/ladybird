@@ -769,6 +769,31 @@ where
     true
 }
 
+pub(crate) fn parse_font_feature_values_family_name_list<F>(filtered_input: &[u8], mut family_callback: F) -> bool
+where
+    F: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let groups = parser.parse_a_comma_separated_list_of_component_values();
+    if groups.is_empty() {
+        return false;
+    }
+
+    for group in groups {
+        let mut parser = ComponentValueParser::new(group);
+        let Some(family_name) = parser.parse_a_family_name() else {
+            return false;
+        };
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return false;
+        }
+        family_callback(&family_name);
+    }
+
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2313,6 +2338,50 @@ impl ComponentValueParser {
         Some(namespace_uri)
     }
 
+    // https://drafts.csswg.org/css-fonts-4/#font-family-name-syntax
+    fn parse_a_family_name(&mut self) -> Option<String> {
+        // <font-family-name> = <string> | <custom-ident>+
+        self.discard_whitespace();
+
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        })) = self.next_component_value()
+        {
+            let family_name = value.clone();
+            self.index += 1;
+            return Some(family_name);
+        }
+
+        let mut parts = Vec::new();
+        while let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+        {
+            parts.push(value.clone());
+            self.index += 1;
+            self.discard_whitespace();
+        }
+
+        if parts.is_empty() {
+            return None;
+        }
+
+        if parts.len() == 1 {
+            // Any identifier which could be misinterpreted as a pre-defined keyword in the font-family value
+            // definition, or the CSS-wide keywords, is not allowed.
+            // AD-HOC: We allow all <ident>'s rather than just <custom-ident>, although we check that the whole value
+            //         isn't a CSS-wide keyword, see https://github.com/w3c/csswg-drafts/issues/13692
+            let part = &parts[0];
+            if !is_valid_custom_ident(part, &[]) || matches_generic_font_family_keyword(part) {
+                return None;
+            }
+        }
+
+        Some(parts.join(" "))
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
@@ -2951,6 +3020,20 @@ fn matches_css_wide_keyword(value: &str) -> bool {
         || value.eq_ignore_ascii_case("unset")
         || value.eq_ignore_ascii_case("revert")
         || value.eq_ignore_ascii_case("revert-layer")
+}
+
+fn matches_generic_font_family_keyword(value: &str) -> bool {
+    value.eq_ignore_ascii_case("serif")
+        || value.eq_ignore_ascii_case("sans-serif")
+        || value.eq_ignore_ascii_case("system-ui")
+        || value.eq_ignore_ascii_case("cursive")
+        || value.eq_ignore_ascii_case("fantasy")
+        || value.eq_ignore_ascii_case("math")
+        || value.eq_ignore_ascii_case("monospace")
+        || value.eq_ignore_ascii_case("ui-serif")
+        || value.eq_ignore_ascii_case("ui-sans-serif")
+        || value.eq_ignore_ascii_case("ui-monospace")
+        || value.eq_ignore_ascii_case("ui-rounded")
 }
 
 fn is_a_custom_property_name_string(value: &str) -> bool {
@@ -4420,7 +4503,7 @@ mod tests {
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
         parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
         parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, strip_whitespace,
+        parse_a_value_type, parse_an_if_condition, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4555,6 +4638,14 @@ mod tests {
             |parsed_namespace_uri| namespace_uri = Some(parsed_namespace_uri.to_string()),
         );
         parsed.then(|| (prefix, namespace_uri.expect("namespace URI must be parsed")))
+    }
+
+    fn parse_font_feature_values_family_names(input: &str) -> Option<Vec<String>> {
+        let mut family_names = Vec::new();
+        let parsed = parse_font_feature_values_family_name_list(input.as_bytes(), |family_name| {
+            family_names.push(family_name.to_string());
+        });
+        parsed.then_some(family_names)
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -5353,6 +5444,29 @@ mod tests {
             parse_namespace_rule_prelude("svg url(\"http://www.w3.org/2000/svg\" foo)"),
             None
         );
+    }
+
+    #[test]
+    fn parses_font_feature_values_family_name_lists() {
+        assert_eq!(
+            parse_font_feature_values_family_names("bongo"),
+            Some(vec!["bongo".to_string()])
+        );
+        assert_eq!(
+            parse_font_feature_values_family_names("\"Bongo Sans\", Great Vibes"),
+            Some(vec!["Bongo Sans".to_string(), "Great Vibes".to_string()])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_feature_values_family_name_lists() {
+        assert_eq!(parse_font_feature_values_family_names(""), None);
+        assert_eq!(parse_font_feature_values_family_names("bongo,"), None);
+        assert_eq!(parse_font_feature_values_family_names("serif"), None);
+        assert_eq!(parse_font_feature_values_family_names("default"), None);
+        assert_eq!(parse_font_feature_values_family_names("initial"), None);
+        assert_eq!(parse_font_feature_values_family_names("\"Bongo\" Sans"), None);
+        assert_eq!(parse_font_feature_values_family_names("123"), None);
     }
 
     #[test]
