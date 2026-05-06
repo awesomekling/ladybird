@@ -650,6 +650,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transform_origin_value(tokens); });
     case PropertyID::Transition:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transition_value(tokens); });
+    case PropertyID::TransitionBehavior:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_transition_behavior_value(tokens); });
     case PropertyID::TransitionProperty:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transition_property_value(tokens); });
     case PropertyID::Translate:
@@ -1152,6 +1154,41 @@ RefPtr<StyleValue const> Parser::parse_position_try_order_value(TokenStream<Comp
 
     transaction.commit();
     return KeywordStyleValue::create(keyword.release_value());
+}
+
+// https://drafts.csswg.org/css-transitions-2/#transition-behavior-property
+RefPtr<StyleValue const> Parser::parse_transition_behavior_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_transition_behavior = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_transition_behavior = RustComponentValueParser::parse_transition_behavior(serialized_transition_behavior.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_transition_behavior.kind) {
+    case FFI::CssTransitionBehaviorValueKind::Invalid:
+        return {};
+    case FFI::CssTransitionBehaviorValueKind::List: {
+        StyleValueVector behaviors;
+        behaviors.ensure_capacity(parsed_transition_behavior.behaviors.size());
+        for (auto behavior : parsed_transition_behavior.behaviors) {
+            switch (behavior) {
+            case FFI::CssTransitionBehaviorItemKind::Normal:
+                behaviors.unchecked_append(KeywordStyleValue::create(Keyword::Normal));
+                break;
+            case FFI::CssTransitionBehaviorItemKind::AllowDiscrete:
+                behaviors.unchecked_append(KeywordStyleValue::create(Keyword::AllowDiscrete));
+                break;
+            }
+        }
+
+        transaction.commit();
+        return StyleValueList::create(move(behaviors), StyleValueList::Separator::Comma);
+    }
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-view-transitions-1/#view-transition-name-prop

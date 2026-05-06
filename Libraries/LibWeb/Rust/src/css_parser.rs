@@ -856,6 +856,20 @@ pub enum CssTransitionPropertyValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTransitionBehaviorValueKind {
+    Invalid,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssTransitionBehaviorItemKind {
+    Normal,
+    AllowDiscrete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssAnimationNameValueKind {
     Invalid,
     List,
@@ -3293,6 +3307,54 @@ where
     }
 
     CssTransitionPropertyValueKind::List
+}
+
+pub(crate) fn parse_transition_behavior_value<N>(
+    filtered_input: &[u8],
+    mut behavior_callback: N,
+) -> CssTransitionBehaviorValueKind
+where
+    N: FnMut(CssTransitionBehaviorItemKind),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/css-transitions-2/#transition-behavior-property
+    // Value: <transition-behavior-value>#
+    //
+    // https://drafts.csswg.org/css-transitions-2/#typedef-transition-behavior-value
+    // <transition-behavior-value> = normal | allow-discrete
+    let Some(behaviors) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.discard_whitespace();
+
+        let behavior = if parser.consume_ident_matching("normal") {
+            CssTransitionBehaviorItemKind::Normal
+        } else if parser.consume_ident_matching("allow-discrete") {
+            CssTransitionBehaviorItemKind::AllowDiscrete
+        } else {
+            return None;
+        };
+
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+
+        Some(behavior)
+    }) else {
+        return CssTransitionBehaviorValueKind::Invalid;
+    };
+
+    if behaviors.is_empty() {
+        return CssTransitionBehaviorValueKind::Invalid;
+    }
+
+    for behavior in behaviors {
+        behavior_callback(behavior);
+    }
+
+    CssTransitionBehaviorValueKind::List
 }
 
 pub(crate) fn parse_animation_name_value<N>(filtered_input: &[u8], mut name_callback: N) -> CssAnimationNameValueKind
@@ -9446,21 +9508,22 @@ mod tests {
         CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
         CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword,
-        CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType,
-        CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTouchActionValue, CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -9473,8 +9536,9 @@ mod tests {
         parse_position_anchor_value, parse_position_try_order_value, parse_position_visibility_value,
         parse_positive_percentage_descriptor, parse_quotes_value, parse_scrollbar_gutter_value,
         parse_string_descriptor, parse_text_underline_position_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transition_property_value,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -10066,6 +10130,14 @@ mod tests {
             properties.push(property.to_string());
         });
         (kind, properties)
+    }
+
+    fn parse_transition_behavior(input: &str) -> (CssTransitionBehaviorValueKind, Vec<CssTransitionBehaviorItemKind>) {
+        let mut behaviors = Vec::new();
+        let kind = parse_transition_behavior_value(input.as_bytes(), |behavior| {
+            behaviors.push(behavior);
+        });
+        (kind, behaviors)
     }
 
     fn parse_animation_name(input: &str) -> (CssAnimationNameValueKind, Vec<(CssAnimationNameItemKind, String)>) {
@@ -12474,6 +12546,55 @@ mod tests {
         assert_eq!(
             parse_transition_property("width,").0,
             CssTransitionPropertyValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_transition_behavior_values() {
+        assert_eq!(
+            parse_transition_behavior("normal"),
+            (
+                CssTransitionBehaviorValueKind::List,
+                vec![CssTransitionBehaviorItemKind::Normal]
+            )
+        );
+        assert_eq!(
+            parse_transition_behavior("allow-discrete"),
+            (
+                CssTransitionBehaviorValueKind::List,
+                vec![CssTransitionBehaviorItemKind::AllowDiscrete]
+            )
+        );
+        assert_eq!(
+            parse_transition_behavior("normal, allow-discrete"),
+            (
+                CssTransitionBehaviorValueKind::List,
+                vec![
+                    CssTransitionBehaviorItemKind::Normal,
+                    CssTransitionBehaviorItemKind::AllowDiscrete
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_transition_behavior_values() {
+        assert_eq!(parse_transition_behavior("").0, CssTransitionBehaviorValueKind::Invalid);
+        assert_eq!(
+            parse_transition_behavior("auto").0,
+            CssTransitionBehaviorValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_behavior("normal allow-discrete").0,
+            CssTransitionBehaviorValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_behavior("normal,").0,
+            CssTransitionBehaviorValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_behavior("10px").0,
+            CssTransitionBehaviorValueKind::Invalid
         );
     }
 

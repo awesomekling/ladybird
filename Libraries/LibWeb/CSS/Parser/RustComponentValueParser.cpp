@@ -2305,6 +2305,27 @@ RustComponentValueParser::TransitionProperty RustComponentValueParser::parse_tra
     };
 }
 
+RustComponentValueParser::TransitionBehavior RustComponentValueParser::parse_transition_behavior(StringView input, StringView encoding)
+{
+    Vector<FFI::CssTransitionBehaviorItemKind> behaviors;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_transition_behavior(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &behaviors,
+        [](void* raw_behaviors, FFI::CssTransitionBehaviorItemKind kind) {
+            auto& behaviors = *static_cast<Vector<FFI::CssTransitionBehaviorItemKind>*>(raw_behaviors);
+            behaviors.append(kind);
+        });
+
+    return TransitionBehavior {
+        .kind = kind,
+        .behaviors = move(behaviors),
+    };
+}
+
 RustComponentValueParser::AnimationName RustComponentValueParser::parse_animation_name(StringView input, StringView encoding)
 {
     Vector<AnimationNameItem> names;

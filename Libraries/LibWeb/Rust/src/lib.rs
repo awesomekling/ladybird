@@ -38,10 +38,11 @@ pub use css_parser::{
     CssRuleEventKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
     CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword,
-    CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssTouchActionValue, CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
+    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1178,6 +1179,30 @@ pub unsafe extern "C" fn rust_css_parse_transition_property(
 
             css_parser::parse_transition_property_value(input, |property| {
                 property_callback(ctx, property.as_ptr(), property.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `behavior_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_transition_behavior(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    behavior_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssTransitionBehaviorItemKind),
+) -> CssTransitionBehaviorValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTransitionBehaviorValueKind::Invalid;
+            };
+
+            css_parser::parse_transition_behavior_value(input, |kind| {
+                behavior_callback(ctx, kind);
             })
         })
     }

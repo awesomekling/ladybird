@@ -182,6 +182,11 @@ public:
         Vector<FlyString> properties;
     };
 
+    struct TransitionBehavior {
+        FFI::CssTransitionBehaviorValueKind kind;
+        Vector<FFI::CssTransitionBehaviorItemKind> behaviors;
+    };
+
     struct AnimationNameItem {
         FFI::CssAnimationNameItemKind kind;
         FlyString value;
@@ -279,6 +284,7 @@ public:
     static Quotes parse_quotes(StringView input, StringView encoding);
     static WillChange parse_will_change(StringView input, StringView encoding);
     static TransitionProperty parse_transition_property(StringView input, StringView encoding);
+    static TransitionBehavior parse_transition_behavior(StringView input, StringView encoding);
     static AnimationName parse_animation_name(StringView input, StringView encoding);
     static ViewTransitionName parse_view_transition_name(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);

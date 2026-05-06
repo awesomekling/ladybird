@@ -534,6 +534,7 @@ private:
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_origin_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transition_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_transition_behavior_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transition_property_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_translate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_try_tactic_value(TokenStream<ComponentValue>&);
