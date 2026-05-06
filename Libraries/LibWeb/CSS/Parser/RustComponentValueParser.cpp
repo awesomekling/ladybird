@@ -3183,6 +3183,23 @@ RustComponentValueParser::ViewTimelineInset RustComponentValueParser::parse_view
     };
 }
 
+RustComponentValueParser::ViewFunction RustComponentValueParser::parse_view_function(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_view_function(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+
+    return {
+        .kind = parsed.kind,
+        .axis = parsed.axis,
+        .inset = parsed.inset,
+        .inset_position = parsed.inset_position,
+    };
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

@@ -992,49 +992,51 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
     if (!function_token.is_function("view"sv))
         return nullptr;
 
+    auto serialized_view_function = function_token.original_source_text();
+    if (serialized_view_function.is_empty())
+        serialized_view_function = function_token.to_string();
+    auto view_function = RustComponentValueParser::parse_view_function(serialized_view_function.bytes_as_string_view(), "utf-8"sv);
+    if (view_function.kind == FFI::CssViewFunctionValueKind::Invalid)
+        return nullptr;
+
     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "view"sv });
 
     StyleValueTuple tuple;
     tuple.resize_with_default_value(2, nullptr);
 
-    bool has_axis = false;
-    bool has_inset = false;
+    switch (view_function.axis) {
+    case FFI::CssScrollFunctionAxisKind::None:
+    case FFI::CssScrollFunctionAxisKind::Block:
+        break;
+    case FFI::CssScrollFunctionAxisKind::Inline:
+        tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::Inline);
+        break;
+    case FFI::CssScrollFunctionAxisKind::X:
+        tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::X);
+        break;
+    case FFI::CssScrollFunctionAxisKind::Y:
+        tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::Y);
+        break;
+    }
 
-    auto argument_tokens = TokenStream { function_token.function().value };
-
-    while (argument_tokens.has_next_token()) {
-        argument_tokens.discard_whitespace();
-
-        if (!argument_tokens.has_next_token())
-            break;
-
-        if (auto inset_value = parse_view_timeline_inset_value(argument_tokens); inset_value) {
-            if (has_inset)
-                return nullptr;
-
-            auto const& inset_values = inset_value->as_value_list().values();
-
-            // NB: The default value of <'view-timeline-inset'> `auto auto` is omitted from the serialization.
-            if (inset_values[0]->to_keyword() != Keyword::Auto || inset_values[1]->to_keyword() != Keyword::Auto)
-                tuple[TupleStyleValue::Indices::ViewFunction::Inset] = inset_value;
-
-            has_inset = true;
-            continue;
+    switch (view_function.inset) {
+    case FFI::CssViewFunctionInsetKind::None:
+    case FFI::CssViewFunctionInsetKind::Default:
+        break;
+    case FFI::CssViewFunctionInsetKind::NonDefault: {
+        auto argument_tokens = TokenStream { function_token.function().value };
+        if (view_function.inset_position == FFI::CssViewFunctionInsetPosition::AfterAxis) {
+            argument_tokens.discard_whitespace();
+            argument_tokens.discard_a_token();
         }
 
-        if (auto keyword_value = parse_keyword_value(argument_tokens); keyword_value && keyword_to_axis(keyword_value->to_keyword()).has_value()) {
-            if (has_axis)
-                return nullptr;
+        auto inset_value = parse_view_timeline_inset_value(argument_tokens);
+        if (!inset_value)
+            return nullptr;
 
-            // NB: The default value of <axis> `block` is omitted from the serialization.
-            if (keyword_value->to_keyword() != Keyword::Block)
-                tuple[TupleStyleValue::Indices::ViewFunction::Axis] = keyword_value;
-
-            has_axis = true;
-            continue;
-        }
-
-        return nullptr;
+        tuple[TupleStyleValue::Indices::ViewFunction::Inset] = inset_value.release_nonnull();
+        break;
+    }
     }
 
     transaction.commit();

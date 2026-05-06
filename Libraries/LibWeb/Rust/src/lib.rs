@@ -56,9 +56,10 @@ pub use css_parser::{
     CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
     CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
     CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewTimelineInsetValue,
-    CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
-    CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
+    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1206,6 +1207,26 @@ pub unsafe extern "C" fn rust_css_parse_view_timeline_inset(
             };
 
             css_parser::parse_view_timeline_inset_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_view_function(input: *const u8, input_len: usize) -> CssViewFunctionValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssViewFunctionValue {
+                    kind: CssViewFunctionValueKind::Invalid,
+                    axis: CssScrollFunctionAxisKind::None,
+                    inset: CssViewFunctionInsetKind::None,
+                    inset_position: CssViewFunctionInsetPosition::None,
+                };
+            };
+
+            css_parser::parse_view_function_value(input)
         })
     }
 }
