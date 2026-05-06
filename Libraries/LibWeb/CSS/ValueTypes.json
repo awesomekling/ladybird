@@ -1,4 +1,38 @@
 {
+    "<font-variant-caps-value>": {
+        "spec": "https://drafts.csswg.org/css-fonts-4/#font-variant-caps-prop",
+        "grammar": "normal | small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps",
+        "branches": [
+            {
+                "name": "Normal",
+                "syntax": { "type": "ident", "value": "normal" }
+            },
+            {
+                "name": "SmallCaps",
+                "syntax": { "type": "ident", "value": "small-caps" }
+            },
+            {
+                "name": "AllSmallCaps",
+                "syntax": { "type": "ident", "value": "all-small-caps" }
+            },
+            {
+                "name": "PetiteCaps",
+                "syntax": { "type": "ident", "value": "petite-caps" }
+            },
+            {
+                "name": "AllPetiteCaps",
+                "syntax": { "type": "ident", "value": "all-petite-caps" }
+            },
+            {
+                "name": "Unicase",
+                "syntax": { "type": "ident", "value": "unicase" }
+            },
+            {
+                "name": "TitlingCaps",
+                "syntax": { "type": "ident", "value": "titling-caps" }
+            }
+        ]
+    },
     "<font-variant-css2>": {
         "spec": "https://drafts.csswg.org/css-fonts-4/#font-prop",
         "grammar": "normal | small-caps",
@@ -10,6 +44,46 @@
             {
                 "name": "SmallCaps",
                 "syntax": { "type": "ident", "value": "small-caps" }
+            }
+        ]
+    },
+    "<font-variant-emoji-value>": {
+        "spec": "https://drafts.csswg.org/css-fonts-4/#font-variant-emoji-prop",
+        "grammar": "normal | text | emoji | unicode",
+        "branches": [
+            {
+                "name": "Normal",
+                "syntax": { "type": "ident", "value": "normal" }
+            },
+            {
+                "name": "Text",
+                "syntax": { "type": "ident", "value": "text" }
+            },
+            {
+                "name": "Emoji",
+                "syntax": { "type": "ident", "value": "emoji" }
+            },
+            {
+                "name": "Unicode",
+                "syntax": { "type": "ident", "value": "unicode" }
+            }
+        ]
+    },
+    "<font-variant-position-value>": {
+        "spec": "https://drafts.csswg.org/css-fonts-4/#font-variant-position-prop",
+        "grammar": "normal | sub | super",
+        "branches": [
+            {
+                "name": "Normal",
+                "syntax": { "type": "ident", "value": "normal" }
+            },
+            {
+                "name": "Sub",
+                "syntax": { "type": "ident", "value": "sub" }
+            },
+            {
+                "name": "Super",
+                "syntax": { "type": "ident", "value": "super" }
             }
         ]
     },

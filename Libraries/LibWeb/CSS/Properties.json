@@ -2125,7 +2125,7 @@
     "initial": "normal",
     "requires-computation": "never",
     "valid-types": [
-      "font-variant-caps"
+      "font-variant-caps-value"
     ]
   },
   "font-variant-east-asian": {
@@ -2146,7 +2146,7 @@
     "initial": "normal",
     "requires-computation": "never",
     "valid-types": [
-      "font-variant-emoji"
+      "font-variant-emoji-value"
     ]
   },
   "font-variant-ligatures": {
@@ -2180,7 +2180,7 @@
     "initial": "normal",
     "requires-computation": "never",
     "valid-types": [
-      "font-variant-position"
+      "font-variant-position-value"
     ]
   },
   "font-variation-settings": {

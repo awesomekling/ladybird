@@ -45,12 +45,18 @@ Optional<ValueType> value_type_from_string(StringView string)
         return ValueType::FontWeightAbsolute;
     if (string.equals_ignoring_ascii_case("font-width-css3"sv))
         return ValueType::FontWidthCss3;
+    if (string.equals_ignoring_ascii_case("font-variant-caps-value"sv))
+        return ValueType::FontVariantCapsValue;
     if (string.equals_ignoring_ascii_case("font-variant-east-asian"sv))
         return ValueType::FontVariantEastAsian;
+    if (string.equals_ignoring_ascii_case("font-variant-emoji-value"sv))
+        return ValueType::FontVariantEmojiValue;
     if (string.equals_ignoring_ascii_case("font-variant-ligatures"sv))
         return ValueType::FontVariantLigatures;
     if (string.equals_ignoring_ascii_case("font-variant-numeric"sv))
         return ValueType::FontVariantNumeric;
+    if (string.equals_ignoring_ascii_case("font-variant-position-value"sv))
+        return ValueType::FontVariantPositionValue;
     if (string.equals_ignoring_ascii_case("frequency"sv))
         return ValueType::Frequency;
     if (string.equals_ignoring_ascii_case("frequency-percentage"sv))
@@ -145,12 +151,18 @@ StringView value_type_to_string(ValueType value_type)
         return "FontWidthCss3"sv;
     case Web::CSS::ValueType::FontVariantAlternates:
         return "FontVariantAlternates"sv;
+    case Web::CSS::ValueType::FontVariantCapsValue:
+        return "FontVariantCapsValue"sv;
     case Web::CSS::ValueType::FontVariantEastAsian:
         return "FontVariantEastAsian"sv;
+    case Web::CSS::ValueType::FontVariantEmojiValue:
+        return "FontVariantEmojiValue"sv;
     case Web::CSS::ValueType::FontVariantLigatures:
         return "FontVariantLigatures"sv;
     case Web::CSS::ValueType::FontVariantNumeric:
         return "FontVariantNumeric"sv;
+    case Web::CSS::ValueType::FontVariantPositionValue:
+        return "FontVariantPositionValue"sv;
     case Web::CSS::ValueType::Frequency:
         return "Frequency"sv;
     case Web::CSS::ValueType::FrequencyPercentage:

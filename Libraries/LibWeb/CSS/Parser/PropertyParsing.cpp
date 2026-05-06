@@ -234,11 +234,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontVariantAlternates); parsed.has_value())
         return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontVariantCapsValue); parsed.has_value())
+        return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontVariantEastAsian); parsed.has_value())
+        return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontVariantEmojiValue); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontVariantLigatures); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontVariantNumeric); parsed.has_value())
+        return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontVariantPositionValue); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::Image); parsed.has_value())
         return parsed.release_value();

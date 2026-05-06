@@ -5207,12 +5207,18 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_font_width_css3_value(tokens);
     case ValueType::FontVariantAlternates:
         return parse_font_variant_alternates_value(tokens);
+    case ValueType::FontVariantCapsValue:
+        return parse_font_variant_caps_value_value(tokens);
     case ValueType::FontVariantEastAsian:
         return parse_font_variant_east_asian_value(tokens);
+    case ValueType::FontVariantEmojiValue:
+        return parse_font_variant_emoji_value_value(tokens);
     case ValueType::FontVariantLigatures:
         return parse_font_variant_ligatures_value(tokens);
     case ValueType::FontVariantNumeric:
         return parse_font_variant_numeric_value(tokens);
+    case ValueType::FontVariantPositionValue:
+        return parse_font_variant_position_value_value(tokens);
     case ValueType::Frequency:
         return parse_frequency_value(tokens, infinite_range);
     case ValueType::FrequencyPercentage:

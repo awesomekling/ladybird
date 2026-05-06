@@ -744,8 +744,22 @@ pub struct CssMediaQuery {
 #[repr(C)]
 pub enum CssValueTypeSyntaxKind {
     Invalid,
+    FontVariantCapsValueNormal,
+    FontVariantCapsValueSmallCaps,
+    FontVariantCapsValueAllSmallCaps,
+    FontVariantCapsValuePetiteCaps,
+    FontVariantCapsValueAllPetiteCaps,
+    FontVariantCapsValueUnicase,
+    FontVariantCapsValueTitlingCaps,
     FontVariantCss2Normal,
     FontVariantCss2SmallCaps,
+    FontVariantEmojiValueNormal,
+    FontVariantEmojiValueText,
+    FontVariantEmojiValueEmoji,
+    FontVariantEmojiValueUnicode,
+    FontVariantPositionValueNormal,
+    FontVariantPositionValueSub,
+    FontVariantPositionValueSuper,
     FontWeightAbsoluteNormal,
     FontWeightAbsoluteBold,
     FontWeightAbsoluteNumber,
@@ -7828,6 +7842,22 @@ mod tests {
         assert_eq!(
             parse_value_type("condensed expanded", ValueTypeId::FontWidthCss3),
             CssValueTypeSyntaxKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_font_variant_keyword_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("all-small-caps", ValueTypeId::FontVariantCapsValue),
+            CssValueTypeSyntaxKind::FontVariantCapsValueAllSmallCaps
+        );
+        assert_eq!(
+            parse_value_type("unicode", ValueTypeId::FontVariantEmojiValue),
+            CssValueTypeSyntaxKind::FontVariantEmojiValueUnicode
+        );
+        assert_eq!(
+            parse_value_type("super", ValueTypeId::FontVariantPositionValue),
+            CssValueTypeSyntaxKind::FontVariantPositionValueSuper
         );
     }
 
