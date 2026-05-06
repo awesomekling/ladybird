@@ -147,6 +147,11 @@ public:
         FlyString name;
     };
 
+    struct TimelineScope {
+        FFI::CssTimelineScopeValueKind kind;
+        Vector<FlyString> names;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -218,6 +223,7 @@ public:
     static ColorScheme parse_color_scheme(StringView input, StringView encoding);
     static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
+    static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
     static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
     static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);

@@ -780,6 +780,15 @@ pub struct CssTouchActionValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTimelineScopeValueKind {
+    Invalid,
+    None,
+    All,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2526,6 +2535,50 @@ where
 
     name_callback(&name);
     CssPositionAnchorValueKind::AnchorName
+}
+
+pub(crate) fn parse_timeline_scope_value<N>(filtered_input: &[u8], mut name_callback: N) -> CssTimelineScopeValueKind
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/scroll-animations-1/#propdef-timeline-scope
+    // Value: none | all | <dashed-ident>#
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssTimelineScopeValueKind::Invalid;
+        }
+        return CssTimelineScopeValueKind::None;
+    }
+
+    if parser.consume_ident_matching("all") {
+        if parser.has_next_component_value() {
+            return CssTimelineScopeValueKind::Invalid;
+        }
+        return CssTimelineScopeValueKind::All;
+    }
+
+    let Some(names) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_dashed_ident()
+    }) else {
+        return CssTimelineScopeValueKind::Invalid;
+    };
+
+    if names.is_empty() {
+        return CssTimelineScopeValueKind::Invalid;
+    }
+
+    for name in names {
+        name_callback(&name);
+    }
+
+    CssTimelineScopeValueKind::List
 }
 
 pub(crate) fn parse_position_visibility_value(filtered_input: &[u8]) -> CssPositionVisibilityValue {
@@ -8909,21 +8962,21 @@ mod tests {
         CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
         CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
-        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind,
+        CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -8934,7 +8987,8 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_string_descriptor,
-        parse_text_underline_position_value, parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
+        parse_text_underline_position_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9466,6 +9520,12 @@ mod tests {
         let mut name = None;
         let kind = parse_position_anchor_value(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         (kind, name)
+    }
+
+    fn parse_timeline_scope(input: &str) -> (CssTimelineScopeValueKind, Vec<String>) {
+        let mut names = Vec::new();
+        let kind = parse_timeline_scope_value(input.as_bytes(), |name| names.push(name.to_string()));
+        (kind, names)
     }
 
     fn parse_position_visibility(input: &str) -> CssPositionVisibilityValue {
@@ -11863,6 +11923,39 @@ mod tests {
             CssPositionAnchorValueKind::Invalid
         );
         assert_eq!(parse_position_anchor("foo").0, CssPositionAnchorValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_timeline_scope_values() {
+        assert_eq!(parse_timeline_scope("none"), (CssTimelineScopeValueKind::None, vec![]));
+        assert_eq!(parse_timeline_scope("all"), (CssTimelineScopeValueKind::All, vec![]));
+        assert_eq!(
+            parse_timeline_scope("--foo"),
+            (CssTimelineScopeValueKind::List, vec!["--foo".to_string()])
+        );
+        assert_eq!(
+            parse_timeline_scope("--foo, --bar"),
+            (
+                CssTimelineScopeValueKind::List,
+                vec!["--foo".to_string(), "--bar".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_timeline_scope_values() {
+        assert_eq!(parse_timeline_scope("").0, CssTimelineScopeValueKind::Invalid);
+        assert_eq!(
+            parse_timeline_scope("none, --foo").0,
+            CssTimelineScopeValueKind::Invalid
+        );
+        assert_eq!(parse_timeline_scope("all, --foo").0, CssTimelineScopeValueKind::Invalid);
+        assert_eq!(parse_timeline_scope("--foo,").0, CssTimelineScopeValueKind::Invalid);
+        assert_eq!(
+            parse_timeline_scope("--foo --bar").0,
+            CssTimelineScopeValueKind::Invalid
+        );
+        assert_eq!(parse_timeline_scope("foo").0, CssTimelineScopeValueKind::Invalid);
     }
 
     #[test]

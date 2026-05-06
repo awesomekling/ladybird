@@ -36,7 +36,7 @@ pub use css_parser::{
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
     CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange,
+    CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange,
     CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
     CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
 };
@@ -926,6 +926,30 @@ pub unsafe extern "C" fn rust_css_parse_position_anchor(
             };
 
             css_parser::parse_position_anchor_value(input, |name| {
+                name_callback(ctx, name.as_ptr(), name.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `name_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_timeline_scope(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
+) -> CssTimelineScopeValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTimelineScopeValueKind::Invalid;
+            };
+
+            css_parser::parse_timeline_scope_value(input, |name| {
                 name_callback(ctx, name.as_ptr(), name.len());
             })
         })

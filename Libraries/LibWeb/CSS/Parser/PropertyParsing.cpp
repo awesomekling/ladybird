@@ -4235,16 +4235,34 @@ RefPtr<StyleValue const> Parser::parse_text_underline_position_value(TokenStream
 // https://drafts.csswg.org/scroll-animations-1/#propdef-timeline-scope
 RefPtr<StyleValue const> Parser::parse_timeline_scope_value(TokenStream<ComponentValue>& tokens)
 {
-    // none | all | <dashed-ident>#
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    if (auto all = parse_all_as_single_keyword_value(tokens, Keyword::All))
-        return all;
+    auto serialized_timeline_scope = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_timeline_scope = RustComponentValueParser::parse_timeline_scope(serialized_timeline_scope.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_timeline_scope.kind) {
+    case FFI::CssTimelineScopeValueKind::Invalid:
+        return {};
+    case FFI::CssTimelineScopeValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssTimelineScopeValueKind::All:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::All);
+    case FFI::CssTimelineScopeValueKind::List: {
+        StyleValueVector names;
+        names.ensure_capacity(parsed_timeline_scope.names.size());
+        for (auto const& name : parsed_timeline_scope.names)
+            names.unchecked_append(CustomIdentStyleValue::create(name));
 
-    return parse_comma_separated_value_list(tokens, [this](TokenStream<ComponentValue>& inner_tokens) {
-        return parse_dashed_ident_value(inner_tokens);
-    });
+        transaction.commit();
+        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
+    }
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://www.w3.org/TR/pointerevents/#the-touch-action-css-property

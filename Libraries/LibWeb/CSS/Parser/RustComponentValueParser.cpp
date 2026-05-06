@@ -2152,6 +2152,27 @@ RustComponentValueParser::PositionAnchor RustComponentValueParser::parse_positio
     };
 }
 
+RustComponentValueParser::TimelineScope RustComponentValueParser::parse_timeline_scope(StringView input, StringView encoding)
+{
+    Vector<FlyString> names;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_timeline_scope(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &names,
+        [](void* raw_names, u8 const* name_ptr, size_t name_len) {
+            auto& names = *static_cast<Vector<FlyString>*>(raw_names);
+            names.append(fly_string_from_ffi_bytes(name_ptr, name_len));
+        });
+
+    return TimelineScope {
+        .kind = kind,
+        .names = move(names),
+    };
+}
+
 FFI::CssPositionVisibilityValue RustComponentValueParser::parse_position_visibility(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
