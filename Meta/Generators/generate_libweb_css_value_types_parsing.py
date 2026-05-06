@@ -250,7 +250,9 @@ namespace Web::CSS {
 """)
 
     for value_type_name in value_type_data:
-        out.write(f"    __ENUMERATE_GENERATED_CSS_VALUE_TYPE({value_type_name_to_snake_case(value_type_name)}) \\\n")
+        out.write(
+            f'    __ENUMERATE_GENERATED_CSS_VALUE_TYPE({value_type_name_to_snake_case(value_type_name)}, {value_type_name_to_title_case(value_type_name)}, "{value_type_name[1:-1]}") \\\n'
+        )
 
     out.write("\n")
     out.write("}")

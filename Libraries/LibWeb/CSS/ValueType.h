@@ -9,6 +9,7 @@
 #include <AK/Format.h>
 #include <AK/Optional.h>
 #include <AK/Types.h>
+#include <LibWeb/CSS/Parser/GeneratedValueTypesParsing.h>
 
 namespace Web::CSS {
 
@@ -30,17 +31,13 @@ enum class ValueType : u8 {
     FitContent,
     Flex,
     FontStyle,
-    FontKerningValue,
-    FontOpticalSizingValue,
-    FontWeightAbsolute,
-    FontWidthCss3,
-    FontVariantAlternates,
-    FontVariantCapsValue,
+#define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(name_snake, name_title, name_string) name_title,
+    ENUMERATE_GENERATED_CSS_VALUE_TYPES
+#undef __ENUMERATE_GENERATED_CSS_VALUE_TYPE
+        FontVariantAlternates,
     FontVariantEastAsian,
-    FontVariantEmojiValue,
     FontVariantLigatures,
     FontVariantNumeric,
-    FontVariantPositionValue,
     Frequency,
     FrequencyPercentage,
     Image,

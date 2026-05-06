@@ -39,28 +39,19 @@ Optional<ValueType> value_type_from_string(StringView string)
         return ValueType::FitContent;
     if (string.equals_ignoring_ascii_case("flex"sv))
         return ValueType::Flex;
-    if (string.equals_ignoring_ascii_case("font-kerning-value"sv))
-        return ValueType::FontKerningValue;
-    if (string.equals_ignoring_ascii_case("font-optical-sizing-value"sv))
-        return ValueType::FontOpticalSizingValue;
+#define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(name_snake, name_title, name_string)               \
+    if (string.equals_ignoring_ascii_case(StringView { name_string, sizeof(name_string) - 1 })) \
+        return ValueType::name_title;
+    ENUMERATE_GENERATED_CSS_VALUE_TYPES
+#undef __ENUMERATE_GENERATED_CSS_VALUE_TYPE
     if (string.equals_ignoring_ascii_case("font-variant-alternates"sv))
         return ValueType::FontVariantAlternates;
-    if (string.equals_ignoring_ascii_case("font-weight-absolute"sv))
-        return ValueType::FontWeightAbsolute;
-    if (string.equals_ignoring_ascii_case("font-width-css3"sv))
-        return ValueType::FontWidthCss3;
-    if (string.equals_ignoring_ascii_case("font-variant-caps-value"sv))
-        return ValueType::FontVariantCapsValue;
     if (string.equals_ignoring_ascii_case("font-variant-east-asian"sv))
         return ValueType::FontVariantEastAsian;
-    if (string.equals_ignoring_ascii_case("font-variant-emoji-value"sv))
-        return ValueType::FontVariantEmojiValue;
     if (string.equals_ignoring_ascii_case("font-variant-ligatures"sv))
         return ValueType::FontVariantLigatures;
     if (string.equals_ignoring_ascii_case("font-variant-numeric"sv))
         return ValueType::FontVariantNumeric;
-    if (string.equals_ignoring_ascii_case("font-variant-position-value"sv))
-        return ValueType::FontVariantPositionValue;
     if (string.equals_ignoring_ascii_case("frequency"sv))
         return ValueType::Frequency;
     if (string.equals_ignoring_ascii_case("frequency-percentage"sv))
@@ -149,28 +140,19 @@ StringView value_type_to_string(ValueType value_type)
         return "Flex"sv;
     case Web::CSS::ValueType::FontStyle:
         return "FontStyle"sv;
-    case Web::CSS::ValueType::FontKerningValue:
-        return "FontKerningValue"sv;
-    case Web::CSS::ValueType::FontOpticalSizingValue:
-        return "FontOpticalSizingValue"sv;
-    case Web::CSS::ValueType::FontWeightAbsolute:
-        return "FontWeightAbsolute"sv;
-    case Web::CSS::ValueType::FontWidthCss3:
-        return "FontWidthCss3"sv;
+#define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(name_snake, name_title, name_string) \
+    case Web::CSS::ValueType::name_title:                                         \
+        return StringView { #name_title, sizeof(#name_title) - 1 };
+        ENUMERATE_GENERATED_CSS_VALUE_TYPES
+#undef __ENUMERATE_GENERATED_CSS_VALUE_TYPE
     case Web::CSS::ValueType::FontVariantAlternates:
         return "FontVariantAlternates"sv;
-    case Web::CSS::ValueType::FontVariantCapsValue:
-        return "FontVariantCapsValue"sv;
     case Web::CSS::ValueType::FontVariantEastAsian:
         return "FontVariantEastAsian"sv;
-    case Web::CSS::ValueType::FontVariantEmojiValue:
-        return "FontVariantEmojiValue"sv;
     case Web::CSS::ValueType::FontVariantLigatures:
         return "FontVariantLigatures"sv;
     case Web::CSS::ValueType::FontVariantNumeric:
         return "FontVariantNumeric"sv;
-    case Web::CSS::ValueType::FontVariantPositionValue:
-        return "FontVariantPositionValue"sv;
     case Web::CSS::ValueType::Frequency:
         return "Frequency"sv;
     case Web::CSS::ValueType::FrequencyPercentage:

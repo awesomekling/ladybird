@@ -562,7 +562,7 @@ private:
     RefPtr<StyleValue const> parse_white_space_trim_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_will_change_value(TokenStream<ComponentValue>&);
 
-#define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name) \
+#define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name, name_title, name_string) \
     RefPtr<StyleValue const> parse_##value_type_name##_value(TokenStream<ComponentValue>& tokens);
     ENUMERATE_GENERATED_CSS_VALUE_TYPES
 #undef __ENUMERATE_GENERATED_CSS_VALUE_TYPE

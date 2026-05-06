@@ -5213,6 +5213,8 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_font_variant_alternates_value(tokens);
     case ValueType::FontVariantCapsValue:
         return parse_font_variant_caps_value_value(tokens);
+    case ValueType::FontVariantCss2:
+        return parse_font_variant_css2_value(tokens);
     case ValueType::FontVariantEastAsian:
         return parse_font_variant_east_asian_value(tokens);
     case ValueType::FontVariantEmojiValue:
@@ -5257,6 +5259,8 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_scroll_function_value(tokens);
     case ValueType::String:
         return parse_string_value(tokens);
+    case ValueType::Symbol:
+        return parse_symbol_value(tokens);
     case ValueType::Time:
         return parse_time_value(tokens, infinite_range);
     case ValueType::TimePercentage:
