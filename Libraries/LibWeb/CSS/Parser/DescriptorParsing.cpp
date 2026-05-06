@@ -447,16 +447,31 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 case DescriptorMetadata::ValueType::Symbol:
                     return parse_symbol_value(tokens);
                 case DescriptorMetadata::ValueType::Symbols: {
+                    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-symbols
                     // <symbol>+
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto symbol_count = RustComponentValueParser::parse_counter_style_symbols(serialized_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_count.has_value())
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> symbol_tokens { component_values };
+
                     StyleValueVector symbols;
-                    while (tokens.has_next_token()) {
-                        auto symbol = parse_symbol_value(tokens);
+                    for (size_t i = 0; i < *symbol_count; ++i) {
+                        symbol_tokens.discard_whitespace();
+                        auto symbol = parse_symbol_value(symbol_tokens);
                         if (!symbol)
-                            break;
+                            return nullptr;
                         symbols.append(symbol.release_nonnull());
                     }
 
-                    if (symbols.is_empty())
+                    symbol_tokens.discard_whitespace();
+                    if (symbol_tokens.has_next_token())
                         return nullptr;
 
                     return StyleValueList::create(move(symbols), StyleValueList::Separator::Space, StyleValueList::Collapsible::No);

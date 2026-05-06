@@ -1899,6 +1899,27 @@ Optional<FFI::CssCounterStyleSystemKind> RustComponentValueParser::parse_counter
     return system;
 }
 
+Optional<size_t> RustComponentValueParser::parse_counter_style_symbols(StringView input, StringView encoding)
+{
+    Optional<size_t> count;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_symbols(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &count,
+        [](void* raw_count, size_t parsed_count) {
+            auto& count = *static_cast<Optional<size_t>*>(raw_count);
+            count = parsed_count;
+        });
+
+    if (!parsed || !count.has_value())
+        return {};
+
+    return count;
+}
+
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
 {
     Optional<FamilyName> family_name;
