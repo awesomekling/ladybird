@@ -554,6 +554,13 @@ pub enum CssNonnegativeIntegerSymbolPairOrder {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssCounterStyleNegativeSymbolCount {
+    One,
+    Two,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1654,6 +1661,26 @@ where
     }
 
     order_callback(order);
+    true
+}
+
+pub(crate) fn parse_counter_style_negative<N>(filtered_input: &[u8], mut count_callback: N) -> bool
+where
+    N: FnMut(CssCounterStyleNegativeSymbolCount),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(count) = parser.parse_counter_style_negative() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    count_callback(count);
     true
 }
 
@@ -4564,6 +4591,22 @@ impl ComponentValueParser {
         Some(CounterStyle::SymbolsFunction { symbols_type, symbols })
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
+    fn parse_counter_style_negative(&mut self) -> Option<CssCounterStyleNegativeSymbolCount> {
+        // <symbol> <symbol>?
+        self.discard_whitespace();
+        if !self.consume_symbol_syntax() {
+            return None;
+        }
+
+        self.discard_whitespace();
+        if !self.consume_symbol_syntax() {
+            return Some(CssCounterStyleNegativeSymbolCount::One);
+        }
+
+        Some(CssCounterStyleNegativeSymbolCount::Two)
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -7118,10 +7161,11 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleSymbolsType, CssFontLanguageOverrideKind,
-        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
+        CssCounterStyleSymbolsType, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
+        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName,
         FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
@@ -7137,7 +7181,7 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
-        parse_an_opentype_tag, parse_container_rule_prelude, parse_empty_prelude,
+        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_empty_prelude,
         parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
@@ -7537,6 +7581,12 @@ mod tests {
         let parsed =
             parse_a_nonnegative_integer_symbol_pair(input.as_bytes(), |parsed_order| order = Some(parsed_order));
         parsed.then_some(order).flatten()
+    }
+
+    fn parse_counter_style_negative_descriptor(input: &str) -> Option<CssCounterStyleNegativeSymbolCount> {
+        let mut count = None;
+        let parsed = parse_counter_style_negative(input.as_bytes(), |parsed_count| count = Some(parsed_count));
+        parsed.then_some(count).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9104,6 +9154,30 @@ mod tests {
         assert_eq!(parse_nonnegative_integer_symbol_pair("-1 \"I\""), None);
         assert_eq!(parse_nonnegative_integer_symbol_pair("inherit 1"), None);
         assert_eq!(parse_nonnegative_integer_symbol_pair("1 default"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_negative_descriptors() {
+        assert_eq!(
+            parse_counter_style_negative_descriptor("\"-\""),
+            Some(CssCounterStyleNegativeSymbolCount::One)
+        );
+        assert_eq!(
+            parse_counter_style_negative_descriptor("\"-\" \"\""),
+            Some(CssCounterStyleNegativeSymbolCount::Two)
+        );
+        assert_eq!(
+            parse_counter_style_negative_descriptor("minus"),
+            Some(CssCounterStyleNegativeSymbolCount::One)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_negative_descriptors() {
+        assert_eq!(parse_counter_style_negative_descriptor(""), None);
+        assert_eq!(parse_counter_style_negative_descriptor("\"-\" \"\" extra"), None);
+        assert_eq!(parse_counter_style_negative_descriptor("inherit"), None);
+        assert_eq!(parse_counter_style_negative_descriptor("default"), None);
     }
 
     #[test]

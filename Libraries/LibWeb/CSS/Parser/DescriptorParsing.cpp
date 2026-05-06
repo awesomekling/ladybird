@@ -7,6 +7,7 @@
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleSystemStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
@@ -173,14 +174,34 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 case DescriptorMetadata::ValueType::CounterStyleNegative: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
                     // <symbol> <symbol>?
-                    auto first_symbol = parse_symbol_value(tokens);
-                    auto second_symbol = parse_symbol_value(tokens);
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_negative = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto count = RustComponentValueParser::parse_counter_style_negative(serialized_negative.bytes_as_string_view(), "utf-8"sv);
+                    if (!count.has_value())
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> negative_tokens { component_values };
+
+                    auto first_symbol = parse_symbol_value(negative_tokens);
 
                     if (!first_symbol)
                         return nullptr;
 
-                    if (!second_symbol)
+                    if (*count == FFI::CssCounterStyleNegativeSymbolCount::One)
                         return StyleValueList::create({ first_symbol.release_nonnull() }, StyleValueList::Separator::Space);
+
+                    negative_tokens.discard_whitespace();
+                    auto second_symbol = parse_symbol_value(negative_tokens);
+                    if (!second_symbol)
+                        return nullptr;
+
+                    negative_tokens.discard_whitespace();
+                    if (negative_tokens.has_next_token())
+                        return nullptr;
 
                     return StyleValueList::create({ first_symbol.release_nonnull(), second_symbol.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
                 }
