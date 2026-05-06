@@ -1333,13 +1333,14 @@ struct RustURLFunctionBuilder {
     Vector<RequestURLModifier> request_url_modifiers;
 };
 
-Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, StringView encoding)
+template<typename RustParseURLFunction>
+static Optional<URL> parse_url_with_rust(StringView input, StringView encoding, RustParseURLFunction rust_parse_url)
 {
     RustURLFunctionBuilder builder;
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
 
-    auto parsed = FFI::rust_css_parse_url_function(
+    auto parsed = rust_parse_url(
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
         &builder,
@@ -1367,6 +1368,16 @@ Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, S
         return {};
 
     return URL { builder.url.release_value(), builder.function_type.release_value(), move(builder.request_url_modifiers) };
+}
+
+Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, StringView encoding)
+{
+    return parse_url_with_rust(input, encoding, FFI::rust_css_parse_url_function);
+}
+
+Optional<URL> RustComponentValueParser::parse_an_import_url(StringView input, StringView encoding)
+{
+    return parse_url_with_rust(input, encoding, FFI::rust_css_parse_import_url);
 }
 
 struct RustFontSourceBuilder {

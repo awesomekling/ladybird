@@ -247,9 +247,14 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
 
     tokens.discard_whitespace();
 
-    Optional<URL> url = parse_url_function(tokens);
-    if (!url.has_value() && tokens.next_token().is(Token::Type::String))
-        url = URL { tokens.consume_a_token().token().string().to_string() };
+    Optional<URL> url;
+    if (tokens.has_next_token()) {
+        auto const& component_value = tokens.next_token();
+        auto serialized_import_url = serialize_component_values_for_reparsing({ &component_value, 1 });
+        url = RustComponentValueParser::parse_an_import_url(serialized_import_url.bytes_as_string_view(), "utf-8"sv);
+        if (url.has_value())
+            tokens.discard_a_token();
+    }
 
     if (!url.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {

@@ -1246,6 +1246,30 @@ where
     true
 }
 
+pub(crate) fn parse_an_import_url<U, M>(filtered_input: &[u8], mut url_callback: U, mut modifier_callback: M) -> bool
+where
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(url_function) = parser.parse_an_import_url() else {
+        return false;
+    };
+
+    url_callback(CssUrlFunction {
+        function_type: url_function.function_type,
+        url_ptr: url_function.url.as_ptr(),
+        url_len: url_function.url.len(),
+    });
+    for modifier in &url_function.request_url_modifiers {
+        modifier_callback(modifier.as_ffi());
+    }
+    true
+}
+
 pub(crate) fn parse_a_font_source<S, U, M, F, T>(
     filtered_input: &[u8],
     mut source_callback: S,
@@ -4074,6 +4098,35 @@ impl ComponentValueParser {
             }
             _ => return None,
         };
+
+        Some(url_function)
+    }
+
+    // https://drafts.csswg.org/css-cascade-5/#at-import
+    fn parse_an_import_url(&mut self) -> Option<UrlFunction> {
+        // @import [ <url> | <string> ]
+        self.discard_whitespace();
+
+        let url_function = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { value },
+                ..
+            }) => {
+                let value = value.clone();
+                self.index += 1;
+                UrlFunction {
+                    function_type: CssUrlFunctionType::Url,
+                    url: value,
+                    request_url_modifiers: Vec::new(),
+                }
+            }
+            _ => self.parse_a_url_function_component()?,
+        };
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
 
         Some(url_function)
     }
@@ -7912,7 +7965,7 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
+        parse_an_if_condition, parse_an_import_url, parse_an_opentype_tag, parse_container_rule_prelude,
         parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
         parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
         parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair,
@@ -8063,6 +8116,29 @@ mod tests {
         let mut url_function = None;
         let mut modifiers = Vec::new();
         let parsed = parse_a_url_function(
+            input.as_bytes(),
+            |parsed_url_function| {
+                let url = unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        parsed_url_function.url_ptr,
+                        parsed_url_function.url_len,
+                    ))
+                };
+                url_function = Some((parsed_url_function.function_type, url.to_string()));
+            },
+            |modifier| {
+                modifiers.push(modifier.kind);
+            },
+        );
+        parsed
+            .then_some(url_function.map(|(function_type, url)| (function_type, url, modifiers)))
+            .flatten()
+    }
+
+    fn parse_import_url(input: &str) -> Option<(CssUrlFunctionType, String, Vec<CssUrlModifierKind>)> {
+        let mut url_function = None;
+        let mut modifiers = Vec::new();
+        let parsed = parse_an_import_url(
             input.as_bytes(),
             |parsed_url_function| {
                 let url = unsafe {
@@ -9380,6 +9456,29 @@ mod tests {
             None
         );
         assert_eq!(parse_url_function("url(\"image.png\" integrity(not-a-string))"), None);
+    }
+
+    #[test]
+    fn parses_import_urls() {
+        assert_eq!(
+            parse_import_url("\"sheet.css\""),
+            Some((CssUrlFunctionType::Url, "sheet.css".to_string(), vec![]))
+        );
+        assert_eq!(
+            parse_import_url("url(\"sheet.css\")"),
+            Some((CssUrlFunctionType::Url, "sheet.css".to_string(), vec![]))
+        );
+        assert_eq!(
+            parse_import_url("src(\"sheet.css\")"),
+            Some((CssUrlFunctionType::Src, "sheet.css".to_string(), vec![]))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_import_urls() {
+        assert_eq!(parse_import_url("sheet.css"), None);
+        assert_eq!(parse_import_url("\"sheet.css\" extra"), None);
+        assert_eq!(parse_import_url("url(\"sheet.css\") extra"), None);
     }
 
     #[test]

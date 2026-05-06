@@ -173,6 +173,7 @@ public:
     static Optional<Gfx::UnicodeRange> parse_a_unicode_range(StringView input, StringView encoding);
     static Optional<Vector<Gfx::UnicodeRange>> parse_a_unicode_range_list(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
+    static Optional<URL> parse_an_import_url(StringView input, StringView encoding);
     static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
     static Optional<FontLanguageOverride> parse_a_font_language_override(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
