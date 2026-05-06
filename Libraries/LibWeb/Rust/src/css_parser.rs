@@ -1672,6 +1672,22 @@ where
     true
 }
 
+pub(crate) fn parse_an_import_layer<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_an_import_layer() else {
+        return false;
+    };
+
+    name_callback(&name);
+    true
+}
+
 pub(crate) fn parse_a_layer_name_list<N>(filtered_input: &[u8], mut name_callback: N) -> bool
 where
     N: FnMut(&str),
@@ -4792,6 +4808,36 @@ impl ComponentValueParser {
         }
 
         Some(name)
+    }
+
+    // https://drafts.csswg.org/css-cascade-5/#at-import
+    fn parse_an_import_layer(&mut self) -> Option<String> {
+        // [ layer | layer(<layer-name>) ]?
+        self.discard_whitespace();
+
+        let layer = match self.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if value.eq_ignore_ascii_case("layer") => String::new(),
+            ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("layer") => {
+                let mut function_parser = ComponentValueParser::new(function.value);
+                let name = function_parser.parse_a_layer_name(false)?;
+                function_parser.discard_whitespace();
+                if function_parser.has_next_component_value() {
+                    return None;
+                }
+                name
+            }
+            _ => return None,
+        };
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(layer)
     }
 
     // https://drafts.csswg.org/css-cascade-5/#layering
@@ -7965,12 +8011,12 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_an_import_url, parse_an_opentype_tag, parse_container_rule_prelude,
-        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair,
-        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
-        parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
+        parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
+        parse_container_rule_prelude, parse_counter_style_additive_symbols, parse_counter_style_negative,
+        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
+        parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
+        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
+        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8360,6 +8406,12 @@ mod tests {
         let parsed = parse_a_layer_name(input.as_bytes(), allow_blank_layer_name, |parsed_name| {
             name = Some(parsed_name.to_string())
         });
+        parsed.then_some(name).flatten()
+    }
+
+    fn parse_import_layer(input: &str) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_an_import_layer(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
     }
 
@@ -9986,6 +10038,25 @@ mod tests {
         assert_eq!(parse_layer_name("inherit", false), None);
         assert_eq!(parse_layer_name("components . buttons", false), None);
         assert_eq!(parse_layer_name("components, buttons", false), None);
+    }
+
+    #[test]
+    fn parses_import_layers() {
+        assert_eq!(parse_import_layer("layer"), Some(String::new()));
+        assert_eq!(parse_import_layer("LaYeR"), Some(String::new()));
+        assert_eq!(parse_import_layer("layer(components)"), Some("components".to_string()));
+        assert_eq!(
+            parse_import_layer("layer(components.buttons)"),
+            Some("components.buttons".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_import_layers() {
+        assert_eq!(parse_import_layer("components"), None);
+        assert_eq!(parse_import_layer("layer()"), None);
+        assert_eq!(parse_import_layer("layer(components buttons)"), None);
+        assert_eq!(parse_import_layer("layer(components) extra"), None);
     }
 
     #[test]

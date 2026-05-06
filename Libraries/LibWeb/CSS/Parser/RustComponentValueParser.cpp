@@ -1798,6 +1798,27 @@ Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView inpu
     return name;
 }
 
+Optional<FlyString> RustComponentValueParser::parse_an_import_layer(StringView input, StringView encoding)
+{
+    Optional<FlyString> name;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_import_layer(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &name,
+        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
+            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
+            name = fly_string_from_ffi_bytes(name_ptr, name_len);
+        });
+
+    if (!parsed)
+        return {};
+
+    return name;
+}
+
 Optional<Vector<FlyString>> RustComponentValueParser::parse_a_layer_name_list(StringView input, StringView encoding)
 {
     Vector<FlyString> names;

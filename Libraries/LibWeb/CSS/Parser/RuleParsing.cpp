@@ -268,23 +268,19 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     tokens.discard_whitespace();
     Optional<FlyString> layer;
     // [ layer | layer(<layer-name>) ]?
-    if (tokens.next_token().is_ident("layer"sv)) {
-        tokens.discard_a_token(); // layer
-        layer = FlyString {};
-    } else if (tokens.next_token().is_function("layer"sv)) {
-        auto layer_transaction = tokens.begin_transaction();
-        auto& layer_function = tokens.consume_a_token().function();
-        auto serialized_layer_name = serialize_component_values_for_reparsing(layer_function.value);
-        auto name = RustComponentValueParser::parse_a_layer_name(serialized_layer_name.bytes_as_string_view(), "utf-8"sv, RustComponentValueParser::AllowBlankLayerName::No);
-        if (!name.has_value()) {
+    if (tokens.has_next_token()) {
+        auto const& component_value = tokens.next_token();
+        auto serialized_import_layer = serialize_component_values_for_reparsing({ &component_value, 1 });
+        auto name = RustComponentValueParser::parse_an_import_layer(serialized_import_layer.bytes_as_string_view(), "utf-8"sv);
+        if (name.has_value()) {
+            tokens.discard_a_token();
+            layer = name.release_value();
+        } else if (component_value.is_function("layer"sv)) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@import"_fly_string,
                 .prelude = tokens.dump_string(),
-                .description = MUST(String::formatted("Unable to parse `{}` as a valid layer.", layer_function.original_source_text())),
+                .description = MUST(String::formatted("Unable to parse `{}` as a valid layer.", component_value.function().original_source_text())),
             });
-        } else {
-            layer_transaction.commit();
-            layer = name.release_value();
         }
     }
 
