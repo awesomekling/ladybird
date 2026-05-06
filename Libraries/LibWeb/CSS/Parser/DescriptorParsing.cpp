@@ -23,6 +23,38 @@
 
 namespace Web::CSS::Parser {
 
+RefPtr<StyleValue const> Parser::materialize_nonnegative_integer_symbol_pair(ReadonlySpan<ComponentValue const> component_values, FFI::CssNonnegativeIntegerSymbolPairOrder order)
+{
+    auto pair_component_values = Vector<ComponentValue> { component_values };
+    TokenStream<ComponentValue> pair_tokens { pair_component_values };
+
+    RefPtr<StyleValue const> integer;
+    RefPtr<StyleValue const> symbol;
+
+    pair_tokens.discard_whitespace();
+    switch (order) {
+    case FFI::CssNonnegativeIntegerSymbolPairOrder::IntegerFirst:
+        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
+        pair_tokens.discard_whitespace();
+        symbol = parse_symbol_value(pair_tokens);
+        break;
+    case FFI::CssNonnegativeIntegerSymbolPairOrder::SymbolFirst:
+        symbol = parse_symbol_value(pair_tokens);
+        pair_tokens.discard_whitespace();
+        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
+        break;
+    }
+
+    if (!integer || !symbol)
+        return nullptr;
+
+    pair_tokens.discard_whitespace();
+    if (pair_tokens.has_next_token())
+        return nullptr;
+
+    return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
+}
+
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens)
 {
     if (!at_rule_supports_descriptor(at_rule_id, descriptor_name_and_id.id())) {
@@ -113,7 +145,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     StyleValueVector additive_tuples;
                     for (size_t i = 0; i < *additive_tuple_count; ++i) {
                         additive_symbol_tokens.discard_whitespace();
-                        auto additive_tuple = parse_nonnegative_integer_symbol_pair_value(additive_symbol_tokens);
+                        auto additive_tuple_start = additive_symbol_tokens.current_index();
+                        while (additive_symbol_tokens.has_next_token() && !additive_symbol_tokens.next_token().is(Token::Type::Comma))
+                            additive_symbol_tokens.discard_a_token();
+
+                        auto serialized_tuple = serialize_component_values_for_reparsing(additive_symbol_tokens.tokens_since(additive_tuple_start));
+                        auto order = RustComponentValueParser::parse_a_nonnegative_integer_symbol_pair(serialized_tuple.bytes_as_string_view(), "utf-8"sv);
+                        if (!order.has_value())
+                            return nullptr;
+
+                        auto additive_tuple = materialize_nonnegative_integer_symbol_pair(additive_symbol_tokens.tokens_since(additive_tuple_start), *order);
                         if (!additive_tuple)
                             return nullptr;
 
@@ -294,34 +335,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!order.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> pair_tokens { component_values };
-
-                    RefPtr<StyleValue const> integer;
-                    RefPtr<StyleValue const> symbol;
-
-                    pair_tokens.discard_whitespace();
-                    switch (*order) {
-                    case FFI::CssNonnegativeIntegerSymbolPairOrder::IntegerFirst:
-                        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-                        pair_tokens.discard_whitespace();
-                        symbol = parse_symbol_value(pair_tokens);
-                        break;
-                    case FFI::CssNonnegativeIntegerSymbolPairOrder::SymbolFirst:
-                        symbol = parse_symbol_value(pair_tokens);
-                        pair_tokens.discard_whitespace();
-                        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-                        break;
-                    }
-
-                    if (!integer || !symbol)
-                        return nullptr;
-
-                    pair_tokens.discard_whitespace();
-                    if (pair_tokens.has_next_token())
-                        return nullptr;
-
-                    return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
+                    return materialize_nonnegative_integer_symbol_pair(tokens.tokens_since(start), *order);
                 }
                 case DescriptorMetadata::ValueType::CounterStyleRange: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range

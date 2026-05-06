@@ -2278,52 +2278,6 @@ RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<Component
     VERIFY_NOT_REACHED();
 }
 
-RefPtr<StyleValue const> Parser::parse_nonnegative_integer_symbol_pair_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    auto start = tokens.current_index();
-    while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma))
-        tokens.discard_a_token();
-
-    auto serialized_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto order = RustComponentValueParser::parse_a_nonnegative_integer_symbol_pair(serialized_pair.bytes_as_string_view(), "utf-8"sv);
-    if (!order.has_value())
-        return nullptr;
-
-    auto pair_component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-    TokenStream<ComponentValue> pair_tokens { pair_component_values };
-
-    RefPtr<StyleValue const> integer;
-    RefPtr<StyleValue const> symbol;
-
-    pair_tokens.discard_whitespace();
-    switch (*order) {
-    case FFI::CssNonnegativeIntegerSymbolPairOrder::IntegerFirst:
-        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-        pair_tokens.discard_whitespace();
-        symbol = parse_symbol_value(pair_tokens);
-        break;
-    case FFI::CssNonnegativeIntegerSymbolPairOrder::SymbolFirst:
-        symbol = parse_symbol_value(pair_tokens);
-        pair_tokens.discard_whitespace();
-        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-        break;
-    }
-
-    if (!integer || !symbol)
-        return nullptr;
-
-    pair_tokens.discard_whitespace();
-    if (pair_tokens.has_next_token())
-        return nullptr;
-
-    transaction.commit();
-
-    return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
-}
-
 // https://drafts.csswg.org/css-values-4/#ratios
 RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& tokens)
 {
