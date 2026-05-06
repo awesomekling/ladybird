@@ -718,39 +718,6 @@ ComponentValue Parser::consume_a_component_value<ComponentValue>(TokenStream<Com
     return tokens.consume_a_token();
 }
 
-// 5.4.7. Consume a component value
-// https://drafts.csswg.org/css-syntax/#consume-component-value
-template<>
-ComponentValue Parser::consume_a_component_value(TokenStream<Token>& input)
-{
-    // To consume a component value from a token stream input:
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <{-token>
-        // <[-token>
-        // <(-token>
-        if (token.is(Token::Type::OpenCurly) || token.is(Token::Type::OpenSquare) || token.is(Token::Type::OpenParen)) {
-            // Consume a simple block from input and return the result.
-            return ComponentValue { consume_a_simple_block(input) };
-        }
-
-        // <function-token>
-        if (token.is(Token::Type::Function)) {
-            // Consume a function from input and return the result.
-            return ComponentValue { consume_a_function(input) };
-        }
-
-        // anything else
-        {
-            // Consume a token from input and return the result.
-            return ComponentValue { input.consume_a_token() };
-        }
-    }
-}
-
 template<>
 void Parser::consume_a_component_value_and_do_nothing<ComponentValue>(TokenStream<ComponentValue>& tokens)
 {
@@ -758,43 +725,6 @@ void Parser::consume_a_component_value_and_do_nothing<ComponentValue>(TokenStrea
     // Note: This overload is called once tokens have already been converted into component values,
     //       so we do not need to do the work in the more general overload.
     tokens.discard_a_token();
-}
-
-// 5.4.7. Consume a component value
-// https://drafts.csswg.org/css-syntax/#consume-component-value
-template<>
-void Parser::consume_a_component_value_and_do_nothing(TokenStream<Token>& input)
-{
-    // AD-HOC: To avoid unnecessary allocations, we explicitly define a "do nothing" variant that discards the result immediately.
-    // To consume a component value from a token stream input:
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <{-token>
-        // <[-token>
-        // <(-token>
-        if (token.is(Token::Type::OpenCurly) || token.is(Token::Type::OpenSquare) || token.is(Token::Type::OpenParen)) {
-            // Consume a simple block from input and return the result.
-            consume_a_simple_block_and_do_nothing(input);
-            return;
-        }
-
-        // <function-token>
-        if (token.is(Token::Type::Function)) {
-            // Consume a function from input and return the result.
-            consume_a_function_and_do_nothing(input);
-            return;
-        }
-
-        // anything else
-        {
-            // Consume a token from input and return the result.
-            input.discard_a_token();
-            return;
-        }
-    }
 }
 
 template<typename T>
@@ -834,157 +764,6 @@ Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<T>
         {
             // Consume a component value from input, and append the result to values.
             values.append(consume_a_component_value(input));
-        }
-    }
-}
-
-// https://drafts.csswg.org/css-syntax/#consume-simple-block
-SimpleBlock Parser::consume_a_simple_block(TokenStream<Token>& input)
-{
-    // To consume a simple block from a token stream input:
-
-    // Assert: the next token of input is <{-token>, <[-token>, or <(-token>.
-    auto const& next = input.next_token();
-    VERIFY(next.is(Token::Type::OpenCurly) || next.is(Token::Type::OpenSquare) || next.is(Token::Type::OpenParen));
-
-    // Let ending token be the mirror variant of the next token. (E.g. if it was called with <[-token>, the ending token is <]-token>.)
-    auto ending_token = input.next_token().mirror_variant();
-
-    // Let block be a new simple block with its associated token set to the next token and with its value initially set to an empty list.
-    SimpleBlock block {
-        .token = input.next_token(),
-        .value = {},
-    };
-
-    // Discard a token from input.
-    input.discard_a_token();
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <eof-token>
-        // ending token
-        if (token.is(Token::Type::EndOfFile) || token.is(ending_token)) {
-            // Discard a token from input. Return block.
-            // AD-HOC: Store the token instead as the "end token"
-            block.end_token = input.consume_a_token();
-            return block;
-        }
-
-        // anything else
-        {
-            // Consume a component value from input and append the result to block’s value.
-            block.value.append(consume_a_component_value(input));
-        }
-    }
-}
-
-// https://drafts.csswg.org/css-syntax/#consume-simple-block
-void Parser::consume_a_simple_block_and_do_nothing(TokenStream<Token>& input)
-{
-    // AD-HOC: To avoid unnecessary allocations, we explicitly define a "do nothing" variant that discards the result immediately.
-    // To consume a simple block from a token stream input:
-
-    // Assert: the next token of input is <{-token>, <[-token>, or <(-token>.
-    auto const& next = input.next_token();
-    VERIFY(next.is(Token::Type::OpenCurly) || next.is(Token::Type::OpenSquare) || next.is(Token::Type::OpenParen));
-
-    // Let ending token be the mirror variant of the next token. (E.g. if it was called with <[-token>, the ending token is <]-token>.)
-    auto ending_token = input.next_token().mirror_variant();
-
-    // Let block be a new simple block with its associated token set to the next token and with its value initially set to an empty list.
-
-    // Discard a token from input.
-    input.discard_a_token();
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <eof-token>
-        // ending token
-        if (token.is(Token::Type::EndOfFile) || token.is(ending_token)) {
-            // Discard a token from input. Return block.
-            input.discard_a_token();
-            return;
-        }
-
-        // anything else
-        {
-            // Consume a component value from input and append the result to block’s value.
-            consume_a_component_value_and_do_nothing(input);
-        }
-    }
-}
-
-// https://drafts.csswg.org/css-syntax/#consume-function
-Function Parser::consume_a_function(TokenStream<Token>& input)
-{
-    // To consume a function from a token stream input:
-
-    // Assert: The next token is a <function-token>.
-    VERIFY(input.next_token().is(Token::Type::Function));
-
-    // Consume a token from input, and let function be a new function with its name equal the returned token’s value,
-    // and a value set to an empty list.
-    auto name_token = ((Token)input.consume_a_token());
-    Function function {
-        .name = name_token.function(),
-        .value = {},
-        .name_token = name_token,
-    };
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <eof-token>
-        // <)-token>
-        if (token.is(Token::Type::EndOfFile) || token.is(Token::Type::CloseParen)) {
-            // Discard a token from input. Return function.
-            // AD-HOC: Store the token instead as the "end token"
-            function.end_token = input.consume_a_token();
-            return function;
-        }
-
-        // anything else
-        {
-            // Consume a component value from input and append the result to function’s value.
-            function.value.append(consume_a_component_value(input));
-        }
-    }
-}
-
-// https://drafts.csswg.org/css-syntax/#consume-function
-void Parser::consume_a_function_and_do_nothing(TokenStream<Token>& input)
-{
-    // AD-HOC: To avoid unnecessary allocations, we explicitly define a "do nothing" variant that discards the result immediately.
-    // To consume a function from a token stream input:
-
-    // Assert: The next token is a <function-token>.
-    VERIFY(input.next_token().is(Token::Type::Function));
-
-    // Consume a token from input, and let function be a new function with its name equal the returned token’s value,
-    // and a value set to an empty list.
-    input.discard_a_token();
-
-    // Process input:
-    for (;;) {
-        auto const& token = input.next_token();
-
-        // <eof-token>
-        // <)-token>
-        if (token.is(Token::Type::EndOfFile) || token.is(Token::Type::CloseParen)) {
-            // Discard a token from input. Return function.
-            input.discard_a_token();
-            return;
-        }
-
-        // anything else
-        {
-            // Consume a component value from input and append the result to function’s value.
-            consume_a_component_value_and_do_nothing(input);
         }
     }
 }
@@ -1992,50 +1771,35 @@ bool Parser::has_ignored_vendor_prefix(StringView string)
     return true;
 }
 
-template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<Token>&, Optional<::URL::URL>);
 template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<::URL::URL>);
 
-template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<Token>& input);
 template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<ComponentValue>& input);
 
-template Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<Token>&);
 template Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<ComponentValue>&);
 
-template Optional<AtRule> Parser::consume_an_at_rule(TokenStream<Token>&, Nested);
 template Optional<AtRule> Parser::consume_an_at_rule(TokenStream<ComponentValue>&, Nested);
 
-template Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualified_rule(TokenStream<Token>&, Optional<Token::Type>, Nested);
 template Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualified_rule(TokenStream<ComponentValue>&, Optional<Token::Type>, Nested);
 
-template Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<Token>&);
 template Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<ComponentValue>&);
 
-template Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<Token>&);
 template Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<ComponentValue>&);
 
 template Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type>, Nested);
-template Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<Token>&, Optional<Token::Type>, Nested);
 
-template Optional<Declaration> Parser::consume_a_declaration(TokenStream<Token>&, Nested, SaveOriginalText);
 template Optional<Declaration> Parser::consume_a_declaration(TokenStream<ComponentValue>&, Nested, SaveOriginalText);
 
-template void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<Token>&, Nested);
 template void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<ComponentValue>&, Nested);
 
-template Optional<Rule> Parser::parse_a_rule(TokenStream<Token>&);
 template Optional<Rule> Parser::parse_a_rule(TokenStream<ComponentValue>&);
 
-template Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<Token>&);
 template Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<ComponentValue>&);
 
-template Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<Token>&);
 template Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<ComponentValue>&);
 
-template Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<Token>&);
 template Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<ComponentValue>&);
 
 template Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
-template Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component_values(TokenStream<Token>&);
 
 DOM::Document const* Parser::document() const
 {

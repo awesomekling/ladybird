@@ -264,10 +264,6 @@ private:
     [[nodiscard]] ComponentValue consume_a_component_value(TokenStream<T>&);
     template<typename T>
     void consume_a_component_value_and_do_nothing(TokenStream<T>&);
-    SimpleBlock consume_a_simple_block(TokenStream<Token>&);
-    void consume_a_simple_block_and_do_nothing(TokenStream<Token>&);
-    Function consume_a_function(TokenStream<Token>&);
-    void consume_a_function_and_do_nothing(TokenStream<Token>&);
     // TODO: consume_a_unicode_range_value()
 
     struct FunctionPrelude {
