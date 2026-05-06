@@ -451,6 +451,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_anchor_name_value(tokens); });
     case PropertyID::AnchorScope:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_anchor_scope_value(tokens); });
+    case PropertyID::AnimationName:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_animation_name_value(tokens); });
     case PropertyID::AspectRatio:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_aspect_ratio_value(tokens); });
     case PropertyID::Animation:
@@ -1026,6 +1028,44 @@ RefPtr<StyleValue const> Parser::parse_anchor_scope_value(TokenStream<ComponentV
         names.ensure_capacity(parsed_anchor_scope.names.size());
         for (auto& name : parsed_anchor_scope.names)
             names.unchecked_append(CustomIdentStyleValue::create(name));
+        transaction.commit();
+        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
+    }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+// https://drafts.csswg.org/css-animations-1/#propdef-animation-name
+RefPtr<StyleValue const> Parser::parse_animation_name_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_animation_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_animation_name = RustComponentValueParser::parse_animation_name(serialized_animation_name.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_animation_name.kind) {
+    case FFI::CssAnimationNameValueKind::Invalid:
+        return {};
+    case FFI::CssAnimationNameValueKind::List: {
+        StyleValueVector names;
+        names.ensure_capacity(parsed_animation_name.names.size());
+        for (auto const& name : parsed_animation_name.names) {
+            switch (name.kind) {
+            case FFI::CssAnimationNameItemKind::None:
+                names.unchecked_append(KeywordStyleValue::create(Keyword::None));
+                break;
+            case FFI::CssAnimationNameItemKind::CustomIdent:
+                names.unchecked_append(CustomIdentStyleValue::create(name.value));
+                break;
+            case FFI::CssAnimationNameItemKind::String:
+                names.unchecked_append(StringStyleValue::create(name.value));
+                break;
+            }
+        }
+
         transaction.commit();
         return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
     }

@@ -172,6 +172,16 @@ public:
         Vector<FlyString> properties;
     };
 
+    struct AnimationNameItem {
+        FFI::CssAnimationNameItemKind kind;
+        FlyString value;
+    };
+
+    struct AnimationName {
+        FFI::CssAnimationNameValueKind kind;
+        Vector<AnimationNameItem> names;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -252,6 +262,7 @@ public:
     static Quotes parse_quotes(StringView input, StringView encoding);
     static WillChange parse_will_change(StringView input, StringView encoding);
     static TransitionProperty parse_transition_property(StringView input, StringView encoding);
+    static AnimationName parse_animation_name(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);

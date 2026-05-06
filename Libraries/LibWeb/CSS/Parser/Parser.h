@@ -464,6 +464,7 @@ private:
 
     RefPtr<StyleValue const> parse_anchor_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_anchor_scope_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_animation_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_aspect_ratio_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_animation_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);

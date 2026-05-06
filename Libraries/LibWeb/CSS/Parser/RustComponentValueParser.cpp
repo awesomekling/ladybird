@@ -2274,6 +2274,30 @@ RustComponentValueParser::TransitionProperty RustComponentValueParser::parse_tra
     };
 }
 
+RustComponentValueParser::AnimationName RustComponentValueParser::parse_animation_name(StringView input, StringView encoding)
+{
+    Vector<AnimationNameItem> names;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_animation_name(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &names,
+        [](void* raw_names, FFI::CssAnimationNameItemKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& names = *static_cast<Vector<AnimationNameItem>*>(raw_names);
+            names.append(AnimationNameItem {
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+            });
+        });
+
+    return AnimationName {
+        .kind = kind,
+        .names = move(names),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

@@ -831,6 +831,21 @@ pub enum CssTransitionPropertyValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssAnimationNameValueKind {
+    Invalid,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssAnimationNameItemKind {
+    None,
+    CustomIdent,
+    String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -3167,6 +3182,74 @@ where
     }
 
     CssTransitionPropertyValueKind::List
+}
+
+pub(crate) fn parse_animation_name_value<N>(filtered_input: &[u8], mut name_callback: N) -> CssAnimationNameValueKind
+where
+    N: FnMut(CssAnimationNameItemKind, &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let Some(names) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.discard_whitespace();
+
+        // https://drafts.csswg.org/css-animations-1/#propdef-animation-name
+        // Value: [ none | <keyframes-name> ]#
+        if parser.consume_ident_matching("none") {
+            if parser.has_next_component_value() {
+                return None;
+            }
+            return Some((CssAnimationNameItemKind::None, String::new()));
+        }
+
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: token_type @ (TokenType::Ident { .. } | TokenType::String { .. }),
+            ..
+        })) = parser.next_component_value()
+        else {
+            return None;
+        };
+
+        let name = match token_type {
+            TokenType::Ident { value } => {
+                // https://drafts.csswg.org/css-animations-1/#typedef-keyframes-name
+                // <keyframes-name> = <custom-ident> | <string>
+                if !is_valid_custom_ident(value, &["none"]) {
+                    return None;
+                }
+                (CssAnimationNameItemKind::CustomIdent, value.clone())
+            }
+            TokenType::String { value } => {
+                if value.is_empty() {
+                    return None;
+                }
+                (CssAnimationNameItemKind::String, value.clone())
+            }
+            _ => unreachable!(),
+        };
+
+        parser.index += 1;
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+
+        Some(name)
+    }) else {
+        return CssAnimationNameValueKind::Invalid;
+    };
+
+    if names.is_empty() {
+        return CssAnimationNameValueKind::Invalid;
+    }
+
+    for (kind, name) in names {
+        name_callback(kind, &name);
+    }
+
+    CssAnimationNameValueKind::List
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -9206,23 +9289,24 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssAnchorNameOrScopeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue,
-        CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
-        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
-        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
-        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind,
+        CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
+        CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
+        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind,
+        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
+        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
+        CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssQuotesValueKind,
+        CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind,
+        CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -9234,14 +9318,14 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_anchor_name_or_scope_value, parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude,
-        parse_container_type_value, parse_counter_style_additive_symbols, parse_counter_style_negative,
-        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
-        parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
-        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_quotes_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_color_scheme_value, parse_contain_value,
+        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
+        parse_position_anchor_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
+        parse_quotes_value, parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
         parse_timeline_scope_value, parse_touch_action_value, parse_transition_property_value,
         parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
@@ -9823,6 +9907,14 @@ mod tests {
             properties.push(property.to_string());
         });
         (kind, properties)
+    }
+
+    fn parse_animation_name(input: &str) -> (CssAnimationNameValueKind, Vec<(CssAnimationNameItemKind, String)>) {
+        let mut names = Vec::new();
+        let kind = parse_animation_name_value(input.as_bytes(), |kind, value| {
+            names.push((kind, value.to_string()));
+        });
+        (kind, names)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -12216,6 +12308,52 @@ mod tests {
             parse_transition_property("width,").0,
             CssTransitionPropertyValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_animation_name_values() {
+        assert_eq!(
+            parse_animation_name("none"),
+            (
+                CssAnimationNameValueKind::List,
+                vec![(CssAnimationNameItemKind::None, String::new())]
+            )
+        );
+        assert_eq!(
+            parse_animation_name("foo, \"none\", Both"),
+            (
+                CssAnimationNameValueKind::List,
+                vec![
+                    (CssAnimationNameItemKind::CustomIdent, "foo".to_string()),
+                    (CssAnimationNameItemKind::String, "none".to_string()),
+                    (CssAnimationNameItemKind::CustomIdent, "Both".to_string())
+                ]
+            )
+        );
+        assert_eq!(
+            parse_animation_name("\"multi word string\""),
+            (
+                CssAnimationNameValueKind::List,
+                vec![(CssAnimationNameItemKind::String, "multi word string".to_string())]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_animation_name_values() {
+        assert_eq!(parse_animation_name("").0, CssAnimationNameValueKind::Invalid);
+        assert_eq!(parse_animation_name("12").0, CssAnimationNameValueKind::Invalid);
+        assert_eq!(parse_animation_name("one two").0, CssAnimationNameValueKind::Invalid);
+        assert_eq!(
+            parse_animation_name("one, initial").0,
+            CssAnimationNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_animation_name("default, two").0,
+            CssAnimationNameValueKind::Invalid
+        );
+        assert_eq!(parse_animation_name("\"\"").0, CssAnimationNameValueKind::Invalid);
+        assert_eq!(parse_animation_name("one,").0, CssAnimationNameValueKind::Invalid);
     }
 
     #[test]
