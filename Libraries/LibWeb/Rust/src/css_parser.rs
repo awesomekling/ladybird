@@ -798,6 +798,15 @@ pub enum CssScrollbarGutterValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssQuotesValueKind {
+    Invalid,
+    Auto,
+    None,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2972,6 +2981,57 @@ pub(crate) fn parse_scrollbar_gutter_value(filtered_input: &[u8]) -> CssScrollba
     } else {
         CssScrollbarGutterValueKind::Stable
     }
+}
+
+pub(crate) fn parse_quotes_value<S>(filtered_input: &[u8], mut string_callback: S) -> CssQuotesValueKind
+where
+    S: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-content-3/#propdef-quotes
+    // Value: auto | none | [ <string> <string> ]+
+    if parser.consume_ident_matching("auto") {
+        if parser.has_next_component_value() {
+            return CssQuotesValueKind::Invalid;
+        }
+        return CssQuotesValueKind::Auto;
+    }
+
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssQuotesValueKind::Invalid;
+        }
+        return CssQuotesValueKind::None;
+    }
+
+    let mut strings = Vec::new();
+    while parser.has_next_component_value() {
+        parser.discard_whitespace();
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        })) = parser.next_component_value()
+        else {
+            return CssQuotesValueKind::Invalid;
+        };
+        strings.push(value.clone());
+        parser.index += 1;
+    }
+
+    if strings.is_empty() || strings.len() % 2 != 0 {
+        return CssQuotesValueKind::Invalid;
+    }
+
+    for string in strings {
+        string_callback(&string);
+    }
+
+    CssQuotesValueKind::List
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -9019,7 +9079,7 @@ mod tests {
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
         CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
         CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
+        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
         CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
@@ -9045,9 +9105,9 @@ mod tests {
         parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_scrollbar_gutter_value,
-        parse_string_descriptor, parse_text_underline_position_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_quotes_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9605,6 +9665,12 @@ mod tests {
 
     fn parse_scrollbar_gutter(input: &str) -> CssScrollbarGutterValueKind {
         parse_scrollbar_gutter_value(input.as_bytes())
+    }
+
+    fn parse_quotes(input: &str) -> (CssQuotesValueKind, Vec<String>) {
+        let mut strings = Vec::new();
+        let kind = parse_quotes_value(input.as_bytes(), |string| strings.push(string.to_string()));
+        (kind, strings)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11891,6 +11957,29 @@ mod tests {
             parse_scrollbar_gutter("stable, both-edges"),
             CssScrollbarGutterValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_quotes_values() {
+        assert_eq!(parse_quotes("auto"), (CssQuotesValueKind::Auto, vec![]));
+        assert_eq!(parse_quotes("none"), (CssQuotesValueKind::None, vec![]));
+        assert_eq!(
+            parse_quotes("\"[\" \"]\" \"(\" \")\""),
+            (
+                CssQuotesValueKind::List,
+                vec!["[".to_string(), "]".to_string(), "(".to_string(), ")".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_quotes_values() {
+        assert_eq!(parse_quotes("").0, CssQuotesValueKind::Invalid);
+        assert_eq!(parse_quotes("auto none").0, CssQuotesValueKind::Invalid);
+        assert_eq!(parse_quotes("\"[\"").0, CssQuotesValueKind::Invalid);
+        assert_eq!(parse_quotes("\"[\" \"]\" \"(\"").0, CssQuotesValueKind::Invalid);
+        assert_eq!(parse_quotes("open close").0, CssQuotesValueKind::Invalid);
+        assert_eq!(parse_quotes("\"[\", \"]\"").0, CssQuotesValueKind::Invalid);
     }
 
     #[test]

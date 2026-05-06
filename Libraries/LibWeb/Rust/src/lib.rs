@@ -34,11 +34,11 @@ pub use css_parser::{
     CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
-    CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode,
-    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-    CssTextUnderlinePositionVertical, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-    CssTouchActionValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType,
-    CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssQuotesValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollbarGutterValueKind,
+    CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
+    CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind, CssTouchActionKeyword,
+    CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
+    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
     CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
@@ -1053,6 +1053,30 @@ pub unsafe extern "C" fn rust_css_parse_scrollbar_gutter(
             };
 
             css_parser::parse_scrollbar_gutter_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `string_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_quotes(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    string_callback: unsafe extern "C" fn(ctx: *mut c_void, string_ptr: *const u8, string_len: usize),
+) -> CssQuotesValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssQuotesValueKind::Invalid;
+            };
+
+            css_parser::parse_quotes_value(input, |string| {
+                string_callback(ctx, string.as_ptr(), string.len());
+            })
         })
     }
 }

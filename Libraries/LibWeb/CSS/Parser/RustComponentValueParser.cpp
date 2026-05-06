@@ -2208,6 +2208,27 @@ FFI::CssScrollbarGutterValueKind RustComponentValueParser::parse_scrollbar_gutte
     return FFI::rust_css_parse_scrollbar_gutter(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+RustComponentValueParser::Quotes RustComponentValueParser::parse_quotes(StringView input, StringView encoding)
+{
+    Vector<FlyString> strings;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_quotes(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &strings,
+        [](void* raw_strings, u8 const* string_ptr, size_t string_len) {
+            auto& strings = *static_cast<Vector<FlyString>*>(raw_strings);
+            strings.append(fly_string_from_ffi_bytes(string_ptr, string_len));
+        });
+
+    return Quotes {
+        .kind = kind,
+        .strings = move(strings),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

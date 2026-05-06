@@ -152,6 +152,11 @@ public:
         Vector<FlyString> names;
     };
 
+    struct Quotes {
+        FFI::CssQuotesValueKind kind;
+        Vector<FlyString> strings;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -229,6 +234,7 @@ public:
     static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);
     static FFI::CssTouchActionValue parse_touch_action(StringView input, StringView encoding);
     static FFI::CssScrollbarGutterValueKind parse_scrollbar_gutter(StringView input, StringView encoding);
+    static Quotes parse_quotes(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
