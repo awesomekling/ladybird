@@ -800,6 +800,28 @@ where
     true
 }
 
+pub(crate) fn parse_container_rule_prelude<C>(filtered_input: &[u8], mut condition_callback: C) -> bool
+where
+    C: FnMut(Option<&str>, Option<&str>),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let groups = parser.parse_a_comma_separated_list_of_component_values();
+    if groups.is_empty() {
+        return false;
+    }
+
+    for group in groups {
+        let mut parser = ComponentValueParser::new(group);
+        let Some((container_name, container_query)) = parser.parse_container_rule_prelude_item(filtered_input_string)
+        else {
+            return false;
+        };
+        condition_callback(container_name.as_deref(), container_query.as_deref());
+    }
+
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2388,6 +2410,42 @@ impl ComponentValueParser {
         Some(parts.join(" "))
     }
 
+    fn parse_container_rule_prelude_item(&mut self, filtered_input: &str) -> Option<(Option<String>, Option<String>)> {
+        // https://drafts.csswg.org/css-conditional-5/#container-rule
+        // <container-condition> = [ <container-name>? <container-query>? ]!
+        // https://drafts.csswg.org/css-conditional-5/#container-name
+        // <container-name> = <custom-ident>
+        self.discard_whitespace();
+
+        let container_name = match self.next_component_value() {
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            })) if is_valid_custom_ident(value, &["none", "and", "not", "or"]) => {
+                let container_name = value.clone();
+                self.index += 1;
+                self.discard_whitespace();
+                Some(container_name)
+            }
+            _ => None,
+        };
+
+        let container_query = if self.has_next_component_value() {
+            Some(serialize_component_values_for_reparsing(
+                &self.component_values[self.index..],
+                filtered_input,
+            )?)
+        } else {
+            None
+        };
+
+        if container_name.is_none() && container_query.is_none() {
+            return None;
+        }
+
+        Some((container_name, container_query))
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]
@@ -3403,6 +3461,42 @@ pub(crate) fn strip_whitespace(component_values: &[ComponentValue]) -> &[Compone
         end -= 1;
     }
     &component_values[start..end]
+}
+
+fn serialize_component_values_for_reparsing(
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+) -> Option<String> {
+    let mut output = String::new();
+    for component_value in component_values {
+        serialize_component_value_for_reparsing(component_value, filtered_input, &mut output)?;
+    }
+    Some(output)
+}
+
+fn serialize_component_value_for_reparsing(
+    component_value: &ComponentValue,
+    filtered_input: &str,
+    output: &mut String,
+) -> Option<()> {
+    match component_value {
+        ComponentValue::PreservedToken(token) => output.push_str(token.original_source(filtered_input)?),
+        ComponentValue::Function(function) => {
+            output.push_str(function.name_token.original_source(filtered_input)?);
+            for component_value in &function.value {
+                serialize_component_value_for_reparsing(component_value, filtered_input, output)?;
+            }
+            output.push_str(function.end_token.original_source(filtered_input)?);
+        }
+        ComponentValue::SimpleBlock(block) => {
+            output.push_str(block.token.original_source(filtered_input)?);
+            for component_value in &block.value {
+                serialize_component_value_for_reparsing(component_value, filtered_input, output)?;
+            }
+            output.push_str(block.end_token.original_source(filtered_input)?);
+        }
+    }
+    Some(())
 }
 
 impl Parser {
@@ -4509,8 +4603,8 @@ mod tests {
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
         parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
         parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, parse_empty_prelude, parse_font_feature_values_family_name_list,
-        strip_whitespace,
+        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4653,6 +4747,17 @@ mod tests {
             family_names.push(family_name.to_string());
         });
         parsed.then_some(family_names)
+    }
+
+    fn parse_container_rule_prelude_items(input: &str) -> Option<Vec<(Option<String>, Option<String>)>> {
+        let mut conditions = Vec::new();
+        let parsed = parse_container_rule_prelude(input.as_bytes(), |container_name, container_query| {
+            conditions.push((
+                container_name.map(ToString::to_string),
+                container_query.map(ToString::to_string),
+            ));
+        });
+        parsed.then_some(conditions)
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -5481,6 +5586,24 @@ mod tests {
         assert!(parse_empty_prelude("".as_bytes()));
         assert!(parse_empty_prelude(" \t\n".as_bytes()));
         assert!(!parse_empty_prelude("foo".as_bytes()));
+    }
+
+    #[test]
+    fn parses_container_rule_preludes() {
+        assert_eq!(
+            parse_container_rule_prelude_items("sidebar (width > 20em), (height > 10em), card"),
+            Some(vec![
+                (Some("sidebar".to_string()), Some("(width > 20em)".to_string())),
+                (None, Some("(height > 10em)".to_string())),
+                (Some("card".to_string()), None),
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_container_rule_preludes() {
+        assert_eq!(parse_container_rule_prelude_items(""), None);
+        assert_eq!(parse_container_rule_prelude_items(","), None);
     }
 
     #[test]

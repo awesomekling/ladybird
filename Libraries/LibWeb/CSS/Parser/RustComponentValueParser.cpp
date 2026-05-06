@@ -25,6 +25,13 @@ static FlyString fly_string_from_ffi_bytes(u8 const* bytes, size_t length)
     return FlyString::from_utf8_without_validation({ bytes, length });
 }
 
+static String string_from_ffi_bytes(u8 const* bytes, size_t length)
+{
+    if (length == 0)
+        return {};
+    return String::from_utf8_without_validation({ bytes, length });
+}
+
 static String decode_and_filter_code_points(StringView input, StringView encoding)
 {
     // https://www.w3.org/TR/css-syntax-3/#css-filter-code-points
@@ -1235,6 +1242,30 @@ Optional<Vector<FlyString>> RustComponentValueParser::parse_font_feature_values_
         return {};
 
     return family_names;
+}
+
+Optional<Vector<RustComponentValueParser::ContainerRulePreludeCondition>> RustComponentValueParser::parse_container_rule_prelude(StringView input, StringView encoding)
+{
+    Vector<ContainerRulePreludeCondition> conditions;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_container_rule_prelude(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &conditions,
+        [](void* raw_conditions, bool has_name, u8 const* name_ptr, size_t name_len, bool has_query, u8 const* query_ptr, size_t query_len) {
+            auto& conditions = *static_cast<Vector<ContainerRulePreludeCondition>*>(raw_conditions);
+            conditions.append({
+                .name = has_name ? Optional<FlyString> { fly_string_from_ffi_bytes(name_ptr, name_len) } : OptionalNone {},
+                .query = has_query ? Optional<String> { string_from_ffi_bytes(query_ptr, query_len) } : OptionalNone {},
+            });
+        });
+
+    if (!parsed)
+        return {};
+
+    return conditions;
 }
 
 struct RuleEventBuilder {

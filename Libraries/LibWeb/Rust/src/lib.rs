@@ -532,6 +532,49 @@ pub unsafe extern "C" fn rust_css_parse_empty_prelude(input: *const u8, input_le
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers when their
+///   corresponding `has_*` parameter is true
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_container_rule_prelude(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    condition_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        has_name: bool,
+        name_ptr: *const u8,
+        name_len: usize,
+        has_query: bool,
+        query_ptr: *const u8,
+        query_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_container_rule_prelude(input, |name, query| {
+                let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                let (query_ptr, query_len) = query.map_or((std::ptr::null(), 0), |query| (query.as_ptr(), query.len()));
+                condition_callback(
+                    ctx,
+                    name.is_some(),
+                    name_ptr,
+                    name_len,
+                    query.is_some(),
+                    query_ptr,
+                    query_len,
+                );
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_media_condition(

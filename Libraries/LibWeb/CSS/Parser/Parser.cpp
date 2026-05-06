@@ -395,44 +395,6 @@ OwnPtr<Supports::Declaration> Parser::parse_supports_declaration(TokenStream<Com
     return {};
 }
 
-OwnPtr<BooleanExpression> Parser::parse_container_query_condition(TokenStream<ComponentValue>& tokens)
-{
-    // https://drafts.csswg.org/css-conditional-5/#typedef-query-in-parens
-    // <query-in-parens> = ( <container-query> )
-    //                   | ( <size-feature> )
-    //                   | style( <style-query> )
-    //                   | scroll-state( <scroll-state-query> )
-    //                   | <general-enclosed>
-
-    // https://drafts.csswg.org/css-anchor-position-2/#container-rule-anchored
-    // <query-in-parens> = ...
-    //                   | anchored( <anchored-query> )
-
-    // FIXME: `( <size-feature> )`
-    // FIXME: `style( <style-query> )`
-    // FIXME: `scroll-state( <scroll-state-query> )`
-    // FIXME: `anchored( <anchored-query> )`
-    auto transaction = tokens.begin_transaction();
-
-    StringBuilder serialized_container_query_condition;
-    while (tokens.has_next_token())
-        serialized_container_query_condition.append(tokens.consume_a_token().original_source_text());
-
-    auto maybe_condition = RustComponentValueParser::parse_a_container_condition(serialized_container_query_condition.string_view(), "utf-8"sv);
-    if (!maybe_condition)
-        return nullptr;
-
-    transaction.commit();
-    return maybe_condition;
-}
-
-RefPtr<ContainerQuery> Parser::parse_container_query(TokenStream<ComponentValue>& tokens)
-{
-    if (auto condition = parse_container_query_condition(tokens))
-        return ContainerQuery::create(condition.release_nonnull());
-    return nullptr;
-}
-
 // https://drafts.csswg.org/css-syntax/#consume-stylesheet-contents
 template<typename T>
 Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<T>& input)

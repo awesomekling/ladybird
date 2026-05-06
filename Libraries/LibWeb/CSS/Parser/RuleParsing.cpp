@@ -670,47 +670,45 @@ GC::Ptr<CSSContainerRule> Parser::convert_to_container_rule(AtRule const& rule, 
         return nullptr;
     }
 
-    auto prelude_item_values = parse_a_comma_separated_list_of_component_values(prelude_stream);
-    if (prelude_item_values.is_empty()) {
+    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    auto prelude_conditions = RustComponentValueParser::parse_container_rule_prelude(serialized_prelude.bytes_as_string_view(), "utf-8"sv);
+    if (!prelude_conditions.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@container"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_prelude,
             .description = "Empty prelude."_string,
         });
         return nullptr;
     }
 
     Vector<CSSContainerRule::Condition> conditions;
-    conditions.ensure_capacity(prelude_item_values.size());
+    conditions.ensure_capacity(prelude_conditions->size());
 
-    for (auto const& prelude_item : prelude_item_values) {
-        TokenStream item_tokens { prelude_item };
-        item_tokens.discard_whitespace();
-        // https://drafts.csswg.org/css-conditional-5/#container-name
-        // The keywords none, and, not, and or are excluded from this <custom-ident>.
-        auto container_name = parse_custom_ident(item_tokens, { { "none"sv, "and"sv, "not"sv, "or"sv } });
-        item_tokens.discard_whitespace();
-        auto container_query = parse_container_query(item_tokens);
-        if (!container_name.has_value() && !container_query) {
+    for (auto& prelude_condition : prelude_conditions.value()) {
+        RefPtr<ContainerQuery> container_query;
+        if (prelude_condition.query.has_value()) {
+            auto query_condition = RustComponentValueParser::parse_a_container_condition(prelude_condition.query.value().bytes_as_string_view(), "utf-8"sv);
+            if (!query_condition) {
+                ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
+                    .rule_name = "@container"_fly_string,
+                    .prelude = serialized_prelude,
+                    .description = prelude_condition.name.has_value() ? "Trailing tokens after name and query."_string : "Missing container name or query."_string,
+                });
+                return nullptr;
+            }
+            container_query = ContainerQuery::create(query_condition.release_nonnull());
+        }
+
+        if (!prelude_condition.name.has_value() && !container_query) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@container"_fly_string,
-                .prelude = prelude_stream.dump_string(),
+                .prelude = serialized_prelude,
                 .description = "Missing container name or query."_string,
             });
             return nullptr;
         }
 
-        item_tokens.discard_whitespace();
-        if (item_tokens.has_next_token()) {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "@container"_fly_string,
-                .prelude = prelude_stream.dump_string(),
-                .description = "Trailing tokens after name and query."_string,
-            });
-            return nullptr;
-        }
-
-        conditions.unchecked_empend(move(container_name), move(container_query));
+        conditions.unchecked_empend(move(prelude_condition.name), move(container_query));
     }
 
     GC::RootVector<GC::Ref<CSSRule>> child_rules { realm().heap() };
