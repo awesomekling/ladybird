@@ -807,6 +807,22 @@ pub enum CssQuotesValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssWillChangeValueKind {
+    Invalid,
+    Auto,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssWillChangeFeatureKind {
+    ScrollPosition,
+    Contents,
+    CustomIdent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -3032,6 +3048,74 @@ where
     }
 
     CssQuotesValueKind::List
+}
+
+pub(crate) fn parse_will_change_value<F>(filtered_input: &[u8], mut feature_callback: F) -> CssWillChangeValueKind
+where
+    F: FnMut(CssWillChangeFeatureKind, &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-will-change/#will-change
+    // Value: auto | <animateable-feature>#
+    if parser.consume_ident_matching("auto") {
+        if parser.has_next_component_value() {
+            return CssWillChangeValueKind::Invalid;
+        }
+        return CssWillChangeValueKind::Auto;
+    }
+
+    let Some(features) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.discard_whitespace();
+
+        // https://drafts.csswg.org/css-will-change/#typedef-animateable-feature
+        // <animateable-feature> = scroll-position | contents | <custom-ident>
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = parser.next_component_value()
+        else {
+            return None;
+        };
+
+        let feature = if value.eq_ignore_ascii_case("scroll-position") {
+            (CssWillChangeFeatureKind::ScrollPosition, String::new())
+        } else if value.eq_ignore_ascii_case("contents") {
+            (CssWillChangeFeatureKind::Contents, String::new())
+        } else if is_valid_custom_ident(
+            value,
+            &["all", "auto", "contents", "none", "scroll-position", "will-change"],
+        ) {
+            (CssWillChangeFeatureKind::CustomIdent, value.clone())
+        } else {
+            return None;
+        };
+
+        parser.index += 1;
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+
+        Some(feature)
+    }) else {
+        return CssWillChangeValueKind::Invalid;
+    };
+
+    if features.is_empty() {
+        return CssWillChangeValueKind::Invalid;
+    }
+
+    for (kind, value) in features {
+        feature_callback(kind, &value);
+    }
+
+    CssWillChangeValueKind::List
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -9083,19 +9167,19 @@ mod tests {
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
         CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -9107,7 +9191,8 @@ mod tests {
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_quotes_value,
         parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
+        parse_timeline_scope_value, parse_touch_action_value, parse_white_space_trim_value, parse_will_change_value,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9671,6 +9756,14 @@ mod tests {
         let mut strings = Vec::new();
         let kind = parse_quotes_value(input.as_bytes(), |string| strings.push(string.to_string()));
         (kind, strings)
+    }
+
+    fn parse_will_change(input: &str) -> (CssWillChangeValueKind, Vec<(CssWillChangeFeatureKind, String)>) {
+        let mut features = Vec::new();
+        let kind = parse_will_change_value(input.as_bytes(), |kind, value| {
+            features.push((kind, value.to_string()));
+        });
+        (kind, features)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11980,6 +12073,43 @@ mod tests {
         assert_eq!(parse_quotes("\"[\" \"]\" \"(\"").0, CssQuotesValueKind::Invalid);
         assert_eq!(parse_quotes("open close").0, CssQuotesValueKind::Invalid);
         assert_eq!(parse_quotes("\"[\", \"]\"").0, CssQuotesValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_will_change_values() {
+        assert_eq!(parse_will_change("auto"), (CssWillChangeValueKind::Auto, vec![]));
+        assert_eq!(
+            parse_will_change("scroll-position, contents, transform"),
+            (
+                CssWillChangeValueKind::List,
+                vec![
+                    (CssWillChangeFeatureKind::ScrollPosition, String::new()),
+                    (CssWillChangeFeatureKind::Contents, String::new()),
+                    (CssWillChangeFeatureKind::CustomIdent, "transform".to_string())
+                ]
+            )
+        );
+        assert_eq!(
+            parse_will_change("Not-A-Property, --var"),
+            (
+                CssWillChangeValueKind::List,
+                vec![
+                    (CssWillChangeFeatureKind::CustomIdent, "Not-A-Property".to_string()),
+                    (CssWillChangeFeatureKind::CustomIdent, "--var".to_string())
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_will_change_values() {
+        assert_eq!(parse_will_change("").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("auto, transform").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("contents auto").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("none").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("all").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("will-change").0, CssWillChangeValueKind::Invalid);
+        assert_eq!(parse_will_change("transform,").0, CssWillChangeValueKind::Invalid);
     }
 
     #[test]

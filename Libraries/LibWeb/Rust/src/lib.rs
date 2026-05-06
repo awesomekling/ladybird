@@ -39,7 +39,7 @@ pub use css_parser::{
     CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind, CssTouchActionKeyword,
     CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
     CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
+    CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1076,6 +1076,35 @@ pub unsafe extern "C" fn rust_css_parse_quotes(
 
             css_parser::parse_quotes_value(input, |string| {
                 string_callback(ctx, string.as_ptr(), string.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `feature_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_will_change(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssWillChangeFeatureKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> CssWillChangeValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssWillChangeValueKind::Invalid;
+            };
+
+            css_parser::parse_will_change_value(input, |kind, value| {
+                feature_callback(ctx, kind, value.as_ptr(), value.len());
             })
         })
     }

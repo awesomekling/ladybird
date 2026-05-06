@@ -5824,25 +5824,42 @@ RefPtr<StyleValue const> Parser::parse_view_timeline_value(TokenStream<Component
 // https://drafts.csswg.org/css-will-change/#will-change
 RefPtr<StyleValue const> Parser::parse_will_change_value(TokenStream<ComponentValue>& tokens)
 {
-    // auto | <animateable-feature>#
-    // <animateable-feature> = scroll-position | contents | <custom-ident>
-    if (parse_all_as_single_keyword_value(tokens, Keyword::Auto))
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_will_change = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_will_change = RustComponentValueParser::parse_will_change(serialized_will_change.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_will_change.kind) {
+    case FFI::CssWillChangeValueKind::Invalid:
+        return {};
+    case FFI::CssWillChangeValueKind::Auto:
+        transaction.commit();
         return KeywordStyleValue::create(Keyword::Auto);
+    case FFI::CssWillChangeValueKind::List: {
+        StyleValueVector features;
+        features.ensure_capacity(parsed_will_change.features.size());
+        for (auto const& feature : parsed_will_change.features) {
+            switch (feature.kind) {
+            case FFI::CssWillChangeFeatureKind::ScrollPosition:
+                features.unchecked_append(KeywordStyleValue::create(Keyword::ScrollPosition));
+                break;
+            case FFI::CssWillChangeFeatureKind::Contents:
+                features.unchecked_append(KeywordStyleValue::create(Keyword::Contents));
+                break;
+            case FFI::CssWillChangeFeatureKind::CustomIdent:
+                features.unchecked_append(CustomIdentStyleValue::create(feature.value));
+                break;
+            }
+        }
 
-    auto parse_animateable_feature = [this](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        auto style_value = parse_css_value_for_property(PropertyID::WillChange, tokens);
-        if (!style_value)
-            return nullptr;
+        transaction.commit();
+        return StyleValueList::create(move(features), StyleValueList::Separator::Comma);
+    }
+    }
 
-        if (style_value->to_keyword() == Keyword::Auto)
-            return nullptr;
-
-        return style_value;
-    };
-
-    return parse_comma_separated_value_list(tokens, [&parse_animateable_feature](auto& tokens) {
-        return parse_animateable_feature(tokens);
-    });
+    VERIFY_NOT_REACHED();
 }
 
 }

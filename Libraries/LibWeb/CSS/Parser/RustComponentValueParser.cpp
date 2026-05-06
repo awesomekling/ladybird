@@ -2229,6 +2229,30 @@ RustComponentValueParser::Quotes RustComponentValueParser::parse_quotes(StringVi
     };
 }
 
+RustComponentValueParser::WillChange RustComponentValueParser::parse_will_change(StringView input, StringView encoding)
+{
+    Vector<WillChangeFeature> features;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_will_change(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &features,
+        [](void* raw_features, FFI::CssWillChangeFeatureKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& features = *static_cast<Vector<WillChangeFeature>*>(raw_features);
+            features.append(WillChangeFeature {
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+            });
+        });
+
+    return WillChange {
+        .kind = kind,
+        .features = move(features),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
