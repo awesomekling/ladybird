@@ -975,28 +975,63 @@ RefPtr<StyleValue const> Parser::parse_cursor_value(TokenStream<ComponentValue>&
 // https://drafts.csswg.org/css-anchor-position/#name
 RefPtr<StyleValue const> Parser::parse_anchor_name_value(TokenStream<ComponentValue>& tokens)
 {
-    // none | <dashed-ident>#
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    return parse_comma_separated_value_list(tokens, [this](TokenStream<ComponentValue>& inner_tokens) -> RefPtr<StyleValue const> {
-        return parse_dashed_ident_value(inner_tokens);
-    });
+    auto serialized_anchor_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_anchor_name = RustComponentValueParser::parse_anchor_name_or_scope(serialized_anchor_name.bytes_as_string_view(), "utf-8"sv, false);
+    switch (parsed_anchor_name.kind) {
+    case FFI::CssAnchorNameOrScopeValueKind::Invalid:
+    case FFI::CssAnchorNameOrScopeValueKind::All:
+        return {};
+    case FFI::CssAnchorNameOrScopeValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssAnchorNameOrScopeValueKind::List: {
+        StyleValueVector names;
+        names.ensure_capacity(parsed_anchor_name.names.size());
+        for (auto& name : parsed_anchor_name.names)
+            names.unchecked_append(CustomIdentStyleValue::create(name));
+        transaction.commit();
+        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
+    }
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-anchor-position/#anchor-scope
 RefPtr<StyleValue const> Parser::parse_anchor_scope_value(TokenStream<ComponentValue>& tokens)
 {
-    // none | all | <dashed-ident>#
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    if (auto all = parse_all_as_single_keyword_value(tokens, Keyword::All))
-        return all;
+    auto serialized_anchor_scope = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_anchor_scope = RustComponentValueParser::parse_anchor_name_or_scope(serialized_anchor_scope.bytes_as_string_view(), "utf-8"sv, true);
+    switch (parsed_anchor_scope.kind) {
+    case FFI::CssAnchorNameOrScopeValueKind::Invalid:
+        return {};
+    case FFI::CssAnchorNameOrScopeValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssAnchorNameOrScopeValueKind::All:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::All);
+    case FFI::CssAnchorNameOrScopeValueKind::List: {
+        StyleValueVector names;
+        names.ensure_capacity(parsed_anchor_scope.names.size());
+        for (auto& name : parsed_anchor_scope.names)
+            names.unchecked_append(CustomIdentStyleValue::create(name));
+        transaction.commit();
+        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
+    }
+    }
 
-    return parse_comma_separated_value_list(tokens, [this](TokenStream<ComponentValue>& inner_tokens) -> RefPtr<StyleValue const> {
-        return parse_dashed_ident_value(inner_tokens);
-    });
+    VERIFY_NOT_REACHED();
 }
 
 // https://www.w3.org/TR/css-sizing-4/#aspect-ratio

@@ -663,6 +663,15 @@ pub struct CssColorSchemeValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssAnchorNameOrScopeValueKind {
+    Invalid,
+    None,
+    All,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2318,6 +2327,56 @@ where
         kind: CssColorSchemeValueKind::List,
         only,
     }
+}
+
+pub(crate) fn parse_anchor_name_or_scope_value<N>(
+    filtered_input: &[u8],
+    allow_all: bool,
+    mut name_callback: N,
+) -> CssAnchorNameOrScopeValueKind
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#name
+    // Value: none | <dashed-ident>#
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssAnchorNameOrScopeValueKind::Invalid;
+        }
+        return CssAnchorNameOrScopeValueKind::None;
+    }
+
+    // https://drafts.csswg.org/css-anchor-position-1/#anchor-scope
+    // Value: none | all | <dashed-ident>#
+    if allow_all && parser.consume_ident_matching("all") {
+        if parser.has_next_component_value() {
+            return CssAnchorNameOrScopeValueKind::Invalid;
+        }
+        return CssAnchorNameOrScopeValueKind::All;
+    }
+
+    let Some(names) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_dashed_ident()
+    }) else {
+        return CssAnchorNameOrScopeValueKind::Invalid;
+    };
+
+    if names.is_empty() {
+        return CssAnchorNameOrScopeValueKind::Invalid;
+    }
+
+    for name in names {
+        name_callback(&name);
+    }
+
+    CssAnchorNameOrScopeValueKind::List
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8357,17 +8416,18 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
-        CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
-        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind,
-        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
-        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        CssAnchorNameOrScopeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue,
+        CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
+        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
+        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
+        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssSupportsFeatureKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -8380,12 +8440,13 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
-        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair,
-        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
-        parse_positive_percentage_descriptor, parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
+        parse_anchor_name_or_scope_value, parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude,
+        parse_container_type_value, parse_counter_style_additive_symbols, parse_counter_style_negative,
+        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
+        parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
+        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
+        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor,
+        parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8905,6 +8966,12 @@ mod tests {
         let mut schemes = Vec::new();
         let parsed = parse_color_scheme_value(input.as_bytes(), |scheme| schemes.push(scheme.to_string()));
         (parsed.kind, parsed.only, schemes)
+    }
+
+    fn parse_anchor_name_or_scope(input: &str, allow_all: bool) -> (CssAnchorNameOrScopeValueKind, Vec<String>) {
+        let mut names = Vec::new();
+        let kind = parse_anchor_name_or_scope_value(input.as_bytes(), allow_all, |name| names.push(name.to_string()));
+        (kind, names)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11074,6 +11141,57 @@ mod tests {
         assert_eq!(parse_color_scheme("default").0, CssColorSchemeValueKind::Invalid);
         assert_eq!(parse_color_scheme("inherit").0, CssColorSchemeValueKind::Invalid);
         assert_eq!(parse_color_scheme("dark, light").0, CssColorSchemeValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_anchor_name_and_scope_values() {
+        assert_eq!(
+            parse_anchor_name_or_scope("none", false),
+            (CssAnchorNameOrScopeValueKind::None, vec![])
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("--foo", false),
+            (CssAnchorNameOrScopeValueKind::List, vec!["--foo".to_string()])
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("--foo, --bar", false),
+            (
+                CssAnchorNameOrScopeValueKind::List,
+                vec!["--foo".to_string(), "--bar".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("all", true),
+            (CssAnchorNameOrScopeValueKind::All, vec![])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_anchor_name_and_scope_values() {
+        assert_eq!(
+            parse_anchor_name_or_scope("", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("all", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("none, --foo", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("--foo,", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("--foo --bar", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_anchor_name_or_scope("foo", false).0,
+            CssAnchorNameOrScopeValueKind::Invalid
+        );
     }
 
     #[test]

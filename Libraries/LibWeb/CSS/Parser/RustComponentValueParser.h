@@ -137,6 +137,11 @@ public:
         Vector<String> schemes;
     };
 
+    struct AnchorNameOrScope {
+        FFI::CssAnchorNameOrScopeValueKind kind;
+        Vector<FlyString> names;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -206,6 +211,7 @@ public:
     static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
     static ColorScheme parse_color_scheme(StringView input, StringView encoding);
+    static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);

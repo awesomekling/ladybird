@@ -2109,6 +2109,28 @@ RustComponentValueParser::ColorScheme RustComponentValueParser::parse_color_sche
     };
 }
 
+RustComponentValueParser::AnchorNameOrScope RustComponentValueParser::parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all)
+{
+    Vector<FlyString> names;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_anchor_name_or_scope(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        allow_all,
+        &names,
+        [](void* raw_names, u8 const* name_ptr, size_t name_len) {
+            auto& names = *static_cast<Vector<FlyString>*>(raw_names);
+            names.append(fly_string_from_ffi_bytes(name_ptr, name_len));
+        });
+
+    return AnchorNameOrScope {
+        .kind = kind,
+        .names = move(names),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

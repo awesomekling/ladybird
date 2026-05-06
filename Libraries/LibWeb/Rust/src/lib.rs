@@ -23,9 +23,9 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssColorSchemeValue, CssColorSchemeValueKind, CssComponentValue,
-    CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
-    CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+    CssAnchorNameOrScopeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValue, CssColorSchemeValueKind,
+    CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
+    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
     CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
     CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
@@ -875,6 +875,31 @@ pub unsafe extern "C" fn rust_css_parse_color_scheme(
 
             css_parser::parse_color_scheme_value(input, |scheme| {
                 scheme_callback(ctx, scheme.as_ptr(), scheme.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `name_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_anchor_name_or_scope(
+    input: *const u8,
+    input_len: usize,
+    allow_all: bool,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
+) -> CssAnchorNameOrScopeValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssAnchorNameOrScopeValueKind::Invalid;
+            };
+
+            css_parser::parse_anchor_name_or_scope_value(input, allow_all, |name| {
+                name_callback(ctx, name.as_ptr(), name.len());
             })
         })
     }
