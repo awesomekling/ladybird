@@ -750,6 +750,36 @@ pub struct CssTextUnderlinePositionValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTouchActionValueKind {
+    Invalid,
+    Auto,
+    None,
+    Manipulation,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssTouchActionKeyword {
+    Invalid,
+    PanX,
+    PanLeft,
+    PanRight,
+    PanY,
+    PanUp,
+    PanDown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssTouchActionValue {
+    pub kind: CssTouchActionValueKind,
+    pub first: CssTouchActionKeyword,
+    pub second: CssTouchActionKeyword,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2724,6 +2754,113 @@ pub(crate) fn parse_text_underline_position_value(filtered_input: &[u8]) -> CssT
     }
 
     CssTextUnderlinePositionValue { horizontal, vertical }
+}
+
+pub(crate) fn parse_touch_action_value(filtered_input: &[u8]) -> CssTouchActionValue {
+    let invalid = CssTouchActionValue {
+        kind: CssTouchActionValueKind::Invalid,
+        first: CssTouchActionKeyword::Invalid,
+        second: CssTouchActionKeyword::Invalid,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://www.w3.org/TR/pointerevents/#the-touch-action-css-property
+    // Value: auto | none | [ [ pan-x | pan-left | pan-right ] || [ pan-y | pan-up | pan-down ] ] | manipulation
+    if parser.consume_ident_matching("auto") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssTouchActionValue {
+            kind: CssTouchActionValueKind::Auto,
+            first: CssTouchActionKeyword::Invalid,
+            second: CssTouchActionKeyword::Invalid,
+        };
+    }
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssTouchActionValue {
+            kind: CssTouchActionValueKind::None,
+            first: CssTouchActionKeyword::Invalid,
+            second: CssTouchActionKeyword::Invalid,
+        };
+    }
+    if parser.consume_ident_matching("manipulation") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssTouchActionValue {
+            kind: CssTouchActionValueKind::Manipulation,
+            first: CssTouchActionKeyword::Invalid,
+            second: CssTouchActionKeyword::Invalid,
+        };
+    }
+
+    let mut horizontal = CssTouchActionKeyword::Invalid;
+    let mut vertical = CssTouchActionKeyword::Invalid;
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("pan-x") {
+            if horizontal != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            horizontal = CssTouchActionKeyword::PanX;
+        } else if ident.eq_ignore_ascii_case("pan-left") {
+            if horizontal != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            horizontal = CssTouchActionKeyword::PanLeft;
+        } else if ident.eq_ignore_ascii_case("pan-right") {
+            if horizontal != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            horizontal = CssTouchActionKeyword::PanRight;
+        } else if ident.eq_ignore_ascii_case("pan-y") {
+            if vertical != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            vertical = CssTouchActionKeyword::PanY;
+        } else if ident.eq_ignore_ascii_case("pan-up") {
+            if vertical != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            vertical = CssTouchActionKeyword::PanUp;
+        } else if ident.eq_ignore_ascii_case("pan-down") {
+            if vertical != CssTouchActionKeyword::Invalid {
+                return invalid;
+            }
+            vertical = CssTouchActionKeyword::PanDown;
+        } else {
+            return invalid;
+        }
+    }
+
+    if horizontal == CssTouchActionKeyword::Invalid && vertical == CssTouchActionKeyword::Invalid {
+        return invalid;
+    }
+
+    if horizontal == CssTouchActionKeyword::Invalid {
+        return CssTouchActionValue {
+            kind: CssTouchActionValueKind::List,
+            first: vertical,
+            second: CssTouchActionKeyword::Invalid,
+        };
+    }
+
+    CssTouchActionValue {
+        kind: CssTouchActionValueKind::List,
+        first: horizontal,
+        second: vertical,
+    }
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8772,20 +8909,21 @@ mod tests {
         CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
         CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssUrlFunctionType, CssUrlModifierKind,
-        CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
+        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -8796,7 +8934,7 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_string_descriptor,
-        parse_text_underline_position_value, parse_white_space_trim_value, strip_whitespace,
+        parse_text_underline_position_value, parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9340,6 +9478,10 @@ mod tests {
 
     fn parse_text_underline_position(input: &str) -> CssTextUnderlinePositionValue {
         parse_text_underline_position_value(input.as_bytes())
+    }
+
+    fn parse_touch_action(input: &str) -> CssTouchActionValue {
+        parse_touch_action_value(input.as_bytes())
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11546,6 +11688,50 @@ mod tests {
         assert_eq!(
             parse_text_underline_position("under, left").horizontal,
             CssTextUnderlinePositionHorizontal::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_touch_action_values() {
+        assert_eq!(parse_touch_action("auto").kind, CssTouchActionValueKind::Auto);
+        assert_eq!(parse_touch_action("none").kind, CssTouchActionValueKind::None);
+        assert_eq!(
+            parse_touch_action("manipulation").kind,
+            CssTouchActionValueKind::Manipulation
+        );
+        assert_eq!(
+            parse_touch_action("pan-y pan-x"),
+            CssTouchActionValue {
+                kind: CssTouchActionValueKind::List,
+                first: CssTouchActionKeyword::PanX,
+                second: CssTouchActionKeyword::PanY,
+            }
+        );
+        assert_eq!(
+            parse_touch_action("pan-left pan-down"),
+            CssTouchActionValue {
+                kind: CssTouchActionValueKind::List,
+                first: CssTouchActionKeyword::PanLeft,
+                second: CssTouchActionKeyword::PanDown,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_touch_action_values() {
+        assert_eq!(parse_touch_action("").kind, CssTouchActionValueKind::Invalid);
+        assert_eq!(parse_touch_action("auto none").kind, CssTouchActionValueKind::Invalid);
+        assert_eq!(
+            parse_touch_action("manipulation pan-x").kind,
+            CssTouchActionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_touch_action("pan-y pan-x pan-y").kind,
+            CssTouchActionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_touch_action("pan-x, pan-y").kind,
+            CssTouchActionValueKind::Invalid
         );
     }
 

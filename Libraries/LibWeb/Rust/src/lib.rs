@@ -36,9 +36,9 @@ pub use css_parser::{
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
     CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier,
-    CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
-    CssWhiteSpaceTrimValueKind,
+    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -991,6 +991,25 @@ pub unsafe extern "C" fn rust_css_parse_text_underline_position(
             };
 
             css_parser::parse_text_underline_position_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_touch_action(input: *const u8, input_len: usize) -> CssTouchActionValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTouchActionValue {
+                    kind: CssTouchActionValueKind::Invalid,
+                    first: CssTouchActionKeyword::Invalid,
+                    second: CssTouchActionKeyword::Invalid,
+                };
+            };
+
+            css_parser::parse_touch_action_value(input)
         })
     }
 }

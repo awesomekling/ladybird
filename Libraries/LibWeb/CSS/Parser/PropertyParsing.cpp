@@ -4250,62 +4250,58 @@ RefPtr<StyleValue const> Parser::parse_timeline_scope_value(TokenStream<Componen
 // https://www.w3.org/TR/pointerevents/#the-touch-action-css-property
 RefPtr<StyleValue const> Parser::parse_touch_action_value(TokenStream<ComponentValue>& tokens)
 {
-    // auto | none | [ [ pan-x | pan-left | pan-right ] || [ pan-y | pan-up | pan-down ] ] | manipulation
-
-    if (auto value = parse_all_as_single_keyword_value(tokens, Keyword::Auto))
-        return value;
-    if (auto value = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return value;
-    if (auto value = parse_all_as_single_keyword_value(tokens, Keyword::Manipulation))
-        return value;
-
-    StyleValueVector parsed_values;
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // We will verify that we have up to one vertical and one horizontal value
-    bool has_horizontal = false;
-    bool has_vertical = false;
-
-    // Were the values specified in y/x order? (we need to store them in canonical x/y order)
-    bool swap_order = false;
-
-    while (auto parsed_value = parse_css_value_for_property(PropertyID::TouchAction, tokens)) {
-        switch (parsed_value->as_keyword().keyword()) {
-        case Keyword::PanX:
-        case Keyword::PanLeft:
-        case Keyword::PanRight:
-            if (has_horizontal)
-                return {};
-            if (has_vertical)
-                swap_order = true;
-            has_horizontal = true;
+    auto keyword_from_touch_action_keyword = [](FFI::CssTouchActionKeyword keyword) {
+        switch (keyword) {
+        case FFI::CssTouchActionKeyword::Invalid:
             break;
-        case Keyword::PanY:
-        case Keyword::PanUp:
-        case Keyword::PanDown:
-            if (has_vertical)
-                return {};
-            has_vertical = true;
-            break;
-        case Keyword::Auto:
-        case Keyword::None:
-        case Keyword::Manipulation:
-            // Not valid as part of a list
-            return {};
-        default:
-            VERIFY_NOT_REACHED();
+        case FFI::CssTouchActionKeyword::PanX:
+            return Keyword::PanX;
+        case FFI::CssTouchActionKeyword::PanLeft:
+            return Keyword::PanLeft;
+        case FFI::CssTouchActionKeyword::PanRight:
+            return Keyword::PanRight;
+        case FFI::CssTouchActionKeyword::PanY:
+            return Keyword::PanY;
+        case FFI::CssTouchActionKeyword::PanUp:
+            return Keyword::PanUp;
+        case FFI::CssTouchActionKeyword::PanDown:
+            return Keyword::PanDown;
         }
 
-        parsed_values.append(parsed_value.release_nonnull());
-        if (!tokens.has_next_token())
-            break;
+        VERIFY_NOT_REACHED();
+    };
+
+    auto serialized_touch_action = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_touch_action = RustComponentValueParser::parse_touch_action(serialized_touch_action.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_touch_action.kind) {
+    case FFI::CssTouchActionValueKind::Invalid:
+        return {};
+    case FFI::CssTouchActionValueKind::Auto:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Auto);
+    case FFI::CssTouchActionValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssTouchActionValueKind::Manipulation:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Manipulation);
+    case FFI::CssTouchActionValueKind::List: {
+        StyleValueVector values;
+        values.append(KeywordStyleValue::create(keyword_from_touch_action_keyword(parsed_touch_action.first)));
+        if (parsed_touch_action.second != FFI::CssTouchActionKeyword::Invalid)
+            values.append(KeywordStyleValue::create(keyword_from_touch_action_keyword(parsed_touch_action.second)));
+
+        transaction.commit();
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+    }
     }
 
-    if (swap_order)
-        swap(parsed_values[0], parsed_values[1]);
-
-    transaction.commit();
-    return StyleValueList::create(move(parsed_values), StyleValueList::Separator::Space);
+    VERIFY_NOT_REACHED();
 }
 
 // https://www.w3.org/TR/css-transforms-1/#propdef-transform-origin
