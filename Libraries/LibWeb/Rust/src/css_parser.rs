@@ -1812,6 +1812,26 @@ where
     true
 }
 
+pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
+where
+    C: FnMut(usize),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(count) = parser.parse_font_weight_absolute_pair() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    count_callback(count);
+    true
+}
+
 pub(crate) fn parse_a_namespace_rule_prelude<P, U>(
     filtered_input: &[u8],
     mut prefix_callback: P,
@@ -4888,6 +4908,25 @@ impl ComponentValueParser {
         })
     }
 
+    // https://drafts.csswg.org/css-fonts-4/#font-prop-desc
+    fn parse_font_weight_absolute_pair(&mut self) -> Option<usize> {
+        // <font-weight-absolute>{1,2}
+        let mut count = 0;
+        for _ in 0..2 {
+            self.discard_whitespace();
+            if !self.consume_font_weight_absolute_syntax() {
+                break;
+            }
+            count += 1;
+        }
+
+        if count == 0 {
+            return None;
+        }
+
+        Some(count)
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -4979,6 +5018,22 @@ impl ComponentValueParser {
         }
 
         self.consume_integer_syntax()
+    }
+
+    fn consume_font_weight_absolute_syntax(&mut self) -> bool {
+        let Some(component_value) = self.next_component_value() else {
+            return false;
+        };
+
+        let is_font_weight_absolute = component_values_parse_as_value_type(
+            ValueTypeId::FontWeightAbsolute,
+            std::slice::from_ref(component_value),
+        ) != CssValueTypeSyntaxKind::Invalid;
+
+        if is_font_weight_absolute {
+            self.index += 1;
+        }
+        is_font_weight_absolute
     }
 
     fn consume_symbol_syntax(&mut self) -> bool {
@@ -7530,7 +7585,7 @@ mod tests {
         parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbols,
         parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7967,6 +8022,14 @@ mod tests {
         let mut kind = None;
         let parsed = parse_crop_or_cross(input.as_bytes(), |parsed_kind| kind = Some(parsed_kind));
         parsed.then_some(kind).flatten()
+    }
+
+    fn parse_font_weight_absolute_pair_descriptor(input: &str) -> Option<usize> {
+        let mut count = None;
+        let parsed = parse_font_weight_absolute_pair(input.as_bytes(), |parsed_count| {
+            count = Some(parsed_count);
+        });
+        parsed.then_some(count).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9716,6 +9779,31 @@ mod tests {
         assert_eq!(parse_crop_or_cross_descriptor("cross crop cross"), None);
         assert_eq!(parse_crop_or_cross_descriptor("orange"), None);
         assert_eq!(parse_crop_or_cross_descriptor("auto"), None);
+    }
+
+    #[test]
+    fn parses_font_weight_absolute_pair_descriptors() {
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("normal"), Some(1));
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("bold"), Some(1));
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("700"), Some(1));
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("calc(600 + 100)"), Some(1));
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("normal bold"), Some(2));
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("100 900"), Some(2));
+        assert_eq!(
+            parse_font_weight_absolute_pair_descriptor("calc(100 + 100) bold"),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_weight_absolute_pair_descriptors() {
+        assert_eq!(parse_font_weight_absolute_pair_descriptor(""), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("auto"), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("lighter"), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("0"), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("1001"), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("100 400 900"), None);
+        assert_eq!(parse_font_weight_absolute_pair_descriptor("100 auto"), None);
     }
 
     #[test]

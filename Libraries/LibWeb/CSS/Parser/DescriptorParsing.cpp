@@ -394,16 +394,36 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     return StyleValueList::create(move(valid_sources), StyleValueList::Separator::Comma);
                 }
                 case DescriptorMetadata::ValueType::FontWeightAbsolutePair: {
+                    // https://drafts.csswg.org/css-fonts-4/#font-prop-desc
                     // <font-weight-absolute>{1,2}
-                    auto first = parse_font_weight_absolute_value(tokens);
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_font_weight_absolute_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto count = RustComponentValueParser::parse_font_weight_absolute_pair(serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
+                    if (!count.has_value())
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
+
+                    auto first = parse_font_weight_absolute_value(font_weight_absolute_tokens);
                     if (!first)
                         return nullptr;
-                    tokens.discard_whitespace();
-                    if (!tokens.has_next_token())
+
+                    if (*count == 1)
                         return StyleValueList::create({ first.release_nonnull() }, StyleValueList::Separator::Space);
-                    auto second = parse_font_weight_absolute_value(tokens);
+
+                    font_weight_absolute_tokens.discard_whitespace();
+                    auto second = parse_font_weight_absolute_value(font_weight_absolute_tokens);
                     if (!second)
                         return nullptr;
+
+                    font_weight_absolute_tokens.discard_whitespace();
+                    if (font_weight_absolute_tokens.has_next_token())
+                        return nullptr;
+
                     return StyleValueList::create({ first.release_nonnull(), second.release_nonnull() }, StyleValueList::Separator::Space);
                 }
                 case DescriptorMetadata::ValueType::Length:

@@ -1272,6 +1272,30 @@ pub unsafe extern "C" fn rust_css_parse_crop_or_cross(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_weight_absolute_pair(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    count_callback: unsafe extern "C" fn(ctx: *mut c_void, count: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_font_weight_absolute_pair(input, |count| {
+                count_callback(ctx, count);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_namespace_rule_prelude(
     input: *const u8,
     input_len: usize,
