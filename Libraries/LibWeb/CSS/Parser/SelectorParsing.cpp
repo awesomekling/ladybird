@@ -37,7 +37,9 @@ static bool next_is_pseudo_element(TokenStream<ComponentValue>& tokens)
 
 Optional<SelectorList> Parser::parse_as_selector(SelectorParsingMode parsing_mode)
 {
-    auto selector_list = parse_a_selector_list(m_token_stream, SelectorType::Standalone, parsing_mode);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
+    TokenStream tokens { component_values };
+    auto selector_list = parse_a_selector_list(tokens, SelectorType::Standalone, parsing_mode);
     if (!selector_list.is_error())
         return selector_list.release_value();
 
@@ -46,7 +48,9 @@ Optional<SelectorList> Parser::parse_as_selector(SelectorParsingMode parsing_mod
 
 Optional<SelectorList> Parser::parse_as_relative_selector(SelectorParsingMode parsing_mode)
 {
-    auto selector_list = parse_a_selector_list(m_token_stream, SelectorType::Relative, parsing_mode);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
+    TokenStream tokens { component_values };
+    auto selector_list = parse_a_selector_list(tokens, SelectorType::Relative, parsing_mode);
     if (!selector_list.is_error())
         return selector_list.release_value();
 
@@ -55,7 +59,7 @@ Optional<SelectorList> Parser::parse_as_relative_selector(SelectorParsingMode pa
 
 Optional<Selector::PseudoElementSelector> Parser::parse_as_pseudo_element_selector()
 {
-    auto component_values = consume_a_list_of_component_values(m_token_stream);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     TokenStream tokens { component_values };
     auto maybe_simple_selector = parse_pseudo_element_simple_selector(tokens);
     if (maybe_simple_selector.is_error())
@@ -123,7 +127,6 @@ Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<T>&
     return selectors;
 }
 template Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<ComponentValue>&, SelectorType, SelectorParsingMode);
-template Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<Token>&, SelectorType, SelectorParsingMode);
 
 Parser::ParseErrorOr<NonnullRefPtr<Selector>> Parser::parse_complex_selector(TokenStream<ComponentValue>& tokens, SelectorType mode)
 {
