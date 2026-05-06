@@ -97,8 +97,7 @@ Parser::Parser(ParsingParams const& context, String input, String encoding)
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-stylesheet
-template<typename T>
-Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<T>& input, Optional<::URL::URL> location)
+Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<ComponentValue>& input, Optional<::URL::URL> location)
 {
     // To parse a stylesheet from an input given an optional url location:
 
@@ -118,8 +117,7 @@ Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<T>& input, Optio
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-a-stylesheets-contents
-template<typename T>
-Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<T>& input)
+Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<ComponentValue>& input)
 {
     // To parse a stylesheet’s contents from input:
 
@@ -374,8 +372,7 @@ OwnPtr<Supports::Declaration> Parser::parse_supports_declaration(TokenStream<Com
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-stylesheet-contents
-template<typename T>
-Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<T>& input)
+Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<ComponentValue>& input)
 {
     // To consume a stylesheet’s contents from a token stream input:
 
@@ -426,8 +423,7 @@ Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<T>& input)
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-at-rule
-template<typename T>
-Optional<AtRule> Parser::consume_an_at_rule(TokenStream<T>& input, Nested nested)
+Optional<AtRule> Parser::consume_an_at_rule(TokenStream<ComponentValue>& input, Nested nested)
 {
     // To consume an at-rule from a token stream input, given an optional bool nested (default false):
 
@@ -497,8 +493,7 @@ Optional<AtRule> Parser::consume_an_at_rule(TokenStream<T>& input, Nested nested
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-qualified-rule
-template<typename T>
-Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualified_rule(TokenStream<T>& input, Optional<Token::Type> stop_token, Nested nested)
+Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualified_rule(TokenStream<ComponentValue>& input, Optional<Token::Type> stop_token, Nested nested)
 {
     // To consume a qualified rule, from a token stream input, given an optional token stop token and an optional bool nested (default false):
 
@@ -589,8 +584,7 @@ Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualif
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-block
-template<typename T>
-Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<T>& input)
+Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<ComponentValue>& input)
 {
     // To consume a block, from a token stream input:
 
@@ -609,8 +603,7 @@ Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<T>& input)
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-block-contents
-template<typename T>
-Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T>& input)
+Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<ComponentValue>& input)
 {
     // To consume a block’s contents from a token stream input:
 
@@ -710,16 +703,14 @@ Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<T
     }
 }
 
-template<>
-ComponentValue Parser::consume_a_component_value<ComponentValue>(TokenStream<ComponentValue>& tokens)
+ComponentValue Parser::consume_a_component_value(TokenStream<ComponentValue>& tokens)
 {
     // Note: This overload is called once tokens have already been converted into component values,
     //       so we do not need to do the work in the more general overload.
     return tokens.consume_a_token();
 }
 
-template<>
-void Parser::consume_a_component_value_and_do_nothing<ComponentValue>(TokenStream<ComponentValue>& tokens)
+void Parser::consume_a_component_value_and_do_nothing(TokenStream<ComponentValue>& tokens)
 {
     // AD-HOC: To avoid unnecessary allocations, we explicitly define a "do nothing" variant that discards the result immediately.
     // Note: This overload is called once tokens have already been converted into component values,
@@ -727,8 +718,7 @@ void Parser::consume_a_component_value_and_do_nothing<ComponentValue>(TokenStrea
     tokens.discard_a_token();
 }
 
-template<typename T>
-Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<T>& input, Optional<Token::Type> stop_token, Nested nested)
+Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<ComponentValue>& input, Optional<Token::Type> stop_token, Nested nested)
 {
     // To consume a list of component values from a token stream input, given an optional token stop token
     // and an optional boolean nested (default false):
@@ -769,8 +759,7 @@ Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<T>
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-declaration
-template<typename T>
-Optional<Declaration> Parser::consume_a_declaration(TokenStream<T>& input, Nested nested, SaveOriginalText save_full_text)
+Optional<Declaration> Parser::consume_a_declaration(TokenStream<ComponentValue>& input, Nested nested, SaveOriginalText save_full_text)
 {
     // To consume a declaration from a token stream input, given an optional bool nested (default false):
 
@@ -921,8 +910,7 @@ Optional<Declaration> Parser::consume_a_declaration(TokenStream<T>& input, Neste
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-the-remnants-of-a-bad-declaration
-template<typename T>
-void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<T>& input, Nested nested)
+void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<ComponentValue>& input, Nested nested)
 {
     // To consume the remnants of a bad declaration from a token stream input, given a bool nested:
 
@@ -984,8 +972,7 @@ Vector<Rule> Parser::parse_as_rules()
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-rule
-template<typename T>
-Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)
+Optional<Rule> Parser::parse_a_rule(TokenStream<ComponentValue>& input)
 {
     // To parse a rule from input:
     Optional<Rule> rule;
@@ -1026,8 +1013,7 @@ Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-block-contents
-template<typename T>
-Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<T>& input)
+Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<ComponentValue>& input)
 {
     // To parse a block’s contents from input:
 
@@ -1056,8 +1042,7 @@ Optional<ComponentValue> Parser::parse_as_component_value()
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-component-value
-template<typename T>
-Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<T>& input)
+Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<ComponentValue>& input)
 {
     // To parse a component value from input:
 
@@ -1086,8 +1071,7 @@ Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<T>& input)
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-list-of-component-values
-template<typename T>
-Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<T>& input)
+Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<ComponentValue>& input)
 {
     // To parse a list of component values from input:
 
@@ -1099,8 +1083,7 @@ Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<T>& 
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-comma-separated-list-of-component-values
-template<typename T>
-Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component_values(TokenStream<T>& input)
+Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>& input)
 {
     // To parse a comma-separated list of component values from input:
 
@@ -1770,36 +1753,6 @@ bool Parser::has_ignored_vendor_prefix(StringView string)
         return false;
     return true;
 }
-
-template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<::URL::URL>);
-
-template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<ComponentValue>& input);
-
-template Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<ComponentValue>&);
-
-template Optional<AtRule> Parser::consume_an_at_rule(TokenStream<ComponentValue>&, Nested);
-
-template Variant<Empty, QualifiedRule, Parser::InvalidRuleError> Parser::consume_a_qualified_rule(TokenStream<ComponentValue>&, Optional<Token::Type>, Nested);
-
-template Vector<RuleOrListOfDeclarations> Parser::consume_a_block(TokenStream<ComponentValue>&);
-
-template Vector<RuleOrListOfDeclarations> Parser::consume_a_blocks_contents(TokenStream<ComponentValue>&);
-
-template Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type>, Nested);
-
-template Optional<Declaration> Parser::consume_a_declaration(TokenStream<ComponentValue>&, Nested, SaveOriginalText);
-
-template void Parser::consume_the_remnants_of_a_bad_declaration(TokenStream<ComponentValue>&, Nested);
-
-template Optional<Rule> Parser::parse_a_rule(TokenStream<ComponentValue>&);
-
-template Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<ComponentValue>&);
-
-template Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<ComponentValue>&);
-
-template Vector<ComponentValue> Parser::parse_a_list_of_component_values(TokenStream<ComponentValue>&);
-
-template Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
 
 DOM::Document const* Parser::document() const
 {

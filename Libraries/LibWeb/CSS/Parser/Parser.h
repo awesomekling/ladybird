@@ -195,75 +195,57 @@ private:
         Optional<::URL::URL> location;
         Vector<Rule> rules;
     };
-    template<typename T>
-    ParsedStyleSheet parse_a_stylesheet(TokenStream<T>&, Optional<::URL::URL> location);
+    ParsedStyleSheet parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<::URL::URL> location);
 
     // "Parse a stylesheet’s contents" is intended for use by the CSSStyleSheet replace() method, and similar, which parse text into the contents of an existing stylesheet.
-    template<typename T>
-    Vector<Rule> parse_a_stylesheets_contents(TokenStream<T>&);
+    Vector<Rule> parse_a_stylesheets_contents(TokenStream<ComponentValue>&);
 
     // "Parse a block’s contents" is intended for parsing the contents of any block in CSS (including things like the style attribute),
     // and APIs such as the CSSStyleDeclaration cssText attribute.
-    template<typename T>
-    Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(TokenStream<T>&);
+    Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(TokenStream<ComponentValue>&);
 
     // "Parse a rule" is intended for use by the CSSStyleSheet#insertRule method, and similar functions which might exist, which parse text into a single rule.
-    template<typename T>
-    Optional<Rule> parse_a_rule(TokenStream<T>&);
+    Optional<Rule> parse_a_rule(TokenStream<ComponentValue>&);
 
     // "Parse a component value" is for things that need to consume a single value, like the parsing rules for attr().
-    template<typename T>
-    Optional<ComponentValue> parse_a_component_value(TokenStream<T>&);
+    Optional<ComponentValue> parse_a_component_value(TokenStream<ComponentValue>&);
 
     // "Parse a list of component values" is for the contents of presentational attributes, which parse text into a single declaration’s value,
     // or for parsing a stand-alone selector [SELECT] or list of Media Queries [MEDIAQ], as in Selectors API or the media HTML attribute.
-    template<typename T>
-    Vector<ComponentValue> parse_a_list_of_component_values(TokenStream<T>&);
+    Vector<ComponentValue> parse_a_list_of_component_values(TokenStream<ComponentValue>&);
 
-    template<typename T>
-    Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(TokenStream<T>&);
+    Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
 
     enum class SelectorType {
         Standalone,
         Relative
     };
-    template<typename T>
-    ParseErrorOr<SelectorList> parse_a_selector_list(TokenStream<T>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
+    ParseErrorOr<SelectorList> parse_a_selector_list(TokenStream<ComponentValue>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
 
     Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list_from_string(StringView, StringView encoding);
     RefPtr<Supports> parse_a_supports_from_string(StringView, StringView encoding);
 
     Optional<Selector::SimpleSelector::ANPlusBPattern> parse_a_n_plus_b_pattern(TokenStream<ComponentValue>&);
 
-    template<typename T>
-    [[nodiscard]] Vector<Rule> consume_a_stylesheets_contents(TokenStream<T>&);
+    [[nodiscard]] Vector<Rule> consume_a_stylesheets_contents(TokenStream<ComponentValue>&);
     enum class Nested {
         No,
         Yes,
     };
-    template<typename T>
-    Optional<AtRule> consume_an_at_rule(TokenStream<T>&, Nested nested = Nested::No);
+    Optional<AtRule> consume_an_at_rule(TokenStream<ComponentValue>&, Nested nested = Nested::No);
     struct InvalidRuleError { };
-    template<typename T>
-    Variant<Empty, QualifiedRule, InvalidRuleError> consume_a_qualified_rule(TokenStream<T>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
-    template<typename T>
-    Vector<RuleOrListOfDeclarations> consume_a_block(TokenStream<T>&);
-    template<typename T>
-    Vector<RuleOrListOfDeclarations> consume_a_blocks_contents(TokenStream<T>&);
+    Variant<Empty, QualifiedRule, InvalidRuleError> consume_a_qualified_rule(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
+    Vector<RuleOrListOfDeclarations> consume_a_block(TokenStream<ComponentValue>&);
+    Vector<RuleOrListOfDeclarations> consume_a_blocks_contents(TokenStream<ComponentValue>&);
     enum class SaveOriginalText : u8 {
         No,
         Yes,
     };
-    template<typename T>
-    Optional<Declaration> consume_a_declaration(TokenStream<T>&, Nested = Nested::No, SaveOriginalText = SaveOriginalText::No);
-    template<typename T>
-    void consume_the_remnants_of_a_bad_declaration(TokenStream<T>&, Nested);
-    template<typename T>
-    [[nodiscard]] Vector<ComponentValue> consume_a_list_of_component_values(TokenStream<T>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
-    template<typename T>
-    [[nodiscard]] ComponentValue consume_a_component_value(TokenStream<T>&);
-    template<typename T>
-    void consume_a_component_value_and_do_nothing(TokenStream<T>&);
+    Optional<Declaration> consume_a_declaration(TokenStream<ComponentValue>&, Nested = Nested::No, SaveOriginalText = SaveOriginalText::No);
+    void consume_the_remnants_of_a_bad_declaration(TokenStream<ComponentValue>&, Nested);
+    [[nodiscard]] Vector<ComponentValue> consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
+    [[nodiscard]] ComponentValue consume_a_component_value(TokenStream<ComponentValue>&);
+    void consume_a_component_value_and_do_nothing(TokenStream<ComponentValue>&);
     // TODO: consume_a_unicode_range_value()
 
     struct FunctionPrelude {

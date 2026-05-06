@@ -95,8 +95,7 @@ static NonnullRefPtr<Selector> create_invalid_selector(Selector::Combinator comb
     return Selector::create({ move(compound) });
 }
 
-template<typename T>
-Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<T>& tokens, SelectorType mode, SelectorParsingMode parsing_mode)
+Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<ComponentValue>& tokens, SelectorType mode, SelectorParsingMode parsing_mode)
 {
     SelectorList selectors;
     for (;;) {
@@ -126,8 +125,6 @@ Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<T>&
 
     return selectors;
 }
-template Parser::ParseErrorOr<SelectorList> Parser::parse_a_selector_list(TokenStream<ComponentValue>&, SelectorType, SelectorParsingMode);
-
 Parser::ParseErrorOr<NonnullRefPtr<Selector>> Parser::parse_complex_selector(TokenStream<ComponentValue>& tokens, SelectorType mode)
 {
     Vector<Selector::CompoundSelector> compound_selectors;
