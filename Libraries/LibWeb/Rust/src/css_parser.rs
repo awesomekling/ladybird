@@ -581,6 +581,14 @@ pub enum CssCounterStyleRangeKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssCropOrCrossKind {
+    Crop,
+    Cross,
+    CropAndCross,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1781,6 +1789,26 @@ where
     }
 
     count_callback(count);
+    true
+}
+
+pub(crate) fn parse_crop_or_cross<C>(filtered_input: &[u8], mut kind_callback: C) -> bool
+where
+    C: FnMut(CssCropOrCrossKind),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(kind) = parser.parse_crop_or_cross() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    kind_callback(kind);
     true
 }
 
@@ -4829,6 +4857,37 @@ impl ComponentValueParser {
         Some(count)
     }
 
+    // https://drafts.csswg.org/css-page-3/#marks
+    fn parse_crop_or_cross(&mut self) -> Option<CssCropOrCrossKind> {
+        // crop || cross
+        self.discard_whitespace();
+
+        let first_is_crop = if self.consume_ident_matching("crop") {
+            true
+        } else if self.consume_ident_matching("cross") {
+            false
+        } else {
+            return None;
+        };
+
+        self.discard_whitespace();
+        let has_both = if first_is_crop {
+            self.consume_ident_matching("cross")
+        } else {
+            self.consume_ident_matching("crop")
+        };
+
+        if has_both {
+            return Some(CssCropOrCrossKind::CropAndCross);
+        }
+
+        Some(if first_is_crop {
+            CssCropOrCrossKind::Crop
+        } else {
+            CssCropOrCrossKind::Cross
+        })
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -7448,28 +7507,30 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssFontLanguageOverrideKind,
-        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName,
-        FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
+        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
+        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssUrlFunctionType,
+        CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
+        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
         parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbols,
-        parse_counter_style_system, parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7900,6 +7961,12 @@ mod tests {
             count = Some(parsed_count);
         });
         parsed.then_some(count).flatten()
+    }
+
+    fn parse_crop_or_cross_descriptor(input: &str) -> Option<CssCropOrCrossKind> {
+        let mut kind = None;
+        let parsed = parse_crop_or_cross(input.as_bytes(), |parsed_kind| kind = Some(parsed_kind));
+        parsed.then_some(kind).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9623,6 +9690,32 @@ mod tests {
         assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\" 2"), None);
         assert_eq!(parse_counter_style_additive_symbols_descriptor("-1 \"I\""), None);
         assert_eq!(parse_counter_style_additive_symbols_descriptor("default 1"), None);
+    }
+
+    #[test]
+    fn parses_crop_or_cross_descriptors() {
+        assert_eq!(parse_crop_or_cross_descriptor("crop"), Some(CssCropOrCrossKind::Crop));
+        assert_eq!(parse_crop_or_cross_descriptor("cross"), Some(CssCropOrCrossKind::Cross));
+        assert_eq!(
+            parse_crop_or_cross_descriptor("crop cross"),
+            Some(CssCropOrCrossKind::CropAndCross)
+        );
+        assert_eq!(
+            parse_crop_or_cross_descriptor("cross crop"),
+            Some(CssCropOrCrossKind::CropAndCross)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_crop_or_cross_descriptors() {
+        assert_eq!(parse_crop_or_cross_descriptor(""), None);
+        assert_eq!(parse_crop_or_cross_descriptor("none"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("none crop"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("crop crop"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("cross cross"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("cross crop cross"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("orange"), None);
+        assert_eq!(parse_crop_or_cross_descriptor("auto"), None);
     }
 
     #[test]

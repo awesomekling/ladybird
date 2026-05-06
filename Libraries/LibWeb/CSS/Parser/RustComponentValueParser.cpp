@@ -1962,6 +1962,27 @@ Optional<size_t> RustComponentValueParser::parse_counter_style_additive_symbols(
     return count;
 }
 
+Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(StringView input, StringView encoding)
+{
+    Optional<FFI::CssCropOrCrossKind> kind;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_crop_or_cross(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &kind,
+        [](void* raw_kind, FFI::CssCropOrCrossKind parsed_kind) {
+            auto& kind = *static_cast<Optional<FFI::CssCropOrCrossKind>*>(raw_kind);
+            kind = parsed_kind;
+        });
+
+    if (!parsed || !kind.has_value())
+        return {};
+
+    return kind;
+}
+
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
 {
     Optional<FamilyName> family_name;

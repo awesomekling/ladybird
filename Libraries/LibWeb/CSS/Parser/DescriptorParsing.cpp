@@ -346,35 +346,29 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     return StyleValueList::create(move(range_entries), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);
                 }
                 case DescriptorMetadata::ValueType::CropOrCross: {
+                    // https://drafts.csswg.org/css-page-3/#marks
                     // crop || cross
-                    auto first = parse_keyword_value(tokens);
-                    tokens.discard_whitespace();
-                    auto second = parse_keyword_value(tokens);
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
 
-                    if (!first)
+                    auto serialized_crop_or_cross = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto crop_or_cross = RustComponentValueParser::parse_crop_or_cross(serialized_crop_or_cross.bytes_as_string_view(), "utf-8"sv);
+                    if (!crop_or_cross.has_value())
                         return nullptr;
 
-                    RefPtr<StyleValue const> crop;
-                    RefPtr<StyleValue const> cross;
-
-                    if (first->to_keyword() == Keyword::Crop)
-                        crop = first;
-                    else if (first->to_keyword() == Keyword::Cross)
-                        cross = first;
-                    else
-                        return nullptr;
-
-                    if (!second)
-                        return first.release_nonnull();
-
-                    if (crop.is_null() && second->to_keyword() == Keyword::Crop)
-                        crop = second.release_nonnull();
-                    else if (cross.is_null() && second->to_keyword() == Keyword::Cross)
-                        cross = second.release_nonnull();
-                    else
-                        return nullptr;
-
-                    return StyleValueList::create(StyleValueVector { crop.release_nonnull(), cross.release_nonnull() }, StyleValueList::Separator::Space);
+                    switch (*crop_or_cross) {
+                    case FFI::CssCropOrCrossKind::Crop:
+                        return KeywordStyleValue::create(Keyword::Crop);
+                    case FFI::CssCropOrCrossKind::Cross:
+                        return KeywordStyleValue::create(Keyword::Cross);
+                    case FFI::CssCropOrCrossKind::CropAndCross:
+                        return StyleValueList::create(StyleValueVector {
+                                                          KeywordStyleValue::create(Keyword::Crop),
+                                                          KeywordStyleValue::create(Keyword::Cross) },
+                            StyleValueList::Separator::Space);
+                    }
+                    VERIFY_NOT_REACHED();
                 }
                 case DescriptorMetadata::ValueType::FamilyName:
                     return parse_family_name_value(tokens);

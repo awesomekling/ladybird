@@ -25,15 +25,16 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssCounterStyleKind,
     CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
-    CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-    CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
-    CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-    CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
+    CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+    CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
+    CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
+    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
+    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
+    CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1237,6 +1238,30 @@ pub unsafe extern "C" fn rust_css_parse_counter_style_additive_symbols(
 
             css_parser::parse_counter_style_additive_symbols(input, |count| {
                 count_callback(ctx, count);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_crop_or_cross(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    kind_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssCropOrCrossKind),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_crop_or_cross(input, |kind| {
+                kind_callback(ctx, kind);
             })
         })
     }
