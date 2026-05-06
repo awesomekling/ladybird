@@ -682,6 +682,23 @@ pub enum CssPositionAnchorValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPositionVisibilityValueKind {
+    Invalid,
+    Always,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssPositionVisibilityValue {
+    pub kind: CssPositionVisibilityValueKind,
+    pub has_anchors_valid: bool,
+    pub has_anchors_visible: bool,
+    pub has_no_overflow: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2428,6 +2445,73 @@ where
 
     name_callback(&name);
     CssPositionAnchorValueKind::AnchorName
+}
+
+pub(crate) fn parse_position_visibility_value(filtered_input: &[u8]) -> CssPositionVisibilityValue {
+    let invalid = CssPositionVisibilityValue {
+        kind: CssPositionVisibilityValueKind::Invalid,
+        has_anchors_valid: false,
+        has_anchors_visible: false,
+        has_no_overflow: false,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#position-visibility
+    // Value: always | [ anchors-valid || anchors-visible || no-overflow ]
+    if parser.consume_ident_matching("always") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssPositionVisibilityValue {
+            kind: CssPositionVisibilityValueKind::Always,
+            has_anchors_valid: false,
+            has_anchors_visible: false,
+            has_no_overflow: false,
+        };
+    }
+
+    let mut value = CssPositionVisibilityValue {
+        kind: CssPositionVisibilityValueKind::List,
+        has_anchors_valid: false,
+        has_anchors_visible: false,
+        has_no_overflow: false,
+    };
+
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("anchors-valid") {
+            if value.has_anchors_valid {
+                return invalid;
+            }
+            value.has_anchors_valid = true;
+        } else if ident.eq_ignore_ascii_case("anchors-visible") {
+            if value.has_anchors_visible {
+                return invalid;
+            }
+            value.has_anchors_visible = true;
+        } else if ident.eq_ignore_ascii_case("no-overflow") {
+            if value.has_no_overflow {
+                return invalid;
+            }
+            value.has_no_overflow = true;
+        } else {
+            return invalid;
+        }
+    }
+
+    if !value.has_anchors_valid && !value.has_anchors_visible && !value.has_no_overflow {
+        return invalid;
+    }
+
+    value
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8474,20 +8558,20 @@ mod tests {
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
         CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPositionAnchorValueKind,
-        CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssUrlFunctionType,
+        CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName,
+        FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -8496,8 +8580,8 @@ mod tests {
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
         parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_position_anchor_value, parse_positive_percentage_descriptor,
-        parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
+        parse_page_size_descriptor, parse_position_anchor_value, parse_position_visibility_value,
+        parse_positive_percentage_descriptor, parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9029,6 +9113,10 @@ mod tests {
         let mut name = None;
         let kind = parse_position_anchor_value(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         (kind, name)
+    }
+
+    fn parse_position_visibility(input: &str) -> CssPositionVisibilityValue {
+        parse_position_visibility_value(input.as_bytes())
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11277,6 +11365,61 @@ mod tests {
             CssPositionAnchorValueKind::Invalid
         );
         assert_eq!(parse_position_anchor("foo").0, CssPositionAnchorValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_position_visibility_values() {
+        assert_eq!(
+            parse_position_visibility("always"),
+            CssPositionVisibilityValue {
+                kind: CssPositionVisibilityValueKind::Always,
+                has_anchors_valid: false,
+                has_anchors_visible: false,
+                has_no_overflow: false,
+            }
+        );
+        assert_eq!(
+            parse_position_visibility("anchors-visible"),
+            CssPositionVisibilityValue {
+                kind: CssPositionVisibilityValueKind::List,
+                has_anchors_valid: false,
+                has_anchors_visible: true,
+                has_no_overflow: false,
+            }
+        );
+        assert_eq!(
+            parse_position_visibility("no-overflow anchors-valid anchors-visible"),
+            CssPositionVisibilityValue {
+                kind: CssPositionVisibilityValueKind::List,
+                has_anchors_valid: true,
+                has_anchors_visible: true,
+                has_no_overflow: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_position_visibility_values() {
+        assert_eq!(
+            parse_position_visibility("").kind,
+            CssPositionVisibilityValueKind::Invalid
+        );
+        assert_eq!(
+            parse_position_visibility("always anchors-valid").kind,
+            CssPositionVisibilityValueKind::Invalid
+        );
+        assert_eq!(
+            parse_position_visibility("anchors-valid anchors-valid").kind,
+            CssPositionVisibilityValueKind::Invalid
+        );
+        assert_eq!(
+            parse_position_visibility("anchors-visible foobar").kind,
+            CssPositionVisibilityValueKind::Invalid
+        );
+        assert_eq!(
+            parse_position_visibility("anchors-valid, anchors-visible").kind,
+            CssPositionVisibilityValueKind::Invalid
+        );
     }
 
     #[test]

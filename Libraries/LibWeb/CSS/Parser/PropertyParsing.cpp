@@ -3937,55 +3937,34 @@ RefPtr<StyleValue const> Parser::parse_position_area_value(TokenStream<Component
 // https://drafts.csswg.org/css-anchor-position/#position-visibility
 RefPtr<StyleValue const> Parser::parse_position_visibility_value(TokenStream<ComponentValue>& tokens)
 {
-    // always | [ anchors-valid || anchors-visible || no-overflow ]
-    if (auto always = parse_all_as_single_keyword_value(tokens, Keyword::Always))
-        return always;
-
-    RefPtr<StyleValue const> anchors_valid_value;
-    RefPtr<StyleValue const> anchors_visible_value;
-    RefPtr<StyleValue const> no_overflow_value;
-    StyleValueVector values;
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        auto keyword_value = parse_keyword_value(tokens);
-        if (!keyword_value)
-            return nullptr;
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-        switch (keyword_value->to_keyword()) {
-        case Keyword::AnchorsValid:
-            if (anchors_valid_value)
-                return nullptr;
-            anchors_valid_value = keyword_value.release_nonnull();
-            break;
-        case Keyword::AnchorsVisible:
-            if (anchors_visible_value)
-                return nullptr;
-            anchors_visible_value = keyword_value.release_nonnull();
-            break;
-        case Keyword::NoOverflow:
-            if (no_overflow_value)
-                return nullptr;
-            no_overflow_value = keyword_value.release_nonnull();
-            break;
-        default:
-            return nullptr;
-        }
-        tokens.discard_whitespace();
+    auto serialized_position_visibility = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_position_visibility = RustComponentValueParser::parse_position_visibility(serialized_position_visibility.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_position_visibility.kind) {
+    case FFI::CssPositionVisibilityValueKind::Invalid:
+        return {};
+    case FFI::CssPositionVisibilityValueKind::Always:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Always);
+    case FFI::CssPositionVisibilityValueKind::List: {
+        StyleValueVector values;
+        if (parsed_position_visibility.has_anchors_valid)
+            values.append(KeywordStyleValue::create(Keyword::AnchorsValid));
+        if (parsed_position_visibility.has_anchors_visible)
+            values.append(KeywordStyleValue::create(Keyword::AnchorsVisible));
+        if (parsed_position_visibility.has_no_overflow)
+            values.append(KeywordStyleValue::create(Keyword::NoOverflow));
+
+        transaction.commit();
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+    }
     }
 
-    if (anchors_valid_value)
-        values.append(anchors_valid_value.release_nonnull());
-    if (anchors_visible_value)
-        values.append(anchors_visible_value.release_nonnull());
-    if (no_overflow_value)
-        values.append(no_overflow_value.release_nonnull());
-
-    if (values.is_empty())
-        return nullptr;
-
-    transaction.commit();
-    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_quotes_value(TokenStream<ComponentValue>& tokens)
