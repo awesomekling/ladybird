@@ -163,21 +163,26 @@ GC::Ptr<CSSStyleRule> Parser::convert_to_style_rule(QualifiedRule const& qualifi
 {
     TokenStream prelude_stream { qualified_rule.prelude };
 
-    auto maybe_selectors = parse_a_selector_list(prelude_stream,
-        nested == Nested::Yes ? SelectorType::Relative : SelectorType::Standalone);
+    auto serialized_prelude = serialize_component_values_for_reparsing(qualified_rule.prelude);
+    auto maybe_selectors = RustComponentValueParser::parse_a_selector_list(
+        serialized_prelude.bytes_as_string_view(),
+        "utf-8"sv,
+        nested == Nested::Yes
+            ? RustComponentValueParser::SelectorType::Relative
+            : RustComponentValueParser::SelectorType::Standalone,
+        RustComponentValueParser::SelectorParsingMode::Normal,
+        m_declared_namespaces);
 
-    if (maybe_selectors.is_error()) {
-        if (maybe_selectors.error() == ParseError::SyntaxError) {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "style"_fly_string,
-                .prelude = prelude_stream.dump_string(),
-                .description = "Selectors invalid."_string,
-            });
-        }
+    if (!maybe_selectors.has_value()) {
+        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
+            .rule_name = "style"_fly_string,
+            .prelude = prelude_stream.dump_string(),
+            .description = "Selectors invalid."_string,
+        });
         return {};
     }
 
-    if (maybe_selectors.value().is_empty()) {
+    if (maybe_selectors->is_empty()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "style"_fly_string,
             .prelude = prelude_stream.dump_string(),

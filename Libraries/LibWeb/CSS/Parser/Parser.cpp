@@ -277,13 +277,19 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
         for (auto const& item : first_token.function().value)
             builder.append(item.to_string());
         transaction.commit();
-        TokenStream selector_tokens { first_token.function().value };
-        auto maybe_selector = parse_complex_selector(selector_tokens, SelectorType::Standalone);
+        auto maybe_selector_list = RustComponentValueParser::parse_a_selector_list(
+            builder.string_view(),
+            "utf-8"sv,
+            RustComponentValueParser::SelectorType::Standalone,
+            RustComponentValueParser::SelectorParsingMode::Normal,
+            m_declared_namespaces);
         // A CSS processor is considered to support a CSS selector if it accepts that all aspects of that selector,
         // recursively, (rather than considering any of its syntax to be unknown or invalid) and that selector doesn’t
         // contain unknown -webkit- pseudo-elements.
         // https://drafts.csswg.org/css-conditional-4/#dfn-support-selector
-        bool matches = !maybe_selector.is_error() && !maybe_selector.value()->contains_unknown_webkit_pseudo_element();
+        bool matches = maybe_selector_list.has_value()
+            && maybe_selector_list->size() == 1
+            && !maybe_selector_list->first()->contains_unknown_webkit_pseudo_element();
         return Supports::Selector::create(builder.to_string_without_validation(), matches);
     }
     case FFI::CssSupportsFeatureKind::FontTech: {

@@ -192,16 +192,8 @@ private:
 
     Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
 
-    enum class SelectorType {
-        Standalone,
-        Relative
-    };
-    ParseErrorOr<SelectorList> parse_a_selector_list(TokenStream<ComponentValue>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
-
     Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list_from_string(StringView, StringView encoding);
     RefPtr<Supports> parse_a_supports_from_string(StringView, StringView encoding);
-
-    Optional<Selector::SimpleSelector::ANPlusBPattern> parse_a_n_plus_b_pattern(TokenStream<ComponentValue>&);
 
     enum class Nested {
         No,
@@ -504,19 +496,6 @@ private:
 
     RefPtr<CalculationNode const> convert_to_calculation_node(CalcParsing::Node const&, CalculationContext const&);
     RefPtr<CalculationNode const> parse_a_calculation(TokenStream<ComponentValue>&, CalculationContext const&);
-
-    ParseErrorOr<NonnullRefPtr<Selector>> parse_complex_selector(TokenStream<ComponentValue>&, SelectorType);
-    ParseErrorOr<Selector::CompoundSelector> parse_compound_selector(TokenStream<ComponentValue>&);
-    Optional<Selector::Combinator> parse_selector_combinator(TokenStream<ComponentValue>&);
-    enum class AllowWildcardName {
-        No,
-        Yes,
-    };
-    Optional<Selector::SimpleSelector::QualifiedName> parse_selector_qualified_name(TokenStream<ComponentValue>&, AllowWildcardName);
-    ParseErrorOr<Selector::SimpleSelector> parse_attribute_simple_selector(ComponentValue const&);
-    ParseErrorOr<Selector::SimpleSelector> parse_pseudo_class_simple_selector(TokenStream<ComponentValue>&);
-    ParseErrorOr<Selector::SimpleSelector> parse_pseudo_element_simple_selector(TokenStream<ComponentValue>&);
-    ParseErrorOr<Optional<Selector::SimpleSelector>> parse_simple_selector(TokenStream<ComponentValue>&);
 
     static String serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const>);
 
