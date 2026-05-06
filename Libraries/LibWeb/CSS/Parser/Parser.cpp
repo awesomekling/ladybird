@@ -1915,7 +1915,10 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
         // 5. Parse the remaining component values in unparsed size as a <media-condition>.
         //    If it does not parse correctly, or it does parse correctly but the <media-condition> evaluates to false, continue.
-        auto media_condition = materialize_rust_media_condition(unparsed_size);
+        auto serialized_media_condition = serialize_component_values_for_reparsing(unparsed_size);
+        auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
+            return materialize_rust_media_feature_test(move(media_feature_test));
+        });
         if (!media_condition)
             continue;
 

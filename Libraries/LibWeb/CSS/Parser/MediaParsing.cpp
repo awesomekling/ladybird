@@ -230,26 +230,6 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
     return nullptr;
 }
 
-OwnPtr<BooleanExpression> Parser::materialize_rust_media_condition(Vector<ComponentValue> const& component_values)
-{
-    auto serialized_media_condition = serialize_component_values_for_reparsing(component_values);
-
-    auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
-        return materialize_rust_media_feature_test(move(media_feature_test));
-    });
-
-    return media_condition;
-}
-
-OwnPtr<BooleanExpression> Parser::materialize_rust_media_test(Vector<ComponentValue> const& component_values)
-{
-    auto serialized_media_test = serialize_component_values_for_reparsing(component_values);
-
-    return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
-        return materialize_rust_media_feature_test(move(media_feature_test));
-    });
-}
-
 template<typename NestedDeclarationsRule>
 GC::Ptr<CSSMediaRule> Parser::convert_to_media_rule(AtRule const& rule, Nested nested)
 {

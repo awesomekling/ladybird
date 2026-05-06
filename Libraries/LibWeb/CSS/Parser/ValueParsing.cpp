@@ -4813,7 +4813,10 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
 
             // media( <media-feature> | <media-condition> )
             if (function.name.equals_ignoring_ascii_case("media"sv)) {
-                return materialize_rust_media_test(function.value);
+                auto serialized_media_test = serialize_component_values_for_reparsing(function.value);
+                return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
+                    return materialize_rust_media_feature_test(move(media_feature_test));
+                });
             }
 
             // FIXME: Support style()
