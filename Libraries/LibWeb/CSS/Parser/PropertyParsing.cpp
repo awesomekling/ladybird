@@ -62,6 +62,7 @@
 #include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
+#include <LibWeb/CSS/StyleValues/TupleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/CSS/ValueType.h>
@@ -2800,6 +2801,16 @@ RefPtr<StyleValue const> Parser::parse_font_variant(TokenStream<ComponentValue>&
     //   [ text | emoji | unicode ]
     // ]
 
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_font_variant = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto rust_font_variant = RustComponentValueParser::parse_a_font_variant(serialized_font_variant.bytes_as_string_view(), "utf-8"sv);
+    if (!rust_font_variant.has_value())
+        return nullptr;
+
     RefPtr<StyleValue const> alternates_value {};
     RefPtr<StyleValue const> caps_value {};
     RefPtr<StyleValue const> emoji_value {};
@@ -2808,87 +2819,144 @@ RefPtr<StyleValue const> Parser::parse_font_variant(TokenStream<ComponentValue>&
     RefPtr<StyleValue const> ligatures_value {};
     RefPtr<StyleValue const> numeric_value {};
 
-    if (auto parsed_value = parse_all_as_single_keyword_value(tokens, Keyword::Normal)) {
-        // normal, do nothing
-    } else if (auto parsed_value = parse_all_as_single_keyword_value(tokens, Keyword::None)) {
-        // none
-        ligatures_value = parsed_value;
-    } else {
+    auto keyword_style_value_from_string = [](FlyString const& value) -> RefPtr<StyleValue const> {
+        auto maybe_keyword = keyword_from_string(value);
+        if (!maybe_keyword.has_value())
+            return nullptr;
+        return KeywordStyleValue::create(*maybe_keyword);
+    };
 
-        while (tokens.has_next_token()) {
-            // [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]
-            if (auto maybe_ligature_value = parse_font_variant_ligatures_value(tokens)) {
-                if (ligatures_value)
-                    return nullptr;
-                ligatures_value = maybe_ligature_value.release_nonnull();
+    if (rust_font_variant->alternates.has_value()) {
+        StyleValueVector values;
+        for (auto const& value : *rust_font_variant->alternates) {
+            if (value.kind == FFI::CssFontVariantAlternatesValueKind::HistoricalForms) {
+                values.append(KeywordStyleValue::create(Keyword::HistoricalForms));
                 continue;
             }
 
-            // [ stylistic(<feature-value-name>) || historical-forms || styleset(<feature-value-name>#) || character-variant(<feature-value-name>#) || swash(<feature-value-name>) || ornaments(<feature-value-name>) || annotation(<feature-value-name>) ]
-            if (auto maybe_alternates_value = parse_font_variant_alternates_value(tokens)) {
-                if (alternates_value)
-                    return nullptr;
-                alternates_value = maybe_alternates_value.release_nonnull();
-                continue;
-            }
+            StyleValueVector feature_value_names;
+            feature_value_names.ensure_capacity(value.feature_value_names.size());
+            for (auto const& feature_value_name : value.feature_value_names)
+                feature_value_names.append(CustomIdentStyleValue::create(feature_value_name));
 
-            // [ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero ]
-            if (auto maybe_numeric_value = parse_font_variant_numeric_value(tokens)) {
-                if (numeric_value)
-                    return nullptr;
-                numeric_value = maybe_numeric_value.release_nonnull();
-                continue;
-            }
-
-            // [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
-            if (auto maybe_east_asian_value = parse_font_variant_east_asian_value(tokens)) {
-                if (east_asian_value)
-                    return nullptr;
-                east_asian_value = maybe_east_asian_value.release_nonnull();
-                continue;
-            }
-
-            auto maybe_value = parse_keyword_value(tokens);
-            if (!maybe_value)
+            FlyString function_name;
+            switch (value.kind) {
+            case FFI::CssFontVariantAlternatesValueKind::Stylistic:
+                function_name = "stylistic"_fly_string;
                 break;
-            auto value = maybe_value.release_nonnull();
-            if (!value->is_keyword())
+            case FFI::CssFontVariantAlternatesValueKind::Styleset:
+                function_name = "styleset"_fly_string;
+                break;
+            case FFI::CssFontVariantAlternatesValueKind::CharacterVariant:
+                function_name = "character-variant"_fly_string;
+                break;
+            case FFI::CssFontVariantAlternatesValueKind::Swash:
+                function_name = "swash"_fly_string;
+                break;
+            case FFI::CssFontVariantAlternatesValueKind::Ornaments:
+                function_name = "ornaments"_fly_string;
+                break;
+            case FFI::CssFontVariantAlternatesValueKind::Annotation:
+                function_name = "annotation"_fly_string;
+                break;
+            case FFI::CssFontVariantAlternatesValueKind::HistoricalForms:
+                VERIFY_NOT_REACHED();
+            }
+
+            values.append(FunctionStyleValue::create(move(function_name), StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma)));
+        }
+        alternates_value = StyleValueList::create(move(values), StyleValueList::Separator::Space);
+    }
+
+    if (rust_font_variant->caps.has_value())
+        caps_value = keyword_style_value_from_string(*rust_font_variant->caps);
+    if (rust_font_variant->emoji.has_value())
+        emoji_value = keyword_style_value_from_string(*rust_font_variant->emoji);
+    if (rust_font_variant->position.has_value())
+        position_value = keyword_style_value_from_string(*rust_font_variant->position);
+    if (rust_font_variant->ligatures_none)
+        ligatures_value = KeywordStyleValue::create(Keyword::None);
+
+    if (rust_font_variant->east_asian.has_value()) {
+        StyleValueTuple tuple;
+        tuple.resize_with_default_value(3, nullptr);
+
+        for (auto const& value : *rust_font_variant->east_asian) {
+            auto style_value = keyword_style_value_from_string(value.value);
+            if (!style_value)
                 return nullptr;
-
-            auto keyword = value->to_keyword();
-
-            switch (keyword) {
-            // [ small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps ]
-            case Keyword::SmallCaps:
-            case Keyword::AllSmallCaps:
-            case Keyword::PetiteCaps:
-            case Keyword::AllPetiteCaps:
-            case Keyword::Unicase:
-            case Keyword::TitlingCaps:
-                if (caps_value != nullptr)
-                    return nullptr;
-                caps_value = value.ptr();
+            switch (value.kind) {
+            case FFI::CssFontVariantEastAsianValueKind::Variant:
+                tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant] = style_value;
                 break;
-            // text | emoji | unicode
-            case Keyword::Text:
-            case Keyword::Emoji:
-            case Keyword::Unicode:
-                if (emoji_value != nullptr)
-                    return nullptr;
-                emoji_value = value.ptr();
+            case FFI::CssFontVariantEastAsianValueKind::Width:
+                tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width] = style_value;
                 break;
-            // sub | super
-            case Keyword::Sub:
-            case Keyword::Super:
-                if (position_value != nullptr)
-                    return nullptr;
-                position_value = value.ptr();
+            case FFI::CssFontVariantEastAsianValueKind::Ruby:
+                tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby] = style_value;
                 break;
-            default:
-                return nullptr;
             }
         }
+        east_asian_value = TupleStyleValue::create(tuple);
     }
+
+    if (rust_font_variant->ligatures.has_value()) {
+        StyleValueTuple tuple;
+        tuple.resize_with_default_value(4, nullptr);
+
+        for (auto const& value : *rust_font_variant->ligatures) {
+            auto style_value = keyword_style_value_from_string(value.value);
+            if (!style_value)
+                return nullptr;
+            switch (value.kind) {
+            case FFI::CssFontVariantLigaturesValueKind::Common:
+                tuple[TupleStyleValue::Indices::FontVariantLigatures::Common] = style_value;
+                break;
+            case FFI::CssFontVariantLigaturesValueKind::Discretionary:
+                tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary] = style_value;
+                break;
+            case FFI::CssFontVariantLigaturesValueKind::Historical:
+                tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical] = style_value;
+                break;
+            case FFI::CssFontVariantLigaturesValueKind::Contextual:
+                tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual] = style_value;
+                break;
+            }
+        }
+        ligatures_value = TupleStyleValue::create(tuple);
+    }
+
+    if (rust_font_variant->numeric.has_value()) {
+        StyleValueTuple tuple;
+        tuple.resize_with_default_value(5, nullptr);
+
+        for (auto const& value : *rust_font_variant->numeric) {
+            auto style_value = keyword_style_value_from_string(value.value);
+            if (!style_value)
+                return nullptr;
+            switch (value.kind) {
+            case FFI::CssFontVariantNumericValueKind::Figure:
+                tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure] = style_value;
+                break;
+            case FFI::CssFontVariantNumericValueKind::Spacing:
+                tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing] = style_value;
+                break;
+            case FFI::CssFontVariantNumericValueKind::Fraction:
+                tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction] = style_value;
+                break;
+            case FFI::CssFontVariantNumericValueKind::Ordinal:
+                tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal] = style_value;
+                break;
+            case FFI::CssFontVariantNumericValueKind::SlashedZero:
+                tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero] = style_value;
+                break;
+            }
+        }
+        numeric_value = TupleStyleValue::create(tuple);
+    }
+
+    if ((rust_font_variant->caps.has_value() && !caps_value) || (rust_font_variant->emoji.has_value() && !emoji_value) || (rust_font_variant->position.has_value() && !position_value))
+        return nullptr;
 
     auto normal_value = KeywordStyleValue::create(Keyword::Normal);
     if (!alternates_value)
@@ -2906,6 +2974,7 @@ RefPtr<StyleValue const> Parser::parse_font_variant(TokenStream<ComponentValue>&
     if (!numeric_value)
         numeric_value = normal_value;
 
+    transaction.commit();
     return ShorthandStyleValue::create(PropertyID::FontVariant,
         { PropertyID::FontVariantAlternates,
             PropertyID::FontVariantCaps,

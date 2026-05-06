@@ -26,12 +26,12 @@ pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontFamilyValueKind,
     CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-    CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind,
-    CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext,
-    CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
-    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
-    CssValueTypeSyntaxKind,
+    CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
+    CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
+    CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+    CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -152,6 +152,79 @@ pub unsafe extern "C" fn rust_css_parse_font_variant_alternates(
                 },
                 |feature_value_name| {
                     feature_value_name_callback(ctx, feature_value_name.as_ptr(), feature_value_name.len());
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_variant(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    simple_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantSimpleValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+    alternates_value_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssFontVariantAlternatesValueKind),
+    alternates_feature_value_name_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+    east_asian_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantEastAsianValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+    numeric_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantNumericValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+    ligatures_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantLigaturesValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_variant(
+                input,
+                |kind, value| {
+                    let (value_ptr, value_len) =
+                        value.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+                    simple_value_callback(ctx, kind, value_ptr, value_len);
+                },
+                |kind| {
+                    alternates_value_callback(ctx, kind);
+                },
+                |feature_value_name| {
+                    alternates_feature_value_name_callback(ctx, feature_value_name.as_ptr(), feature_value_name.len());
+                },
+                |value| {
+                    east_asian_value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
+                },
+                |value| {
+                    numeric_value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
+                },
+                |value| {
+                    ligatures_value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
                 },
             )
         })

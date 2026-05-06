@@ -1569,6 +1569,81 @@ Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> RustCompo
     return values;
 }
 
+Optional<RustComponentValueParser::FontVariant> RustComponentValueParser::parse_a_font_variant(StringView input, StringView encoding)
+{
+    FontVariant font_variant;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_variant(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &font_variant,
+        [](void* raw_font_variant, FFI::CssFontVariantSimpleValueKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            switch (kind) {
+            case FFI::CssFontVariantSimpleValueKind::LigaturesNone:
+                font_variant.ligatures_none = true;
+                break;
+            case FFI::CssFontVariantSimpleValueKind::Caps:
+                font_variant.caps = fly_string_from_ffi_bytes(value_ptr, value_len);
+                break;
+            case FFI::CssFontVariantSimpleValueKind::Emoji:
+                font_variant.emoji = fly_string_from_ffi_bytes(value_ptr, value_len);
+                break;
+            case FFI::CssFontVariantSimpleValueKind::Position:
+                font_variant.position = fly_string_from_ffi_bytes(value_ptr, value_len);
+                break;
+            }
+        },
+        [](void* raw_font_variant, FFI::CssFontVariantAlternatesValueKind kind) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            if (!font_variant.alternates.has_value())
+                font_variant.alternates = Vector<FontVariantAlternatesValue> {};
+            font_variant.alternates->append({
+                .kind = kind,
+            });
+        },
+        [](void* raw_font_variant, u8 const* value_ptr, size_t value_len) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            VERIFY(font_variant.alternates.has_value());
+            VERIFY(!font_variant.alternates->is_empty());
+            font_variant.alternates->last().feature_value_names.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+        },
+        [](void* raw_font_variant, FFI::CssFontVariantEastAsianValueKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            if (!font_variant.east_asian.has_value())
+                font_variant.east_asian = Vector<FontVariantEastAsianValue> {};
+            font_variant.east_asian->append({
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+            });
+        },
+        [](void* raw_font_variant, FFI::CssFontVariantNumericValueKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            if (!font_variant.numeric.has_value())
+                font_variant.numeric = Vector<FontVariantNumericValue> {};
+            font_variant.numeric->append({
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+            });
+        },
+        [](void* raw_font_variant, FFI::CssFontVariantLigaturesValueKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
+            if (!font_variant.ligatures.has_value())
+                font_variant.ligatures = Vector<FontVariantLigaturesValue> {};
+            font_variant.ligatures->append({
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+            });
+        });
+
+    if (!parsed)
+        return {};
+
+    return font_variant;
+}
+
 Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> RustComponentValueParser::parse_a_font_variant_east_asian(StringView input, StringView encoding)
 {
     Vector<FontVariantEastAsianValue> values;
