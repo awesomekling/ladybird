@@ -1214,6 +1214,27 @@ pub unsafe extern "C" fn rust_css_parse_view_timeline_inset(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_view_timeline_inset_prefix(
+    input: *const u8,
+    input_len: usize,
+) -> CssViewTimelineInsetValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssViewTimelineInsetValue {
+                    kind: CssViewTimelineInsetValueKind::Invalid,
+                    count: 0,
+                };
+            };
+
+            css_parser::parse_view_timeline_inset_value_prefix(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_view_function(input: *const u8, input_len: usize) -> CssViewFunctionValue {
     unsafe {
         abort_on_panic(|| {

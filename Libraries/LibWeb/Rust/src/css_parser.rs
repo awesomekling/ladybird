@@ -3346,6 +3346,28 @@ pub(crate) fn parse_view_timeline_inset_value(filtered_input: &[u8]) -> CssViewT
     }
 }
 
+pub(crate) fn parse_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> CssViewTimelineInsetValue {
+    let invalid = CssViewTimelineInsetValue {
+        kind: CssViewTimelineInsetValueKind::Invalid,
+        count: 0,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+    // [ [ auto | <length-percentage> ]{1,2} ]
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(inset) = parse_view_timeline_inset_prefix(&mut parser) else {
+        return invalid;
+    };
+
+    CssViewTimelineInsetValue {
+        kind: CssViewTimelineInsetValueKind::Valid,
+        count: inset.count,
+    }
+}
+
 pub(crate) fn parse_view_function_value(filtered_input: &[u8]) -> CssViewFunctionValue {
     let invalid = CssViewFunctionValue {
         kind: CssViewFunctionValueKind::Invalid,
@@ -12126,8 +12148,8 @@ mod tests {
         parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
         parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
         parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -12695,6 +12717,10 @@ mod tests {
 
     fn parse_view_timeline_inset(input: &str) -> CssViewTimelineInsetValue {
         parse_view_timeline_inset_value(input.as_bytes())
+    }
+
+    fn parse_view_timeline_inset_prefix(input: &str) -> CssViewTimelineInsetValue {
+        parse_view_timeline_inset_value_prefix(input.as_bytes())
     }
 
     fn parse_view_function(input: &str) -> CssViewFunctionValue {
@@ -15518,6 +15544,17 @@ mod tests {
         );
         assert_eq!(
             parse_view_timeline_inset("1px, 2px").kind,
+            CssViewTimelineInsetValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_view_timeline_inset_value_prefixes() {
+        assert_eq!(parse_view_timeline_inset_prefix("auto inline").count, 1);
+        assert_eq!(parse_view_timeline_inset_prefix("1px y").count, 1);
+        assert_eq!(parse_view_timeline_inset_prefix("1px auto y").count, 2);
+        assert_eq!(
+            parse_view_timeline_inset_prefix("block").kind,
             CssViewTimelineInsetValueKind::Invalid
         );
     }

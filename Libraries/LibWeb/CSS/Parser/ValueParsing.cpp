@@ -875,9 +875,14 @@ RefPtr<StyleValue const> Parser::parse_view_timeline_inset_value(TokenStream<Com
     // [ [ auto | <length-percentage> ]{1,2} ]
     auto transaction = tokens.begin_transaction();
 
+    auto serialized_view_timeline_inset = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto view_timeline_inset = RustComponentValueParser::parse_view_timeline_inset_prefix(serialized_view_timeline_inset.bytes_as_string_view(), "utf-8"sv);
+    if (view_timeline_inset.kind == FFI::CssViewTimelineInsetValueKind::Invalid)
+        return nullptr;
+
     StyleValueVector inset_values;
 
-    while (tokens.has_next_token() && inset_values.size() < 2) {
+    while (inset_values.size() < view_timeline_inset.count) {
         tokens.discard_whitespace();
 
         if (tokens.next_token().is_ident("auto"sv)) {
@@ -891,11 +896,8 @@ RefPtr<StyleValue const> Parser::parse_view_timeline_inset_value(TokenStream<Com
             continue;
         }
 
-        break;
-    }
-
-    if (inset_values.is_empty())
         return nullptr;
+    }
 
     transaction.commit();
 

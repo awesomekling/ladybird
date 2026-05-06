@@ -363,6 +363,7 @@ public:
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
+    static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
     static ViewFunction parse_view_function(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
