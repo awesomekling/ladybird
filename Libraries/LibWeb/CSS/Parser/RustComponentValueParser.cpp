@@ -300,6 +300,11 @@ Optional<RustComponentValueParser::PropertyKeyword> RustComponentValueParser::pa
     return property_keyword;
 }
 
+bool RustComponentValueParser::property_accepts_keyword(PropertyID property_id, Keyword keyword)
+{
+    return parse_property_keyword_value({ &property_id, 1 }, string_from_keyword(keyword)).has_value();
+}
+
 Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

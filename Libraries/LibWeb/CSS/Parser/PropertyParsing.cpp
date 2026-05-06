@@ -3621,7 +3621,7 @@ RefPtr<StyleValue const> Parser::parse_place_content_value(TokenStream<Component
         return nullptr;
 
     if (!tokens.has_next_token()) {
-        if (!property_accepts_keyword(PropertyID::JustifyContent, maybe_align_content_value->to_keyword()))
+        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifyContent, maybe_align_content_value->to_keyword()))
             return nullptr;
         transaction.commit();
         return ShorthandStyleValue::create(PropertyID::PlaceContent,
@@ -3646,7 +3646,7 @@ RefPtr<StyleValue const> Parser::parse_place_items_value(TokenStream<ComponentVa
         return nullptr;
 
     if (!tokens.has_next_token()) {
-        if (!property_accepts_keyword(PropertyID::JustifyItems, maybe_align_items_value->to_keyword()))
+        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifyItems, maybe_align_items_value->to_keyword()))
             return nullptr;
         transaction.commit();
         return ShorthandStyleValue::create(PropertyID::PlaceItems,
@@ -3671,7 +3671,7 @@ RefPtr<StyleValue const> Parser::parse_place_self_value(TokenStream<ComponentVal
         return nullptr;
 
     if (!tokens.has_next_token()) {
-        if (!property_accepts_keyword(PropertyID::JustifySelf, maybe_align_self_value->to_keyword()))
+        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifySelf, maybe_align_self_value->to_keyword()))
             return nullptr;
         transaction.commit();
         return ShorthandStyleValue::create(PropertyID::PlaceSelf,
@@ -5962,7 +5962,7 @@ RefPtr<StyleValue const> Parser::parse_white_space_shorthand(TokenStream<Compone
 
             auto keyword = keyword_from_string(peek_token.token().ident());
 
-            if (!keyword.has_value() || !property_accepts_keyword(PropertyID::WhiteSpaceTrim, keyword.value())) {
+            if (!keyword.has_value() || !RustComponentValueParser::property_accepts_keyword(PropertyID::WhiteSpaceTrim, keyword.value())) {
                 break;
             }
 
