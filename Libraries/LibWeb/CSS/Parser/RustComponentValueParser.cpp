@@ -1541,6 +1541,34 @@ Optional<RustComponentValueParser::FontStyle> RustComponentValueParser::parse_a_
     return font_style;
 }
 
+Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> RustComponentValueParser::parse_a_font_variant_alternates(StringView input, StringView encoding)
+{
+    Vector<FontVariantAlternatesValue> values;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_variant_alternates(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &values,
+        [](void* raw_values, FFI::CssFontVariantAlternatesValueKind kind) {
+            auto& values = *static_cast<Vector<FontVariantAlternatesValue>*>(raw_values);
+            values.append({
+                .kind = kind,
+            });
+        },
+        [](void* raw_values, u8 const* value_ptr, size_t value_len) {
+            auto& values = *static_cast<Vector<FontVariantAlternatesValue>*>(raw_values);
+            VERIFY(!values.is_empty());
+            values.last().feature_value_names.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+        });
+
+    if (!parsed)
+        return {};
+
+    return values;
+}
+
 Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> RustComponentValueParser::parse_a_font_variant_east_asian(StringView input, StringView encoding)
 {
     Vector<FontVariantEastAsianValue> values;

@@ -84,6 +84,11 @@ public:
         bool has_angle { false };
     };
 
+    struct FontVariantAlternatesValue {
+        FFI::CssFontVariantAlternatesValueKind kind;
+        Vector<FlyString> feature_value_names;
+    };
+
     struct FontVariantEastAsianValue {
         FFI::CssFontVariantEastAsianValueKind kind;
         FlyString value;
@@ -145,6 +150,7 @@ public:
     static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
+    static Optional<Vector<FontVariantAlternatesValue>> parse_a_font_variant_alternates(StringView input, StringView encoding);
     static Optional<Vector<FontVariantEastAsianValue>> parse_a_font_variant_east_asian(StringView input, StringView encoding);
     static Optional<Vector<FontVariantNumericValue>> parse_a_font_variant_numeric(StringView input, StringView encoding);
     static Optional<Vector<FontVariantLigaturesValue>> parse_a_font_variant_ligatures(StringView input, StringView encoding);

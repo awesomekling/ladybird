@@ -167,6 +167,12 @@ pub(crate) enum FontStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FontVariantAlternatesValue {
+    pub(crate) kind: CssFontVariantAlternatesValueKind,
+    pub(crate) feature_value_names: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FontVariantEastAsianValue {
     pub(crate) kind: CssFontVariantEastAsianValueKind,
     pub(crate) value: String,
@@ -503,6 +509,18 @@ pub enum CssFontStyleKind {
     Left,
     Right,
     Oblique,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontVariantAlternatesValueKind {
+    Stylistic,
+    HistoricalForms,
+    Styleset,
+    CharacterVariant,
+    Swash,
+    Ornaments,
+    Annotation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1276,6 +1294,36 @@ where
 
     for value in &values {
         value_callback(value);
+    }
+    true
+}
+
+pub(crate) fn parse_a_font_variant_alternates<V, N>(
+    filtered_input: &[u8],
+    mut value_callback: V,
+    mut feature_value_name_callback: N,
+) -> bool
+where
+    V: FnMut(CssFontVariantAlternatesValueKind),
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(values) = parser.parse_a_font_variant_alternates() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    for value in values {
+        value_callback(value.kind);
+        for feature_value_name in &value.feature_value_names {
+            feature_value_name_callback(feature_value_name);
+        }
     }
     true
 }
@@ -2264,6 +2312,15 @@ where
     }
 
     groups.into_iter().map(&mut parse_group).collect()
+}
+
+fn parse_font_variant_alternates_feature_value_names(component_values: Vec<ComponentValue>) -> Option<Vec<String>> {
+    let groups = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+        parser.parse_a_custom_ident(&[])
+    })?;
+
+    (!groups.is_empty()).then_some(groups)
 }
 
 // https://drafts.csswg.org/css-fonts/#typedef-opentype-tag
@@ -3649,6 +3706,110 @@ impl ComponentValueParser {
         }
 
         None
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#propdef-font-variant-alternates
+    fn parse_a_font_variant_alternates(&mut self) -> Option<Vec<FontVariantAlternatesValue>> {
+        // [ stylistic(<feature-value-name>) || historical-forms || styleset(<feature-value-name>#) || character-variant(<feature-value-name>#) || swash(<feature-value-name>) || ornaments(<feature-value-name>) || annotation(<feature-value-name>) ]
+        // <feature-value-name> = <ident>
+        let mut stylistic = None;
+        let mut historical_forms = None;
+        let mut styleset = None;
+        let mut character_variant = None;
+        let mut swash = None;
+        let mut ornaments = None;
+        let mut annotation = None;
+
+        loop {
+            self.discard_whitespace();
+
+            if self.consume_ident_matching("historical-forms") {
+                if historical_forms.is_some() {
+                    return None;
+                }
+                historical_forms = Some(FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::HistoricalForms,
+                    feature_value_names: Vec::new(),
+                });
+                continue;
+            }
+
+            let Some(ComponentValue::Function(function)) = self.next_component_value() else {
+                break;
+            };
+
+            let kind = if function.name.eq_ignore_ascii_case("stylistic") {
+                if stylistic.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::Stylistic
+            } else if function.name.eq_ignore_ascii_case("styleset") {
+                if styleset.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::Styleset
+            } else if function.name.eq_ignore_ascii_case("character-variant") {
+                if character_variant.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::CharacterVariant
+            } else if function.name.eq_ignore_ascii_case("swash") {
+                if swash.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::Swash
+            } else if function.name.eq_ignore_ascii_case("ornaments") {
+                if ornaments.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::Ornaments
+            } else if function.name.eq_ignore_ascii_case("annotation") {
+                if annotation.is_some() {
+                    return None;
+                }
+                CssFontVariantAlternatesValueKind::Annotation
+            } else {
+                break;
+            };
+
+            let feature_value_names = parse_font_variant_alternates_feature_value_names(function.value.clone())?;
+            if !matches!(
+                kind,
+                CssFontVariantAlternatesValueKind::Styleset | CssFontVariantAlternatesValueKind::CharacterVariant
+            ) && feature_value_names.len() != 1
+            {
+                return None;
+            }
+
+            self.index += 1;
+            let value = FontVariantAlternatesValue {
+                kind,
+                feature_value_names,
+            };
+            match kind {
+                CssFontVariantAlternatesValueKind::Stylistic => stylistic = Some(value),
+                CssFontVariantAlternatesValueKind::Styleset => styleset = Some(value),
+                CssFontVariantAlternatesValueKind::CharacterVariant => character_variant = Some(value),
+                CssFontVariantAlternatesValueKind::Swash => swash = Some(value),
+                CssFontVariantAlternatesValueKind::Ornaments => ornaments = Some(value),
+                CssFontVariantAlternatesValueKind::Annotation => annotation = Some(value),
+                CssFontVariantAlternatesValueKind::HistoricalForms => unreachable!(),
+            }
+        }
+
+        let values = [
+            stylistic,
+            historical_forms,
+            styleset,
+            character_variant,
+            swash,
+            ornaments,
+            annotation,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        (!values.is_empty()).then_some(values)
     }
 
     // https://drafts.csswg.org/css-fonts-4/#propdef-font-variant-east-asian
@@ -6465,9 +6626,10 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
+        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+        CssFontVariantNumericValueKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
+        CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle, FontVariantAlternatesValue,
         FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
         MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
         OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
@@ -6476,12 +6638,13 @@ mod tests {
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
         parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
         parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
-        parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
-        parse_a_value_type, parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_a_font_variant_alternates, parse_a_font_variant_east_asian, parse_a_font_variant_ligatures,
+        parse_a_font_variant_numeric, parse_a_font_variation_settings, parse_a_keyframe_selector_list,
+        parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
+        parse_a_namespace_rule_prelude, parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list,
+        parse_a_url_function, parse_a_value_type, parse_an_if_condition, parse_an_opentype_tag,
+        parse_container_rule_prelude, parse_empty_prelude, parse_font_feature_values_family_name_list,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -6726,6 +6889,28 @@ mod tests {
             font_style = Some(parsed_font_style);
         });
         parsed.then_some(font_style).flatten()
+    }
+
+    fn parse_font_variant_alternates(input: &str) -> Option<Vec<FontVariantAlternatesValue>> {
+        let values = std::cell::RefCell::new(Vec::new());
+        let parsed = parse_a_font_variant_alternates(
+            input.as_bytes(),
+            |kind| {
+                values.borrow_mut().push(FontVariantAlternatesValue {
+                    kind,
+                    feature_value_names: Vec::new(),
+                });
+            },
+            |feature_value_name| {
+                values
+                    .borrow_mut()
+                    .last_mut()
+                    .expect("feature value name callback must follow a value callback")
+                    .feature_value_names
+                    .push(feature_value_name.to_string());
+            },
+        );
+        parsed.then(|| values.into_inner())
     }
 
     fn parse_font_variant_east_asian(input: &str) -> Option<Vec<FontVariantEastAsianValue>> {
@@ -7812,6 +7997,84 @@ mod tests {
         assert_eq!(parse_font_style("normal italic"), None);
         assert_eq!(parse_font_style("italic 10deg"), None);
         assert_eq!(parse_font_style("oblique 10px"), None);
+    }
+
+    #[test]
+    fn parses_font_variant_alternates_values() {
+        assert_eq!(
+            parse_font_variant_alternates("stylistic(foo) historical-forms styleset(bar, baz) character-variant(qux)"),
+            Some(vec![
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Stylistic,
+                    feature_value_names: vec!["foo".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::HistoricalForms,
+                    feature_value_names: vec![]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Styleset,
+                    feature_value_names: vec!["bar".to_string(), "baz".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::CharacterVariant,
+                    feature_value_names: vec!["qux".to_string()]
+                },
+            ])
+        );
+        assert_eq!(
+            parse_font_variant_alternates("swash(foo) ornaments(bar) annotation(baz)"),
+            Some(vec![
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Swash,
+                    feature_value_names: vec!["foo".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Ornaments,
+                    feature_value_names: vec!["bar".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Annotation,
+                    feature_value_names: vec!["baz".to_string()]
+                },
+            ])
+        );
+        assert_eq!(
+            parse_font_variant_alternates("annotation(foo) ornaments(bar) swash(baz) historical-forms stylistic(qux)"),
+            Some(vec![
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Stylistic,
+                    feature_value_names: vec!["qux".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::HistoricalForms,
+                    feature_value_names: vec![]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Swash,
+                    feature_value_names: vec!["baz".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Ornaments,
+                    feature_value_names: vec!["bar".to_string()]
+                },
+                FontVariantAlternatesValue {
+                    kind: CssFontVariantAlternatesValueKind::Annotation,
+                    feature_value_names: vec!["foo".to_string()]
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variant_alternates_values() {
+        assert_eq!(parse_font_variant_alternates("stylistic(foo) stylistic(bar)"), None);
+        assert_eq!(parse_font_variant_alternates("historical-forms historical-forms"), None);
+        assert_eq!(parse_font_variant_alternates("stylistic(foo, bar)"), None);
+        assert_eq!(parse_font_variant_alternates("swash()"), None);
+        assert_eq!(parse_font_variant_alternates("styleset(foo,)"), None);
+        assert_eq!(parse_font_variant_alternates("normal stylistic(foo)"), None);
+        assert_eq!(parse_font_variant_alternates(""), None);
     }
 
     #[test]

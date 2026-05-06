@@ -3266,137 +3266,69 @@ RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream
     // 6.8 https://drafts.csswg.org/css-fonts/#font-variant-alternates-prop
     // [ stylistic(<feature-value-name>) || historical-forms || styleset(<feature-value-name>#) || character-variant(<feature-value-name>#) || swash(<feature-value-name>) || ornaments(<feature-value-name>) || annotation(<feature-value-name>) ]
     // <feature-value-name> = <ident>
-    RefPtr<StyleValue const> stylistic;
-    RefPtr<StyleValue const> historical_forms;
-    RefPtr<StyleValue const> styleset;
-    RefPtr<StyleValue const> character_variant;
-    RefPtr<StyleValue const> swash;
-    RefPtr<StyleValue const> ornaments;
-    RefPtr<StyleValue const> annotation;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> parsed_values;
 
     while (tokens.has_next_token()) {
+        auto component_transaction = tokens.begin_transaction();
         tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        tokens.discard_a_token();
 
-        // historical-forms
-        if (auto maybe_historical_forms = parse_specific_keyword_value(tokens, Keyword::HistoricalForms)) {
-            if (historical_forms)
-                return nullptr;
-
-            historical_forms = maybe_historical_forms;
-            continue;
-        }
-
-        if (!tokens.next_token().is_function())
+        auto serialized_font_variant_alternates = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto maybe_values = RustComponentValueParser::parse_a_font_variant_alternates(serialized_font_variant_alternates.bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_values.has_value())
             break;
 
-        auto transaction = tokens.begin_transaction();
-
-        auto function = tokens.consume_a_token().function();
-
-        auto argument_token_stream = TokenStream<ComponentValue> { function.value };
-        auto const& arguments = parse_a_comma_separated_list_of_component_values(argument_token_stream);
-
-        if (arguments.size() == 0)
-            break;
-
-        StyleValueVector feature_value_names;
-        feature_value_names.ensure_capacity(arguments.size());
-
-        for (auto const& argument_values : arguments) {
-            TokenStream<ComponentValue> argument_tokens { argument_values };
-
-            auto ident = parse_custom_ident_value(argument_tokens, {});
-
-            argument_tokens.discard_whitespace();
-
-            if (!ident || argument_tokens.has_next_token())
-                return nullptr;
-
-            feature_value_names.append(ident.release_nonnull());
-        }
-
-        // stylistic(<feature-value-name>)
-        if (function.name.equals_ignoring_ascii_case("stylistic"sv)) {
-            if (feature_value_names.size() != 1 || stylistic)
-                return nullptr;
-
-            transaction.commit();
-            stylistic = FunctionStyleValue::create("stylistic"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        // styleset(<feature-value-name>#)
-        if (function.name.equals_ignoring_ascii_case("styleset"sv)) {
-            if (styleset)
-                return nullptr;
-
-            transaction.commit();
-            styleset = FunctionStyleValue::create("styleset"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        // character-variant(<feature-value-name>#)
-        if (function.name.equals_ignoring_ascii_case("character-variant"sv)) {
-            if (character_variant)
-                return nullptr;
-
-            transaction.commit();
-            character_variant = FunctionStyleValue::create("character-variant"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        // swash(<feature-value-name>)
-        if (function.name.equals_ignoring_ascii_case("swash"sv)) {
-            if (feature_value_names.size() != 1 || swash)
-                return nullptr;
-
-            transaction.commit();
-            swash = FunctionStyleValue::create("swash"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        // ornaments(<feature-value-name>)
-        if (function.name.equals_ignoring_ascii_case("ornaments"sv)) {
-            if (feature_value_names.size() != 1 || ornaments)
-                return nullptr;
-
-            transaction.commit();
-            ornaments = FunctionStyleValue::create("ornaments"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        // annotation(<feature-value-name>)
-        if (function.name.equals_ignoring_ascii_case("annotation"sv)) {
-            if (feature_value_names.size() != 1 || annotation)
-                return nullptr;
-
-            transaction.commit();
-            annotation = FunctionStyleValue::create("annotation"_fly_string, StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma));
-            continue;
-        }
-
-        break;
+        component_transaction.commit();
+        parsed_values = maybe_values.release_value();
     }
 
-    StyleValueVector values;
-    if (stylistic)
-        values.append(stylistic.release_nonnull());
-    if (historical_forms)
-        values.append(historical_forms.release_nonnull());
-    if (styleset)
-        values.append(styleset.release_nonnull());
-    if (character_variant)
-        values.append(character_variant.release_nonnull());
-    if (swash)
-        values.append(swash.release_nonnull());
-    if (ornaments)
-        values.append(ornaments.release_nonnull());
-    if (annotation)
-        values.append(annotation.release_nonnull());
-
-    if (values.is_empty())
+    if (!parsed_values.has_value())
         return nullptr;
 
+    StyleValueVector values;
+    for (auto const& value : *parsed_values) {
+        if (value.kind == FFI::CssFontVariantAlternatesValueKind::HistoricalForms) {
+            values.append(KeywordStyleValue::create(Keyword::HistoricalForms));
+            continue;
+        }
+
+        StyleValueVector feature_value_names;
+        feature_value_names.ensure_capacity(value.feature_value_names.size());
+        for (auto const& feature_value_name : value.feature_value_names)
+            feature_value_names.append(CustomIdentStyleValue::create(feature_value_name));
+
+        FlyString function_name;
+        switch (value.kind) {
+        case FFI::CssFontVariantAlternatesValueKind::Stylistic:
+            function_name = "stylistic"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::Styleset:
+            function_name = "styleset"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::CharacterVariant:
+            function_name = "character-variant"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::Swash:
+            function_name = "swash"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::Ornaments:
+            function_name = "ornaments"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::Annotation:
+            function_name = "annotation"_fly_string;
+            break;
+        case FFI::CssFontVariantAlternatesValueKind::HistoricalForms:
+            VERIFY_NOT_REACHED();
+        }
+
+        values.append(FunctionStyleValue::create(move(function_name), StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma)));
+    }
+
+    transaction.commit();
     return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
