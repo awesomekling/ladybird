@@ -212,10 +212,6 @@ private:
     template<typename T>
     Optional<Rule> parse_a_rule(TokenStream<T>&);
 
-    // "Parse a declaration" is used in @supports conditions. [CSS3-CONDITIONAL]
-    template<typename T>
-    Optional<Declaration> parse_a_declaration(TokenStream<T>&);
-
     // "Parse a component value" is for things that need to consume a single value, like the parsing rules for attr().
     template<typename T>
     Optional<ComponentValue> parse_a_component_value(TokenStream<T>&);

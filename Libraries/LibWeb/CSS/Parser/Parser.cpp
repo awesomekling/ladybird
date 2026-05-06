@@ -1291,25 +1291,6 @@ Optional<StyleProperty> Parser::parse_as_supports_condition()
     return {};
 }
 
-// https://drafts.csswg.org/css-syntax/#parse-declaration
-template<typename T>
-Optional<Declaration> Parser::parse_a_declaration(TokenStream<T>& input)
-{
-    // To parse a declaration from input:
-
-    // 1. Normalize input, and set input to the result.
-    // Note: This is done when initializing the Parser.
-
-    // 2. Discard whitespace from input.
-    input.discard_whitespace();
-
-    // 3. Consume a declaration from input. If anything was returned, return it. Otherwise, return a syntax error.
-    if (auto declaration = consume_a_declaration(input); declaration.has_value())
-        return declaration.release_value();
-    // FIXME: Syntax error
-    return {};
-}
-
 Optional<ComponentValue> Parser::parse_as_component_value()
 {
     return RustComponentValueParser::parse_a_component_value(m_input, m_encoding);
@@ -2066,9 +2047,6 @@ template Optional<Rule> Parser::parse_a_rule(TokenStream<ComponentValue>&);
 
 template Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<Token>&);
 template Vector<RuleOrListOfDeclarations> Parser::parse_a_blocks_contents(TokenStream<ComponentValue>&);
-
-template Optional<Declaration> Parser::parse_a_declaration(TokenStream<Token>&);
-template Optional<Declaration> Parser::parse_a_declaration(TokenStream<ComponentValue>&);
 
 template Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<Token>&);
 template Optional<ComponentValue> Parser::parse_a_component_value(TokenStream<ComponentValue>&);
