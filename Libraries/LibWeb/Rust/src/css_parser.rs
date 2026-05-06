@@ -995,6 +995,13 @@ pub struct CssViewFunctionValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssRectValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -3408,6 +3415,50 @@ pub(crate) fn parse_view_function_value(filtered_input: &[u8]) -> CssViewFunctio
     invalid
 }
 
+pub(crate) fn parse_rect_value(filtered_input: &[u8]) -> CssRectValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let [ComponentValue::Function(function)] = component_values else {
+        return CssRectValueKind::Invalid;
+    };
+    if !function.name.eq_ignore_ascii_case("rect") {
+        return CssRectValueKind::Invalid;
+    }
+
+    // https://www.w3.org/TR/CSS2/visufx.html#value-def-shape
+    // In CSS 2.1, the only valid <shape> value is:
+    // rect(<top>, <right>, <bottom>, <left>)
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut requires_commas = None;
+
+    for side in 0..4 {
+        if !parse_rect_side(&mut parser) {
+            return CssRectValueKind::Invalid;
+        }
+
+        parser.discard_whitespace();
+
+        if side == 3 {
+            return if parser.has_next_component_value() {
+                CssRectValueKind::Invalid
+            } else {
+                CssRectValueKind::Valid
+            };
+        }
+
+        let next_is_comma = parser.consume_a_comma();
+        match requires_commas {
+            Some(true) if !next_is_comma => return CssRectValueKind::Invalid,
+            Some(false) if next_is_comma => return CssRectValueKind::Invalid,
+            None => requires_commas = Some(next_is_comma),
+            _ => {}
+        }
+    }
+
+    CssRectValueKind::Invalid
+}
+
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
     let mut parser = ComponentValueParser::new(component_values);
     let axis = parse_view_function_axis(&mut parser);
@@ -3450,6 +3501,25 @@ fn parse_view_function_value_with_inset_first(component_values: Vec<ComponentVal
             .map(|_| CssViewFunctionInsetPosition::BeforeAxis)
             .unwrap_or(CssViewFunctionInsetPosition::None),
     })
+}
+
+fn parse_rect_side(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+
+    if parser.consume_ident_matching("auto") {
+        return true;
+    }
+
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_length(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
 }
 
 #[derive(Clone, Copy)]
@@ -6656,6 +6726,21 @@ impl ComponentValueParser {
         let value = value.clone();
         self.index += 1;
         Some(value)
+    }
+
+    fn consume_a_comma(&mut self) -> bool {
+        if matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            }))
+        ) {
+            self.index += 1;
+            return true;
+        }
+
+        false
     }
 
     fn remaining_component_values(&self) -> &[ComponentValue] {
@@ -10552,6 +10637,27 @@ fn component_value_parse_as_length_percentage(component_value: &ComponentValue) 
     }
 }
 
+fn component_value_parse_as_length(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => {
+            is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("anchor-size")
+        }
+        _ => false,
+    }
+}
+
 fn component_value_parse_as_length_descriptor(component_value: &ComponentValue) -> bool {
     match component_value {
         ComponentValue::PreservedToken(Token {
@@ -12108,9 +12214,9 @@ mod tests {
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind,
-        CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
-        CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssPositionVisibilityValueKind, CssQuotesValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
+        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
         CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
         CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
@@ -12144,12 +12250,12 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
-        parse_quotes_value, parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_quotes_value, parse_rect_value, parse_scroll_function_value, parse_scrollbar_gutter_value,
+        parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -12725,6 +12831,10 @@ mod tests {
 
     fn parse_view_function(input: &str) -> CssViewFunctionValue {
         parse_view_function_value(input.as_bytes())
+    }
+
+    fn parse_rect(input: &str) -> CssRectValueKind {
+        parse_rect_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -15618,6 +15728,24 @@ mod tests {
             parse_view_function("view(y 1px, auto)").kind,
             CssViewFunctionValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_rect_values() {
+        assert_eq!(
+            parse_rect("rect(auto, 1px, 0, calc(2px + 3px))"),
+            CssRectValueKind::Valid
+        );
+        assert_eq!(parse_rect("rect(auto 1px 0 calc(2px + 3px))"), CssRectValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_rect_values() {
+        assert_eq!(parse_rect(""), CssRectValueKind::Invalid);
+        assert_eq!(parse_rect("rect(auto, 1px 0, 2px)"), CssRectValueKind::Invalid);
+        assert_eq!(parse_rect("rect(auto, 1px, 0)"), CssRectValueKind::Invalid);
+        assert_eq!(parse_rect("rect(auto, 1px, 0, 2px,)"), CssRectValueKind::Invalid);
+        assert_eq!(parse_rect("rect(auto, 1%, 0, 2px)"), CssRectValueKind::Invalid);
     }
 
     #[test]

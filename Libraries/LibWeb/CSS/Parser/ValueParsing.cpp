@@ -1053,27 +1053,18 @@ RefPtr<StyleValue const> Parser::parse_rect_value(TokenStream<ComponentValue>& t
     if (!function_token.is_function("rect"sv))
         return nullptr;
 
+    auto serialized_rect = function_token.original_source_text();
+    if (serialized_rect.is_empty())
+        serialized_rect = function_token.to_string();
+    if (RustComponentValueParser::parse_rect(serialized_rect.bytes_as_string_view(), "utf-8"sv) == FFI::CssRectValueKind::Invalid)
+        return nullptr;
+
     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
 
     StyleValueVector params;
     params.ensure_capacity(4);
 
     auto argument_tokens = TokenStream { function_token.function().value };
-
-    enum class CommaRequirement {
-        Unknown,
-        RequiresCommas,
-        RequiresNoCommas
-    };
-
-    enum class Side {
-        Top = 0,
-        Right = 1,
-        Bottom = 2,
-        Left = 3
-    };
-
-    auto comma_requirement = CommaRequirement::Unknown;
 
     // In CSS 2.1, the only valid <shape> value is: rect(<top>, <right>, <bottom>, <left>) where
     // <top> and <bottom> specify offsets from the top border edge of the box, and <right>, and
@@ -1095,32 +1086,8 @@ RefPtr<StyleValue const> Parser::parse_rect_value(TokenStream<ComponentValue>& t
         }
         argument_tokens.discard_whitespace();
 
-        // The last side, should be no more tokens following it.
-        if (static_cast<Side>(side) == Side::Left) {
-            if (argument_tokens.has_next_token())
-                return nullptr;
-            break;
-        }
-
-        bool next_is_comma = argument_tokens.next_token().is(Token::Type::Comma);
-
-        // Authors should separate offset values with commas. User agents must support separation
-        // with commas, but may also support separation without commas (but not a combination),
-        // because a previous revision of this specification was ambiguous in this respect.
-        if (comma_requirement == CommaRequirement::Unknown)
-            comma_requirement = next_is_comma ? CommaRequirement::RequiresCommas : CommaRequirement::RequiresNoCommas;
-
-        if (comma_requirement == CommaRequirement::RequiresCommas) {
-            if (next_is_comma)
-                argument_tokens.discard_a_token();
-            else
-                return nullptr;
-        } else if (comma_requirement == CommaRequirement::RequiresNoCommas) {
-            if (next_is_comma)
-                return nullptr;
-        } else {
-            VERIFY_NOT_REACHED();
-        }
+        if (argument_tokens.next_token().is(Token::Type::Comma))
+            argument_tokens.discard_a_token();
     }
 
     transaction.commit();

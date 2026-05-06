@@ -46,8 +46,8 @@ pub use css_parser::{
     CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-    CssPositionVisibilityValueKind, CssPseudoElementValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
+    CssPositionVisibilityValueKind, CssPseudoElementValueKind, CssQuotesValueKind, CssRectValueKind, CssRuleContext,
+    CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
     CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent,
     CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind,
     CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
@@ -1248,6 +1248,21 @@ pub unsafe extern "C" fn rust_css_parse_view_function(input: *const u8, input_le
             };
 
             css_parser::parse_view_function_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_rect(input: *const u8, input_len: usize) -> CssRectValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssRectValueKind::Invalid;
+            };
+
+            css_parser::parse_rect_value(input)
         })
     }
 }

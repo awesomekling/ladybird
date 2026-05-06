@@ -3215,6 +3215,16 @@ RustComponentValueParser::ViewFunction RustComponentValueParser::parse_view_func
     };
 }
 
+FFI::CssRectValueKind RustComponentValueParser::parse_rect(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_rect(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
