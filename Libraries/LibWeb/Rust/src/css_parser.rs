@@ -9717,6 +9717,12 @@ mod tests {
         MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
         media_feature_identifier_is_falsey,
     };
+    use crate::generated_properties::{
+        PropertyId, PropertyNumericRange, PropertyValueType, longhands_for_shorthand,
+        property_accepted_range_by_value_type, property_accepts_keyword, property_accepts_value_type,
+        property_custom_ident_blacklist, property_id_from_string, property_name,
+        property_resolves_percentages_relative_to, resolve_legacy_value_alias,
+    };
     use crate::generated_units::{DimensionType, dimension_for_unit};
     use crate::generated_value_types::ValueTypeId;
 
@@ -10384,6 +10390,80 @@ mod tests {
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
         component_values_parse_as_value_type(value_type_id, &parse(input))
+    }
+
+    #[test]
+    fn generated_property_metadata_matches_property_ids() {
+        assert_eq!(property_id_from_string("color"), Some(PropertyId::Color));
+        assert_eq!(property_id_from_string("COLOR"), Some(PropertyId::Color));
+        assert_eq!(property_id_from_string("--ladybird"), Some(PropertyId::Custom));
+        assert_eq!(
+            property_id_from_string("-webkit-animation-name"),
+            Some(PropertyId::AnimationName)
+        );
+        assert_eq!(property_name(PropertyId::TextWrap), "text-wrap");
+    }
+
+    #[test]
+    fn generated_property_metadata_knows_longhands() {
+        assert_eq!(
+            longhands_for_shorthand(PropertyId::TextWrap),
+            &[PropertyId::TextWrapMode, PropertyId::TextWrapStyle]
+        );
+        assert_eq!(
+            longhands_for_shorthand(PropertyId::Transition),
+            &[
+                PropertyId::TransitionProperty,
+                PropertyId::TransitionDuration,
+                PropertyId::TransitionTimingFunction,
+                PropertyId::TransitionDelay,
+                PropertyId::TransitionBehavior,
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_property_metadata_knows_accepted_keywords_and_types() {
+        assert!(property_accepts_keyword(PropertyId::Display, "block"));
+        assert!(property_accepts_keyword(
+            PropertyId::AnimationDirection,
+            "alternate-reverse"
+        ));
+        assert!(property_accepts_keyword(PropertyId::TextWrapMode, "nowrap"));
+        assert!(!property_accepts_keyword(
+            PropertyId::AnimationDirection,
+            "allow-discrete"
+        ));
+
+        assert!(property_accepts_value_type(PropertyId::Color, PropertyValueType::Color));
+        assert!(property_accepts_value_type(
+            PropertyId::AnimationDuration,
+            PropertyValueType::Time
+        ));
+        assert!(!property_accepts_value_type(
+            PropertyId::Color,
+            PropertyValueType::Length
+        ));
+    }
+
+    #[test]
+    fn generated_property_metadata_knows_ranges_and_aliases() {
+        assert_eq!(
+            property_accepted_range_by_value_type(PropertyId::AnimationDuration, PropertyValueType::Time),
+            Some(PropertyNumericRange {
+                minimum: Some(0.0),
+                maximum: None,
+            })
+        );
+        assert_eq!(
+            property_resolves_percentages_relative_to(PropertyId::BackgroundPositionX),
+            Some(PropertyValueType::Length)
+        );
+        assert_eq!(
+            resolve_legacy_value_alias(PropertyId::Overflow, "overlay"),
+            Some("auto")
+        );
+        assert_eq!(property_custom_ident_blacklist(PropertyId::AnimationName), &["none"]);
     }
 
     fn parse_syntax(input: &str) -> Option<SyntaxNode> {

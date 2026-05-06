@@ -12,6 +12,9 @@ mod css_tokenizer;
 mod generated_media_features {
     include!(concat!(env!("OUT_DIR"), "/generated_media_features.rs"));
 }
+mod generated_properties {
+    include!(concat!(env!("OUT_DIR"), "/generated_properties.rs"));
+}
 mod generated_units {
     include!(concat!(env!("OUT_DIR"), "/generated_units.rs"));
 }

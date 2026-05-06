@@ -18,12 +18,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|libraries_dir| libraries_dir.parent())
         .expect("LibWeb must live under Libraries");
     let media_features_json = libweb_dir.join("CSS").join("MediaFeatures.json");
+    let properties_json = libweb_dir.join("CSS").join("Properties.json");
+    let enums_json = libweb_dir.join("CSS").join("Enums.json");
+    let logical_property_groups_json = libweb_dir.join("CSS").join("LogicalPropertyGroups.json");
     let units_json = libweb_dir.join("CSS").join("Units.json");
     let value_types_json = libweb_dir.join("CSS").join("ValueTypes.json");
     let media_features_generator = repository_root
         .join("Meta")
         .join("Generators")
         .join("generate_libweb_css_media_features_rust.py");
+    let properties_generator = repository_root
+        .join("Meta")
+        .join("Generators")
+        .join("generate_libweb_css_properties_rust.py");
     let units_generator = repository_root
         .join("Meta")
         .join("Generators")
@@ -33,6 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .join("Generators")
         .join("generate_libweb_css_value_types_rust.py");
     let generated_media_features = out_dir.join("generated_media_features.rs");
+    let generated_properties = out_dir.join("generated_properties.rs");
     let generated_units = out_dir.join("generated_units.rs");
     let generated_value_types = out_dir.join("generated_value_types.rs");
 
@@ -41,9 +49,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=FFI_OUTPUT_DIR");
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed={}", media_features_json.display());
+    println!("cargo:rerun-if-changed={}", properties_json.display());
+    println!("cargo:rerun-if-changed={}", enums_json.display());
+    println!("cargo:rerun-if-changed={}", logical_property_groups_json.display());
     println!("cargo:rerun-if-changed={}", units_json.display());
     println!("cargo:rerun-if-changed={}", value_types_json.display());
     println!("cargo:rerun-if-changed={}", media_features_generator.display());
+    println!("cargo:rerun-if-changed={}", properties_generator.display());
     println!("cargo:rerun-if-changed={}", units_generator.display());
     println!("cargo:rerun-if-changed={}", value_types_generator.display());
 
@@ -56,6 +68,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .status()?;
     if !status.success() {
         return Err(format!("{} failed with status {status}", media_features_generator.display()).into());
+    }
+
+    let status = Command::new("python3")
+        .arg(&properties_generator)
+        .arg("--properties-json")
+        .arg(&properties_json)
+        .arg("--enums-json")
+        .arg(&enums_json)
+        .arg("--groups-json")
+        .arg(&logical_property_groups_json)
+        .arg("--output")
+        .arg(&generated_properties)
+        .status()?;
+    if !status.success() {
+        return Err(format!("{} failed with status {status}", properties_generator.display()).into());
     }
 
     let status = Command::new("python3")
