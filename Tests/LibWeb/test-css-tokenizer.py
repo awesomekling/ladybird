@@ -81,7 +81,7 @@ def run_backend(file: Path, backend: str, encoding: str) -> tuple[str, Path]:
 
 
 def test(file: Path, backend: str, rebaseline: bool) -> bool:
-    requested_backends = ["cpp", "rust"] if backend == "both" else [backend]
+    requested_backends = ["rust"]
     encoding = encoding_for(file)
     results = {
         requested_backend: run_backend(file, requested_backend, encoding) for requested_backend in requested_backends
@@ -89,18 +89,8 @@ def test(file: Path, backend: str, rebaseline: bool) -> bool:
     expected_file = CSS_TOKENIZER_TEST_DIR / "expected" / file.with_suffix(".txt")
 
     if rebaseline:
-        cpp_stdout = results["cpp"][0] if "cpp" in results else run_backend(file, "cpp", encoding)[0]
-        expected_file.write_text(cpp_stdout + "\n", encoding="utf8")
-
-        if "rust" in results and results["rust"][0] != cpp_stdout:
-            print(f"\nRust tokenizer output does not match C++ for {file} after rebaseline!\n")
-            diff(
-                a=cpp_stdout,
-                a_file=output_file_for(file, "cpp"),
-                b=results["rust"][0],
-                b_file=results["rust"][1],
-            )
-            return True
+        rust_stdout = results["rust"][0]
+        expected_file.write_text(rust_stdout + "\n", encoding="utf8")
 
         return False
 
@@ -113,16 +103,6 @@ def test(file: Path, backend: str, rebaseline: bool) -> bool:
             diff(a=expected, a_file=expected_file, b=stdout, b_file=output_file)
             failed = True
 
-    if "cpp" in results and "rust" in results and results["cpp"][0] != results["rust"][0]:
-        print(f"\nBackends disagree for {file}!\n")
-        diff(
-            a=results["cpp"][0],
-            a_file=results["cpp"][1],
-            b=results["rust"][0],
-            b_file=results["rust"][1],
-        )
-        failed = True
-
     return failed
 
 
@@ -131,7 +111,7 @@ def main() -> int:
 
     parser = ArgumentParser()
     parser.add_argument("-j", "--jobs", type=int)
-    parser.add_argument("--backend", choices=("cpp", "rust", "both"), default="both")
+    parser.add_argument("--backend", choices=("rust",), default="rust")
     parser.add_argument("--rebaseline", action="store_true")
 
     args = parser.parse_args()

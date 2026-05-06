@@ -512,7 +512,6 @@ class Parser;
 class RustTokenizer;
 class SyntaxNode;
 class Token;
-class Tokenizer;
 
 struct AtRule;
 struct Declaration;

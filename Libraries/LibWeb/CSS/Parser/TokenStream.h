@@ -10,7 +10,6 @@
 #include <AK/Format.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
-#include <LibWeb/CSS/Parser/Tokenizer.h>
 
 namespace Web::CSS::Parser {
 
@@ -206,10 +205,10 @@ private:
     T make_eof()
     {
         if constexpr (IsSame<T, Token>) {
-            return Tokenizer::create_eof_token();
+            return Token::create(Token::Type::EndOfFile);
         }
         if constexpr (IsSame<T, ComponentValue>) {
-            return ComponentValue(Tokenizer::create_eof_token());
+            return ComponentValue(Token::create(Token::Type::EndOfFile));
         }
     }
 
