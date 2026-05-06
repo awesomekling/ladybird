@@ -1072,6 +1072,20 @@ pub enum CssTransformFunctionValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssFitContentValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssBasicShapeValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -4068,6 +4082,286 @@ fn component_value_ref_is_ident(component_value: &ComponentValue, ident: &str) -
             ..
         }) if value.eq_ignore_ascii_case(ident)
     )
+}
+
+pub(crate) fn parse_fit_content_value(filtered_input: &[u8]) -> CssFitContentValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    match component_values {
+        [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }),
+        ] if value.eq_ignore_ascii_case("fit-content") => CssFitContentValueKind::Valid,
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("fit-content") => {
+            // https://drafts.csswg.org/css-sizing-3/#funcdef-width-fit-content
+            // fit-content() = fit-content( <length-percentage [0,∞]> )
+            if component_values_parse_as_single_length_percentage(&function.value) {
+                CssFitContentValueKind::Valid
+            } else {
+                CssFitContentValueKind::Invalid
+            }
+        }
+        _ => CssFitContentValueKind::Invalid,
+    }
+}
+
+pub(crate) fn parse_basic_shape_value(filtered_input: &[u8]) -> CssBasicShapeValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return CssBasicShapeValueKind::Invalid;
+    };
+
+    let is_valid = if function.name.eq_ignore_ascii_case("inset") {
+        parse_inset_basic_shape_function(function)
+    } else if function.name.eq_ignore_ascii_case("xywh") {
+        parse_xywh_basic_shape_function(function)
+    } else if function.name.eq_ignore_ascii_case("rect") {
+        parse_rect_basic_shape_function(function)
+    } else if function.name.eq_ignore_ascii_case("circle") {
+        parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Circle)
+    } else if function.name.eq_ignore_ascii_case("ellipse") {
+        parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Ellipse)
+    } else if function.name.eq_ignore_ascii_case("polygon") {
+        parse_polygon_basic_shape_function(function)
+    } else if function.name.eq_ignore_ascii_case("path") {
+        parse_path_basic_shape_function(function)
+    } else {
+        false
+    };
+
+    if is_valid {
+        CssBasicShapeValueKind::Valid
+    } else {
+        CssBasicShapeValueKind::Invalid
+    }
+}
+
+fn parse_inset_basic_shape_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-inset
+    // inset() = inset( <length-percentage>{1,4} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut offset_count = 0;
+    while offset_count < 4 && consume_length_percentage_component_value(&mut parser) {
+        offset_count += 1;
+    }
+
+    offset_count > 0 && consume_optional_round_border_radius_and_end(&mut parser)
+}
+
+fn parse_xywh_basic_shape_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-xywh
+    // xywh() = xywh( <length-percentage>{2} <length-percentage [0,∞]>{2} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    for _ in 0..4 {
+        if !consume_length_percentage_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_round_border_radius_and_end(&mut parser)
+}
+
+fn parse_rect_basic_shape_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-rect
+    // rect() = rect( [ <length-percentage> | auto ]{4} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    for _ in 0..4 {
+        parser.discard_whitespace();
+        if parser.consume_ident_matching("auto") {
+            continue;
+        }
+        if !consume_length_percentage_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_round_border_radius_and_end(&mut parser)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BasicShapeRadialFunction {
+    Circle,
+    Ellipse,
+}
+
+fn parse_circle_or_ellipse_basic_shape_function(
+    function: &Function,
+    radial_function: BasicShapeRadialFunction,
+) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-circle
+    // circle() = circle( <shape-radius>? [ at <position> ]? )
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-ellipse
+    // ellipse() = ellipse( <shape-radius>{2}? [ at <position> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut radius_count = 0;
+    while radius_count < 2 {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+        if component_value_parse_as_radial_size_component(component_value) {
+            parser.index += 1;
+            radius_count += 1;
+            continue;
+        }
+        break;
+    }
+
+    if radial_function == BasicShapeRadialFunction::Circle && radius_count > 1 {
+        return false;
+    }
+    if radial_function == BasicShapeRadialFunction::Ellipse && radius_count == 1 {
+        return false;
+    }
+
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("at") {
+        parser.discard_whitespace();
+        // AD-HOC: C++ still owns the full <position> parser and materialization here.
+        if !parser.has_next_component_value() {
+            return false;
+        }
+        return true;
+    }
+
+    !parser.has_next_component_value()
+}
+
+fn parse_polygon_basic_shape_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-polygon
+    // polygon() = polygon( <'fill-rule'>? , [<length-percentage> <length-percentage>]# )
+    let Some(mut arguments) = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        Some(remove_whitespace_component_values(&component_values))
+    }) else {
+        return false;
+    };
+
+    if arguments.is_empty() {
+        return false;
+    }
+
+    if component_values_parse_as_fill_rule(&arguments[0]) {
+        arguments.remove(0);
+    }
+    if arguments.is_empty() {
+        return false;
+    }
+
+    arguments.iter().all(|argument| {
+        let [x, y] = argument.as_slice() else {
+            return false;
+        };
+        component_value_parse_as_length_percentage(x) && component_value_parse_as_length_percentage(y)
+    })
+}
+
+fn parse_path_basic_shape_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-path
+    // <path()> = path( <'fill-rule'>?, <string> )
+    let Some(arguments) = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        Some(strip_whitespace(&component_values).to_vec())
+    }) else {
+        return false;
+    };
+
+    match arguments.as_slice() {
+        [path] => component_values_parse_as_string(path),
+        [fill_rule, path] => component_values_parse_as_fill_rule(fill_rule) && component_values_parse_as_string(path),
+        _ => false,
+    }
+}
+
+fn consume_optional_round_border_radius_and_end(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("round") && !consume_border_radius_rect_component_values(parser) {
+        return false;
+    }
+
+    parser.discard_whitespace();
+    !parser.has_next_component_value()
+}
+
+fn consume_border_radius_rect_component_values(parser: &mut ComponentValueParser) -> bool {
+    let mut horizontal_count = 0;
+    let mut vertical_count = 0;
+    let mut reading_vertical = false;
+
+    while parser.has_next_component_value() {
+        parser.discard_whitespace();
+        if parser.consume_a_delim('/') {
+            if reading_vertical || horizontal_count == 0 {
+                return false;
+            }
+            reading_vertical = true;
+            continue;
+        }
+
+        if !consume_length_percentage_component_value(parser) {
+            break;
+        }
+
+        if reading_vertical {
+            vertical_count += 1;
+        } else {
+            horizontal_count += 1;
+        }
+
+        if horizontal_count > 4 || vertical_count > 4 {
+            return false;
+        }
+    }
+
+    horizontal_count > 0 && (!reading_vertical || vertical_count > 0)
+}
+
+fn consume_length_percentage_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_length_percentage(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
+}
+
+fn component_values_parse_as_single_length_percentage(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = strip_whitespace(component_values) else {
+        return false;
+    };
+    component_value_parse_as_length_percentage(component_value)
+}
+
+fn remove_whitespace_component_values(component_values: &[ComponentValue]) -> Vec<ComponentValue> {
+    component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .cloned()
+        .collect()
+}
+
+fn component_value_parse_as_radial_size_component(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_length_percentage(component_value)
+        || component_value_is_ident(Some(component_value), "closest-corner")
+        || component_value_is_ident(Some(component_value), "closest-side")
+        || component_value_is_ident(Some(component_value), "farthest-corner")
+        || component_value_is_ident(Some(component_value), "farthest-side")
+}
+
+fn component_values_parse_as_fill_rule(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    component_value_is_ident(Some(component_value), "nonzero")
+        || component_value_is_ident(Some(component_value), "evenodd")
 }
 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
@@ -12846,59 +13140,61 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind,
+        CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBasicShapeValueKind,
         CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
         CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
         CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind,
-        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
-        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
-        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-        CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
-        CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
-        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransitionBehaviorItemKind,
-        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
-        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
-        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
-        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
+        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
+        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
+        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
+        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
+        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+        CssTransformFunctionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_color_scheme_value, parse_contain_value,
-        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_easing_value,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
-        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_basic_shape_value,
+        parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
+        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
+        parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
+        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_length_descriptor,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
+        parse_position_anchor_value, parse_position_try_order_value, parse_position_visibility_value,
+        parse_positive_percentage_descriptor, parse_primitive_value_prefix, parse_quotes_value,
+        parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value, parse_scrollbar_gutter_value,
+        parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transform_function_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -13502,6 +13798,14 @@ mod tests {
 
     fn parse_transform_function(input: &str) -> CssTransformFunctionValueKind {
         parse_transform_function_value(input.as_bytes())
+    }
+
+    fn parse_fit_content(input: &str) -> CssFitContentValueKind {
+        parse_fit_content_value(input.as_bytes())
+    }
+
+    fn parse_basic_shape(input: &str) -> CssBasicShapeValueKind {
+        parse_basic_shape_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -16648,6 +16952,72 @@ mod tests {
             parse_transform_function("matrix(1 0 0 1 10 20)"),
             CssTransformFunctionValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_fit_content_values() {
+        assert_eq!(parse_fit_content("fit-content"), CssFitContentValueKind::Valid);
+        assert_eq!(parse_fit_content("fit-content(10px)"), CssFitContentValueKind::Valid);
+        assert_eq!(
+            parse_fit_content("fit-content(calc(10px + 5%))"),
+            CssFitContentValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_fit_content_values() {
+        assert_eq!(parse_fit_content("max-content"), CssFitContentValueKind::Invalid);
+        assert_eq!(parse_fit_content("fit-content()"), CssFitContentValueKind::Invalid);
+        assert_eq!(
+            parse_fit_content("fit-content(10px 20px)"),
+            CssFitContentValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_basic_shape_values() {
+        assert_eq!(parse_basic_shape("inset(10px)"), CssBasicShapeValueKind::Valid);
+        assert_eq!(
+            parse_basic_shape("inset(10px 20% 30px 40% round 1px / 2px)"),
+            CssBasicShapeValueKind::Valid
+        );
+        assert_eq!(parse_basic_shape("xywh(0 0 10px 20%)"), CssBasicShapeValueKind::Valid);
+        assert_eq!(
+            parse_basic_shape("rect(auto 10px 20% 0 round 1px)"),
+            CssBasicShapeValueKind::Valid
+        );
+        assert_eq!(
+            parse_basic_shape("circle(closest-side at center)"),
+            CssBasicShapeValueKind::Valid
+        );
+        assert_eq!(
+            parse_basic_shape("ellipse(10px 20% at left top)"),
+            CssBasicShapeValueKind::Valid
+        );
+        assert_eq!(
+            parse_basic_shape("polygon(evenodd, 0 0, 100% 0, 100% 100%)"),
+            CssBasicShapeValueKind::Valid
+        );
+        assert_eq!(
+            parse_basic_shape("path(evenodd, \"M 0 0 L 1 1\")"),
+            CssBasicShapeValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_basic_shape_values() {
+        assert_eq!(parse_basic_shape("none"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("inset()"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("xywh(0 0 10px)"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(
+            parse_basic_shape("rect(auto 10px 20%)"),
+            CssBasicShapeValueKind::Invalid
+        );
+        assert_eq!(parse_basic_shape("circle(10px 20px)"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("ellipse(10px)"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("polygon(evenodd)"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("polygon(0 0, 100%)"), CssBasicShapeValueKind::Invalid);
+        assert_eq!(parse_basic_shape("path(nonzero)"), CssBasicShapeValueKind::Invalid);
     }
 
     #[test]

@@ -3133,6 +3133,14 @@ RefPtr<RadialSizeStyleValue const> Parser::parse_radial_size(TokenStream<Compone
 RefPtr<StyleValue const> Parser::parse_fit_content_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
+    tokens.discard_whitespace();
+    if (!tokens.has_next_token())
+        return nullptr;
+
+    auto serialized_fit_content = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
+    if (RustComponentValueParser::parse_fit_content(serialized_fit_content.bytes_as_string_view(), "utf-8"sv) == FFI::CssFitContentValueKind::Invalid)
+        return nullptr;
+
     auto& component_value = tokens.consume_a_token();
 
     if (component_value.is_ident("fit-content"sv)) {
@@ -3469,6 +3477,14 @@ RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<
 RefPtr<StyleValue const> Parser::parse_basic_shape_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
+    tokens.discard_whitespace();
+    if (!tokens.has_next_token())
+        return nullptr;
+
+    auto serialized_basic_shape = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
+    if (RustComponentValueParser::parse_basic_shape(serialized_basic_shape.bytes_as_string_view(), "utf-8"sv) == FFI::CssBasicShapeValueKind::Invalid)
+        return nullptr;
+
     auto& component_value = tokens.consume_a_token();
     if (!component_value.is_function())
         return nullptr;

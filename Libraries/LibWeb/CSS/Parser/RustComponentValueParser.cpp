@@ -3267,6 +3267,26 @@ FFI::CssTransformFunctionValueKind RustComponentValueParser::parse_transform_fun
         filtered_input_bytes.size());
 }
 
+FFI::CssFitContentValueKind RustComponentValueParser::parse_fit_content(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_fit_content(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssBasicShapeValueKind RustComponentValueParser::parse_basic_shape(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_basic_shape(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

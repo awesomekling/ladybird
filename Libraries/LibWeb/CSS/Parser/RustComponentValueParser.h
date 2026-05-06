@@ -370,6 +370,8 @@ public:
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssEasingValueKind parse_easing(StringView input, StringView encoding);
     static FFI::CssTransformFunctionValueKind parse_transform_function(StringView input, StringView encoding);
+    static FFI::CssFitContentValueKind parse_fit_content(StringView input, StringView encoding);
+    static FFI::CssBasicShapeValueKind parse_basic_shape(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);
