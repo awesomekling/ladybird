@@ -19,6 +19,7 @@
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
@@ -173,14 +174,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
         return {};
     };
-    auto any_property_accepts_keyword = [](ReadonlySpan<PropertyID> property_ids, Keyword keyword) -> Optional<PropertyID> {
-        for (auto const& property : property_ids) {
-            if (property_accepts_keyword(property, keyword))
-                return property;
-        }
-        return {};
-    };
-
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
 
@@ -196,14 +189,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     if (peek_token.is(Token::Type::Ident)) {
         // NOTE: We do not try to parse "CSS-wide keywords" here. https://www.w3.org/TR/css-values-4/#common-keywords
         //       These are only valid on their own, and so should be parsed directly in `parse_css_value()`.
-        auto keyword = keyword_from_string(peek_token.token().ident());
-        if (keyword.has_value()) {
-            if (auto property = any_property_accepts_keyword(property_ids, keyword.value()); property.has_value()) {
-                tokens.discard_a_token();
-                if (auto resolved_keyword = resolve_legacy_value_alias(property.value(), keyword.value()); resolved_keyword.has_value())
-                    return PropertyAndValue { *property, KeywordStyleValue::create(resolved_keyword.value()) };
-                return PropertyAndValue { *property, KeywordStyleValue::create(keyword.value()) };
-            }
+        if (auto property_keyword = RustComponentValueParser::parse_property_keyword_value(property_ids, peek_token.token().ident()); property_keyword.has_value()) {
+            tokens.discard_a_token();
+            return PropertyAndValue { property_keyword->property_id, KeywordStyleValue::create(property_keyword->keyword) };
         }
 
         // Custom idents

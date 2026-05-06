@@ -321,6 +321,35 @@ pub unsafe extern "C" fn rust_css_parse_value_type(
 }
 
 /// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `keyword` and `keyword_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_property_keyword_value(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    keyword: *const u8,
+    keyword_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, property_id: u16, keyword: *const u8, keyword_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(keyword) = bytes_from_raw(keyword, keyword_len) else {
+                return false;
+            };
+
+            css_parser::parse_property_keyword_value(property_ids, keyword, |property_id, keyword| {
+                callback(ctx, property_id, keyword.as_ptr(), keyword.len());
+            })
+        })
+    }
+}
+
+/// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to `callback` must be valid pointers

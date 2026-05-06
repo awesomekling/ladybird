@@ -272,6 +272,34 @@ FFI::CssValueTypeSyntaxKind RustComponentValueParser::parse_a_value_type(u8 valu
         value_type_id);
 }
 
+Optional<RustComponentValueParser::PropertyKeyword> RustComponentValueParser::parse_property_keyword_value(ReadonlySpan<PropertyID> property_ids, StringView keyword)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<PropertyKeyword> property_keyword;
+    auto keyword_bytes = keyword.bytes();
+    FFI::rust_css_parse_property_keyword_value(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        keyword_bytes.data(),
+        keyword_bytes.size(),
+        &property_keyword,
+        [](void* raw_property_keyword, u16 property_id, u8 const* keyword_ptr, size_t keyword_len) {
+            auto& property_keyword = *static_cast<Optional<PropertyKeyword>*>(raw_property_keyword);
+            auto keyword = keyword_from_string({ keyword_ptr, keyword_len });
+            if (!keyword.has_value())
+                return;
+            property_keyword = PropertyKeyword {
+                .property_id = static_cast<PropertyID>(property_id),
+                .keyword = keyword.release_value(),
+            };
+        });
+
+    return property_keyword;
+}
+
 struct RustSyntaxNodeBuilder {
     enum class FrameType : u8 {
         Multiplier,

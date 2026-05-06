@@ -38,6 +38,10 @@ def split_valid_type(valid_type: str) -> tuple[str, str | None]:
     return parts[0], parts[1]
 
 
+def keyword_name(keyword: str) -> str:
+    return keyword.split("=", 1)[0]
+
+
 def numeric_range_from_parameters(parameters: str | None) -> tuple[str, str] | None:
     if parameters is None:
         return None
@@ -259,7 +263,7 @@ pub(crate) fn property_accepts_keyword(property_id: PropertyId, keyword: &str) -
             type_name, _ = split_valid_type(valid_type)
             if type_name not in enums:
                 continue
-            keywords.extend(enums[type_name])
+            keywords.extend(keyword_name(keyword) for keyword in enums[type_name])
         if not keywords:
             continue
         out.write(f"""

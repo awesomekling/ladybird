@@ -13,6 +13,7 @@ use crate::generated_media_features::{
     MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
     media_feature_id_from_string, media_feature_type_is_range,
 };
+use crate::generated_properties::{property_accepts_keyword, property_id_from_u16, resolve_legacy_value_alias};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
@@ -1265,6 +1266,30 @@ pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> Cs
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     component_values_parse_as_value_type(value_type_id, &component_values)
+}
+
+pub(crate) fn parse_property_keyword_value<C>(property_ids: &[u16], keyword: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, &str),
+{
+    let Ok(keyword) = std::str::from_utf8(keyword) else {
+        return false;
+    };
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_keyword(property_id, keyword) {
+            continue;
+        }
+
+        let resolved_keyword = resolve_legacy_value_alias(property_id, keyword).unwrap_or(keyword);
+        callback(property_id as u16, resolved_keyword);
+        return true;
+    }
+
+    false
 }
 
 fn parse_as_syntax_string(input: &str, limit_single_component_ident_to_custom_ident: bool) -> Option<SyntaxNode> {
@@ -10392,6 +10417,18 @@ mod tests {
         component_values_parse_as_value_type(value_type_id, &parse(input))
     }
 
+    fn parse_property_keyword(property_ids: &[PropertyId], keyword: &str) -> Option<(PropertyId, String)> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut parsed_keyword = None;
+        super::parse_property_keyword_value(&property_ids, keyword.as_bytes(), |property_id, keyword| {
+            parsed_keyword = Some((
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                keyword.to_string(),
+            ));
+        });
+        parsed_keyword
+    }
+
     #[test]
     fn generated_property_metadata_matches_property_ids() {
         assert_eq!(property_id_from_string("color"), Some(PropertyId::Color));
@@ -10429,6 +10466,7 @@ mod tests {
             PropertyId::AnimationDirection,
             "alternate-reverse"
         ));
+        assert!(property_accepts_keyword(PropertyId::ImageRendering, "optimizequality"));
         assert!(property_accepts_keyword(PropertyId::TextWrapMode, "nowrap"));
         assert!(!property_accepts_keyword(
             PropertyId::AnimationDirection,
@@ -10464,6 +10502,26 @@ mod tests {
             Some("auto")
         );
         assert_eq!(property_custom_ident_blacklist(PropertyId::AnimationName), &["none"]);
+    }
+
+    #[test]
+    fn parses_property_keyword_values_with_generated_metadata() {
+        assert_eq!(
+            parse_property_keyword(&[PropertyId::Color, PropertyId::Display], "block"),
+            Some((PropertyId::Display, "block".to_string()))
+        );
+        assert_eq!(
+            parse_property_keyword(&[PropertyId::Overflow], "overlay"),
+            Some((PropertyId::Overflow, "auto".to_string()))
+        );
+        assert_eq!(
+            parse_property_keyword(&[PropertyId::ImageRendering], "optimizequality"),
+            Some((PropertyId::ImageRendering, "optimizequality".to_string()))
+        );
+        assert_eq!(
+            parse_property_keyword(&[PropertyId::AnimationDirection], "allow-discrete"),
+            None
+        );
     }
 
     fn parse_syntax(input: &str) -> Option<SyntaxNode> {

@@ -52,6 +52,11 @@ public:
         Optional<FlyString> name;
     };
 
+    struct PropertyKeyword {
+        PropertyID property_id;
+        Keyword keyword;
+    };
+
     struct NamespaceRulePrelude {
         Optional<FlyString> prefix;
         FlyString namespace_uri;
@@ -223,6 +228,7 @@ public:
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);
+    static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static bool parse_empty_prelude(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
