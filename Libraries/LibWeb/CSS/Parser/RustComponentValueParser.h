@@ -188,6 +188,7 @@ public:
     static Optional<FFI::CssCounterStyleSystemKind> parse_counter_style_system(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_symbols(StringView input, StringView encoding);
     static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
+    static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_font_feature_values_family_name_list(StringView input, StringView encoding);

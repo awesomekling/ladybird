@@ -98,12 +98,39 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 switch (value_type) {
                 case DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols: {
                     // [ <integer [0,∞]> && <symbol> ]#
-                    auto additive_tuples = parse_comma_separated_value_list(tokens, [this](auto& tokens) {
-                        return parse_nonnegative_integer_symbol_pair_value(tokens);
-                    });
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
 
-                    if (!additive_tuples)
+                    auto serialized_additive_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto additive_tuple_count = RustComponentValueParser::parse_counter_style_additive_symbols(serialized_additive_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!additive_tuple_count.has_value())
                         return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> additive_symbol_tokens { component_values };
+
+                    StyleValueVector additive_tuples;
+                    for (size_t i = 0; i < *additive_tuple_count; ++i) {
+                        additive_symbol_tokens.discard_whitespace();
+                        auto additive_tuple = parse_nonnegative_integer_symbol_pair_value(additive_symbol_tokens);
+                        if (!additive_tuple)
+                            return nullptr;
+
+                        additive_tuples.append(additive_tuple.release_nonnull());
+
+                        additive_symbol_tokens.discard_whitespace();
+                        if (i + 1 < *additive_tuple_count) {
+                            if (!additive_symbol_tokens.has_next_token() || !additive_symbol_tokens.consume_a_token().is(Token::Type::Comma))
+                                return nullptr;
+                        }
+                    }
+
+                    additive_symbol_tokens.discard_whitespace();
+                    if (additive_symbol_tokens.has_next_token())
+                        return nullptr;
+
+                    auto additive_tuple_list = StyleValueList::create(move(additive_tuples), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);
 
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-symbols
                     // Each entry in the additive-symbols descriptor’s value defines an additive tuple, which consists
@@ -112,7 +139,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // declaration is invalid and must be ignored.
                     i32 previous_weight = NumericLimits<i32>::max();
 
-                    for (auto const& tuple_style_value : additive_tuples->as_value_list().values()) {
+                    for (auto const& tuple_style_value : additive_tuple_list->as_value_list().values()) {
                         auto const& weight = tuple_style_value->as_value_list().value_at(0, false);
 
                         i32 resolved_weight;
@@ -133,7 +160,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         previous_weight = resolved_weight;
                     }
 
-                    return additive_tuples;
+                    return additive_tuple_list;
                 }
                 case DescriptorMetadata::ValueType::CounterStyleSystem: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-system

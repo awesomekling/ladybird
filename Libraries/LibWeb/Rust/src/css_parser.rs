@@ -1764,6 +1764,26 @@ where
     true
 }
 
+pub(crate) fn parse_counter_style_additive_symbols<C>(filtered_input: &[u8], mut count_callback: C) -> bool
+where
+    C: FnMut(usize),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(count) = parser.parse_counter_style_additive_symbols() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    count_callback(count);
+    true
+}
+
 pub(crate) fn parse_a_namespace_rule_prelude<P, U>(
     filtered_input: &[u8],
     mut prefix_callback: P,
@@ -4783,6 +4803,32 @@ impl ComponentValueParser {
         Some((CssCounterStyleRangeKind::List, count))
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-symbols
+    fn parse_counter_style_additive_symbols(&mut self) -> Option<usize> {
+        // <additive-symbols> = <additive-tuple>#
+        let mut count = 0;
+        loop {
+            self.discard_whitespace();
+            self.parse_a_nonnegative_integer_symbol_pair()?;
+
+            count += 1;
+            self.discard_whitespace();
+            if !self.consume_comma() {
+                break;
+            }
+            self.discard_whitespace();
+            if !self.has_next_component_value() {
+                return None;
+            }
+        }
+
+        if count == 0 {
+            return None;
+        }
+
+        Some(count)
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -7421,9 +7467,9 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
-        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbols, parse_counter_style_system, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbols,
+        parse_counter_style_system, parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7846,6 +7892,14 @@ mod tests {
         let mut range = None;
         let parsed = parse_counter_style_range(input.as_bytes(), |kind, count| range = Some((kind, count)));
         parsed.then_some(range).flatten()
+    }
+
+    fn parse_counter_style_additive_symbols_descriptor(input: &str) -> Option<usize> {
+        let mut count = None;
+        let parsed = parse_counter_style_additive_symbols(input.as_bytes(), |parsed_count| {
+            count = Some(parsed_count);
+        });
+        parsed.then_some(count).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9545,6 +9599,30 @@ mod tests {
         assert_eq!(parse_counter_style_range_descriptor("0 1 2"), None);
         assert_eq!(parse_counter_style_range_descriptor("infinite"), None);
         assert_eq!(parse_counter_style_range_descriptor("default 1"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_additive_symbols_descriptors() {
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\""), Some(1));
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("\"I\" 1"), Some(1));
+        assert_eq!(
+            parse_counter_style_additive_symbols_descriptor("2 \"II\", 1 \"I\""),
+            Some(2)
+        );
+        assert_eq!(
+            parse_counter_style_additive_symbols_descriptor("calc(2) \"II\", 1 \"I\""),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_additive_symbols_descriptors() {
+        assert_eq!(parse_counter_style_additive_symbols_descriptor(""), None);
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("1"), None);
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\","), None);
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\" 2"), None);
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("-1 \"I\""), None);
+        assert_eq!(parse_counter_style_additive_symbols_descriptor("default 1"), None);
     }
 
     #[test]
