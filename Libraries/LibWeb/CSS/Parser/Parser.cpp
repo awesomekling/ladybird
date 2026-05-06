@@ -364,6 +364,7 @@ Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<Co
             // Otherwise, this is a parse error. Consume a token from input and append the result to values.
             log_parse_error();
             values.append(input.consume_a_token());
+            continue;
         }
 
         // anything else
@@ -425,6 +426,17 @@ Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component
 
     // 1. Normalize input, and set input to the result.
     // Note: This is done when initializing the Parser.
+
+    auto remaining_tokens = input.remaining_tokens();
+
+    // AD-HOC: Re-parsing substituted component values through Rust would lose
+    // C++-side attr() taint metadata until that metadata is carried over FFI.
+    if (!remaining_tokens.first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value()) {
+        auto serialized_input = serialize_component_values_for_reparsing(remaining_tokens);
+        while (input.has_next_token())
+            input.discard_a_token();
+        return RustComponentValueParser::parse_a_comma_separated_list_of_component_values(serialized_input.bytes_as_string_view(), "utf-8"sv);
+    }
 
     // 2. Let groups be an empty list.
     Vector<Vector<ComponentValue>> groups;
