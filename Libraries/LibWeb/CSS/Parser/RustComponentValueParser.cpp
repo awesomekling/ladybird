@@ -1198,6 +1198,30 @@ Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringV
     return name;
 }
 
+Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
+{
+    Optional<FamilyName> family_name;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_family_name(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &family_name,
+        [](void* raw_family_name, u8 const* name_ptr, size_t name_len, bool is_string) {
+            auto& family_name = *static_cast<Optional<FamilyName>*>(raw_family_name);
+            family_name = FamilyName {
+                .name = fly_string_from_ffi_bytes(name_ptr, name_len),
+                .is_string = is_string,
+            };
+        });
+
+    if (!parsed)
+        return {};
+
+    return family_name;
+}
+
 Optional<RustComponentValueParser::NamespaceRulePrelude> RustComponentValueParser::parse_a_namespace_rule_prelude(StringView input, StringView encoding)
 {
     NamespaceRulePrelude namespace_rule_prelude;

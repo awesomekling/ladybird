@@ -461,6 +461,12 @@ pub struct CssSyntaxNode {
     pub value_len: usize,
 }
 
+#[derive(Debug, PartialEq)]
+struct FamilyName {
+    name: String,
+    is_string: bool,
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -794,9 +800,29 @@ where
         if parser.has_next_component_value() {
             return false;
         }
-        family_callback(&family_name);
+        family_callback(&family_name.name);
     }
 
+    true
+}
+
+pub(crate) fn parse_a_family_name<F>(filtered_input: &[u8], mut family_callback: F) -> bool
+where
+    F: FnMut(&str, bool),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(family_name) = parser.parse_a_family_name() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    family_callback(&family_name.name, family_name.is_string);
     true
 }
 
@@ -2367,7 +2393,7 @@ impl ComponentValueParser {
     }
 
     // https://drafts.csswg.org/css-fonts-4/#font-family-name-syntax
-    fn parse_a_family_name(&mut self) -> Option<String> {
+    fn parse_a_family_name(&mut self) -> Option<FamilyName> {
         // <font-family-name> = <string> | <custom-ident>+
         self.discard_whitespace();
 
@@ -2378,7 +2404,10 @@ impl ComponentValueParser {
         {
             let family_name = value.clone();
             self.index += 1;
-            return Some(family_name);
+            return Some(FamilyName {
+                name: family_name,
+                is_string: true,
+            });
         }
 
         let mut parts = Vec::new();
@@ -2407,7 +2436,10 @@ impl ComponentValueParser {
             }
         }
 
-        Some(parts.join(" "))
+        Some(FamilyName {
+            name: parts.join(" "),
+            is_string: false,
+        })
     }
 
     fn parse_container_rule_prelude_item(&mut self, filtered_input: &str) -> Option<(Option<String>, Option<String>)> {
@@ -3089,7 +3121,6 @@ fn matches_css_wide_keyword(value: &str) -> bool {
 fn matches_generic_font_family_keyword(value: &str) -> bool {
     value.eq_ignore_ascii_case("serif")
         || value.eq_ignore_ascii_case("sans-serif")
-        || value.eq_ignore_ascii_case("system-ui")
         || value.eq_ignore_ascii_case("cursive")
         || value.eq_ignore_ascii_case("fantasy")
         || value.eq_ignore_ascii_case("math")
@@ -4601,10 +4632,10 @@ mod tests {
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_a_family_name, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4747,6 +4778,14 @@ mod tests {
             family_names.push(family_name.to_string());
         });
         parsed.then_some(family_names)
+    }
+
+    fn parse_family_name(input: &str) -> Option<(String, bool)> {
+        let mut family_name = None;
+        let parsed = parse_a_family_name(input.as_bytes(), |name, is_string| {
+            family_name = Some((name.to_string(), is_string));
+        });
+        parsed.then_some(family_name).flatten()
     }
 
     fn parse_container_rule_prelude_items(input: &str) -> Option<Vec<(Option<String>, Option<String>)>> {
@@ -5568,6 +5607,30 @@ mod tests {
             parse_font_feature_values_family_names("\"Bongo Sans\", Great Vibes"),
             Some(vec!["Bongo Sans".to_string(), "Great Vibes".to_string()])
         );
+    }
+
+    #[test]
+    fn parses_family_names() {
+        assert_eq!(parse_family_name("bongo"), Some(("bongo".to_string(), false)));
+        assert_eq!(
+            parse_family_name("Great Vibes"),
+            Some(("Great Vibes".to_string(), false))
+        );
+        assert_eq!(parse_family_name("system-ui"), Some(("system-ui".to_string(), false)));
+        assert_eq!(
+            parse_family_name("\"Bongo Sans\""),
+            Some(("Bongo Sans".to_string(), true))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_family_names() {
+        assert_eq!(parse_family_name(""), None);
+        assert_eq!(parse_family_name("serif"), None);
+        assert_eq!(parse_family_name("default"), None);
+        assert_eq!(parse_family_name("initial"), None);
+        assert_eq!(parse_family_name("\"Bongo\" Sans"), None);
+        assert_eq!(parse_family_name("123"), None);
     }
 
     #[test]

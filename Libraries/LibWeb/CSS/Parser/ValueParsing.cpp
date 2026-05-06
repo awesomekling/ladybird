@@ -211,51 +211,29 @@ Optional<Vector<ComponentValue>> Parser::parse_declaration_value(TokenStream<Com
 RefPtr<StyleValue const> Parser::parse_family_name_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
 
-    // <family-name> = <string> | <custom-ident>+
-    Vector<String> parts;
-    while (tokens.has_next_token()) {
-        auto const& peek = tokens.next_token();
-
-        if (peek.is(Token::Type::String)) {
-            // `font-family: my cool "font";` is invalid.
-            if (!parts.is_empty())
-                return nullptr;
-            tokens.discard_a_token(); // String
-            tokens.discard_whitespace();
-            transaction.commit();
-            return StringStyleValue::create(peek.token().string());
+    StringBuilder source_builder;
+    {
+        auto serialize_transaction = tokens.begin_transaction();
+        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
+            auto const& component_value = tokens.consume_a_token();
+            auto original_source_text = component_value.original_source_text();
+            source_builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
         }
-
-        // AD-HOC: We allow all <ident>'s rather than just <custom-ident>, although we check below that the whole value
-        //         isn't a CSS-wide keyword, see https://github.com/w3c/csswg-drafts/issues/13692
-        if (peek.is(Token::Type::Ident)) {
-            auto ident = tokens.consume_a_token().token().ident();
-            parts.append(ident.to_string());
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        break;
     }
 
-    if (parts.is_empty())
+    auto source = source_builder.to_string_without_validation();
+    auto family_name = RustComponentValueParser::parse_a_family_name(source.bytes_as_string_view(), "utf-8"sv);
+    if (!family_name.has_value())
         return nullptr;
 
-    if (parts.size() == 1) {
-        // <generic-family> is a separate type from <family-name>, and so isn't allowed here.
-        auto maybe_keyword = keyword_from_string(parts.first());
-        if (!is_valid_custom_ident(parts.first(), {}))
-            return nullptr;
-        if (maybe_keyword.has_value() && keyword_to_generic_font_family(maybe_keyword.value()).has_value())
-            return nullptr;
-    }
-
-    auto complete_name = MUST(String::join(' ', parts));
+    while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma))
+        tokens.discard_a_token();
 
     transaction.commit();
-    return CustomIdentStyleValue::create(complete_name);
+    if (family_name->is_string)
+        return StringStyleValue::create(family_name->name);
+    return CustomIdentStyleValue::create(family_name->name);
 }
 
 // https://www.w3.org/TR/css-syntax-3/#urange-syntax
