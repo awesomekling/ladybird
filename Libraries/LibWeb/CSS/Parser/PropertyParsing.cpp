@@ -2656,70 +2656,25 @@ RefPtr<StyleValue const> Parser::parse_font_language_override_value(TokenStream<
     // https://drafts.csswg.org/css-fonts/#propdef-font-language-override
     // This is `normal | <string>` but with the constraint that the string has to be 4 characters long:
     // Shorter strings are right-padded with spaces before use, and longer strings are invalid.
-
-    if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
-        return normal;
-
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (auto string = parse_string_value(tokens)) {
-        auto string_value = string->string_value();
-        tokens.discard_whitespace();
-        if (tokens.has_next_token()) {
-            ErrorReporter::the().report(InvalidPropertyError {
-                .rule_name = "style"_fly_string,
-                .property_name = "font-language-override"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "Unexpected trailing tokens"_string,
-            });
-            return nullptr;
-        }
-        auto length = string_value.bytes().size();
-        if (length == 0) {
-            ErrorReporter::the().report(InvalidPropertyError {
-                .rule_name = "style"_fly_string,
-                .property_name = "font-language-override"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "<string> value is empty"_string,
-            });
-            return nullptr;
-        }
-        if (!string_value.is_ascii()) {
-            ErrorReporter::the().report(InvalidPropertyError {
-                .rule_name = "style"_fly_string,
-                .property_name = "font-language-override"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("<string> value \"{}\" contains non-ascii characters", string_value)),
-            });
-            return nullptr;
-        }
-        if (length > 4) {
-            ErrorReporter::the().report(InvalidPropertyError {
-                .rule_name = "style"_fly_string,
-                .property_name = "font-language-override"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("<string> value \"{}\" is too long", string_value)),
-            });
-            return nullptr;
-        }
-        // We're expected to always serialize without any trailing spaces, so remove them now for convenience.
-        auto trimmed = string_value.bytes_as_string_view().trim_whitespace(TrimMode::Right);
-        if (trimmed.is_empty()) {
-            ErrorReporter::the().report(InvalidPropertyError {
-                .rule_name = "style"_fly_string,
-                .property_name = "font-language-override"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("<string> value \"{}\" is only whitespace", string_value)),
-            });
-            return nullptr;
-        }
-        transaction.commit();
-        if (trimmed != string_value.bytes_as_string_view())
-            return StringStyleValue::create(FlyString::from_utf8_without_validation(trimmed.bytes()));
-        return string;
-    }
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    return nullptr;
+    auto serialized_font_language_override = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_language_override = RustComponentValueParser::parse_a_font_language_override(serialized_font_language_override.bytes_as_string_view(), "utf-8"sv);
+    if (!font_language_override.has_value())
+        return nullptr;
+
+    transaction.commit();
+    switch (font_language_override->kind) {
+    case FFI::CssFontLanguageOverrideKind::Normal:
+        return KeywordStyleValue::create(Keyword::Normal);
+    case FFI::CssFontLanguageOverrideKind::String:
+        VERIFY(font_language_override->value.has_value());
+        return StringStyleValue::create(font_language_override->value.release_value());
+    }
+    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_font_feature_settings_value(TokenStream<ComponentValue>& tokens)

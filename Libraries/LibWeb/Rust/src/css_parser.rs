@@ -139,6 +139,12 @@ enum FontSource {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum FontLanguageOverride {
+    Normal,
+    String(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpression {
     Not(Box<BooleanExpression>),
     Parens(Box<BooleanExpression>),
@@ -427,6 +433,13 @@ pub enum CssFontTech {
     Incremental,
     Palettes,
     Variations,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontLanguageOverrideKind {
+    Normal,
+    String,
 }
 
 #[repr(C)]
@@ -974,6 +987,30 @@ where
             for tech in tech {
                 tech_callback(*tech);
             }
+        }
+    }
+
+    true
+}
+
+pub(crate) fn parse_a_font_language_override<F>(filtered_input: &[u8], mut font_language_override_callback: F) -> bool
+where
+    F: FnMut(CssFontLanguageOverrideKind, Option<&str>),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(font_language_override) = parser.parse_a_font_language_override() else {
+        return false;
+    };
+
+    match &font_language_override {
+        FontLanguageOverride::Normal => {
+            font_language_override_callback(CssFontLanguageOverrideKind::Normal, None);
+        }
+        FontLanguageOverride::String(value) => {
+            font_language_override_callback(CssFontLanguageOverrideKind::String, Some(value));
         }
     }
 
@@ -1900,6 +1937,24 @@ fn parse_font_tech_name(value: &str) -> Option<CssFontTech> {
         value if value.eq_ignore_ascii_case("variations") => Some(CssFontTech::Variations),
         _ => None,
     }
+}
+
+fn parse_font_language_override_string_value(value: &str) -> Option<String> {
+    // https://drafts.csswg.org/css-fonts/#propdef-font-language-override
+    // This is `normal | <string>` but with the constraint that the string has to be 4 characters long:
+    // Shorter strings are right-padded with spaces before use, and longer strings are invalid.
+    let length = value.len();
+    if length == 0 || length > 4 || !value.is_ascii() {
+        return None;
+    }
+
+    // We're expected to always serialize without any trailing spaces, so remove them now for convenience.
+    let trimmed = value.trim_end_matches(|code_point: char| code_point.is_ascii_whitespace());
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(trimmed.to_string())
 }
 
 fn parse_single_ident_from_function(function: &Function) -> Option<String> {
@@ -3021,6 +3076,31 @@ impl ComponentValueParser {
             format,
             tech,
         })
+    }
+
+    // https://drafts.csswg.org/css-fonts/#propdef-font-language-override
+    fn parse_a_font_language_override(&mut self) -> Option<FontLanguageOverride> {
+        // normal | <string>
+        self.discard_whitespace();
+
+        let font_language_override = match self.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if value.eq_ignore_ascii_case("normal") => FontLanguageOverride::Normal,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { value },
+                ..
+            }) => FontLanguageOverride::String(parse_font_language_override_string_value(&value)?),
+            _ => return None,
+        };
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(font_language_override)
     }
 
     // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
@@ -5542,13 +5622,14 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssFontSourceKind, CssFontTech, CssMediaQuery, CssMediaTypeKind,
-        CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style_name,
-        parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name,
+        CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaQuery,
+        CssMediaTypeKind, CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_language_override,
         parse_a_font_source, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
@@ -5744,6 +5825,14 @@ mod tests {
         parsed
             .then_some(source_kind.map(|kind| (kind, local_name.or(url), format, tech)))
             .flatten()
+    }
+
+    fn parse_font_language_override(input: &str) -> Option<(CssFontLanguageOverrideKind, Option<String>)> {
+        let mut font_language_override = None;
+        let parsed = parse_a_font_language_override(input.as_bytes(), |kind, value| {
+            font_language_override = Some((kind, value.map(ToString::to_string)));
+        });
+        parsed.then_some(font_language_override).flatten()
     }
 
     fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
@@ -6651,6 +6740,37 @@ mod tests {
         assert_eq!(parse_font_source("url(\"ahem.woff2\") tech()"), None);
         assert_eq!(parse_font_source("url(\"ahem.woff2\") tech(variations,)"), None);
         assert_eq!(parse_font_source("url(\"ahem.woff2\") tech(unknown)"), None);
+    }
+
+    #[test]
+    fn parses_font_language_overrides() {
+        assert_eq!(
+            parse_font_language_override("normal"),
+            Some((CssFontLanguageOverrideKind::Normal, None))
+        );
+        assert_eq!(
+            parse_font_language_override("\"KSW\""),
+            Some((CssFontLanguageOverrideKind::String, Some("KSW".to_string())))
+        );
+        assert_eq!(
+            parse_font_language_override("\"en  \""),
+            Some((CssFontLanguageOverrideKind::String, Some("en".to_string())))
+        );
+        assert_eq!(
+            parse_font_language_override("\" en \""),
+            Some((CssFontLanguageOverrideKind::String, Some(" en".to_string())))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_language_overrides() {
+        assert_eq!(parse_font_language_override("auto"), None);
+        assert_eq!(parse_font_language_override("normal \"ksw\""), None);
+        assert_eq!(parse_font_language_override("\"turkish\""), None);
+        assert_eq!(parse_font_language_override("\"xøx\""), None);
+        assert_eq!(parse_font_language_override("\"\""), None);
+        assert_eq!(parse_font_language_override("\"ENG  \""), None);
+        assert_eq!(parse_font_language_override("\"    \""), None);
     }
 
     #[test]

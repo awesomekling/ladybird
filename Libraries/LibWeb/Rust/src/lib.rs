@@ -23,12 +23,13 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontSourceKind,
-    CssFontTech, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind,
-    CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
-    CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode,
-    CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType,
-    CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaFeature, CssMediaFeatureComparison,
+    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
+    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssPageSelector,
+    CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -563,6 +564,36 @@ pub unsafe extern "C" fn rust_css_parse_font_source(
                     tech_callback(ctx, tech);
                 },
             )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_language_override(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    font_language_override_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontLanguageOverrideKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_language_override(input, |kind, value| {
+                let (value_ptr, value_len) = value.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+                font_language_override_callback(ctx, kind, value_ptr, value_len);
+            })
         })
     }
 }

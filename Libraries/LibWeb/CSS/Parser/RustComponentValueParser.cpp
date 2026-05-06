@@ -1427,6 +1427,33 @@ Optional<RustComponentValueParser::FontSource> RustComponentValueParser::parse_a
     VERIFY_NOT_REACHED();
 }
 
+Optional<RustComponentValueParser::FontLanguageOverride> RustComponentValueParser::parse_a_font_language_override(StringView input, StringView encoding)
+{
+    Optional<FontLanguageOverride> font_language_override;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_language_override(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &font_language_override,
+        [](void* raw_font_language_override, FFI::CssFontLanguageOverrideKind kind, u8 const* value_ptr, size_t value_len) {
+            auto& font_language_override = *static_cast<Optional<FontLanguageOverride>*>(raw_font_language_override);
+            Optional<FlyString> value;
+            if (kind == FFI::CssFontLanguageOverrideKind::String)
+                value = fly_string_from_ffi_bytes(value_ptr, value_len);
+            font_language_override = FontLanguageOverride {
+                .kind = kind,
+                .value = move(value),
+            };
+        });
+
+    if (!parsed)
+        return {};
+
+    return font_language_override;
+}
+
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)
 {
     Optional<FlyString> name;
