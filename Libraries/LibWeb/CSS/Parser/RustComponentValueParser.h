@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/BooleanExpression.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/MediaQuery.h>
+#include <LibWeb/CSS/NumericRange.h>
 #include <LibWeb/CSS/PageSelector.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
 #include <LibWeb/CSS/Parser/RuleContext.h>
@@ -61,6 +62,13 @@ public:
     struct PropertyCustomIdent {
         PropertyID property_id;
         FlyString custom_ident;
+    };
+
+    struct PropertyNumericMetadata {
+        PropertyID property_id;
+        NumericRange range;
+        Optional<NumericRange> percentage_range;
+        bool percentages_resolve_to_value_type { false };
     };
 
     struct NamespaceRulePrelude {
@@ -237,6 +245,7 @@ public:
     static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
+    static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static bool parse_empty_prelude(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);

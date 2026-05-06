@@ -14,8 +14,10 @@ use crate::generated_media_features::{
     media_feature_id_from_string, media_feature_type_is_range,
 };
 use crate::generated_properties::{
-    property_accepts_keyword, property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
-    property_value_type_from_css_value_type_name, resolve_legacy_value_alias,
+    PropertyNumericRange, PropertyValueType, property_accepted_range_by_value_type, property_accepts_keyword,
+    property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
+    property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name,
+    resolve_legacy_value_alias,
 };
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
@@ -1342,6 +1344,75 @@ where
         };
 
         callback(property_id as u16, &name);
+        return true;
+    }
+
+    false
+}
+
+fn numeric_range_limit_to_f64(limit: Option<f64>, value_type: PropertyValueType, is_minimum: bool) -> f64 {
+    match (limit, value_type, is_minimum) {
+        (Some(limit), _, _) => limit,
+        (None, PropertyValueType::Integer, true) => i32::MIN as f64,
+        (None, PropertyValueType::Integer, false) => i32::MAX as f64,
+        (None, _, true) => f32::MIN as f64,
+        (None, _, false) => f32::MAX as f64,
+    }
+}
+
+fn numeric_range_to_f64(range: PropertyNumericRange, value_type: PropertyValueType) -> (f64, f64) {
+    (
+        numeric_range_limit_to_f64(range.minimum, value_type, true),
+        numeric_range_limit_to_f64(range.maximum, value_type, false),
+    )
+}
+
+pub(crate) fn property_numeric_metadata<C>(property_ids: &[u16], value_type: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, f64, f64, bool, f64, f64, bool),
+{
+    let Ok(value_type) = std::str::from_utf8(value_type) else {
+        return false;
+    };
+    let Some(value_type) = property_value_type_from_css_value_type_name(value_type) else {
+        return false;
+    };
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_value_type(property_id, value_type) {
+            continue;
+        }
+        let Some(range) = property_accepted_range_by_value_type(property_id, value_type) else {
+            continue;
+        };
+
+        let (minimum, maximum) = numeric_range_to_f64(range, value_type);
+        let percentages_resolve_to_value_type =
+            property_resolves_percentages_relative_to(property_id) == Some(value_type);
+        if percentages_resolve_to_value_type {
+            let Some(percentage_range) =
+                property_accepted_range_by_value_type(property_id, PropertyValueType::Percentage)
+            else {
+                continue;
+            };
+            let (percentage_minimum, percentage_maximum) =
+                numeric_range_to_f64(percentage_range, PropertyValueType::Percentage);
+            callback(
+                property_id as u16,
+                minimum,
+                maximum,
+                true,
+                percentage_minimum,
+                percentage_maximum,
+                true,
+            );
+            return true;
+        }
+
+        callback(property_id as u16, minimum, maximum, false, 0.0, 0.0, false);
         return true;
     }
 
@@ -10506,6 +10577,40 @@ mod tests {
         parsed_custom_ident
     }
 
+    #[derive(Debug, PartialEq)]
+    struct PropertyNumericMetadata {
+        property_id: PropertyId,
+        minimum: f64,
+        maximum: f64,
+        percentage_range: Option<(f64, f64)>,
+        percentages_resolve_to_value_type: bool,
+    }
+
+    fn property_numeric_metadata(property_ids: &[PropertyId], value_type: &str) -> Option<PropertyNumericMetadata> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut metadata = None;
+        super::property_numeric_metadata(
+            &property_ids,
+            value_type.as_bytes(),
+            |property_id,
+             minimum,
+             maximum,
+             has_percentage_range,
+             percentage_minimum,
+             percentage_maximum,
+             percentages_resolve_to_value_type| {
+                metadata = Some(PropertyNumericMetadata {
+                    property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                    minimum,
+                    maximum,
+                    percentage_range: has_percentage_range.then_some((percentage_minimum, percentage_maximum)),
+                    percentages_resolve_to_value_type,
+                });
+            },
+        );
+        metadata
+    }
+
     #[test]
     fn generated_property_metadata_matches_property_ids() {
         assert_eq!(property_id_from_string("color"), Some(PropertyId::Color));
@@ -10622,6 +10727,31 @@ mod tests {
         );
         assert_eq!(parse_property_custom_ident(&[PropertyId::AnimationName], "none"), None);
         assert_eq!(parse_property_custom_ident(&[PropertyId::Color], "slide"), None);
+    }
+
+    #[test]
+    fn selects_property_numeric_metadata_with_generated_metadata() {
+        assert_eq!(
+            property_numeric_metadata(&[PropertyId::Color, PropertyId::AnimationDuration], "Time"),
+            Some(PropertyNumericMetadata {
+                property_id: PropertyId::AnimationDuration,
+                minimum: 0.0,
+                maximum: f32::MAX as f64,
+                percentage_range: None,
+                percentages_resolve_to_value_type: false,
+            })
+        );
+        assert_eq!(
+            property_numeric_metadata(&[PropertyId::Color, PropertyId::BackgroundPositionX], "Length"),
+            Some(PropertyNumericMetadata {
+                property_id: PropertyId::BackgroundPositionX,
+                minimum: f32::MIN as f64,
+                maximum: f32::MAX as f64,
+                percentage_range: Some((f32::MIN as f64, f32::MAX as f64)),
+                percentages_resolve_to_value_type: true,
+            })
+        );
+        assert_eq!(property_numeric_metadata(&[PropertyId::Color], "Length"), None);
     }
 
     fn parse_syntax(input: &str) -> Option<SyntaxNode> {

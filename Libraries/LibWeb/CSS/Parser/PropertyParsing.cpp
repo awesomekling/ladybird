@@ -170,6 +170,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     auto any_property_accepts_type = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<PropertyID> {
         return RustComponentValueParser::property_accepting_type(property_ids, value_type);
     };
+    auto property_numeric_metadata = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<RustComponentValueParser::PropertyNumericMetadata> {
+        return RustComponentValueParser::property_numeric_metadata(property_ids, value_type);
+    };
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
 
@@ -267,95 +270,88 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         return parsed.release_value();
 
     // <integer>/<number> come before <length>, so that 0 is not interpreted as a <length> in case both are allowed.
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Integer); property.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (auto value = parse_integer_value(tokens, property_accepted_ranges_by_value_type(*property).get(ValueType::Integer).value()))
-            return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Integer); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (auto value = parse_integer_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Number); property.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (auto value = parse_number_value(tokens, property_accepted_ranges_by_value_type(*property).get(ValueType::Number).value()))
-            return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Number); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (auto value = parse_number_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Angle); property.has_value()) {
-        auto const& valid_ranges = property_accepted_ranges_by_value_type(*property);
-        auto const& angle_range = valid_ranges.get(ValueType::Angle).value();
-
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (property_resolves_percentages_relative_to(*property) == ValueType::Angle) {
-            if (auto value = parse_angle_percentage_value(tokens, angle_range, valid_ranges.get(ValueType::Percentage).value()))
-                return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Angle); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (metadata->percentages_resolve_to_value_type) {
+            VERIFY(metadata->percentage_range.has_value());
+            if (auto value = parse_angle_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
+                return PropertyAndValue { metadata->property_id, value };
         }
 
-        if (auto value = parse_angle_value(tokens, angle_range))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_angle_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Flex); property.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (auto value = parse_flex_value(tokens, property_accepted_ranges_by_value_type(*property).get(ValueType::Flex).value()))
-            return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Flex); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (auto value = parse_flex_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Frequency); property.has_value()) {
-        auto const& valid_ranges = property_accepted_ranges_by_value_type(*property);
-        auto const& frequency_range = valid_ranges.get(ValueType::Frequency).value();
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (property_resolves_percentages_relative_to(*property) == ValueType::Frequency) {
-            if (auto value = parse_frequency_percentage_value(tokens, frequency_range, valid_ranges.get(ValueType::Percentage).value()))
-                return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Frequency); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (metadata->percentages_resolve_to_value_type) {
+            VERIFY(metadata->percentage_range.has_value());
+            if (auto value = parse_frequency_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
+                return PropertyAndValue { metadata->property_id, value };
         }
 
-        if (auto value = parse_frequency_value(tokens, frequency_range))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_frequency_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
     if (auto parsed = parse_for_type(ValueType::FitContent); parsed.has_value())
         return parsed.release_value();
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Length); property.has_value()) {
-        auto const& valid_ranges = property_accepted_ranges_by_value_type(*property);
-        auto const& length_range = valid_ranges.get(ValueType::Length).value();
-
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (property_resolves_percentages_relative_to(*property) == ValueType::Length) {
-            if (auto value = parse_length_percentage_value(tokens, length_range, valid_ranges.get(ValueType::Percentage).value()))
-                return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Length); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (metadata->percentages_resolve_to_value_type) {
+            VERIFY(metadata->percentage_range.has_value());
+            if (auto value = parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
+                return PropertyAndValue { metadata->property_id, value };
         }
 
-        if (auto value = parse_length_value(tokens, length_range))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_length_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Resolution); property.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(*property);
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Resolution); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
 
-        if (auto value = parse_resolution_value(tokens, property_accepted_ranges_by_value_type(*property).get(ValueType::Resolution).value()))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_resolution_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Time); property.has_value()) {
-        auto const& valid_ranges = property_accepted_ranges_by_value_type(*property);
-        auto const& time_range = valid_ranges.get(ValueType::Time).value();
-
-        auto context_guard = push_temporary_value_parsing_context(*property);
-        if (property_resolves_percentages_relative_to(*property) == ValueType::Time) {
-            if (auto value = parse_time_percentage_value(tokens, time_range, valid_ranges.get(ValueType::Percentage).value()))
-                return PropertyAndValue { *property, value };
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Time); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
+        if (metadata->percentages_resolve_to_value_type) {
+            VERIFY(metadata->percentage_range.has_value());
+            if (auto value = parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
+                return PropertyAndValue { metadata->property_id, value };
         }
 
-        if (auto value = parse_time_value(tokens, time_range))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_time_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
     // <percentage> is checked after the <foo-percentage> types.
-    if (auto property = any_property_accepts_type(property_ids, ValueType::Percentage); property.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(*property);
+    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Percentage); metadata.has_value()) {
+        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
 
-        if (auto value = parse_percentage_value(tokens, property_accepted_ranges_by_value_type(*property).get(ValueType::Percentage).value()))
-            return PropertyAndValue { *property, value };
+        if (auto value = parse_percentage_value(tokens, metadata->range))
+            return PropertyAndValue { metadata->property_id, value };
     }
 
     if (auto parsed = parse_for_type(ValueType::Paint); parsed.has_value())

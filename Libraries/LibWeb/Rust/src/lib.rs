@@ -413,6 +413,63 @@ pub unsafe extern "C" fn rust_css_parse_property_custom_ident_value(
 }
 
 /// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `value_type` and `value_type_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_property_numeric_metadata(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    value_type: *const u8,
+    value_type_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        property_id: u16,
+        minimum: f64,
+        maximum: f64,
+        has_percentage_range: bool,
+        percentage_minimum: f64,
+        percentage_maximum: f64,
+        percentages_resolve_to_value_type: bool,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(value_type) = bytes_from_raw(value_type, value_type_len) else {
+                return false;
+            };
+
+            css_parser::property_numeric_metadata(
+                property_ids,
+                value_type,
+                |property_id,
+                 minimum,
+                 maximum,
+                 has_percentage_range,
+                 percentage_minimum,
+                 percentage_maximum,
+                 percentages_resolve_to_value_type| {
+                    callback(
+                        ctx,
+                        property_id,
+                        minimum,
+                        maximum,
+                        has_percentage_range,
+                        percentage_minimum,
+                        percentage_maximum,
+                        percentages_resolve_to_value_type,
+                    );
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to `callback` must be valid pointers

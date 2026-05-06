@@ -348,6 +348,34 @@ Optional<RustComponentValueParser::PropertyCustomIdent> RustComponentValueParser
     return property_custom_ident;
 }
 
+Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<PropertyNumericMetadata> metadata;
+    auto value_type_string = value_type_to_string(value_type);
+    auto value_type_bytes = value_type_string.bytes();
+    FFI::rust_css_property_numeric_metadata(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        value_type_bytes.data(),
+        value_type_bytes.size(),
+        &metadata,
+        [](void* raw_metadata, u16 property_id, double minimum, double maximum, bool has_percentage_range, double percentage_minimum, double percentage_maximum, bool percentages_resolve_to_value_type) {
+            auto& metadata = *static_cast<Optional<PropertyNumericMetadata>*>(raw_metadata);
+            metadata = PropertyNumericMetadata {
+                .property_id = static_cast<PropertyID>(property_id),
+                .range = { minimum, maximum },
+                .percentage_range = has_percentage_range ? Optional<NumericRange> { { percentage_minimum, percentage_maximum } } : Optional<NumericRange> {},
+                .percentages_resolve_to_value_type = percentages_resolve_to_value_type,
+            };
+        });
+
+    return metadata;
+}
+
 struct RustSyntaxNodeBuilder {
     enum class FrameType : u8 {
         Multiplier,
