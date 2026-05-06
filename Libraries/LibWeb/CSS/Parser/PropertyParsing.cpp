@@ -2480,42 +2480,41 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
         }
 
         // <font-variant-css2> = normal | small-caps
-        // So, we handle that manually instead of trying to parse the font-variant property.
-        if (!font_variant && tokens.next_token().is_ident("small-caps"sv)) {
-            tokens.discard_a_token(); // small-caps
-
-            font_variant = ShorthandStyleValue::create(PropertyID::FontVariant,
-                { PropertyID::FontVariantAlternates,
-                    PropertyID::FontVariantCaps,
-                    PropertyID::FontVariantEastAsian,
-                    PropertyID::FontVariantEmoji,
-                    PropertyID::FontVariantLigatures,
-                    PropertyID::FontVariantNumeric,
-                    PropertyID::FontVariantPosition },
-                {
-                    property_initial_value(PropertyID::FontVariantAlternates),
-                    KeywordStyleValue::create(Keyword::SmallCaps),
-                    property_initial_value(PropertyID::FontVariantEastAsian),
-                    property_initial_value(PropertyID::FontVariantEmoji),
-                    property_initial_value(PropertyID::FontVariantLigatures),
-                    property_initial_value(PropertyID::FontVariantNumeric),
-                    property_initial_value(PropertyID::FontVariantPosition),
-                });
-            tokens.discard_whitespace();
-            continue;
+        if (!font_variant) {
+            auto font_variant_transaction = tokens.begin_transaction();
+            auto maybe_font_variant_css2 = parse_font_variant_css2_value(tokens);
+            if (maybe_font_variant_css2 && maybe_font_variant_css2->to_keyword() == Keyword::SmallCaps) {
+                font_variant_transaction.commit();
+                font_variant = ShorthandStyleValue::create(PropertyID::FontVariant,
+                    { PropertyID::FontVariantAlternates,
+                        PropertyID::FontVariantCaps,
+                        PropertyID::FontVariantEastAsian,
+                        PropertyID::FontVariantEmoji,
+                        PropertyID::FontVariantLigatures,
+                        PropertyID::FontVariantNumeric,
+                        PropertyID::FontVariantPosition },
+                    {
+                        property_initial_value(PropertyID::FontVariantAlternates),
+                        KeywordStyleValue::create(Keyword::SmallCaps),
+                        property_initial_value(PropertyID::FontVariantEastAsian),
+                        property_initial_value(PropertyID::FontVariantEmoji),
+                        property_initial_value(PropertyID::FontVariantLigatures),
+                        property_initial_value(PropertyID::FontVariantNumeric),
+                        property_initial_value(PropertyID::FontVariantPosition),
+                    });
+                tokens.discard_whitespace();
+                continue;
+            }
         }
 
         // <font-width-css3> = normal | ultra-condensed | extra-condensed | condensed | semi-condensed | semi-expanded | expanded | extra-expanded | ultra-expanded
-        // So again, we do this manually.
-        if (!font_width && tokens.next_token().is(Token::Type::Ident)) {
+        if (!font_width) {
             auto font_width_transaction = tokens.begin_transaction();
-            if (auto keyword = parse_keyword_value(tokens)) {
-                if (keyword_to_font_width(keyword->to_keyword()).has_value()) {
-                    font_width_transaction.commit();
-                    font_width = keyword.release_nonnull();
-                    tokens.discard_whitespace();
-                    continue;
-                }
+            if (auto maybe_font_width_css3 = parse_font_width_css3_value(tokens); maybe_font_width_css3 && maybe_font_width_css3->to_keyword() != Keyword::Normal) {
+                font_width_transaction.commit();
+                font_width = maybe_font_width_css3.release_nonnull();
+                tokens.discard_whitespace();
+                continue;
             }
         }
 

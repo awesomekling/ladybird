@@ -744,9 +744,20 @@ pub struct CssMediaQuery {
 #[repr(C)]
 pub enum CssValueTypeSyntaxKind {
     Invalid,
+    FontVariantCss2Normal,
+    FontVariantCss2SmallCaps,
     FontWeightAbsoluteNormal,
     FontWeightAbsoluteBold,
     FontWeightAbsoluteNumber,
+    FontWidthCss3Normal,
+    FontWidthCss3UltraCondensed,
+    FontWidthCss3ExtraCondensed,
+    FontWidthCss3Condensed,
+    FontWidthCss3SemiCondensed,
+    FontWidthCss3SemiExpanded,
+    FontWidthCss3Expanded,
+    FontWidthCss3ExtraExpanded,
+    FontWidthCss3UltraExpanded,
     SymbolString,
     SymbolCustomIdent,
 }
@@ -7705,6 +7716,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_font_variant_css2_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("normal", ValueTypeId::FontVariantCss2),
+            CssValueTypeSyntaxKind::FontVariantCss2Normal
+        );
+        assert_eq!(
+            parse_value_type("small-caps", ValueTypeId::FontVariantCss2),
+            CssValueTypeSyntaxKind::FontVariantCss2SmallCaps
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variant_css2_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("all-small-caps", ValueTypeId::FontVariantCss2),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("small-caps normal", ValueTypeId::FontVariantCss2),
+            CssValueTypeSyntaxKind::Invalid
+        );
+    }
+
+    #[test]
     fn parses_font_weight_absolute_syntax_nodes() {
         assert_eq!(
             parse_value_type("normal", ValueTypeId::FontWeightAbsolute),
@@ -7740,6 +7775,58 @@ mod tests {
         );
         assert_eq!(
             parse_value_type("700 800", ValueTypeId::FontWeightAbsolute),
+            CssValueTypeSyntaxKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_font_width_css3_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("normal", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3Normal
+        );
+        assert_eq!(
+            parse_value_type("ultra-condensed", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3UltraCondensed
+        );
+        assert_eq!(
+            parse_value_type("extra-condensed", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3ExtraCondensed
+        );
+        assert_eq!(
+            parse_value_type("condensed", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3Condensed
+        );
+        assert_eq!(
+            parse_value_type("semi-condensed", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3SemiCondensed
+        );
+        assert_eq!(
+            parse_value_type("semi-expanded", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3SemiExpanded
+        );
+        assert_eq!(
+            parse_value_type("expanded", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3Expanded
+        );
+        assert_eq!(
+            parse_value_type("extra-expanded", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3ExtraExpanded
+        );
+        assert_eq!(
+            parse_value_type("ultra-expanded", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::FontWidthCss3UltraExpanded
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_width_css3_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("100%", ValueTypeId::FontWidthCss3),
+            CssValueTypeSyntaxKind::Invalid
+        );
+        assert_eq!(
+            parse_value_type("condensed expanded", ValueTypeId::FontWidthCss3),
             CssValueTypeSyntaxKind::Invalid
         );
     }
