@@ -1478,31 +1478,4 @@ Optional<PageSelectorList> Parser::parse_as_page_selector_list()
     return RustComponentValueParser::parse_a_page_selector_list(m_input, m_encoding);
 }
 
-Parser::ParseErrorOr<PageSelectorList> Parser::parse_a_page_selector_list(TokenStream<ComponentValue>& tokens)
-{
-    // https://drafts.csswg.org/css-page-3/#syntax-page-selector
-    // <page-selector-list> = <page-selector>#
-    // <page-selector> = [ <ident-token>? <pseudo-page>* ]!
-    // <pseudo-page> = : [ left | right | first | blank ]
-
-    auto transaction = tokens.begin_transaction();
-    Vector<ComponentValue> page_selector_list;
-    while (tokens.has_next_token())
-        page_selector_list.append(tokens.consume_a_token());
-
-    auto serialized_page_selector_list = serialize_component_values_for_reparsing(page_selector_list);
-    auto selector_list = RustComponentValueParser::parse_a_page_selector_list(serialized_page_selector_list.bytes_as_string_view(), "utf-8"sv);
-    if (selector_list.has_value()) {
-        transaction.commit();
-        return selector_list.release_value();
-    }
-
-    ErrorReporter::the().report(InvalidSelectorError {
-        .rule_name = "@page"_fly_string,
-        .value_string = serialized_page_selector_list,
-        .description = "Invalid page selector list."_string,
-    });
-    return ParseError::SyntaxError;
-}
-
 }

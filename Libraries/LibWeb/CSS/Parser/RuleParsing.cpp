@@ -1215,9 +1215,20 @@ GC::Ptr<CSSPageRule> Parser::convert_to_page_rule(AtRule const& page_rule)
         return nullptr;
     }
 
-    auto page_selectors = parse_a_page_selector_list(tokens);
-    if (page_selectors.is_error())
+    auto page_selector_start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_page_selector_list = serialize_component_values_for_reparsing(tokens.tokens_since(page_selector_start));
+    auto page_selectors = RustComponentValueParser::parse_a_page_selector_list(serialized_page_selector_list.bytes_as_string_view(), "utf-8"sv);
+    if (!page_selectors.has_value()) {
+        ErrorReporter::the().report(InvalidSelectorError {
+            .rule_name = "@page"_fly_string,
+            .value_string = serialized_page_selector_list,
+            .description = "Invalid page selector list."_string,
+        });
         return nullptr;
+    }
 
     GC::RootVector<GC::Ref<CSSRule>> child_rules { realm().heap() };
     DescriptorList descriptors { AtRuleID::Page };
