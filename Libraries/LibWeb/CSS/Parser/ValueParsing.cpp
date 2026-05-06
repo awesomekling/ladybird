@@ -5201,6 +5201,8 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_flex_value(tokens, infinite_range);
     case ValueType::FontStyle:
         return parse_font_style_value(tokens);
+    case ValueType::FontWeightAbsolute:
+        return parse_font_weight_absolute_value(tokens);
     case ValueType::FontVariantAlternates:
         return parse_font_variant_alternates_value(tokens);
     case ValueType::FontVariantEastAsian:

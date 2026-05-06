@@ -2204,13 +2204,12 @@
     "needs-layout-node-for-resolved-value": true,
     "requires-computation": "non-inherited-value",
     "valid-types": [
+      "font-weight-absolute",
       "number [1,1000]"
     ],
     "valid-identifiers": [
-      "bold",
       "bolder",
-      "lighter",
-      "normal"
+      "lighter"
     ]
   },
   "font-width": {
