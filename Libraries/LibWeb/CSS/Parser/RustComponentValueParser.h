@@ -165,6 +165,17 @@ public:
         Vector<String> schemes;
     };
 
+    struct ScrollFunction {
+        FFI::CssScrollFunctionValueKind kind;
+        FFI::CssScrollFunctionScrollerKind scroller;
+        FFI::CssScrollFunctionAxisKind axis;
+    };
+
+    struct ViewTimelineInset {
+        FFI::CssViewTimelineInsetValueKind kind;
+        size_t count { 0 };
+    };
+
     struct AnchorNameOrScope {
         FFI::CssAnchorNameOrScopeValueKind kind;
         Vector<FlyString> names;
@@ -343,6 +354,8 @@ public:
     static AnimationName parse_animation_name(StringView input, StringView encoding);
     static ViewTransitionName parse_view_transition_name(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
+    static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
+    static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);

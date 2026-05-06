@@ -942,50 +942,41 @@ RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream
     if (!function_token.is_function("scroll"sv))
         return nullptr;
 
+    auto serialized_scroll_function = function_token.original_source_text();
+    if (serialized_scroll_function.is_empty())
+        serialized_scroll_function = function_token.to_string();
+    auto scroll_function = RustComponentValueParser::parse_scroll_function(serialized_scroll_function.bytes_as_string_view(), "utf-8"sv);
+    if (scroll_function.kind == FFI::CssScrollFunctionValueKind::Invalid)
+        return nullptr;
+
     StyleValueTuple tuple;
     tuple.resize_with_default_value(2, nullptr);
 
-    bool has_scroller = false;
-    bool has_axis = false;
+    switch (scroll_function.scroller) {
+    case FFI::CssScrollFunctionScrollerKind::None:
+    case FFI::CssScrollFunctionScrollerKind::Nearest:
+        break;
+    case FFI::CssScrollFunctionScrollerKind::Root:
+        tuple[TupleStyleValue::Indices::ScrollFunction::Scroller] = KeywordStyleValue::create(Keyword::Root);
+        break;
+    case FFI::CssScrollFunctionScrollerKind::Self_:
+        tuple[TupleStyleValue::Indices::ScrollFunction::Scroller] = KeywordStyleValue::create(Keyword::Self);
+        break;
+    }
 
-    auto argument_tokens = TokenStream { function_token.function().value };
-
-    while (argument_tokens.has_next_token()) {
-        tokens.discard_whitespace();
-
-        if (!argument_tokens.has_next_token())
-            break;
-
-        auto keyword_value = parse_keyword_value(argument_tokens);
-
-        if (!keyword_value)
-            return nullptr;
-
-        if (auto maybe_scroller = keyword_to_scroller(keyword_value->to_keyword()); maybe_scroller.has_value()) {
-            if (has_scroller)
-                return nullptr;
-
-            // NB: The default value of <scroller> `nearest` is omitted from the serialization.
-            if (maybe_scroller.value() != Scroller::Nearest)
-                tuple[TupleStyleValue::Indices::ScrollFunction::Scroller] = keyword_value;
-
-            has_scroller = true;
-            continue;
-        }
-
-        if (auto maybe_axis = keyword_to_axis(keyword_value->to_keyword()); maybe_axis.has_value()) {
-            if (has_axis)
-                return nullptr;
-
-            // NB: The default value of <axis> `block` is omitted from the serialization.
-            if (maybe_axis.value() != Axis::Block)
-                tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = keyword_value;
-
-            has_axis = true;
-            continue;
-        }
-
-        return nullptr;
+    switch (scroll_function.axis) {
+    case FFI::CssScrollFunctionAxisKind::None:
+    case FFI::CssScrollFunctionAxisKind::Block:
+        break;
+    case FFI::CssScrollFunctionAxisKind::Inline:
+        tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::Inline);
+        break;
+    case FFI::CssScrollFunctionAxisKind::X:
+        tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::X);
+        break;
+    case FFI::CssScrollFunctionAxisKind::Y:
+        tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::Y);
+        break;
     }
 
     transaction.commit();

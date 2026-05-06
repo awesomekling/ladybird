@@ -47,15 +47,17 @@ pub use css_parser::{
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
     CssPositionVisibilityValueKind, CssPseudoElementValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind,
-    CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind, CssSupportsFeatureKind, CssSyntaxNode,
-    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
-    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
-    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransitionBehaviorItemKind,
-    CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
-    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
-    CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
+    CssRuleEventKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
+    CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent,
+    CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind,
+    CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
+    CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+    CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+    CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewTimelineInsetValue,
+    CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
     CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
@@ -1164,6 +1166,46 @@ pub unsafe extern "C" fn rust_css_parse_contain(input: *const u8, input_len: usi
             };
 
             css_parser::parse_contain_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_scroll_function(input: *const u8, input_len: usize) -> CssScrollFunctionValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssScrollFunctionValue {
+                    kind: CssScrollFunctionValueKind::Invalid,
+                    scroller: CssScrollFunctionScrollerKind::None,
+                    axis: CssScrollFunctionAxisKind::None,
+                };
+            };
+
+            css_parser::parse_scroll_function_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_view_timeline_inset(
+    input: *const u8,
+    input_len: usize,
+) -> CssViewTimelineInsetValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssViewTimelineInsetValue {
+                    kind: CssViewTimelineInsetValueKind::Invalid,
+                    count: 0,
+                };
+            };
+
+            css_parser::parse_view_timeline_inset_value(input)
         })
     }
 }

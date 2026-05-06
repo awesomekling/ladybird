@@ -3152,6 +3152,37 @@ FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, S
         filtered_input_bytes.size());
 }
 
+RustComponentValueParser::ScrollFunction RustComponentValueParser::parse_scroll_function(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_scroll_function(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+
+    return {
+        .kind = parsed.kind,
+        .scroller = parsed.scroller,
+        .axis = parsed.axis,
+    };
+}
+
+RustComponentValueParser::ViewTimelineInset RustComponentValueParser::parse_view_timeline_inset(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_view_timeline_inset(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+
+    return {
+        .kind = parsed.kind,
+        .count = parsed.count,
+    };
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

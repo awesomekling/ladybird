@@ -915,6 +915,54 @@ pub struct CssContainValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssScrollFunctionValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssScrollFunctionScrollerKind {
+    None,
+    Nearest,
+    Root,
+    Self_,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssScrollFunctionAxisKind {
+    None,
+    Block,
+    Inline,
+    X,
+    Y,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssScrollFunctionValue {
+    pub kind: CssScrollFunctionValueKind,
+    pub scroller: CssScrollFunctionScrollerKind,
+    pub axis: CssScrollFunctionAxisKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssViewTimelineInsetValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssViewTimelineInsetValue {
+    pub kind: CssViewTimelineInsetValueKind,
+    pub count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -3177,6 +3225,107 @@ where
     CssColorSchemeValue {
         kind: CssColorSchemeValueKind::List,
         only,
+    }
+}
+
+pub(crate) fn parse_scroll_function_value(filtered_input: &[u8]) -> CssScrollFunctionValue {
+    let invalid = CssScrollFunctionValue {
+        kind: CssScrollFunctionValueKind::Invalid,
+        scroller: CssScrollFunctionScrollerKind::None,
+        axis: CssScrollFunctionAxisKind::None,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let [ComponentValue::Function(function)] = component_values else {
+        return invalid;
+    };
+    if !function.name.eq_ignore_ascii_case("scroll") {
+        return invalid;
+    }
+
+    // https://drafts.csswg.org/scroll-animations-1/#funcdef-scroll
+    // <scroll()> = scroll( [ <scroller> || <axis> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut scroller = CssScrollFunctionScrollerKind::None;
+    let mut axis = CssScrollFunctionAxisKind::None;
+
+    while parser.has_next_component_value() {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if let Some(parsed_scroller) = scroll_function_scroller_from_string(&ident) {
+            if scroller != CssScrollFunctionScrollerKind::None {
+                return invalid;
+            }
+            scroller = parsed_scroller;
+            continue;
+        }
+
+        if let Some(parsed_axis) = scroll_function_axis_from_string(&ident) {
+            if axis != CssScrollFunctionAxisKind::None {
+                return invalid;
+            }
+            axis = parsed_axis;
+            continue;
+        }
+
+        return invalid;
+    }
+
+    CssScrollFunctionValue {
+        kind: CssScrollFunctionValueKind::Valid,
+        scroller,
+        axis,
+    }
+}
+
+pub(crate) fn parse_view_timeline_inset_value(filtered_input: &[u8]) -> CssViewTimelineInsetValue {
+    let invalid = CssViewTimelineInsetValue {
+        kind: CssViewTimelineInsetValueKind::Invalid,
+        count: 0,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+    // [ [ auto | <length-percentage> ]{1,2} ]
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut count = 0;
+
+    while count < 2 {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        if component_value_is_ident(Some(component_value), "auto")
+            || component_value_parse_as_length_percentage(component_value)
+        {
+            parser.index += 1;
+            count += 1;
+            continue;
+        }
+
+        break;
+    }
+
+    parser.discard_whitespace();
+    if count == 0 || parser.has_next_component_value() {
+        return invalid;
+    }
+
+    CssViewTimelineInsetValue {
+        kind: CssViewTimelineInsetValueKind::Valid,
+        count,
     }
 }
 
@@ -10197,6 +10346,29 @@ fn component_values_parse_as_length(component_values: &[ComponentValue]) -> bool
     }
 }
 
+fn component_value_parse_as_length_percentage(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => true,
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
 fn component_value_parse_as_length_descriptor(component_value: &ComponentValue) -> bool {
     match component_value {
         ComponentValue::PreservedToken(Token {
@@ -10274,6 +10446,35 @@ fn is_math_function_name(name: &str) -> bool {
             | "sqrt"
             | "tan"
     )
+}
+
+fn scroll_function_scroller_from_string(input: &str) -> Option<CssScrollFunctionScrollerKind> {
+    if input.eq_ignore_ascii_case("nearest") {
+        return Some(CssScrollFunctionScrollerKind::Nearest);
+    }
+    if input.eq_ignore_ascii_case("root") {
+        return Some(CssScrollFunctionScrollerKind::Root);
+    }
+    if input.eq_ignore_ascii_case("self") {
+        return Some(CssScrollFunctionScrollerKind::Self_);
+    }
+    None
+}
+
+fn scroll_function_axis_from_string(input: &str) -> Option<CssScrollFunctionAxisKind> {
+    if input.eq_ignore_ascii_case("block") {
+        return Some(CssScrollFunctionAxisKind::Block);
+    }
+    if input.eq_ignore_ascii_case("inline") {
+        return Some(CssScrollFunctionAxisKind::Inline);
+    }
+    if input.eq_ignore_ascii_case("x") {
+        return Some(CssScrollFunctionAxisKind::X);
+    }
+    if input.eq_ignore_ascii_case("y") {
+        return Some(CssScrollFunctionAxisKind::Y);
+    }
+    None
 }
 
 fn is_page_size_keyword(input: &str) -> bool {
@@ -11724,19 +11925,21 @@ mod tests {
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
+        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind,
+        CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
         CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
         CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
         CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
         CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTimelineInsetValue,
+        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -11757,11 +11960,11 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
-        parse_quotes_value, parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_quotes_value, parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_view_timeline_inset_value,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -12321,6 +12524,14 @@ mod tests {
 
     fn parse_contain(input: &str) -> CssContainValue {
         parse_contain_value(input.as_bytes())
+    }
+
+    fn parse_scroll_function(input: &str) -> CssScrollFunctionValue {
+        parse_scroll_function_value(input.as_bytes())
+    }
+
+    fn parse_view_timeline_inset(input: &str) -> CssViewTimelineInsetValue {
+        parse_view_timeline_inset_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -15058,6 +15269,90 @@ mod tests {
         assert_eq!(parse_contain("paint paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size, paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size nonsense").kind, CssContainValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_scroll_function_values() {
+        assert_eq!(
+            parse_scroll_function("scroll()"),
+            CssScrollFunctionValue {
+                kind: CssScrollFunctionValueKind::Valid,
+                scroller: CssScrollFunctionScrollerKind::None,
+                axis: CssScrollFunctionAxisKind::None,
+            }
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(root)").scroller,
+            CssScrollFunctionScrollerKind::Root
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(self x)").axis,
+            CssScrollFunctionAxisKind::X
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(y root)").scroller,
+            CssScrollFunctionScrollerKind::Root
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(y root)").axis,
+            CssScrollFunctionAxisKind::Y
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_scroll_function_values() {
+        assert_eq!(parse_scroll_function("").kind, CssScrollFunctionValueKind::Invalid);
+        assert_eq!(parse_scroll_function("root").kind, CssScrollFunctionValueKind::Invalid);
+        assert_eq!(
+            parse_scroll_function("scroll(root self)").kind,
+            CssScrollFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(x y)").kind,
+            CssScrollFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(root, x)").kind,
+            CssScrollFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scroll_function("scroll(foo)").kind,
+            CssScrollFunctionValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_view_timeline_inset_values() {
+        assert_eq!(
+            parse_view_timeline_inset("auto"),
+            CssViewTimelineInsetValue {
+                kind: CssViewTimelineInsetValueKind::Valid,
+                count: 1,
+            }
+        );
+        assert_eq!(parse_view_timeline_inset("1px").count, 1);
+        assert_eq!(parse_view_timeline_inset("10% auto").count, 2);
+        assert_eq!(parse_view_timeline_inset("calc(1px + 2px) 5%").count, 2);
+    }
+
+    #[test]
+    fn rejects_invalid_view_timeline_inset_values() {
+        assert_eq!(
+            parse_view_timeline_inset("").kind,
+            CssViewTimelineInsetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_timeline_inset("auto auto auto").kind,
+            CssViewTimelineInsetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_timeline_inset("block").kind,
+            CssViewTimelineInsetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_timeline_inset("1px, 2px").kind,
+            CssViewTimelineInsetValueKind::Invalid
+        );
     }
 
     #[test]
