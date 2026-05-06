@@ -33,9 +33,9 @@ pub use css_parser::{
     CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
     CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
     CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
-    CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
-    CssPositionVisibilityValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
-    CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
+    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
     CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword,
     CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
@@ -984,6 +984,24 @@ pub unsafe extern "C" fn rust_css_parse_timeline_name(
             css_parser::parse_timeline_name_value(input, |kind, name| {
                 name_callback(ctx, kind, name.as_ptr(), name.len());
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_position_try_order(
+    input: *const u8,
+    input_len: usize,
+) -> CssPositionTryOrderValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPositionTryOrderValue::Invalid;
+            };
+
+            css_parser::parse_position_try_order_value(input)
         })
     }
 }

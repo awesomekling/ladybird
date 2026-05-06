@@ -270,6 +270,7 @@ public:
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static TimelineName parse_timeline_name(StringView input, StringView encoding);
+    static FFI::CssPositionTryOrderValue parse_position_try_order(StringView input, StringView encoding);
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
     static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
     static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);

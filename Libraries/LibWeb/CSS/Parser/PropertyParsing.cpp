@@ -614,6 +614,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_area_value(tokens); });
     case PropertyID::PositionTryFallbacks:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_try_fallbacks_value(tokens); });
+    case PropertyID::PositionTryOrder:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_position_try_order_value(tokens); });
     case PropertyID::PositionVisibility:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_visibility_value(tokens); });
     case PropertyID::Quotes:
@@ -1114,6 +1116,42 @@ RefPtr<StyleValue const> Parser::parse_timeline_name_value(TokenStream<Component
     }
 
     VERIFY_NOT_REACHED();
+}
+
+// https://drafts.csswg.org/css-anchor-position-1/#position-try-order-property
+RefPtr<StyleValue const> Parser::parse_position_try_order_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_position_try_order = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_position_try_order = RustComponentValueParser::parse_position_try_order(serialized_position_try_order.bytes_as_string_view(), "utf-8"sv);
+
+    auto keyword = [](FFI::CssPositionTryOrderValue value) -> Optional<Keyword> {
+        switch (value) {
+        case FFI::CssPositionTryOrderValue::Invalid:
+            return {};
+        case FFI::CssPositionTryOrderValue::Normal:
+            return Keyword::Normal;
+        case FFI::CssPositionTryOrderValue::MostWidth:
+            return Keyword::MostWidth;
+        case FFI::CssPositionTryOrderValue::MostHeight:
+            return Keyword::MostHeight;
+        case FFI::CssPositionTryOrderValue::MostBlockSize:
+            return Keyword::MostBlockSize;
+        case FFI::CssPositionTryOrderValue::MostInlineSize:
+            return Keyword::MostInlineSize;
+        }
+        VERIFY_NOT_REACHED();
+    }(parsed_position_try_order);
+
+    if (!keyword.has_value())
+        return {};
+
+    transaction.commit();
+    return KeywordStyleValue::create(keyword.release_value());
 }
 
 // https://drafts.csswg.org/css-view-transitions-1/#view-transition-name-prop

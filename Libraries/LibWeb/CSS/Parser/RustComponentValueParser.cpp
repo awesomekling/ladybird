@@ -2197,6 +2197,13 @@ RustComponentValueParser::TimelineName RustComponentValueParser::parse_timeline_
     };
 }
 
+FFI::CssPositionTryOrderValue RustComponentValueParser::parse_position_try_order(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+    return FFI::rust_css_parse_position_try_order(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 FFI::CssPositionVisibilityValue RustComponentValueParser::parse_position_visibility(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
