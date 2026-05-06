@@ -224,10 +224,27 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     VERIFY_NOT_REACHED();
                 }
                 case DescriptorMetadata::ValueType::CounterStyleName: {
-                    auto counter_style_name = parse_counter_style_name(tokens);
+                    // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
+                    // <counter-style-name> is a <custom-ident> that is not an ASCII case-insensitive match for none.
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_counter_style_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto counter_style_name = RustComponentValueParser::parse_a_counter_style_name(serialized_counter_style_name.bytes_as_string_view(), "utf-8"sv);
 
                     if (!counter_style_name.has_value())
                         return nullptr;
+
+                    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+                    // Counter style names are case-sensitive. However, the names defined in this specification are
+                    // ASCII lowercased on parse wherever they are used as counter styles, e.g. in the list-style set
+                    // of properties, in the @counter-style rule, and in the counter() functions.
+                    //
+                    // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
+                    auto const& keyword = keyword_from_string(counter_style_name.value());
+                    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+                        counter_style_name = counter_style_name->to_ascii_lowercase();
 
                     return CustomIdentStyleValue::create(counter_style_name.release_value());
                 }
