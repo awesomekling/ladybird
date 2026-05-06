@@ -3986,6 +3986,24 @@ where
     true
 }
 
+pub(crate) fn parse_font_feature_values_feature_value<V>(filtered_input: &[u8], mut value_callback: V) -> bool
+where
+    V: FnMut(u32),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(values) = parser.parse_font_feature_values_feature_value() else {
+        return false;
+    };
+
+    for value in values {
+        value_callback(value);
+    }
+    true
+}
+
 pub(crate) fn parse_a_family_name<F>(filtered_input: &[u8], mut family_callback: F) -> bool
 where
     F: FnMut(&str, bool),
@@ -7411,6 +7429,33 @@ impl ComponentValueParser {
         Some(namespace_uri)
     }
 
+    // https://drafts.csswg.org/css-fonts-4/#font-feature-values-syntax
+    fn parse_font_feature_values_feature_value(&mut self) -> Option<Vec<u32>> {
+        // <feature-value-declaration> = <custom-ident> : <integer [0,∞]>+;
+        self.discard_whitespace();
+
+        let mut values = Vec::new();
+        while let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        })) = self.next_component_value()
+        {
+            if !number_is_integer(*number) || number.value() < 0.0 || number.value() > u32::MAX as f64 {
+                return None;
+            }
+
+            values.push(number.value() as u32);
+            self.index += 1;
+            self.discard_whitespace();
+        }
+
+        if values.is_empty() || self.has_next_component_value() {
+            return None;
+        }
+
+        Some(values)
+    }
+
     // https://drafts.csswg.org/css-fonts-4/#font-family-name-syntax
     fn parse_a_family_name(&mut self) -> Option<FamilyName> {
         // <font-family-name> = <string> | <custom-ident>+
@@ -10041,14 +10086,15 @@ mod tests {
         parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
-        parse_position_anchor_value, parse_position_try_order_value, parse_position_visibility_value,
-        parse_positive_percentage_descriptor, parse_quotes_value, parse_scrollbar_gutter_value,
-        parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
+        parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
+        parse_quotes_value, parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -10705,6 +10751,14 @@ mod tests {
             family_names.push(family_name.to_string());
         });
         parsed.then_some(family_names)
+    }
+
+    fn parse_font_feature_values_feature_values(input: &str) -> Option<Vec<u32>> {
+        let mut values = Vec::new();
+        let parsed = parse_font_feature_values_feature_value(input.as_bytes(), |value| {
+            values.push(value);
+        });
+        parsed.then_some(values)
     }
 
     fn parse_family_name(input: &str) -> Option<(String, bool)> {
@@ -12931,6 +12985,26 @@ mod tests {
         assert_eq!(parse_font_feature_values_family_names("initial"), None);
         assert_eq!(parse_font_feature_values_family_names("\"Bongo\" Sans"), None);
         assert_eq!(parse_font_feature_values_family_names("123"), None);
+    }
+
+    #[test]
+    fn parses_font_feature_values_feature_values() {
+        assert_eq!(parse_font_feature_values_feature_values("1"), Some(vec![1]));
+        assert_eq!(parse_font_feature_values_feature_values("1 2"), Some(vec![1, 2]));
+        assert_eq!(
+            parse_font_feature_values_feature_values("0 4294967295"),
+            Some(vec![0, u32::MAX])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_feature_values_feature_values() {
+        assert_eq!(parse_font_feature_values_feature_values(""), None);
+        assert_eq!(parse_font_feature_values_feature_values("-1"), None);
+        assert_eq!(parse_font_feature_values_feature_values("1.5"), None);
+        assert_eq!(parse_font_feature_values_feature_values("calc(1)"), None);
+        assert_eq!(parse_font_feature_values_feature_values("1 foo"), None);
+        assert_eq!(parse_font_feature_values_feature_values("4294967296"), None);
     }
 
     #[test]

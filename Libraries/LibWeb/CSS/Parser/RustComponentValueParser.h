@@ -341,6 +341,7 @@ public:
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_font_feature_values_family_name_list(StringView input, StringView encoding);
+    static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
     static Optional<Vector<ContainerRulePreludeCondition>> parse_container_rule_prelude(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);

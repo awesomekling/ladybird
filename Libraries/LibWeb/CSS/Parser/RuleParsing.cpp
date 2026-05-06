@@ -896,60 +896,38 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
             }
 
             at_rule.for_each_as_declaration_list([&](Declaration const& declaration) {
-                auto value_stream = TokenStream { declaration.value };
+                auto serialized_value = serialize_component_values_for_reparsing(declaration.value);
 
                 if (declaration.important == Important::Yes) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = value_stream.dump_string(),
+                        .prelude = serialized_value,
                         .description = "Declarations in @font-feature-values rules cannot be marked !important."_string,
                     });
                     return;
                 }
 
-                value_stream.discard_whitespace();
-
-                if (!value_stream.has_next_token()) {
+                auto values = RustComponentValueParser::parse_font_feature_values_feature_value(serialized_value.bytes_as_string_view(), "utf-8"sv);
+                if (!values.has_value()) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = value_stream.dump_string(),
-                        .description = "Empty feature value."_string,
+                        .prelude = serialized_value,
+                        .description = "Feature value entry must be a non-negative integer."_string,
                     });
                     return;
                 }
 
-                Vector<u32> values;
-
-                while (value_stream.has_next_token()) {
-                    auto token = value_stream.consume_a_token();
-
-                    // FIXME: Support calc()
-                    if (!token.is(Token::Type::Number) || !token.token().is_integer() || token.token().to_integer() < 0) {
-                        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                            .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                            .prelude = value_stream.dump_string(),
-                            .description = "Feature value entry must be a non-negative integer."_string,
-                        });
-
-                        return;
-                    }
-
-                    values.append(token.token().to_integer());
-
-                    value_stream.discard_whitespace();
-                }
-
-                if (values.size() > max_value_count) {
+                if (values->size() > max_value_count) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = value_stream.dump_string(),
+                        .prelude = serialized_value,
                         .description = MUST(String::formatted("Too many feature values provided (maximum {})."_string, max_value_count)),
                     });
 
                     return;
                 }
 
-                MUST(feature_values_map->set(declaration.name.to_string(), move(values)));
+                MUST(feature_values_map->set(declaration.name.to_string(), values.release_value()));
             });
         },
         [&](Declaration const&) {

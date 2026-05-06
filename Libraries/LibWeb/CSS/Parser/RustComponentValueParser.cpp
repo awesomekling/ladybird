@@ -2796,6 +2796,27 @@ Optional<Vector<FlyString>> RustComponentValueParser::parse_font_feature_values_
     return family_names;
 }
 
+Optional<Vector<u32>> RustComponentValueParser::parse_font_feature_values_feature_value(StringView input, StringView encoding)
+{
+    Vector<u32> values;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_feature_values_feature_value(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &values,
+        [](void* raw_values, u32 value) {
+            auto& values = *static_cast<Vector<u32>*>(raw_values);
+            values.append(value);
+        });
+
+    if (!parsed)
+        return {};
+
+    return values;
+}
+
 Optional<Vector<RustComponentValueParser::ContainerRulePreludeCondition>> RustComponentValueParser::parse_container_rule_prelude(StringView input, StringView encoding)
 {
     Vector<ContainerRulePreludeCondition> conditions;

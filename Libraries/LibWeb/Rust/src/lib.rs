@@ -2298,6 +2298,29 @@ pub unsafe extern "C" fn rust_css_parse_font_feature_values_family_name_list(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_feature_values_feature_value(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    value_callback: unsafe extern "C" fn(ctx: *mut c_void, value: u32),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_font_feature_values_feature_value(input, |value| {
+                value_callback(ctx, value);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_empty_prelude(input: *const u8, input_len: usize) -> bool {
     unsafe {
