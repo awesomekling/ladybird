@@ -210,21 +210,6 @@ RefPtr<Supports> Parser::parse_as_supports()
     return parse_a_supports_from_string(m_input, m_encoding);
 }
 
-template<typename T>
-RefPtr<Supports> Parser::parse_a_supports(TokenStream<T>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    StringBuilder serialized_supports;
-    while (tokens.has_next_token())
-        serialized_supports.append(tokens.consume_a_token().original_source_text());
-
-    auto supports = parse_a_supports_from_string(serialized_supports.string_view(), "utf-8"sv);
-    if (supports)
-        transaction.commit();
-
-    return supports;
-}
-
 RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringView encoding)
 {
     m_rule_context.append(RuleContext::SupportsCondition);
@@ -2014,9 +1999,6 @@ template Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<Compone
 
 template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<Token>& input);
 template Vector<Rule> Parser::parse_a_stylesheets_contents(TokenStream<ComponentValue>& input);
-
-template RefPtr<Supports> Parser::parse_a_supports(TokenStream<ComponentValue>&);
-template RefPtr<Supports> Parser::parse_a_supports(TokenStream<Token>&);
 
 template Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<Token>&);
 template Vector<Rule> Parser::consume_a_stylesheets_contents(TokenStream<ComponentValue>&);

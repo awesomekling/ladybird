@@ -290,8 +290,9 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     RefPtr<Supports> supports {};
     if (tokens.next_token().is_function("supports"sv)) {
         auto component_value = tokens.consume_a_token();
+        auto serialized_supports = serialize_component_values_for_reparsing(component_value.function().value);
+        supports = parse_a_supports_from_string(serialized_supports.bytes_as_string_view(), "utf-8"sv);
         TokenStream supports_tokens { component_value.function().value };
-        supports = parse_a_supports(supports_tokens);
         if (!supports) {
             m_rule_context.append(RuleContext::SupportsCondition);
             auto supports_declaration = parse_supports_declaration(supports_tokens);
@@ -516,7 +517,8 @@ GC::Ptr<CSSSupportsRule> Parser::convert_to_supports_rule(AtRule const& rule, Ne
         return {};
     }
 
-    auto supports = parse_a_supports(supports_tokens);
+    auto serialized_supports = serialize_component_values_for_reparsing(rule.prelude);
+    auto supports = parse_a_supports_from_string(serialized_supports.bytes_as_string_view(), "utf-8"sv);
     if (!supports) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@supports"_fly_string,
