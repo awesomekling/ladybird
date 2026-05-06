@@ -14,7 +14,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/GenericLexer.h>
 #include <AK/QuickSort.h>
 #include <AK/StringConversions.h>
 #include <AK/TemporaryChange.h>
@@ -240,312 +239,33 @@ RefPtr<StyleValue const> Parser::parse_family_name_value(TokenStream<ComponentVa
 Optional<Gfx::UnicodeRange> Parser::parse_unicode_range(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // <urange> =
-    //  u '+' <ident-token> '?'* |
-    //  u <dimension-token> '?'* |
-    //  u <number-token> '?'* |
-    //  u <number-token> <dimension-token> |
-    //  u <number-token> <number-token> |
-    //  u '+' '?'+
-    // (All with no whitespace in between tokens.)
-
-    // NOTE: Parsing this is different from usual. We take these steps:
-    // 1. Match the grammar above against the tokens, concatenating them into a string using their original representation.
-    // 2. Then, parse that string according to the spec algorithm.
-    // Step 2 is performed by calling the other parse_unicode_range() overload.
-
-    auto is_ending_token = [](ComponentValue const& component_value) {
-        return component_value.is(Token::Type::EndOfFile)
-            || component_value.is(Token::Type::Comma)
-            || component_value.is(Token::Type::Semicolon)
-            || component_value.is(Token::Type::Whitespace);
-    };
-
-    auto create_unicode_range = [&](StringView text, auto& local_transaction) -> Optional<Gfx::UnicodeRange> {
-        auto maybe_unicode_range = parse_unicode_range(text);
-        if (maybe_unicode_range.has_value()) {
-            local_transaction.commit();
-            transaction.commit();
-        }
-        return maybe_unicode_range;
-    };
-
-    // All options start with 'u'/'U'.
-    auto const& u = tokens.consume_a_token();
-    if (!u.is_ident("u"sv)) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = tokens.dump_string(),
-            .description = "Doesn't start with 'u'."_string,
-        });
+    auto serialized_unicode_range = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto maybe_unicode_range = RustComponentValueParser::parse_a_unicode_range(serialized_unicode_range.bytes_as_string_view(), "utf-8"sv);
+    if (!maybe_unicode_range.has_value())
         return {};
-    }
 
-    auto const& second_token = tokens.consume_a_token();
-
-    //  u '+' <ident-token> '?'* |
-    //  u '+' '?'+
-    if (second_token.is_delim('+')) {
-        auto local_transaction = tokens.begin_transaction();
-        StringBuilder string_builder;
-        string_builder.append(second_token.token().original_source_text());
-
-        auto const& third_token = tokens.consume_a_token();
-        if (third_token.is(Token::Type::Ident) || third_token.is_delim('?')) {
-            string_builder.append(third_token.token().original_source_text());
-            while (tokens.next_token().is_delim('?'))
-                string_builder.append(tokens.consume_a_token().token().original_source_text());
-            if (is_ending_token(tokens.next_token()))
-                return create_unicode_range(string_builder.string_view(), local_transaction);
-        }
-    }
-
-    //  u <dimension-token> '?'*
-    if (second_token.is(Token::Type::Dimension)) {
-        auto local_transaction = tokens.begin_transaction();
-        StringBuilder string_builder;
-        string_builder.append(second_token.token().original_source_text());
-        while (tokens.next_token().is_delim('?'))
-            string_builder.append(tokens.consume_a_token().token().original_source_text());
-        if (is_ending_token(tokens.next_token()))
-            return create_unicode_range(string_builder.string_view(), local_transaction);
-    }
-
-    //  u <number-token> '?'* |
-    //  u <number-token> <dimension-token> |
-    //  u <number-token> <number-token>
-    if (second_token.is(Token::Type::Number)) {
-        auto local_transaction = tokens.begin_transaction();
-        StringBuilder string_builder;
-        string_builder.append(second_token.token().original_source_text());
-
-        if (is_ending_token(tokens.next_token()))
-            return create_unicode_range(string_builder.string_view(), local_transaction);
-
-        auto const& third_token = tokens.consume_a_token();
-        if (third_token.is_delim('?')) {
-            string_builder.append(third_token.token().original_source_text());
-            while (tokens.next_token().is_delim('?'))
-                string_builder.append(tokens.consume_a_token().token().original_source_text());
-            if (is_ending_token(tokens.next_token()))
-                return create_unicode_range(string_builder.string_view(), local_transaction);
-        } else if (third_token.is(Token::Type::Dimension)) {
-            string_builder.append(third_token.token().original_source_text());
-            if (is_ending_token(tokens.next_token()))
-                return create_unicode_range(string_builder.string_view(), local_transaction);
-        } else if (third_token.is(Token::Type::Number)) {
-            string_builder.append(third_token.token().original_source_text());
-            if (is_ending_token(tokens.next_token()))
-                return create_unicode_range(string_builder.string_view(), local_transaction);
-        }
-    }
-
-    ErrorReporter::the().report(InvalidValueError {
-        .value_type = "<urange>"_fly_string,
-        .value_string = tokens.dump_string(),
-        .description = "Did not match grammar."_string,
-    });
-    return {};
-}
-
-Optional<Gfx::UnicodeRange> Parser::parse_unicode_range(StringView text)
-{
-    auto make_valid_unicode_range = [&](u32 start_value, u32 end_value) -> Optional<Gfx::UnicodeRange> {
-        // https://www.w3.org/TR/css-syntax-3/#maximum-allowed-code-point
-        constexpr u32 maximum_allowed_code_point = 0x10FFFF;
-
-        // To determine what codepoints the <urange> represents:
-        // 1. If end value is greater than the maximum allowed code point,
-        //    the <urange> is invalid and a syntax error.
-        if (end_value > maximum_allowed_code_point) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<urange>"_fly_string,
-                .value_string = MUST(String::from_utf8(text)),
-                .description = MUST(String::formatted("end_value ({}) > maximum ({})", end_value, maximum_allowed_code_point)),
-            });
-            return {};
-        }
-
-        // 2. If start value is greater than end value, the <urange> is invalid and a syntax error.
-        if (start_value > end_value) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<urange>"_fly_string,
-                .value_string = MUST(String::from_utf8(text)),
-                .description = MUST(String::formatted("start_value ({}) > end_value ({})", start_value, end_value)),
-            });
-            return {};
-        }
-
-        // 3. Otherwise, the <urange> represents a contiguous range of codepoints from start value to end value, inclusive.
-        return Gfx::UnicodeRange { start_value, end_value };
-    };
-
-    // 1. Skipping the first u token, concatenate the representations of all the tokens in the production together.
-    //    Let this be text.
-    // NOTE: The concatenation is already done by the caller.
-    GenericLexer lexer { text };
-
-    // 2. If the first character of text is U+002B PLUS SIGN, consume it.
-    //    Otherwise, this is an invalid <urange>, and this algorithm must exit.
-    if (lexer.next_is('+')) {
-        lexer.consume();
-    } else {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = MUST(String::formatted("Second character was '{}', expected '+'.", lexer.consume())),
-        });
-        return {};
-    }
-
-    // 3. Consume as many hex digits from text as possible.
-    //    then consume as many U+003F QUESTION MARK (?) code points as possible.
-    auto start_position = lexer.tell();
-    auto hex_digits = lexer.consume_while(is_ascii_hex_digit);
-    auto question_marks = lexer.consume_while([](auto it) { return it == '?'; });
-    //    If zero code points were consumed, or more than six code points were consumed,
-    //    this is an invalid <urange>, and this algorithm must exit.
-    size_t consumed_code_points = hex_digits.length() + question_marks.length();
-    if (consumed_code_points == 0 || consumed_code_points > 6) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = MUST(String::formatted("Start value had {} digits/?s, expected between 1 and 6.", consumed_code_points)),
-        });
-        return {};
-    }
-    StringView start_value_code_points = text.substring_view(start_position, consumed_code_points);
-
-    //    If any U+003F QUESTION MARK (?) code points were consumed, then:
-    if (question_marks.length() > 0) {
-        // 1. If there are any code points left in text, this is an invalid <urange>,
-        //    and this algorithm must exit.
-        if (lexer.tell_remaining() != 0) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<urange>"_fly_string,
-                .value_string = MUST(String::from_utf8(text)),
-                .description = MUST(String::formatted("Has {} trailing unused code points.", lexer.tell_remaining())),
-            });
-            return {};
-        }
-
-        // 2. Interpret the consumed code points as a hexadecimal number,
-        //    with the U+003F QUESTION MARK (?) code points replaced by U+0030 DIGIT ZERO (0) code points.
-        //    This is the start value.
-        auto start_value_string = start_value_code_points.replace("?"sv, "0"sv, ReplaceMode::All);
-        auto maybe_start_value = AK::parse_hexadecimal_number<u32>(start_value_string);
-        if (!maybe_start_value.has_value()) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<urange>"_fly_string,
-                .value_string = MUST(String::from_utf8(text)),
-                .description = "?-converted start value did not parse as hex number."_string,
-            });
-            return {};
-        }
-        u32 start_value = maybe_start_value.release_value();
-
-        // 3. Interpret the consumed code points as a hexadecimal number again,
-        //    with the U+003F QUESTION MARK (?) code points replaced by U+0046 LATIN CAPITAL LETTER F (F) code points.
-        //    This is the end value.
-        auto end_value_string = start_value_code_points.replace("?"sv, "F"sv, ReplaceMode::All);
-        auto maybe_end_value = AK::parse_hexadecimal_number<u32>(end_value_string);
-        if (!maybe_end_value.has_value()) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<urange>"_fly_string,
-                .value_string = MUST(String::from_utf8(text)),
-                .description = "?-converted end value did not parse as hex number."_string,
-            });
-            return {};
-        }
-        u32 end_value = maybe_end_value.release_value();
-
-        // 4. Exit this algorithm.
-        return make_valid_unicode_range(start_value, end_value);
-    }
-    //   Otherwise, interpret the consumed code points as a hexadecimal number. This is the start value.
-    auto maybe_start_value = AK::parse_hexadecimal_number<u32>(start_value_code_points);
-    if (!maybe_start_value.has_value()) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = "Start value did not parse as hex number."_string,
-        });
-        return {};
-    }
-    u32 start_value = maybe_start_value.release_value();
-
-    // 4. If there are no code points left in text, The end value is the same as the start value.
-    //    Exit this algorithm.
-    if (lexer.tell_remaining() == 0)
-        return make_valid_unicode_range(start_value, start_value);
-
-    // 5. If the next code point in text is U+002D HYPHEN-MINUS (-), consume it.
-    if (lexer.next_is('-')) {
-        lexer.consume();
-    }
-    //    Otherwise, this is an invalid <urange>, and this algorithm must exit.
-    else {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = "Start and end values not separated by '-'."_string,
-        });
-        return {};
-    }
-
-    // 6. Consume as many hex digits as possible from text.
-    auto end_hex_digits = lexer.consume_while(is_ascii_hex_digit);
-
-    //   If zero hex digits were consumed, or more than 6 hex digits were consumed,
-    //   this is an invalid <urange>, and this algorithm must exit.
-    if (end_hex_digits.length() == 0 || end_hex_digits.length() > 6) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = MUST(String::formatted("End value had {} digits, expected between 1 and 6.", end_hex_digits.length())),
-        });
-        return {};
-    }
-
-    //   If there are any code points left in text, this is an invalid <urange>, and this algorithm must exit.
-    if (lexer.tell_remaining() != 0) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = MUST(String::formatted("Has {} trailing unused code points.", lexer.tell_remaining())),
-        });
-        return {};
-    }
-
-    // 7. Interpret the consumed code points as a hexadecimal number. This is the end value.
-    auto maybe_end_value = AK::parse_hexadecimal_number<u32>(end_hex_digits);
-    if (!maybe_end_value.has_value()) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<urange>"_fly_string,
-            .value_string = MUST(String::from_utf8(text)),
-            .description = "End value did not parse as hex number."_string,
-        });
-        return {};
-    }
-    u32 end_value = maybe_end_value.release_value();
-
-    return make_valid_unicode_range(start_value, end_value);
+    transaction.commit();
+    return maybe_unicode_range.release_value();
 }
 
 Vector<Gfx::UnicodeRange> Parser::parse_unicode_ranges(TokenStream<ComponentValue>& tokens)
 {
-    Vector<Gfx::UnicodeRange> unicode_ranges;
-    auto range_token_lists = parse_a_comma_separated_list_of_component_values(tokens);
-    for (auto& range_tokens : range_token_lists) {
-        TokenStream range_token_stream { range_tokens };
-        auto maybe_unicode_range = parse_unicode_range(range_token_stream);
-        if (!maybe_unicode_range.has_value())
-            return {};
-        unicode_ranges.append(maybe_unicode_range.release_value());
-    }
-    return unicode_ranges;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_unicode_ranges = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto maybe_unicode_ranges = RustComponentValueParser::parse_a_unicode_range_list(serialized_unicode_ranges.bytes_as_string_view(), "utf-8"sv);
+    if (!maybe_unicode_ranges.has_value())
+        return {};
+
+    transaction.commit();
+    return maybe_unicode_ranges.release_value();
 }
 
 RefPtr<UnicodeRangeStyleValue const> Parser::parse_unicode_range_value(TokenStream<ComponentValue>& tokens)

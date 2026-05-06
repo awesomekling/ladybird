@@ -1176,6 +1176,56 @@ Optional<FlyString> RustComponentValueParser::parse_a_dashed_ident(StringView in
     return name;
 }
 
+static Gfx::UnicodeRange unicode_range_from_rust(FFI::CssUnicodeRange const& unicode_range)
+{
+    return Gfx::UnicodeRange {
+        unicode_range.min_code_point,
+        unicode_range.max_code_point,
+    };
+}
+
+Optional<Gfx::UnicodeRange> RustComponentValueParser::parse_a_unicode_range(StringView input, StringView encoding)
+{
+    Optional<Gfx::UnicodeRange> unicode_range;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_unicode_range(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &unicode_range,
+        [](void* raw_unicode_range, FFI::CssUnicodeRange const* rust_unicode_range) {
+            auto& unicode_range = *static_cast<Optional<Gfx::UnicodeRange>*>(raw_unicode_range);
+            unicode_range = unicode_range_from_rust(*rust_unicode_range);
+        });
+
+    if (!parsed)
+        return {};
+
+    return unicode_range;
+}
+
+Optional<Vector<Gfx::UnicodeRange>> RustComponentValueParser::parse_a_unicode_range_list(StringView input, StringView encoding)
+{
+    Vector<Gfx::UnicodeRange> unicode_ranges;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_unicode_range_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &unicode_ranges,
+        [](void* raw_unicode_ranges, FFI::CssUnicodeRange const* rust_unicode_range) {
+            auto& unicode_ranges = *static_cast<Vector<Gfx::UnicodeRange>*>(raw_unicode_ranges);
+            unicode_ranges.append(unicode_range_from_rust(*rust_unicode_range));
+        });
+
+    if (!parsed)
+        return {};
+
+    return unicode_ranges;
+}
+
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)
 {
     Optional<FlyString> name;

@@ -11,6 +11,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
+#include <LibGfx/Font/UnicodeRange.h>
 #include <LibWeb/CSS/BooleanExpression.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/PageSelector.h>
@@ -84,6 +85,8 @@ public:
     static Optional<FlyString> parse_a_custom_property_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
+    static Optional<Gfx::UnicodeRange> parse_a_unicode_range(StringView input, StringView encoding);
+    static Optional<Vector<Gfx::UnicodeRange>> parse_a_unicode_range_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);

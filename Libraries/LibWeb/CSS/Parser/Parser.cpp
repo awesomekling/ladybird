@@ -269,7 +269,7 @@ static void serialize_component_value_for_reparsing(StringBuilder& builder, Comp
     builder.append(component_value.to_string());
 }
 
-String Parser::serialize_component_values_for_reparsing(Vector<ComponentValue> const& component_values)
+String Parser::serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const> component_values)
 {
     StringBuilder builder;
     for (auto const& component_value : component_values)

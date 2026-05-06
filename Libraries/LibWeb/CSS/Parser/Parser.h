@@ -323,7 +323,6 @@ private:
 
     RefPtr<StyleValue const> parse_source_size_value(TokenStream<ComponentValue>&);
     Optional<Gfx::UnicodeRange> parse_unicode_range(TokenStream<ComponentValue>&);
-    Optional<Gfx::UnicodeRange> parse_unicode_range(StringView);
     Vector<Gfx::UnicodeRange> parse_unicode_ranges(TokenStream<ComponentValue>&);
     RefPtr<UnicodeRangeStyleValue const> parse_unicode_range_value(TokenStream<ComponentValue>&);
 
@@ -584,7 +583,7 @@ private:
     ParseErrorOr<Selector::SimpleSelector> parse_pseudo_element_simple_selector(TokenStream<ComponentValue>&);
     ParseErrorOr<Optional<Selector::SimpleSelector>> parse_simple_selector(TokenStream<ComponentValue>&);
 
-    static String serialize_component_values_for_reparsing(Vector<ComponentValue> const&);
+    static String serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const>);
 
     OwnPtr<BooleanExpression> materialize_rust_supports_condition(Vector<ComponentValue> const&);
     OwnPtr<BooleanExpression> materialize_rust_media_condition(Vector<ComponentValue> const&);

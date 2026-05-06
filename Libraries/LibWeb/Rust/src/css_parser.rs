@@ -289,6 +289,12 @@ pub struct CssComponentValue {
 }
 
 #[repr(C)]
+pub struct CssUnicodeRange {
+    pub min_code_point: u32,
+    pub max_code_point: u32,
+}
+
+#[repr(C)]
 pub struct CssDeclaration {
     pub is_valid: bool,
     pub name_ptr: *const u8,
@@ -731,6 +737,34 @@ where
     };
 
     name_callback(&name);
+    true
+}
+
+pub(crate) fn parse_a_unicode_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
+where
+    R: FnMut(CssUnicodeRange),
+{
+    let (mut parser, filtered_input) = parser_from_filtered_input(filtered_input);
+    let Some(unicode_range) = parser.parse_a_unicode_range(filtered_input) else {
+        return false;
+    };
+
+    range_callback(unicode_range);
+    true
+}
+
+pub(crate) fn parse_a_unicode_range_list<R>(filtered_input: &[u8], mut range_callback: R) -> bool
+where
+    R: FnMut(CssUnicodeRange),
+{
+    let (mut parser, filtered_input) = parser_from_filtered_input(filtered_input);
+    let Some(unicode_ranges) = parser.parse_a_unicode_range_list(filtered_input) else {
+        return false;
+    };
+
+    for unicode_range in unicode_ranges {
+        range_callback(unicode_range);
+    }
     true
 }
 
@@ -1291,6 +1325,133 @@ fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     });
 
     (Parser::new(tokens), filtered_input_string)
+}
+
+fn token_is_delim(token: &Token, value: char) -> bool {
+    matches!(token.token_type, TokenType::Delim { value: delimiter } if delimiter == value as u32)
+}
+
+fn token_original_source<'a>(token: &Token, filtered_input: &'a str) -> Option<&'a str> {
+    token.original_source(filtered_input)
+}
+
+impl Token {
+    fn is_unicode_range_ending_token(&self) -> bool {
+        matches!(
+            self.token_type,
+            TokenType::EndOfFile | TokenType::Comma | TokenType::Semicolon | TokenType::Whitespace
+        )
+    }
+}
+
+// https://www.w3.org/TR/css-syntax-3/#urange-syntax
+fn parse_unicode_range_text(text: &str) -> Option<CssUnicodeRange> {
+    fn make_valid_unicode_range(start_value: u32, end_value: u32) -> Option<CssUnicodeRange> {
+        // https://www.w3.org/TR/css-syntax-3/#maximum-allowed-code-point
+        const MAXIMUM_ALLOWED_CODE_POINT: u32 = 0x10FFFF;
+
+        // To determine what codepoints the <urange> represents:
+        // 1. If end value is greater than the maximum allowed code point,
+        //    the <urange> is invalid and a syntax error.
+        if end_value > MAXIMUM_ALLOWED_CODE_POINT {
+            return None;
+        }
+
+        // 2. If start value is greater than end value, the <urange> is invalid and a syntax error.
+        if start_value > end_value {
+            return None;
+        }
+
+        // 3. Otherwise, the <urange> represents a contiguous range of codepoints from start value to end value, inclusive.
+        Some(CssUnicodeRange {
+            min_code_point: start_value,
+            max_code_point: end_value,
+        })
+    }
+
+    // 1. Skipping the first u token, concatenate the representations of all the tokens in the production together.
+    //    Let this be text.
+    // NOTE: The concatenation is already done by the caller.
+    let mut input = text;
+
+    // 2. If the first character of text is U+002B PLUS SIGN, consume it.
+    //    Otherwise, this is an invalid <urange>, and this algorithm must exit.
+    input = input.strip_prefix('+')?;
+
+    // 3. Consume as many hex digits from text as possible.
+    //    then consume as many U+003F QUESTION MARK (?) code points as possible.
+    let hex_digits_len = input.bytes().take_while(|byte| byte.is_ascii_hexdigit()).count();
+    let after_hex_digits = &input[hex_digits_len..];
+    let question_marks_len = after_hex_digits.bytes().take_while(|byte| *byte == b'?').count();
+    let consumed_code_points = hex_digits_len + question_marks_len;
+
+    //    If zero code points were consumed, or more than six code points were consumed,
+    //    this is an invalid <urange>, and this algorithm must exit.
+    if consumed_code_points == 0 || consumed_code_points > 6 {
+        return None;
+    }
+
+    let start_value_code_points = &input[..consumed_code_points];
+    input = &input[consumed_code_points..];
+
+    //    If any U+003F QUESTION MARK (?) code points were consumed, then:
+    if question_marks_len > 0 {
+        // 1. If there are any code points left in text, this is an invalid <urange>,
+        //    and this algorithm must exit.
+        if !input.is_empty() {
+            return None;
+        }
+
+        // 2. Interpret the consumed code points as a hexadecimal number,
+        //    with the U+003F QUESTION MARK (?) code points replaced by U+0030 DIGIT ZERO (0) code points.
+        //    This is the start value.
+        let start_value_string = start_value_code_points.replace('?', "0");
+        let start_value = u32::from_str_radix(&start_value_string, 16).ok()?;
+
+        // 3. Interpret the consumed code points as a hexadecimal number again,
+        //    with the U+003F QUESTION MARK (?) code points replaced by U+0046 LATIN CAPITAL LETTER F (F) code points.
+        //    This is the end value.
+        let end_value_string = start_value_code_points.replace('?', "F");
+        let end_value = u32::from_str_radix(&end_value_string, 16).ok()?;
+
+        // 4. Exit this algorithm.
+        return make_valid_unicode_range(start_value, end_value);
+    }
+
+    //   Otherwise, interpret the consumed code points as a hexadecimal number. This is the start value.
+    let start_value = u32::from_str_radix(start_value_code_points, 16).ok()?;
+
+    // 4. If there are no code points left in text, The end value is the same as the start value.
+    //    Exit this algorithm.
+    if input.is_empty() {
+        return make_valid_unicode_range(start_value, start_value);
+    }
+
+    // 5. If the next code point in text is U+002D HYPHEN-MINUS (-), consume it.
+    //    Otherwise, this is an invalid <urange>, and this algorithm must exit.
+    input = input.strip_prefix('-')?;
+
+    // 6. Consume as many hex digits as possible from text.
+    let end_hex_digits_len = input.bytes().take_while(|byte| byte.is_ascii_hexdigit()).count();
+
+    //   If zero hex digits were consumed, or more than 6 hex digits were consumed,
+    //   this is an invalid <urange>, and this algorithm must exit.
+    if end_hex_digits_len == 0 || end_hex_digits_len > 6 {
+        return None;
+    }
+
+    let end_hex_digits = &input[..end_hex_digits_len];
+    input = &input[end_hex_digits_len..];
+
+    //   If there are any code points left in text, this is an invalid <urange>, and this algorithm must exit.
+    if !input.is_empty() {
+        return None;
+    }
+
+    // 7. Interpret the consumed code points as a hexadecimal number. This is the end value.
+    let end_value = u32::from_str_radix(end_hex_digits, 16).ok()?;
+
+    make_valid_unicode_range(start_value, end_value)
 }
 
 fn string_parts(string: &str) -> (*const u8, usize) {
@@ -3613,6 +3774,122 @@ impl Parser {
         }
     }
 
+    // https://www.w3.org/TR/css-syntax-3/#urange-syntax
+    fn parse_a_unicode_range(&mut self, filtered_input: &str) -> Option<CssUnicodeRange> {
+        // <urange> =
+        //  u '+' <ident-token> '?'* |
+        //  u <dimension-token> '?'* |
+        //  u <number-token> '?'* |
+        //  u <number-token> <dimension-token> |
+        //  u <number-token> <number-token> |
+        //  u '+' '?'+
+        // (All with no whitespace in between tokens.)
+        self.discard_whitespace();
+        let unicode_range = self.consume_a_unicode_range(filtered_input)?;
+        self.discard_whitespace();
+        if !matches!(self.next_input_token().token_type, TokenType::EndOfFile) {
+            return None;
+        }
+        Some(unicode_range)
+    }
+
+    // https://www.w3.org/TR/css-syntax-3/#urange-syntax
+    fn parse_a_unicode_range_list(&mut self, filtered_input: &str) -> Option<Vec<CssUnicodeRange>> {
+        let mut unicode_ranges = Vec::new();
+
+        loop {
+            self.discard_whitespace();
+            unicode_ranges.push(self.consume_a_unicode_range(filtered_input)?);
+            self.discard_whitespace();
+
+            match self.next_input_token().token_type {
+                TokenType::Comma => self.discard_a_token(),
+                TokenType::EndOfFile => break,
+                _ => return None,
+            }
+        }
+
+        Some(unicode_ranges)
+    }
+
+    // https://www.w3.org/TR/css-syntax-3/#urange-syntax
+    fn consume_a_unicode_range(&mut self, filtered_input: &str) -> Option<CssUnicodeRange> {
+        let u = self.consume_the_next_input_token();
+        if !matches!(u.token_type, TokenType::Ident { ref value } if value.eq_ignore_ascii_case("u")) {
+            return None;
+        }
+
+        let second_token = self.consume_the_next_input_token();
+
+        //  u '+' <ident-token> '?'* |
+        //  u '+' '?'+
+        if token_is_delim(&second_token, '+') {
+            let mut text = token_original_source(&second_token, filtered_input)?.to_string();
+            let third_token = self.consume_the_next_input_token();
+            if matches!(third_token.token_type, TokenType::Ident { .. }) || token_is_delim(&third_token, '?') {
+                text.push_str(token_original_source(&third_token, filtered_input)?);
+                while token_is_delim(self.next_input_token(), '?') {
+                    text.push_str(token_original_source(
+                        &self.consume_the_next_input_token(),
+                        filtered_input,
+                    )?);
+                }
+                if self.next_input_token().is_unicode_range_ending_token() {
+                    return parse_unicode_range_text(&text);
+                }
+            }
+        }
+
+        //  u <dimension-token> '?'*
+        if matches!(second_token.token_type, TokenType::Dimension { .. }) {
+            let mut text = token_original_source(&second_token, filtered_input)?.to_string();
+            while token_is_delim(self.next_input_token(), '?') {
+                text.push_str(token_original_source(
+                    &self.consume_the_next_input_token(),
+                    filtered_input,
+                )?);
+            }
+            if self.next_input_token().is_unicode_range_ending_token() {
+                return parse_unicode_range_text(&text);
+            }
+        }
+
+        //  u <number-token> '?'* |
+        //  u <number-token> <dimension-token> |
+        //  u <number-token> <number-token>
+        if matches!(second_token.token_type, TokenType::Number { .. }) {
+            let mut text = token_original_source(&second_token, filtered_input)?.to_string();
+
+            if self.next_input_token().is_unicode_range_ending_token() {
+                return parse_unicode_range_text(&text);
+            }
+
+            let third_token = self.consume_the_next_input_token();
+            if token_is_delim(&third_token, '?') {
+                text.push_str(token_original_source(&third_token, filtered_input)?);
+                while token_is_delim(self.next_input_token(), '?') {
+                    text.push_str(token_original_source(
+                        &self.consume_the_next_input_token(),
+                        filtered_input,
+                    )?);
+                }
+                if self.next_input_token().is_unicode_range_ending_token() {
+                    return parse_unicode_range_text(&text);
+                }
+            } else if matches!(
+                third_token.token_type,
+                TokenType::Dimension { .. } | TokenType::Number { .. }
+            ) {
+                text.push_str(token_original_source(&third_token, filtered_input)?);
+                if self.next_input_token().is_unicode_range_ending_token() {
+                    return parse_unicode_range_text(&text);
+                }
+            }
+        }
+
+        None
+    }
+
     // https://drafts.csswg.org/css-syntax/#parse-a-stylesheets-contents
     pub(crate) fn parse_a_stylesheets_contents(&mut self) -> Vec<Rule> {
         // To parse a stylesheet’s contents from input:
@@ -4708,9 +4985,9 @@ mod tests {
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
         parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_keyframe_selector_list,
         parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
-        parse_a_namespace_rule_prelude, parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition,
-        parse_container_rule_prelude, parse_empty_prelude, parse_font_feature_values_family_name_list,
-        strip_whitespace,
+        parse_a_namespace_rule_prelude, parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list,
+        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4826,6 +5103,22 @@ mod tests {
         let mut name = None;
         let parsed = parse_a_dashed_ident(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
+    }
+
+    fn parse_unicode_range(input: &str) -> Option<(u32, u32)> {
+        let mut range = None;
+        let parsed = parse_a_unicode_range(input.as_bytes(), |parsed_range| {
+            range = Some((parsed_range.min_code_point, parsed_range.max_code_point))
+        });
+        parsed.then_some(range).flatten()
+    }
+
+    fn parse_unicode_range_list(input: &str) -> Option<Vec<(u32, u32)>> {
+        let mut ranges = Vec::new();
+        let parsed = parse_a_unicode_range_list(input.as_bytes(), |parsed_range| {
+            ranges.push((parsed_range.min_code_point, parsed_range.max_code_point))
+        });
+        parsed.then_some(ranges)
     }
 
     fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
@@ -5622,6 +5915,37 @@ mod tests {
         assert_eq!(parse_dashed_ident("accent"), None);
         assert_eq!(parse_dashed_ident("--accent extra"), None);
         assert_eq!(parse_dashed_ident("\"--accent\""), None);
+    }
+
+    #[test]
+    fn parses_unicode_ranges() {
+        assert_eq!(parse_unicode_range("u+a"), Some((0xA, 0xA)));
+        assert_eq!(parse_unicode_range("U+abc"), Some((0xABC, 0xABC)));
+        assert_eq!(parse_unicode_range("u+a?"), Some((0xA0, 0xAF)));
+        assert_eq!(parse_unicode_range("u+?????"), Some((0x0, 0xFFFFF)));
+        assert_eq!(parse_unicode_range("u+1e-20"), Some((0x1E, 0x20)));
+        assert_eq!(parse_unicode_range("u+0-10ffff"), Some((0x0, 0x10FFFF)));
+    }
+
+    #[test]
+    fn parses_unicode_range_lists() {
+        assert_eq!(
+            parse_unicode_range_list("u+0, u+20-7e, u+a?"),
+            Some(vec![(0x0, 0x0), (0x20, 0x7E), (0xA0, 0xAF)])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_unicode_ranges() {
+        assert_eq!(parse_unicode_range("u+efg"), None);
+        assert_eq!(parse_unicode_range("u+ abc"), None);
+        assert_eq!(parse_unicode_range("u+aaaaaaa"), None);
+        assert_eq!(parse_unicode_range("u+a?a"), None);
+        assert_eq!(parse_unicode_range("u+222222"), None);
+        assert_eq!(parse_unicode_range("u+0-110000"), None);
+        assert_eq!(parse_unicode_range("u+1-0"), None);
+        assert_eq!(parse_unicode_range("u+0 foo"), None);
+        assert_eq!(parse_unicode_range_list("u+0, nope"), None);
     }
 
     #[test]
