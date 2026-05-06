@@ -187,6 +187,8 @@ public:
     static ParseErrorOr<void> collect_arbitrary_substitution_function_presence(Vector<ComponentValue> const&, SubstitutionFunctionsPresence&);
     static ParseErrorOr<void> collect_arbitrary_substitution_function_presence(ComponentValue const&, SubstitutionFunctionsPresence&);
 
+    static String serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const>);
+
 private:
     Parser(ParsingParams const&, String input, String encoding);
 
@@ -496,8 +498,6 @@ private:
 
     RefPtr<CalculationNode const> convert_to_calculation_node(CalcParsing::Node const&, CalculationContext const&);
     RefPtr<CalculationNode const> parse_a_calculation(TokenStream<ComponentValue>&, CalculationContext const&);
-
-    static String serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const>);
 
     OwnPtr<BooleanExpression> materialize_rust_supports_condition(Vector<ComponentValue> const&);
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);

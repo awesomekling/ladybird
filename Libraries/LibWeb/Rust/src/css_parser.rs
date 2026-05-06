@@ -1016,6 +1016,47 @@ pub struct CssRatioValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPrimitiveValueType {
+    Integer,
+    Number,
+    Percentage,
+    Angle,
+    Flex,
+    Frequency,
+    Length,
+    Resolution,
+    String,
+    Time,
+    Opacity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssPrimitiveValueKind {
+    Invalid,
+    Integer,
+    Number,
+    Percentage,
+    Angle,
+    Flex,
+    Frequency,
+    Length,
+    Resolution,
+    String,
+    Time,
+    Opacity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct CssPrimitiveValueOptions {
+    pub allow_quirky_length: bool,
+    pub allow_svg_unitless_length: bool,
+    pub allow_svg_unitless_angle: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -3504,6 +3545,216 @@ pub(crate) fn parse_ratio_value_prefix(filtered_input: &[u8]) -> CssRatioValue {
     CssRatioValue {
         kind: CssRatioValueKind::Valid,
         has_denominator: true,
+    }
+}
+
+pub(crate) fn parse_primitive_value_prefix(
+    filtered_input: &[u8],
+    value_type: CssPrimitiveValueType,
+    options: CssPrimitiveValueOptions,
+) -> CssPrimitiveValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    let Some(component_value) = parser.next_component_value() else {
+        return CssPrimitiveValueKind::Invalid;
+    };
+
+    match value_type {
+        CssPrimitiveValueType::Integer => parse_integer_value_prefix(component_value),
+        CssPrimitiveValueType::Number => parse_number_value_prefix(component_value),
+        CssPrimitiveValueType::Percentage => parse_percentage_value_prefix(component_value),
+        CssPrimitiveValueType::Angle => parse_angle_value_prefix(component_value, options),
+        CssPrimitiveValueType::Flex => parse_flex_value_prefix(component_value),
+        CssPrimitiveValueType::Frequency => parse_frequency_value_prefix(component_value),
+        CssPrimitiveValueType::Length => parse_length_value_prefix(component_value, options),
+        CssPrimitiveValueType::Resolution => parse_resolution_value_prefix(component_value),
+        CssPrimitiveValueType::String => parse_string_value_prefix(component_value),
+        CssPrimitiveValueType::Time => parse_time_value_prefix(component_value),
+        CssPrimitiveValueType::Opacity => parse_opacity_value_prefix(component_value),
+    }
+}
+
+fn parse_integer_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#integers
+    // <integer> = [-+]? [0-9]+
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number_is_integer(*number) => CssPrimitiveValueKind::Integer,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math and tree-counting functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Integer,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_number_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#numbers
+    // <number> = <integer> | <number-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        }) => CssPrimitiveValueKind::Number,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math and tree-counting functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Number,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_percentage_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#percentages
+    // <percentage> = <number-token>%
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => CssPrimitiveValueKind::Percentage,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Percentage,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_angle_value_prefix(
+    component_value: &ComponentValue,
+    options: CssPrimitiveValueOptions,
+) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#angles
+    // <angle> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Angle)) => CssPrimitiveValueKind::Angle,
+        // https://svgwg.org/svg2-draft/types.html#presentation-attribute-css-value
+        // When parsing an SVG attribute, an angle is allowed without a unit.
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        }) if options.allow_svg_unitless_angle => CssPrimitiveValueKind::Angle,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Angle,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_flex_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#flex
+    // <flex> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Flex)) => CssPrimitiveValueKind::Flex,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Flex,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_frequency_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#frequency
+    // <frequency> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Frequency)) => CssPrimitiveValueKind::Frequency,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Frequency,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_length_value_prefix(
+    component_value: &ComponentValue,
+    options: CssPrimitiveValueOptions,
+) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#lengths
+    // <length> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Length)) => CssPrimitiveValueKind::Length,
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() == 0.0 || options.allow_quirky_length || options.allow_svg_unitless_length => {
+            CssPrimitiveValueKind::Length
+        }
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions and anchor-size() still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Length,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_resolution_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#resolution
+    // <resolution> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) if number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Resolution)) => {
+            CssPrimitiveValueKind::Resolution
+        }
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Resolution,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_string_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#strings
+    // <string> = <string-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { .. },
+            ..
+        }) => CssPrimitiveValueKind::String,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_time_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-values-4/#time
+    // <time> = <dimension-token>
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Time)) => CssPrimitiveValueKind::Time,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => CssPrimitiveValueKind::Time,
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn parse_opacity_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
+    // https://drafts.csswg.org/css-color-4/#typedef-opacity-opacity-value
+    // <opacity-value> = <number> | <percentage>
+    match parse_number_value_prefix(component_value) {
+        CssPrimitiveValueKind::Number => CssPrimitiveValueKind::Opacity,
+        _ => match parse_percentage_value_prefix(component_value) {
+            CssPrimitiveValueKind::Percentage => CssPrimitiveValueKind::Opacity,
+            _ => CssPrimitiveValueKind::Invalid,
+        },
     }
 }
 
@@ -12292,22 +12543,23 @@ mod tests {
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
-        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
+        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
+        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
+        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
+        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -12328,13 +12580,13 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
-        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -12918,6 +13170,18 @@ mod tests {
 
     fn parse_ratio_prefix(input: &str) -> CssRatioValue {
         parse_ratio_value_prefix(input.as_bytes())
+    }
+
+    fn parse_primitive_prefix(input: &str, value_type: CssPrimitiveValueType) -> CssPrimitiveValueKind {
+        parse_primitive_value_prefix(input.as_bytes(), value_type, CssPrimitiveValueOptions::default())
+    }
+
+    fn parse_primitive_prefix_with_options(
+        input: &str,
+        value_type: CssPrimitiveValueType,
+        options: CssPrimitiveValueOptions,
+    ) -> CssPrimitiveValueKind {
+        parse_primitive_value_prefix(input.as_bytes(), value_type, options)
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -15850,6 +16114,110 @@ mod tests {
         assert_eq!(parse_ratio_prefix("-1").kind, CssRatioValueKind::Invalid);
         assert_eq!(parse_ratio_prefix("1 /").kind, CssRatioValueKind::Invalid);
         assert_eq!(parse_ratio_prefix("1 / auto").kind, CssRatioValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_primitive_value_prefixes() {
+        assert_eq!(
+            parse_primitive_prefix("1", CssPrimitiveValueType::Integer),
+            CssPrimitiveValueKind::Integer
+        );
+        assert_eq!(
+            parse_primitive_prefix("1.5", CssPrimitiveValueType::Number),
+            CssPrimitiveValueKind::Number
+        );
+        assert_eq!(
+            parse_primitive_prefix("50%", CssPrimitiveValueType::Percentage),
+            CssPrimitiveValueKind::Percentage
+        );
+        assert_eq!(
+            parse_primitive_prefix("1deg", CssPrimitiveValueType::Angle),
+            CssPrimitiveValueKind::Angle
+        );
+        assert_eq!(
+            parse_primitive_prefix("1fr", CssPrimitiveValueType::Flex),
+            CssPrimitiveValueKind::Flex
+        );
+        assert_eq!(
+            parse_primitive_prefix("1Hz", CssPrimitiveValueType::Frequency),
+            CssPrimitiveValueKind::Frequency
+        );
+        assert_eq!(
+            parse_primitive_prefix("1px", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive_prefix("96dpi", CssPrimitiveValueType::Resolution),
+            CssPrimitiveValueKind::Resolution
+        );
+        assert_eq!(
+            parse_primitive_prefix("\"hello\"", CssPrimitiveValueType::String),
+            CssPrimitiveValueKind::String
+        );
+        assert_eq!(
+            parse_primitive_prefix("1s", CssPrimitiveValueType::Time),
+            CssPrimitiveValueKind::Time
+        );
+        assert_eq!(
+            parse_primitive_prefix("50%", CssPrimitiveValueType::Opacity),
+            CssPrimitiveValueKind::Opacity
+        );
+    }
+
+    #[test]
+    fn parses_primitive_value_prefix_options() {
+        assert_eq!(
+            parse_primitive_prefix("0", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive_prefix("1", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive_prefix_with_options(
+                "1",
+                CssPrimitiveValueType::Length,
+                CssPrimitiveValueOptions {
+                    allow_quirky_length: true,
+                    allow_svg_unitless_length: false,
+                    allow_svg_unitless_angle: false,
+                }
+            ),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive_prefix_with_options(
+                "1",
+                CssPrimitiveValueType::Angle,
+                CssPrimitiveValueOptions {
+                    allow_quirky_length: false,
+                    allow_svg_unitless_length: false,
+                    allow_svg_unitless_angle: true,
+                }
+            ),
+            CssPrimitiveValueKind::Angle
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_primitive_value_prefixes() {
+        assert_eq!(
+            parse_primitive_prefix("1.5", CssPrimitiveValueType::Integer),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive_prefix("1px", CssPrimitiveValueType::Percentage),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive_prefix("-1dpi", CssPrimitiveValueType::Resolution),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive_prefix("ident", CssPrimitiveValueType::String),
+            CssPrimitiveValueKind::Invalid
+        );
     }
 
     #[test]

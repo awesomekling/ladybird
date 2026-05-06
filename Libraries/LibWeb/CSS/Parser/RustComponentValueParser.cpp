@@ -3235,6 +3235,18 @@ FFI::CssRatioValue RustComponentValueParser::parse_ratio_prefix(StringView input
         filtered_input_bytes.size());
 }
 
+FFI::CssPrimitiveValueKind RustComponentValueParser::parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType value_type, FFI::CssPrimitiveValueOptions options)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_primitive_value_prefix(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        value_type,
+        options);
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
