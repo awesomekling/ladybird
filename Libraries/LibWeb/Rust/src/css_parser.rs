@@ -1797,6 +1797,21 @@ pub(crate) fn parse_positive_percentage_descriptor(filtered_input: &[u8]) -> boo
     matches!(component_values, [component_value] if component_value_parse_as_positive_percentage_descriptor(component_value))
 }
 
+pub(crate) fn parse_page_size_descriptor(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-page-3/#page-size-prop
+    // <length [0,∞]>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    if parser.parse_page_size_descriptor().is_none() {
+        return false;
+    }
+    parser.discard_whitespace();
+    !parser.has_next_component_value()
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -4979,6 +4994,55 @@ impl ComponentValueParser {
         Some(count)
     }
 
+    // https://drafts.csswg.org/css-page-3/#page-size-prop
+    fn parse_page_size_descriptor(&mut self) -> Option<()> {
+        // <length [0,∞]>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
+        self.discard_whitespace();
+        if self.consume_ident_matching("auto") {
+            return Some(());
+        }
+
+        let saved_index = self.index;
+        let mut length_count = 0;
+        for _ in 0..2 {
+            self.discard_whitespace();
+            if !self.consume_nonnegative_length_descriptor_syntax() {
+                break;
+            }
+            length_count += 1;
+        }
+        if length_count > 0 {
+            return Some(());
+        }
+        self.index = saved_index;
+
+        let mut page_size = false;
+        let mut orientation = false;
+
+        for _ in 0..2 {
+            self.discard_whitespace();
+            let Some(ident) = self.consume_an_ident() else {
+                break;
+            };
+
+            if is_page_size_keyword(&ident) {
+                if page_size {
+                    return None;
+                }
+                page_size = true;
+            } else if ident.eq_ignore_ascii_case("portrait") || ident.eq_ignore_ascii_case("landscape") {
+                if orientation {
+                    return None;
+                }
+                orientation = true;
+            } else {
+                return None;
+            }
+        }
+
+        (page_size || orientation).then_some(())
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -5086,6 +5150,18 @@ impl ComponentValueParser {
             self.index += 1;
         }
         is_font_weight_absolute
+    }
+
+    fn consume_nonnegative_length_descriptor_syntax(&mut self) -> bool {
+        let Some(component_value) = self.next_component_value() else {
+            return false;
+        };
+
+        let is_nonnegative_length = component_value_parse_as_nonnegative_length_descriptor(component_value);
+        if is_nonnegative_length {
+            self.index += 1;
+        }
+        is_nonnegative_length
     }
 
     fn consume_symbol_syntax(&mut self) -> bool {
@@ -6207,6 +6283,25 @@ fn component_value_parse_as_length_descriptor(component_value: &ComponentValue) 
     }
 }
 
+fn component_value_parse_as_nonnegative_length_descriptor(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
 fn component_value_parse_as_positive_percentage_descriptor(component_value: &ComponentValue) -> bool {
     match component_value {
         ComponentValue::PreservedToken(Token {
@@ -6245,6 +6340,15 @@ fn is_math_function_name(name: &str) -> bool {
             | "sin"
             | "sqrt"
             | "tan"
+    )
+}
+
+fn is_page_size_keyword(input: &str) -> bool {
+    // https://drafts.csswg.org/css-page-3/#typedef-page-size-page-size
+    // <page-size> = A5 | A4 | A3 | B5 | B4 | JIS-B5 | JIS-B4 | letter | legal | ledger
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "a5" | "a4" | "a3" | "b5" | "b4" | "jis-b5" | "jis-b4" | "letter" | "legal" | "ledger"
     )
 }
 
@@ -7698,7 +7802,7 @@ mod tests {
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
         parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
+        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8131,6 +8235,10 @@ mod tests {
 
     fn parse_positive_percentage_descriptor_value(input: &str) -> bool {
         parse_positive_percentage_descriptor(input.as_bytes())
+    }
+
+    fn parse_page_size_descriptor_value(input: &str) -> bool {
+        parse_page_size_descriptor(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -9880,6 +9988,32 @@ mod tests {
         assert!(!parse_positive_percentage_descriptor_value("1px"));
         assert!(!parse_positive_percentage_descriptor_value("1% 2%"));
         assert!(!parse_positive_percentage_descriptor_value("foo(1%)"));
+    }
+
+    #[test]
+    fn parses_page_size_descriptors() {
+        assert!(parse_page_size_descriptor_value("auto"));
+        assert!(parse_page_size_descriptor_value("8.5in"));
+        assert!(parse_page_size_descriptor_value("0"));
+        assert!(parse_page_size_descriptor_value("8.5in 11in"));
+        assert!(parse_page_size_descriptor_value("calc(8in + 0.5in) 11in"));
+        assert!(parse_page_size_descriptor_value("a4"));
+        assert!(parse_page_size_descriptor_value("letter landscape"));
+        assert!(parse_page_size_descriptor_value("portrait jis-b5"));
+        assert!(parse_page_size_descriptor_value("landscape"));
+    }
+
+    #[test]
+    fn rejects_invalid_page_size_descriptors() {
+        assert!(!parse_page_size_descriptor_value(""));
+        assert!(!parse_page_size_descriptor_value("auto landscape"));
+        assert!(!parse_page_size_descriptor_value("-1px"));
+        assert!(!parse_page_size_descriptor_value("1px 2px 3px"));
+        assert!(!parse_page_size_descriptor_value("1%"));
+        assert!(!parse_page_size_descriptor_value("foo(1px)"));
+        assert!(!parse_page_size_descriptor_value("a4 letter"));
+        assert!(!parse_page_size_descriptor_value("landscape portrait"));
+        assert!(!parse_page_size_descriptor_value("orange"));
     }
 
     #[test]

@@ -195,6 +195,7 @@ public:
     static bool parse_string_descriptor(StringView input, StringView encoding);
     static bool parse_length_descriptor(StringView input, StringView encoding);
     static bool parse_positive_percentage_descriptor(StringView input, StringView encoding);
+    static bool parse_page_size_descriptor(StringView input, StringView encoding);
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_font_feature_values_family_name_list(StringView input, StringView encoding);

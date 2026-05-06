@@ -466,16 +466,26 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 case DescriptorMetadata::ValueType::PageSize: {
                     // https://drafts.csswg.org/css-page-3/#page-size-prop
                     // <length [0,∞]>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_page_size = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_page_size_descriptor(serialized_page_size.bytes_as_string_view(), "utf-8"sv))
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> page_size_tokens { component_values };
 
                     // auto
-                    if (auto value = parse_all_as_single_keyword_value(tokens, Keyword::Auto))
+                    if (auto value = parse_all_as_single_keyword_value(page_size_tokens, Keyword::Auto))
                         return value.release_nonnull();
 
                     // <length [0,∞]>{1,2}
-                    if (auto first_length = parse_length_value(tokens, non_negative_range)) {
-                        tokens.discard_whitespace();
+                    if (auto first_length = parse_length_value(page_size_tokens, non_negative_range)) {
+                        page_size_tokens.discard_whitespace();
 
-                        if (auto second_length = parse_length_value(tokens, non_negative_range))
+                        if (auto second_length = parse_length_value(page_size_tokens, non_negative_range))
                             return StyleValueList::create(StyleValueVector { first_length.release_nonnull(), second_length.release_nonnull() }, StyleValueList::Separator::Space);
 
                         return first_length.release_nonnull();
@@ -484,7 +494,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // [ <page-size> || [ portrait | landscape ] ]
                     RefPtr<StyleValue const> page_size;
                     RefPtr<StyleValue const> orientation;
-                    if (auto first_keyword = parse_keyword_value(tokens)) {
+                    if (auto first_keyword = parse_keyword_value(page_size_tokens)) {
                         if (first_is_one_of(first_keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
                             orientation = first_keyword.release_nonnull();
                         } else if (keyword_to_page_size(first_keyword->to_keyword()).has_value()) {
@@ -496,9 +506,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return nullptr;
                     }
 
-                    tokens.discard_whitespace();
+                    page_size_tokens.discard_whitespace();
 
-                    if (auto second_keyword = parse_keyword_value(tokens)) {
+                    if (auto second_keyword = parse_keyword_value(page_size_tokens)) {
                         if (orientation.is_null() && first_is_one_of(second_keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
                             orientation = second_keyword.release_nonnull();
                         } else if (page_size.is_null() && keyword_to_page_size(second_keyword->to_keyword()).has_value()) {
