@@ -2219,8 +2219,8 @@
     "needs-layout-node-for-resolved-value": true,
     "requires-computation": "non-inherited-value",
     "valid-types": [
-      "percentage [0,∞]",
-      "font-width"
+      "font-width-css3",
+      "percentage [0,∞]"
     ]
   },
   "gap": {

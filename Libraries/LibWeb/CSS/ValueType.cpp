@@ -43,6 +43,8 @@ Optional<ValueType> value_type_from_string(StringView string)
         return ValueType::FontVariantAlternates;
     if (string.equals_ignoring_ascii_case("font-weight-absolute"sv))
         return ValueType::FontWeightAbsolute;
+    if (string.equals_ignoring_ascii_case("font-width-css3"sv))
+        return ValueType::FontWidthCss3;
     if (string.equals_ignoring_ascii_case("font-variant-east-asian"sv))
         return ValueType::FontVariantEastAsian;
     if (string.equals_ignoring_ascii_case("font-variant-ligatures"sv))
@@ -139,6 +141,8 @@ StringView value_type_to_string(ValueType value_type)
         return "FontStyle"sv;
     case Web::CSS::ValueType::FontWeightAbsolute:
         return "FontWeightAbsolute"sv;
+    case Web::CSS::ValueType::FontWidthCss3:
+        return "FontWidthCss3"sv;
     case Web::CSS::ValueType::FontVariantAlternates:
         return "FontVariantAlternates"sv;
     case Web::CSS::ValueType::FontVariantEastAsian:
