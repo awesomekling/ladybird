@@ -2225,6 +2225,13 @@ FFI::CssTextUnderlinePositionValue RustComponentValueParser::parse_text_underlin
     return FFI::rust_css_parse_text_underline_position(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+FFI::CssTextWrapValue RustComponentValueParser::parse_text_wrap(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+    return FFI::rust_css_parse_text_wrap(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 FFI::CssTextWrapModeValue RustComponentValueParser::parse_text_wrap_mode(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

@@ -779,6 +779,21 @@ pub enum CssTextWrapStyleValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTextWrapValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssTextWrapValue {
+    pub kind: CssTextWrapValueKind,
+    pub mode: CssTextWrapModeValue,
+    pub style: CssTextWrapStyleValue,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssTouchActionValueKind {
     Invalid,
     Auto,
@@ -3072,6 +3087,79 @@ pub(crate) fn parse_text_wrap_style_value(filtered_input: &[u8]) -> CssTextWrapS
     }
 
     value
+}
+
+pub(crate) fn parse_text_wrap_value(filtered_input: &[u8]) -> CssTextWrapValue {
+    let invalid = CssTextWrapValue {
+        kind: CssTextWrapValueKind::Invalid,
+        mode: CssTextWrapModeValue::Invalid,
+        style: CssTextWrapStyleValue::Invalid,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    let mut mode = CssTextWrapModeValue::Invalid;
+    let mut style = CssTextWrapStyleValue::Invalid;
+
+    // https://drafts.csswg.org/css-text-4/#text-wrap
+    // Value: <'text-wrap-mode'> || <'text-wrap-style'>
+    //
+    // AD-HOC: text-wrap-style does not accept avoid-orphans yet.
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("wrap") {
+            if mode != CssTextWrapModeValue::Invalid {
+                return invalid;
+            }
+            mode = CssTextWrapModeValue::Wrap;
+        } else if ident.eq_ignore_ascii_case("nowrap") {
+            if mode != CssTextWrapModeValue::Invalid {
+                return invalid;
+            }
+            mode = CssTextWrapModeValue::Nowrap;
+        } else if ident.eq_ignore_ascii_case("auto") {
+            if style != CssTextWrapStyleValue::Invalid {
+                return invalid;
+            }
+            style = CssTextWrapStyleValue::Auto;
+        } else if ident.eq_ignore_ascii_case("balance") {
+            if style != CssTextWrapStyleValue::Invalid {
+                return invalid;
+            }
+            style = CssTextWrapStyleValue::Balance;
+        } else if ident.eq_ignore_ascii_case("stable") {
+            if style != CssTextWrapStyleValue::Invalid {
+                return invalid;
+            }
+            style = CssTextWrapStyleValue::Stable;
+        } else if ident.eq_ignore_ascii_case("pretty") {
+            if style != CssTextWrapStyleValue::Invalid {
+                return invalid;
+            }
+            style = CssTextWrapStyleValue::Pretty;
+        } else {
+            return invalid;
+        }
+
+        parser.discard_whitespace();
+    }
+
+    if mode == CssTextWrapModeValue::Invalid && style == CssTextWrapStyleValue::Invalid {
+        return invalid;
+    }
+
+    CssTextWrapValue {
+        kind: CssTextWrapValueKind::Valid,
+        mode,
+        style,
+    }
 }
 
 pub(crate) fn parse_touch_action_value(filtered_input: &[u8]) -> CssTouchActionValue {
@@ -9590,23 +9678,24 @@ mod tests {
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTimelineNameItemKind, CssTimelineNameValueKind,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -9619,9 +9708,9 @@ mod tests {
         parse_position_anchor_value, parse_position_try_order_value, parse_position_visibility_value,
         parse_positive_percentage_descriptor, parse_quotes_value, parse_scrollbar_gutter_value,
         parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -10183,6 +10272,10 @@ mod tests {
 
     fn parse_text_underline_position(input: &str) -> CssTextUnderlinePositionValue {
         parse_text_underline_position_value(input.as_bytes())
+    }
+
+    fn parse_text_wrap(input: &str) -> CssTextWrapValue {
+        parse_text_wrap_value(input.as_bytes())
     }
 
     fn parse_text_wrap_mode(input: &str) -> CssTextWrapModeValue {
@@ -12452,6 +12545,44 @@ mod tests {
             parse_text_underline_position("under, left").horizontal,
             CssTextUnderlinePositionHorizontal::Invalid
         );
+    }
+
+    #[test]
+    fn parses_text_wrap_values() {
+        assert_eq!(
+            parse_text_wrap("wrap"),
+            CssTextWrapValue {
+                kind: CssTextWrapValueKind::Valid,
+                mode: CssTextWrapModeValue::Wrap,
+                style: CssTextWrapStyleValue::Invalid,
+            }
+        );
+        assert_eq!(
+            parse_text_wrap("pretty nowrap"),
+            CssTextWrapValue {
+                kind: CssTextWrapValueKind::Valid,
+                mode: CssTextWrapModeValue::Nowrap,
+                style: CssTextWrapStyleValue::Pretty,
+            }
+        );
+        assert_eq!(
+            parse_text_wrap("stable"),
+            CssTextWrapValue {
+                kind: CssTextWrapValueKind::Valid,
+                mode: CssTextWrapModeValue::Invalid,
+                style: CssTextWrapStyleValue::Stable,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_text_wrap_values() {
+        assert_eq!(parse_text_wrap("").kind, CssTextWrapValueKind::Invalid);
+        assert_eq!(parse_text_wrap("wrap nowrap").kind, CssTextWrapValueKind::Invalid);
+        assert_eq!(parse_text_wrap("pretty balance").kind, CssTextWrapValueKind::Invalid);
+        assert_eq!(parse_text_wrap("wrap, pretty").kind, CssTextWrapValueKind::Invalid);
+        assert_eq!(parse_text_wrap("avoid-orphans").kind, CssTextWrapValueKind::Invalid);
+        assert_eq!(parse_text_wrap("10px").kind, CssTextWrapValueKind::Invalid);
     }
 
     #[test]

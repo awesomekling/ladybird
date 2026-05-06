@@ -642,6 +642,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Text); });
     case PropertyID::TextUnderlinePosition:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_text_underline_position_value(tokens); });
+    case PropertyID::TextWrap:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_wrap_value(tokens); });
     case PropertyID::TextWrapMode:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_text_wrap_mode_value(tokens); });
     case PropertyID::TextWrapStyle:
@@ -4417,6 +4419,68 @@ RefPtr<StyleValue const> Parser::parse_text_underline_position_value(TokenStream
     return TextUnderlinePositionStyleValue::create(horizontal_from_rust(parsed_text_underline_position.horizontal), vertical_from_rust(parsed_text_underline_position.vertical));
 }
 
+static Optional<Keyword> text_wrap_mode_keyword_from_rust(FFI::CssTextWrapModeValue value)
+{
+    switch (value) {
+    case FFI::CssTextWrapModeValue::Invalid:
+        return {};
+    case FFI::CssTextWrapModeValue::Wrap:
+        return Keyword::Wrap;
+    case FFI::CssTextWrapModeValue::Nowrap:
+        return Keyword::Nowrap;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Optional<Keyword> text_wrap_style_keyword_from_rust(FFI::CssTextWrapStyleValue value)
+{
+    switch (value) {
+    case FFI::CssTextWrapStyleValue::Invalid:
+        return {};
+    case FFI::CssTextWrapStyleValue::Auto:
+        return Keyword::Auto;
+    case FFI::CssTextWrapStyleValue::Balance:
+        return Keyword::Balance;
+    case FFI::CssTextWrapStyleValue::Stable:
+        return Keyword::Stable;
+    case FFI::CssTextWrapStyleValue::Pretty:
+        return Keyword::Pretty;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+// https://drafts.csswg.org/css-text-4/#text-wrap
+RefPtr<StyleValue const> Parser::parse_text_wrap_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_text_wrap = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_text_wrap = RustComponentValueParser::parse_text_wrap(serialized_text_wrap.bytes_as_string_view(), "utf-8"sv);
+    if (parsed_text_wrap.kind == FFI::CssTextWrapValueKind::Invalid)
+        return {};
+
+    auto text_wrap_mode = property_initial_value(PropertyID::TextWrapMode);
+    if (auto keyword = text_wrap_mode_keyword_from_rust(parsed_text_wrap.mode); keyword.has_value())
+        text_wrap_mode = KeywordStyleValue::create(keyword.release_value());
+
+    auto text_wrap_style = property_initial_value(PropertyID::TextWrapStyle);
+    if (auto keyword = text_wrap_style_keyword_from_rust(parsed_text_wrap.style); keyword.has_value())
+        text_wrap_style = KeywordStyleValue::create(keyword.release_value());
+
+    Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+    longhand_values.append(text_wrap_mode);
+    longhand_values.append(text_wrap_style);
+
+    transaction.commit();
+    return ShorthandStyleValue::create(
+        PropertyID::TextWrap,
+        { PropertyID::TextWrapMode, PropertyID::TextWrapStyle },
+        move(longhand_values));
+}
+
 // https://drafts.csswg.org/css-text-4/#text-wrap-mode
 RefPtr<StyleValue const> Parser::parse_text_wrap_mode_value(TokenStream<ComponentValue>& tokens)
 {
@@ -4427,18 +4491,7 @@ RefPtr<StyleValue const> Parser::parse_text_wrap_mode_value(TokenStream<Componen
 
     auto serialized_text_wrap_mode = serialize_component_values_for_reparsing(tokens.tokens_since(start));
     auto parsed_text_wrap_mode = RustComponentValueParser::parse_text_wrap_mode(serialized_text_wrap_mode.bytes_as_string_view(), "utf-8"sv);
-    auto keyword = [&]() -> Optional<Keyword> {
-        switch (parsed_text_wrap_mode) {
-        case FFI::CssTextWrapModeValue::Invalid:
-            return {};
-        case FFI::CssTextWrapModeValue::Wrap:
-            return Keyword::Wrap;
-        case FFI::CssTextWrapModeValue::Nowrap:
-            return Keyword::Nowrap;
-        }
-        VERIFY_NOT_REACHED();
-    }();
-
+    auto keyword = text_wrap_mode_keyword_from_rust(parsed_text_wrap_mode);
     if (!keyword.has_value())
         return {};
 
@@ -4456,22 +4509,7 @@ RefPtr<StyleValue const> Parser::parse_text_wrap_style_value(TokenStream<Compone
 
     auto serialized_text_wrap_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
     auto parsed_text_wrap_style = RustComponentValueParser::parse_text_wrap_style(serialized_text_wrap_style.bytes_as_string_view(), "utf-8"sv);
-    auto keyword = [&]() -> Optional<Keyword> {
-        switch (parsed_text_wrap_style) {
-        case FFI::CssTextWrapStyleValue::Invalid:
-            return {};
-        case FFI::CssTextWrapStyleValue::Auto:
-            return Keyword::Auto;
-        case FFI::CssTextWrapStyleValue::Balance:
-            return Keyword::Balance;
-        case FFI::CssTextWrapStyleValue::Stable:
-            return Keyword::Stable;
-        case FFI::CssTextWrapStyleValue::Pretty:
-            return Keyword::Pretty;
-        }
-        VERIFY_NOT_REACHED();
-    }();
-
+    auto keyword = text_wrap_style_keyword_from_rust(parsed_text_wrap_style);
     if (!keyword.has_value())
         return {};
 

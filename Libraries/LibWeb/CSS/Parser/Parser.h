@@ -525,6 +525,7 @@ private:
     RefPtr<StyleValue const> parse_text_decoration_line_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_indent_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_underline_position_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_text_wrap_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_wrap_mode_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_wrap_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_rotate_value(TokenStream<ComponentValue>&);
