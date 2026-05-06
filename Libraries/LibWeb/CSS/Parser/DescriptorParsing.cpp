@@ -628,9 +628,30 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     return StyleValueList::create(move(symbols), StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
                 }
                 case DescriptorMetadata::ValueType::UnicodeRangeTokens: {
-                    return parse_comma_separated_value_list(tokens, [this](auto& tokens) -> RefPtr<StyleValue const> {
+                    // https://drafts.csswg.org/css-syntax-3/#urange-syntax
+                    // <urange>#
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_unicode_ranges = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_a_unicode_range_list(serialized_unicode_ranges.bytes_as_string_view(), "utf-8"sv).has_value())
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> unicode_range_tokens { component_values };
+
+                    auto unicode_ranges = parse_comma_separated_value_list(unicode_range_tokens, [this](auto& tokens) -> RefPtr<StyleValue const> {
                         return parse_unicode_range_value(tokens);
                     });
+                    if (!unicode_ranges)
+                        return nullptr;
+
+                    unicode_range_tokens.discard_whitespace();
+                    if (unicode_range_tokens.has_next_token())
+                        return nullptr;
+
+                    return unicode_ranges.release_nonnull();
                 }
                 }
                 return nullptr;
