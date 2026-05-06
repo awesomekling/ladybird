@@ -138,30 +138,63 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 case DescriptorMetadata::ValueType::CounterStyleSystem: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-system
                     // cyclic | numeric | alphabetic | symbolic | additive | [fixed <integer>?] | [ extends <counter-style-name> ]
-                    auto keyword_value = parse_keyword_value(tokens);
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
 
+                    auto serialized_system = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto system = RustComponentValueParser::parse_counter_style_system(serialized_system.bytes_as_string_view(), "utf-8"sv);
+                    if (!system.has_value())
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> system_tokens { component_values };
+
+                    auto keyword_value = parse_keyword_value(system_tokens);
                     if (!keyword_value)
                         return nullptr;
 
-                    if (auto system = keyword_to_counter_style_system(keyword_value->to_keyword()); system.has_value())
-                        return CounterStyleSystemStyleValue::create(system.release_value());
-
-                    if (keyword_value->to_keyword() == Keyword::Fixed) {
-                        auto integer_value = parse_integer_value(tokens, infinite_integer_range);
-
+                    switch (*system) {
+                    case FFI::CssCounterStyleSystemKind::Cyclic:
+                    case FFI::CssCounterStyleSystemKind::Numeric:
+                    case FFI::CssCounterStyleSystemKind::Alphabetic:
+                    case FFI::CssCounterStyleSystemKind::Symbolic:
+                    case FFI::CssCounterStyleSystemKind::Additive: {
+                        auto counter_style_system = keyword_to_counter_style_system(keyword_value->to_keyword());
+                        if (!counter_style_system.has_value())
+                            return nullptr;
+                        return CounterStyleSystemStyleValue::create(counter_style_system.release_value());
+                    }
+                    case FFI::CssCounterStyleSystemKind::Fixed:
+                        if (keyword_value->to_keyword() != Keyword::Fixed)
+                            return nullptr;
+                        return CounterStyleSystemStyleValue::create_fixed(nullptr);
+                    case FFI::CssCounterStyleSystemKind::FixedWithInteger: {
+                        if (keyword_value->to_keyword() != Keyword::Fixed)
+                            return nullptr;
+                        system_tokens.discard_whitespace();
+                        auto integer_value = parse_integer_value(system_tokens, infinite_integer_range);
+                        if (!integer_value)
+                            return nullptr;
+                        system_tokens.discard_whitespace();
+                        if (system_tokens.has_next_token())
+                            return nullptr;
                         return CounterStyleSystemStyleValue::create_fixed(integer_value);
                     }
-
-                    if (keyword_value->to_keyword() == Keyword::Extends) {
-                        auto counter_style_name = parse_counter_style_name(tokens);
-
+                    case FFI::CssCounterStyleSystemKind::Extends: {
+                        if (keyword_value->to_keyword() != Keyword::Extends)
+                            return nullptr;
+                        system_tokens.discard_whitespace();
+                        auto counter_style_name = parse_counter_style_name(system_tokens);
                         if (!counter_style_name.has_value())
                             return nullptr;
-
+                        system_tokens.discard_whitespace();
+                        if (system_tokens.has_next_token())
+                            return nullptr;
                         return CounterStyleSystemStyleValue::create_extends(counter_style_name.release_value());
                     }
-
-                    return nullptr;
+                    }
+                    VERIFY_NOT_REACHED();
                 }
                 case DescriptorMetadata::ValueType::CounterStyleName: {
                     auto counter_style_name = parse_counter_style_name(tokens);

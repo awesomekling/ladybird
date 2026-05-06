@@ -561,6 +561,19 @@ pub enum CssCounterStyleNegativeSymbolCount {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssCounterStyleSystemKind {
+    Cyclic,
+    Numeric,
+    Alphabetic,
+    Symbolic,
+    Additive,
+    Fixed,
+    FixedWithInteger,
+    Extends,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1681,6 +1694,26 @@ where
     }
 
     count_callback(count);
+    true
+}
+
+pub(crate) fn parse_counter_style_system<S>(filtered_input: &[u8], mut system_callback: S) -> bool
+where
+    S: FnMut(CssCounterStyleSystemKind),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(system) = parser.parse_counter_style_system() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    system_callback(system);
     true
 }
 
@@ -4591,6 +4624,45 @@ impl ComponentValueParser {
         Some(CounterStyle::SymbolsFunction { symbols_type, symbols })
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-system
+    fn parse_counter_style_system(&mut self) -> Option<CssCounterStyleSystemKind> {
+        // cyclic | numeric | alphabetic | symbolic | additive | [fixed <integer>?] | [ extends <counter-style-name> ]
+        self.discard_whitespace();
+
+        if self.consume_ident_matching("cyclic") {
+            return Some(CssCounterStyleSystemKind::Cyclic);
+        }
+        if self.consume_ident_matching("numeric") {
+            return Some(CssCounterStyleSystemKind::Numeric);
+        }
+        if self.consume_ident_matching("alphabetic") {
+            return Some(CssCounterStyleSystemKind::Alphabetic);
+        }
+        if self.consume_ident_matching("symbolic") {
+            return Some(CssCounterStyleSystemKind::Symbolic);
+        }
+        if self.consume_ident_matching("additive") {
+            return Some(CssCounterStyleSystemKind::Additive);
+        }
+
+        if self.consume_ident_matching("fixed") {
+            self.discard_whitespace();
+            if self.consume_integer_syntax() {
+                return Some(CssCounterStyleSystemKind::FixedWithInteger);
+            }
+            return Some(CssCounterStyleSystemKind::Fixed);
+        }
+
+        if self.consume_ident_matching("extends") {
+            self.discard_whitespace();
+            if self.consume_counter_style_name_syntax() {
+                return Some(CssCounterStyleSystemKind::Extends);
+            }
+        }
+
+        None
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
     fn parse_counter_style_negative(&mut self) -> Option<CssCounterStyleNegativeSymbolCount> {
         // <symbol> <symbol>?
@@ -4649,6 +4721,47 @@ impl ComponentValueParser {
             self.index += 1;
         }
         is_nonnegative_integer
+    }
+
+    fn consume_integer_syntax(&mut self) -> bool {
+        let Some(component_value) = self.next_component_value() else {
+            return false;
+        };
+
+        let is_integer = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { number },
+                ..
+            }) => number_is_integer(*number),
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing math functions still happens in C++.
+            ComponentValue::Function(_) => true,
+            _ => false,
+        };
+
+        if is_integer {
+            self.index += 1;
+        }
+        is_integer
+    }
+
+    fn consume_counter_style_name_syntax(&mut self) -> bool {
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+        else {
+            return false;
+        };
+
+        // <counter-style-name> is a <custom-ident> that is not an ASCII
+        // case-insensitive match for none.
+        if !is_valid_custom_ident(value, &["none"]) {
+            return false;
+        }
+
+        self.index += 1;
+        true
     }
 
     fn consume_symbol_syntax(&mut self) -> bool {
@@ -7162,10 +7275,10 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleSymbolsType, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
-        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssFontLanguageOverrideKind, CssFontSourceKind,
+        CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
+        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName,
         FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
@@ -7181,8 +7294,8 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
-        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_counter_style_system,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7587,6 +7700,12 @@ mod tests {
         let mut count = None;
         let parsed = parse_counter_style_negative(input.as_bytes(), |parsed_count| count = Some(parsed_count));
         parsed.then_some(count).flatten()
+    }
+
+    fn parse_counter_style_system_descriptor(input: &str) -> Option<CssCounterStyleSystemKind> {
+        let mut system = None;
+        let parsed = parse_counter_style_system(input.as_bytes(), |parsed_system| system = Some(parsed_system));
+        parsed.then_some(system).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9178,6 +9297,58 @@ mod tests {
         assert_eq!(parse_counter_style_negative_descriptor("\"-\" \"\" extra"), None);
         assert_eq!(parse_counter_style_negative_descriptor("inherit"), None);
         assert_eq!(parse_counter_style_negative_descriptor("default"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_system_descriptors() {
+        assert_eq!(
+            parse_counter_style_system_descriptor("cyclic"),
+            Some(CssCounterStyleSystemKind::Cyclic)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("numeric"),
+            Some(CssCounterStyleSystemKind::Numeric)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("alphabetic"),
+            Some(CssCounterStyleSystemKind::Alphabetic)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("symbolic"),
+            Some(CssCounterStyleSystemKind::Symbolic)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("additive"),
+            Some(CssCounterStyleSystemKind::Additive)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("fixed"),
+            Some(CssCounterStyleSystemKind::Fixed)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("fixed 1"),
+            Some(CssCounterStyleSystemKind::FixedWithInteger)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("fixed calc(1)"),
+            Some(CssCounterStyleSystemKind::FixedWithInteger)
+        );
+        assert_eq!(
+            parse_counter_style_system_descriptor("extends custom-counter"),
+            Some(CssCounterStyleSystemKind::Extends)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_system_descriptors() {
+        assert_eq!(parse_counter_style_system_descriptor(""), None);
+        assert_eq!(parse_counter_style_system_descriptor("unknown"), None);
+        assert_eq!(parse_counter_style_system_descriptor("fixed \"1\""), None);
+        assert_eq!(parse_counter_style_system_descriptor("fixed 1 extra"), None);
+        assert_eq!(parse_counter_style_system_descriptor("extends"), None);
+        assert_eq!(parse_counter_style_system_descriptor("extends none"), None);
+        assert_eq!(parse_counter_style_system_descriptor("extends default"), None);
+        assert_eq!(parse_counter_style_system_descriptor("extends custom extra"), None);
     }
 
     #[test]
