@@ -20,7 +20,7 @@ parse_deps = false
 all_features = false
 
 [export]
-include = ["CssBooleanExpressionEventKind", "CssComponentValue", "CssComponentValueKind", "CssCounterStyleKind", "CssCounterStyleNegativeSymbolCount", "CssCounterStyleRangeKind", "CssCounterStyleSymbolsType", "CssCounterStyleSystemKind", "CssCropOrCrossKind", "CssDeclaration", "CssHashType", "CssMediaFeature", "CssMediaFeatureComparison", "CssMediaFeatureNameKind", "CssMediaFeatureSyntaxKind", "CssMediaFeatureValue", "CssMediaFeatureValueKind", "CssMediaQuery", "CssNonnegativeIntegerSymbolPairOrder", "CssNumberType", "CssRuleContext", "CssRuleEvent", "CssRuleEventKind", "CssSupportsFeatureKind", "CssToken", "CssTokenType", "CssValueTypeSyntaxKind"]
+include = ["CssBooleanExpressionEventKind", "CssComponentValue", "CssComponentValueKind", "CssContainerTypeValueKind", "CssCounterStyleKind", "CssCounterStyleNegativeSymbolCount", "CssCounterStyleRangeKind", "CssCounterStyleSymbolsType", "CssCounterStyleSystemKind", "CssCropOrCrossKind", "CssDeclaration", "CssHashType", "CssMediaFeature", "CssMediaFeatureComparison", "CssMediaFeatureNameKind", "CssMediaFeatureSyntaxKind", "CssMediaFeatureValue", "CssMediaFeatureValueKind", "CssMediaQuery", "CssNonnegativeIntegerSymbolPairOrder", "CssNumberType", "CssRuleContext", "CssRuleEvent", "CssRuleEventKind", "CssSupportsFeatureKind", "CssToken", "CssTokenType", "CssValueTypeSyntaxKind"]
 
 [export.mangle]
 rename_types = "PascalCase"

@@ -5651,54 +5651,46 @@ RefPtr<StyleValue const> Parser::parse_contain_value(TokenStream<ComponentValue>
 // https://drafts.csswg.org/css-conditional-5/#propdef-container-type
 RefPtr<StyleValue const> Parser::parse_container_type_value(TokenStream<ComponentValue>& tokens)
 {
-    // normal | [ [ size | inline-size ] || scroll-state ]
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // normal
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::Normal)) {
-        transaction.commit();
-        return none;
-    }
+    auto serialized_container_type = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_container_type = RustComponentValueParser::parse_container_type(serialized_container_type.bytes_as_string_view(), "utf-8"sv);
 
-    // [ [ size | inline-size ] || scroll-state ]
-    if (!tokens.has_next_token())
+    auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
+        values.append(KeywordStyleValue::create(keyword));
+    };
+
+    StyleValueVector values;
+    switch (parsed_container_type) {
+    case FFI::CssContainerTypeValueKind::Invalid:
         return {};
-
-    RefPtr<StyleValue const> size_value;
-    RefPtr<StyleValue const> scroll_state_value;
-
-    while (tokens.has_next_token()) {
-        auto keyword_value = parse_keyword_value(tokens);
-        if (!keyword_value)
-            return {};
-        switch (keyword_value->to_keyword()) {
-        case Keyword::Size:
-        case Keyword::InlineSize:
-            if (size_value)
-                return {};
-            size_value = move(keyword_value);
-            break;
-        case Keyword::ScrollState:
-            if (scroll_state_value)
-                return {};
-            scroll_state_value = move(keyword_value);
-            break;
-        default:
-            return {};
-        }
-        tokens.discard_whitespace();
+    case FFI::CssContainerTypeValueKind::Normal:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Normal);
+    case FFI::CssContainerTypeValueKind::Size:
+        append_keyword(values, Keyword::Size);
+        break;
+    case FFI::CssContainerTypeValueKind::InlineSize:
+        append_keyword(values, Keyword::InlineSize);
+        break;
+    case FFI::CssContainerTypeValueKind::ScrollState:
+        append_keyword(values, Keyword::ScrollState);
+        break;
+    case FFI::CssContainerTypeValueKind::SizeAndScrollState:
+        append_keyword(values, Keyword::Size);
+        append_keyword(values, Keyword::ScrollState);
+        break;
+    case FFI::CssContainerTypeValueKind::InlineSizeAndScrollState:
+        append_keyword(values, Keyword::InlineSize);
+        append_keyword(values, Keyword::ScrollState);
+        break;
     }
-
-    StyleValueVector containment_values;
-    if (size_value)
-        containment_values.append(size_value.release_nonnull());
-    if (scroll_state_value)
-        containment_values.append(scroll_state_value.release_nonnull());
 
     transaction.commit();
-
-    return StyleValueList::create(move(containment_values), StyleValueList::Separator::Space);
+    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
 // https://www.w3.org/TR/css-text-4/#white-space-trim

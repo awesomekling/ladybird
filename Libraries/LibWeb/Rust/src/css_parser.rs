@@ -598,6 +598,18 @@ pub enum CssCropOrCrossKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssContainerTypeValueKind {
+    Invalid,
+    Normal,
+    Size,
+    InlineSize,
+    ScrollState,
+    SizeAndScrollState,
+    InlineSizeAndScrollState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1976,6 +1988,59 @@ where
 
     kind_callback(kind);
     true
+}
+
+pub(crate) fn parse_container_type_value(filtered_input: &[u8]) -> CssContainerTypeValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-conditional-5/#propdef-container-type
+    // normal | [ [ size | inline-size ] || scroll-state ]
+    if parser.consume_ident_matching("normal") {
+        if parser.has_next_component_value() {
+            return CssContainerTypeValueKind::Invalid;
+        }
+        return CssContainerTypeValueKind::Normal;
+    }
+
+    let mut size_value = None;
+    let mut has_scroll_state = false;
+    while parser.has_next_component_value() {
+        let Some(value) = parser.consume_an_ident() else {
+            return CssContainerTypeValueKind::Invalid;
+        };
+
+        if value.eq_ignore_ascii_case("size") {
+            if size_value.is_some() {
+                return CssContainerTypeValueKind::Invalid;
+            }
+            size_value = Some(CssContainerTypeValueKind::Size);
+        } else if value.eq_ignore_ascii_case("inline-size") {
+            if size_value.is_some() {
+                return CssContainerTypeValueKind::Invalid;
+            }
+            size_value = Some(CssContainerTypeValueKind::InlineSize);
+        } else if value.eq_ignore_ascii_case("scroll-state") {
+            if has_scroll_state {
+                return CssContainerTypeValueKind::Invalid;
+            }
+            has_scroll_state = true;
+        } else {
+            return CssContainerTypeValueKind::Invalid;
+        }
+    }
+
+    match (size_value, has_scroll_state) {
+        (Some(CssContainerTypeValueKind::Size), false) => CssContainerTypeValueKind::Size,
+        (Some(CssContainerTypeValueKind::InlineSize), false) => CssContainerTypeValueKind::InlineSize,
+        (None, true) => CssContainerTypeValueKind::ScrollState,
+        (Some(CssContainerTypeValueKind::Size), true) => CssContainerTypeValueKind::SizeAndScrollState,
+        (Some(CssContainerTypeValueKind::InlineSize), true) => CssContainerTypeValueKind::InlineSizeAndScrollState,
+        _ => CssContainerTypeValueKind::Invalid,
+    }
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8015,17 +8080,17 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
-        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
-        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssSupportsFeatureKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
-        FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssBooleanExpressionEventKind, CssContainerTypeValueKind, CssCounterStyleKind,
+        CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+        CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
+        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssPagePseudoClassKind, CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -8037,11 +8102,12 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_container_rule_prelude, parse_counter_style_additive_symbols, parse_counter_style_negative,
-        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
-        parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
-        parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
+        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_positive_percentage_descriptor,
+        parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8547,6 +8613,10 @@ mod tests {
             count = Some(parsed_count);
         });
         parsed.then_some(count).flatten()
+    }
+
+    fn parse_container_type(input: &str) -> CssContainerTypeValueKind {
+        parse_container_type_value(input.as_bytes())
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -10607,6 +10677,78 @@ mod tests {
     fn rejects_invalid_container_rule_preludes() {
         assert_eq!(parse_container_rule_prelude_items(""), None);
         assert_eq!(parse_container_rule_prelude_items(","), None);
+    }
+
+    #[test]
+    fn parses_container_type_values() {
+        assert_eq!(parse_container_type("normal"), CssContainerTypeValueKind::Normal);
+        assert_eq!(parse_container_type("size"), CssContainerTypeValueKind::Size);
+        assert_eq!(
+            parse_container_type("inline-size"),
+            CssContainerTypeValueKind::InlineSize
+        );
+        assert_eq!(
+            parse_container_type("scroll-state"),
+            CssContainerTypeValueKind::ScrollState
+        );
+        assert_eq!(
+            parse_container_type("size scroll-state"),
+            CssContainerTypeValueKind::SizeAndScrollState
+        );
+        assert_eq!(
+            parse_container_type("scroll-state size"),
+            CssContainerTypeValueKind::SizeAndScrollState
+        );
+        assert_eq!(
+            parse_container_type("inline-size scroll-state"),
+            CssContainerTypeValueKind::InlineSizeAndScrollState
+        );
+        assert_eq!(
+            parse_container_type("scroll-state inline-size"),
+            CssContainerTypeValueKind::InlineSizeAndScrollState
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_container_type_values() {
+        assert_eq!(parse_container_type(""), CssContainerTypeValueKind::Invalid);
+        assert_eq!(parse_container_type("none"), CssContainerTypeValueKind::Invalid);
+        assert_eq!(parse_container_type("auto"), CssContainerTypeValueKind::Invalid);
+        assert_eq!(parse_container_type("block-size"), CssContainerTypeValueKind::Invalid);
+        assert_eq!(
+            parse_container_type("normal normal"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_container_type("normal inline-size"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_container_type("inline-size normal"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_container_type("size inline-size"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_container_type("inline-size size"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(parse_container_type("size size"), CssContainerTypeValueKind::Invalid);
+        assert_eq!(
+            parse_container_type("scroll-state scroll-state"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(parse_container_type("style"), CssContainerTypeValueKind::Invalid);
+        assert_eq!(
+            parse_container_type("size nonsense"),
+            CssContainerTypeValueKind::Invalid
+        );
+        assert_eq!(
+            parse_container_type("size, scroll-state"),
+            CssContainerTypeValueKind::Invalid
+        );
     }
 
     #[test]

@@ -23,8 +23,8 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssCounterStyleKind,
-    CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssContainerTypeValueKind,
+    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
     CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
     CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
@@ -788,6 +788,24 @@ pub unsafe extern "C" fn rust_css_parse_opentype_tag(
             css_parser::parse_an_opentype_tag(input, |value| {
                 opentype_tag_callback(ctx, value.as_ptr(), value.len());
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_container_type(
+    input: *const u8,
+    input_len: usize,
+) -> CssContainerTypeValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssContainerTypeValueKind::Invalid;
+            };
+
+            css_parser::parse_container_type_value(input)
         })
     }
 }
