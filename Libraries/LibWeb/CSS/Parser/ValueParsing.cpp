@@ -4280,13 +4280,20 @@ Optional<FlyString> Parser::parse_custom_ident(TokenStream<ComponentValue>& toke
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
-    auto const& token = tokens.consume_a_token();
-    if (!token.is(Token::Type::Ident))
-        return {};
-    auto custom_ident = token.token().ident();
+    auto const& component_value = tokens.next_token();
+    auto original_source_text = component_value.original_source_text();
+    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
 
-    if (!is_valid_custom_ident(custom_ident, blacklist))
+    auto custom_ident = RustComponentValueParser::parse_a_custom_ident(source.bytes_as_string_view(), "utf-8"sv);
+    if (!custom_ident.has_value())
         return {};
+
+    for (auto& value : blacklist) {
+        if (custom_ident->equals_ignoring_ascii_case(value))
+            return {};
+    }
+
+    tokens.discard_a_token();
 
     transaction.commit();
     return custom_ident;
@@ -4382,11 +4389,19 @@ Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& toke
     // The <dashed-ident> production is a <custom-ident>, with all the case-sensitivity that implies, with the
     // additional restriction that it must start with two dashes (U+002D HYPHEN-MINUS).
     auto transaction = tokens.begin_transaction();
-    auto custom_ident = parse_custom_ident(tokens, {});
-    if (!custom_ident.has_value() || !custom_ident->starts_with_bytes("--"sv))
+    tokens.discard_whitespace();
+
+    auto const& component_value = tokens.next_token();
+    auto original_source_text = component_value.original_source_text();
+    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
+
+    auto dashed_ident = RustComponentValueParser::parse_a_dashed_ident(source.bytes_as_string_view(), "utf-8"sv);
+    if (!dashed_ident.has_value())
         return {};
+    tokens.discard_a_token();
+
     transaction.commit();
-    return custom_ident;
+    return dashed_ident;
 }
 
 RefPtr<CustomIdentStyleValue const> Parser::parse_dashed_ident_value(TokenStream<ComponentValue>& tokens)

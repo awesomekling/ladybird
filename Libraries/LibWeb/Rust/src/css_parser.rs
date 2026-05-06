@@ -702,6 +702,38 @@ where
     true
 }
 
+pub(crate) fn parse_a_custom_ident<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_a_custom_ident(&[]) else {
+        return false;
+    };
+
+    name_callback(&name);
+    true
+}
+
+pub(crate) fn parse_a_dashed_ident<N>(filtered_input: &[u8], mut name_callback: N) -> bool
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(name) = parser.parse_a_dashed_ident() else {
+        return false;
+    };
+
+    name_callback(&name);
+    true
+}
+
 pub(crate) fn parse_a_layer_name<N>(filtered_input: &[u8], allow_blank_layer_name: bool, mut name_callback: N) -> bool
 where
     N: FnMut(&str),
@@ -2211,6 +2243,48 @@ impl ComponentValueParser {
                 token_type: TokenType::Ident { value },
                 ..
             }) if is_valid_custom_ident(value, &["none"]) => value.clone(),
+            _ => return None,
+        };
+        self.index += 1;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(name)
+    }
+
+    // https://drafts.csswg.org/css-values-4/#custom-idents
+    fn parse_a_custom_ident(&mut self, blacklist: &[&str]) -> Option<String> {
+        self.discard_whitespace();
+        let name = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if is_valid_custom_ident(value, blacklist) => value.clone(),
+            _ => return None,
+        };
+        self.index += 1;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(name)
+    }
+
+    // https://drafts.csswg.org/css-values-4/#typedef-dashed-ident
+    fn parse_a_dashed_ident(&mut self) -> Option<String> {
+        // The <dashed-ident> production is a <custom-ident>, with all the case-sensitivity that implies, with the
+        // additional restriction that it must start with two dashes (U+002D HYPHEN-MINUS).
+        self.discard_whitespace();
+        let name = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if value.starts_with("--") && is_valid_custom_ident(value, &[]) => value.clone(),
             _ => return None,
         };
         self.index += 1;
@@ -4631,11 +4705,12 @@ mod tests {
         MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
-        parse_a_family_name, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
-        parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
+        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_keyframe_selector_list,
+        parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
+        parse_a_namespace_rule_prelude, parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition,
+        parse_container_rule_prelude, parse_empty_prelude, parse_font_feature_values_family_name_list,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4738,6 +4813,18 @@ mod tests {
     fn parse_custom_property_name(input: &str) -> Option<String> {
         let mut name = None;
         let parsed = parse_a_custom_property_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
+        parsed.then_some(name).flatten()
+    }
+
+    fn parse_custom_ident(input: &str) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_a_custom_ident(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
+        parsed.then_some(name).flatten()
+    }
+
+    fn parse_dashed_ident(input: &str) -> Option<String> {
+        let mut name = None;
+        let parsed = parse_a_dashed_ident(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
     }
 
@@ -5506,6 +5593,35 @@ mod tests {
         assert_eq!(parse_custom_property_name("color"), None);
         assert_eq!(parse_custom_property_name("--accent extra"), None);
         assert_eq!(parse_custom_property_name("\"--accent\""), None);
+    }
+
+    #[test]
+    fn parses_custom_idents() {
+        assert_eq!(parse_custom_ident("accent"), Some("accent".to_string()));
+        assert_eq!(parse_custom_ident("--accent"), Some("--accent".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_custom_idents() {
+        assert_eq!(parse_custom_ident("default"), None);
+        assert_eq!(parse_custom_ident("inherit"), None);
+        assert_eq!(parse_custom_ident("accent extra"), None);
+        assert_eq!(parse_custom_ident("\"accent\""), None);
+    }
+
+    #[test]
+    fn parses_dashed_idents() {
+        assert_eq!(parse_dashed_ident("--accent"), Some("--accent".to_string()));
+        assert_eq!(parse_dashed_ident("--"), Some("--".to_string()));
+        assert_eq!(parse_dashed_ident("--Accent"), Some("--Accent".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_dashed_idents() {
+        assert_eq!(parse_dashed_ident("-accent"), None);
+        assert_eq!(parse_dashed_ident("accent"), None);
+        assert_eq!(parse_dashed_ident("--accent extra"), None);
+        assert_eq!(parse_dashed_ident("\"--accent\""), None);
     }
 
     #[test]
