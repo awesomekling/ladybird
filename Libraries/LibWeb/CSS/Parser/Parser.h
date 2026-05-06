@@ -190,30 +190,6 @@ public:
 private:
     Parser(ParsingParams const&, String input, String encoding);
 
-    // "Parse a stylesheet" is intended to be the normal parser entry point, for parsing stylesheets.
-    struct ParsedStyleSheet {
-        Optional<::URL::URL> location;
-        Vector<Rule> rules;
-    };
-    ParsedStyleSheet parse_a_stylesheet(TokenStream<ComponentValue>&, Optional<::URL::URL> location);
-
-    // "Parse a stylesheet’s contents" is intended for use by the CSSStyleSheet replace() method, and similar, which parse text into the contents of an existing stylesheet.
-    Vector<Rule> parse_a_stylesheets_contents(TokenStream<ComponentValue>&);
-
-    // "Parse a block’s contents" is intended for parsing the contents of any block in CSS (including things like the style attribute),
-    // and APIs such as the CSSStyleDeclaration cssText attribute.
-    Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(TokenStream<ComponentValue>&);
-
-    // "Parse a rule" is intended for use by the CSSStyleSheet#insertRule method, and similar functions which might exist, which parse text into a single rule.
-    Optional<Rule> parse_a_rule(TokenStream<ComponentValue>&);
-
-    // "Parse a component value" is for things that need to consume a single value, like the parsing rules for attr().
-    Optional<ComponentValue> parse_a_component_value(TokenStream<ComponentValue>&);
-
-    // "Parse a list of component values" is for the contents of presentational attributes, which parse text into a single declaration’s value,
-    // or for parsing a stand-alone selector [SELECT] or list of Media Queries [MEDIAQ], as in Selectors API or the media HTML attribute.
-    Vector<ComponentValue> parse_a_list_of_component_values(TokenStream<ComponentValue>&);
-
     Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
 
     enum class SelectorType {
@@ -227,25 +203,11 @@ private:
 
     Optional<Selector::SimpleSelector::ANPlusBPattern> parse_a_n_plus_b_pattern(TokenStream<ComponentValue>&);
 
-    [[nodiscard]] Vector<Rule> consume_a_stylesheets_contents(TokenStream<ComponentValue>&);
     enum class Nested {
         No,
         Yes,
     };
-    Optional<AtRule> consume_an_at_rule(TokenStream<ComponentValue>&, Nested nested = Nested::No);
-    struct InvalidRuleError { };
-    Variant<Empty, QualifiedRule, InvalidRuleError> consume_a_qualified_rule(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
-    Vector<RuleOrListOfDeclarations> consume_a_block(TokenStream<ComponentValue>&);
-    Vector<RuleOrListOfDeclarations> consume_a_blocks_contents(TokenStream<ComponentValue>&);
-    enum class SaveOriginalText : u8 {
-        No,
-        Yes,
-    };
-    Optional<Declaration> consume_a_declaration(TokenStream<ComponentValue>&, Nested = Nested::No, SaveOriginalText = SaveOriginalText::No);
-    void consume_the_remnants_of_a_bad_declaration(TokenStream<ComponentValue>&, Nested);
-    [[nodiscard]] Vector<ComponentValue> consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {}, Nested = Nested::No);
-    [[nodiscard]] ComponentValue consume_a_component_value(TokenStream<ComponentValue>&);
-    void consume_a_component_value_and_do_nothing(TokenStream<ComponentValue>&);
+    [[nodiscard]] Vector<ComponentValue> consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {});
     // TODO: consume_a_unicode_range_value()
 
     struct FunctionPrelude {
