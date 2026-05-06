@@ -117,6 +117,18 @@ Optional<Vector<ComponentValue>> Parser::parse_declaration_value(TokenStream<Com
     // contain <bad-string-token>, <bad-url-token>, unmatched <)-token>, <]-token>, or <}-token>, or top-level
     // <semicolon-token> tokens or <delim-token> tokens with a value of "!". It represents the entirety of what a valid
     // declaration can have as its value.
+    auto remaining_tokens = tokens.remaining_tokens();
+    // AD-HOC: Re-parsing substituted component values through Rust would lose
+    // C++-side attr() taint metadata until that metadata is carried over FFI.
+    if (!end_token_type.has_value() && !remaining_tokens.first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value()) {
+        auto serialized_input = Parser::serialize_component_values_for_reparsing(remaining_tokens);
+        if (RustComponentValueParser::parse_optional_declaration_value_descriptor(serialized_input.bytes_as_string_view(), "utf-8"sv)) {
+            while (tokens.has_next_token())
+                tokens.discard_a_token();
+            return RustComponentValueParser::parse_a_list_of_component_values(serialized_input.bytes_as_string_view(), "utf-8"sv);
+        }
+    }
+
     Vector<ComponentValue> top_level_declaration_value;
 
     AK::Function<void(TokenStream<ComponentValue>&, Nested)> const parse_declaration_value_impl = [&](TokenStream<ComponentValue>& current_tokens, Nested nested) {
