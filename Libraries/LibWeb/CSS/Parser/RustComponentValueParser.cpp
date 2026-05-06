@@ -1183,6 +1183,31 @@ Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringV
     return name;
 }
 
+Optional<RustComponentValueParser::NamespaceRulePrelude> RustComponentValueParser::parse_a_namespace_rule_prelude(StringView input, StringView encoding)
+{
+    NamespaceRulePrelude namespace_rule_prelude;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_namespace_rule_prelude(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &namespace_rule_prelude,
+        [](void* raw_namespace_rule_prelude, u8 const* prefix_ptr, size_t prefix_len) {
+            auto& namespace_rule_prelude = *static_cast<NamespaceRulePrelude*>(raw_namespace_rule_prelude);
+            namespace_rule_prelude.prefix = fly_string_from_ffi_bytes(prefix_ptr, prefix_len);
+        },
+        [](void* raw_namespace_rule_prelude, u8 const* namespace_uri_ptr, size_t namespace_uri_len) {
+            auto& namespace_rule_prelude = *static_cast<NamespaceRulePrelude*>(raw_namespace_rule_prelude);
+            namespace_rule_prelude.namespace_uri = fly_string_from_ffi_bytes(namespace_uri_ptr, namespace_uri_len);
+        });
+
+    if (!parsed)
+        return {};
+
+    return namespace_rule_prelude;
+}
+
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,

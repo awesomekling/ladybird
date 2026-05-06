@@ -475,42 +475,18 @@ GC::Ptr<CSSNamespaceRule> Parser::convert_to_namespace_rule(AtRule const& rule)
         return {};
     }
 
-    tokens.discard_whitespace();
-
-    Optional<FlyString> prefix = {};
-    if (tokens.next_token().is(Token::Type::Ident)) {
-        prefix = tokens.consume_a_token().token().ident();
-        tokens.discard_whitespace();
-    }
-
-    FlyString namespace_uri;
-    if (auto url = parse_url_function(tokens); url.has_value()) {
-        // "A URI string parsed from the URI syntax must be treated as a literal string: as with the STRING syntax, no
-        // URI-specific normalization is applied."
-        // https://drafts.csswg.org/css-namespaces/#syntax
-        namespace_uri = url->url();
-    } else if (auto& url_token = tokens.consume_a_token(); url_token.is(Token::Type::String)) {
-        namespace_uri = url_token.token().string();
-    } else {
+    auto serialized_namespace_rule_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    auto namespace_rule_prelude = RustComponentValueParser::parse_a_namespace_rule_prelude(serialized_namespace_rule_prelude.bytes_as_string_view(), "utf-8"sv);
+    if (!namespace_rule_prelude.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@namespace"_fly_string,
-            .prelude = tokens.dump_string(),
-            .description = "Unable to parse <url>."_string,
+            .prelude = serialized_namespace_rule_prelude,
+            .description = "Unable to parse prelude."_string,
         });
         return {};
     }
 
-    tokens.discard_whitespace();
-    if (tokens.has_next_token()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@namespace"_fly_string,
-            .prelude = tokens.dump_string(),
-            .description = "Trailing tokens after <url> in prelude."_string,
-        });
-        return {};
-    }
-
-    return CSSNamespaceRule::create(realm(), prefix, namespace_uri);
+    return CSSNamespaceRule::create(realm(), move(namespace_rule_prelude->prefix), namespace_rule_prelude->namespace_uri);
 }
 
 template<typename NestedDeclarationsRule>

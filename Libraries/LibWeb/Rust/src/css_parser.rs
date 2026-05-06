@@ -745,6 +745,30 @@ where
     true
 }
 
+pub(crate) fn parse_a_namespace_rule_prelude<P, U>(
+    filtered_input: &[u8],
+    mut prefix_callback: P,
+    mut namespace_uri_callback: U,
+) -> bool
+where
+    P: FnMut(&str),
+    U: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some((prefix, namespace_uri)) = parser.parse_a_namespace_rule_prelude() else {
+        return false;
+    };
+
+    if let Some(prefix) = prefix {
+        prefix_callback(&prefix);
+    }
+    namespace_uri_callback(&namespace_uri);
+    true
+}
+
 pub(crate) fn parse_a_media_condition<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -2225,6 +2249,68 @@ impl ComponentValueParser {
         }
 
         Some(name)
+    }
+
+    // https://drafts.csswg.org/css-namespaces/#syntax
+    fn parse_a_namespace_rule_prelude(&mut self) -> Option<(Option<String>, String)> {
+        // @namespace <namespace-prefix>? [ <string> | <url> ] ;
+        // <namespace-prefix> = <ident>
+        self.discard_whitespace();
+
+        let prefix = match self.next_component_value() {
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            })) => {
+                let prefix = value.clone();
+                self.index += 1;
+                self.discard_whitespace();
+                Some(prefix)
+            }
+            _ => None,
+        };
+
+        let namespace_uri = self.consume_namespace_uri()?;
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some((prefix, namespace_uri))
+    }
+
+    fn consume_namespace_uri(&mut self) -> Option<String> {
+        // "A URI string parsed from the URI syntax must be treated as a literal string: as with the STRING syntax, no
+        // URI-specific normalization is applied."
+        // https://drafts.csswg.org/css-namespaces/#syntax
+        let namespace_uri = match self.next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { value } | TokenType::Url { value },
+                ..
+            }) => value.clone(),
+            ComponentValue::Function(function)
+                if function.name.eq_ignore_ascii_case("url") || function.name.eq_ignore_ascii_case("src") =>
+            {
+                let mut function_parser = ComponentValueParser::new(function.value.clone());
+                function_parser.discard_whitespace();
+                let namespace_uri = match function_parser.next_component_value()? {
+                    ComponentValue::PreservedToken(Token {
+                        token_type: TokenType::String { value },
+                        ..
+                    }) => value.clone(),
+                    _ => return None,
+                };
+                function_parser.index += 1;
+                function_parser.discard_whitespace();
+                if function_parser.has_next_component_value() {
+                    return None;
+                }
+                namespace_uri
+            }
+            _ => return None,
+        };
+        self.index += 1;
+        Some(namespace_uri)
     }
 
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
@@ -4333,8 +4419,8 @@ mod tests {
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
         parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_page_selector_list, parse_a_value_type, parse_an_if_condition,
-        strip_whitespace,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
+        parse_a_value_type, parse_an_if_condition, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -4458,6 +4544,17 @@ mod tests {
         let mut name = None;
         let parsed = parse_a_counter_style_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
+    }
+
+    fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
+        let mut prefix = None;
+        let mut namespace_uri = None;
+        let parsed = parse_a_namespace_rule_prelude(
+            input.as_bytes(),
+            |parsed_prefix| prefix = Some(parsed_prefix.to_string()),
+            |parsed_namespace_uri| namespace_uri = Some(parsed_namespace_uri.to_string()),
+        );
+        parsed.then(|| (prefix, namespace_uri.expect("namespace URI must be parsed")))
     }
 
     fn parse_value_type(input: &str, value_type_id: ValueTypeId) -> CssValueTypeSyntaxKind {
@@ -5223,6 +5320,39 @@ mod tests {
         assert_eq!(parse_counter_style_name("inherit"), None);
         assert_eq!(parse_counter_style_name("custom-counter extra"), None);
         assert_eq!(parse_counter_style_name("\"custom-counter\""), None);
+    }
+
+    #[test]
+    fn parses_namespace_rule_preludes() {
+        assert_eq!(
+            parse_namespace_rule_prelude("\"https://www.w3.org/1999/xhtml\""),
+            Some((None, "https://www.w3.org/1999/xhtml".to_string()))
+        );
+        assert_eq!(
+            parse_namespace_rule_prelude("svg url(http://www.w3.org/2000/svg)"),
+            Some((Some("svg".to_string()), "http://www.w3.org/2000/svg".to_string()))
+        );
+        assert_eq!(
+            parse_namespace_rule_prelude("math url(\"http://www.w3.org/1998/Math/MathML\")"),
+            Some((
+                Some("math".to_string()),
+                "http://www.w3.org/1998/Math/MathML".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_namespace_rule_preludes() {
+        assert_eq!(parse_namespace_rule_prelude(""), None);
+        assert_eq!(parse_namespace_rule_prelude("svg"), None);
+        assert_eq!(
+            parse_namespace_rule_prelude("svg url(http://www.w3.org/2000/svg) extra"),
+            None
+        );
+        assert_eq!(
+            parse_namespace_rule_prelude("svg url(\"http://www.w3.org/2000/svg\" foo)"),
+            None
+        );
     }
 
     #[test]
