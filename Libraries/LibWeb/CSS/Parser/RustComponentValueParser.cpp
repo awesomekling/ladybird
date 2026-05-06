@@ -1920,6 +1920,27 @@ Optional<size_t> RustComponentValueParser::parse_counter_style_symbols(StringVie
     return count;
 }
 
+Optional<RustComponentValueParser::CounterStyleRangeSyntax> RustComponentValueParser::parse_counter_style_range(StringView input, StringView encoding)
+{
+    Optional<CounterStyleRangeSyntax> range;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_range(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &range,
+        [](void* raw_range, FFI::CssCounterStyleRangeKind kind, size_t count) {
+            auto& range = *static_cast<Optional<CounterStyleRangeSyntax>*>(raw_range);
+            range = CounterStyleRangeSyntax { .kind = kind, .count = count };
+        });
+
+    if (!parsed || !range.has_value())
+        return {};
+
+    return range;
+}
+
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
 {
     Optional<FamilyName> family_name;

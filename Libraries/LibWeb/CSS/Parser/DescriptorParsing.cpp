@@ -246,35 +246,50 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 case DescriptorMetadata::ValueType::CounterStyleRange: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
                     // [ [ <integer> | infinite ]{2} ]# | auto
-                    if (auto value = parse_all_as_single_keyword_value(tokens, Keyword::Auto))
-                        return value;
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
 
-                    return parse_comma_separated_value_list(tokens, [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-                        auto const parse_value = [&]() -> RefPtr<StyleValue const> {
-                            if (auto keyword_value = parse_specific_keyword_value(tokens, Keyword::Infinite))
-                                return keyword_value;
+                    auto serialized_range = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto range = RustComponentValueParser::parse_counter_style_range(serialized_range.bytes_as_string_view(), "utf-8"sv);
+                    if (!range.has_value())
+                        return nullptr;
 
-                            if (auto integer_value = parse_integer_value(tokens, infinite_integer_range); integer_value)
-                                return integer_value;
+                    if (range->kind == FFI::CssCounterStyleRangeKind::Auto)
+                        return KeywordStyleValue::create(Keyword::Auto);
 
-                            return nullptr;
-                        };
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> range_tokens { component_values };
 
-                        auto const resolve_value = [&](StyleValue const& value, i32 infinite_value) -> Optional<i32> {
-                            if (value.is_integer())
-                                return value.as_integer().integer();
+                    auto const parse_value = [&]() -> RefPtr<StyleValue const> {
+                        if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
+                            return keyword_value;
 
-                            if (value.is_keyword() && value.as_keyword().to_keyword() == Keyword::Infinite)
-                                return infinite_value;
+                        if (auto integer_value = parse_integer_value(range_tokens, infinite_integer_range); integer_value)
+                            return integer_value;
 
-                            // FIXME: How should we actually handle calc() when we have no document to absolutize against
-                            if (!computation_context.has_value())
-                                return {};
+                        return nullptr;
+                    };
 
-                            return value.absolutized(computation_context.value())->as_calculated().resolve_integer({}).value();
-                        };
+                    auto const resolve_value = [&](StyleValue const& value, i32 infinite_value) -> Optional<i32> {
+                        if (value.is_integer())
+                            return value.as_integer().integer();
 
+                        if (value.is_keyword() && value.as_keyword().to_keyword() == Keyword::Infinite)
+                            return infinite_value;
+
+                        // FIXME: How should we actually handle calc() when we have no document to absolutize against
+                        if (!computation_context.has_value())
+                            return {};
+
+                        return value.absolutized(computation_context.value())->as_calculated().resolve_integer({}).value();
+                    };
+
+                    StyleValueVector range_entries;
+                    for (size_t i = 0; i < range->count; ++i) {
+                        range_tokens.discard_whitespace();
                         auto first_value = parse_value();
+                        range_tokens.discard_whitespace();
                         auto second_value = parse_value();
 
                         if (!first_value || !second_value)
@@ -288,8 +303,20 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         if (!first_int.has_value() || !second_int.has_value() || first_int.value() > second_int.value())
                             return nullptr;
 
-                        return StyleValueList::create({ first_value.release_nonnull(), second_value.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
-                    });
+                        range_entries.append(StyleValueList::create({ first_value.release_nonnull(), second_value.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No));
+
+                        range_tokens.discard_whitespace();
+                        if (i + 1 < range->count) {
+                            if (!range_tokens.has_next_token() || !range_tokens.consume_a_token().is(Token::Type::Comma))
+                                return nullptr;
+                        }
+                    }
+
+                    range_tokens.discard_whitespace();
+                    if (range_tokens.has_next_token())
+                        return nullptr;
+
+                    return StyleValueList::create(move(range_entries), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);
                 }
                 case DescriptorMetadata::ValueType::CropOrCross: {
                     // crop || cross

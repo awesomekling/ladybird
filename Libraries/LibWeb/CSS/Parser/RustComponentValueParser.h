@@ -138,6 +138,11 @@ public:
         Vector<FlyString> symbols;
     };
 
+    struct CounterStyleRangeSyntax {
+        FFI::CssCounterStyleRangeKind kind;
+        size_t count { 0 };
+    };
+
     static Optional<ComponentValue> parse_a_component_value(StringView input, StringView encoding);
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
@@ -182,6 +187,7 @@ public:
     static Optional<FFI::CssCounterStyleNegativeSymbolCount> parse_counter_style_negative(StringView input, StringView encoding);
     static Optional<FFI::CssCounterStyleSystemKind> parse_counter_style_system(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_symbols(StringView input, StringView encoding);
+    static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_font_feature_values_family_name_list(StringView input, StringView encoding);

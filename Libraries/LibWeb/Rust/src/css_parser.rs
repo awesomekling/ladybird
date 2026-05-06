@@ -574,6 +574,13 @@ pub enum CssCounterStyleSystemKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssCounterStyleRangeKind {
+    Auto,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1734,6 +1741,26 @@ where
     }
 
     count_callback(count);
+    true
+}
+
+pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
+where
+    R: FnMut(CssCounterStyleRangeKind, usize),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some((kind, count)) = parser.parse_counter_style_range() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    range_callback(kind, count);
     true
 }
 
@@ -4718,6 +4745,44 @@ impl ComponentValueParser {
         Some(count)
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
+    fn parse_counter_style_range(&mut self) -> Option<(CssCounterStyleRangeKind, usize)> {
+        // [ [ <integer> | infinite ]{2} ]# | auto
+        self.discard_whitespace();
+        if self.consume_ident_matching("auto") {
+            return Some((CssCounterStyleRangeKind::Auto, 0));
+        }
+
+        let mut count = 0;
+        loop {
+            self.discard_whitespace();
+            if !self.consume_counter_style_range_bound_syntax() {
+                break;
+            }
+
+            self.discard_whitespace();
+            if !self.consume_counter_style_range_bound_syntax() {
+                return None;
+            }
+
+            count += 1;
+            self.discard_whitespace();
+            if !self.consume_comma() {
+                break;
+            }
+            self.discard_whitespace();
+            if !self.has_next_component_value() {
+                return None;
+            }
+        }
+
+        if count == 0 {
+            return None;
+        }
+
+        Some((CssCounterStyleRangeKind::List, count))
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
     fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
         // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
@@ -4803,6 +4868,14 @@ impl ComponentValueParser {
         true
     }
 
+    fn consume_counter_style_range_bound_syntax(&mut self) -> bool {
+        if self.consume_ident_matching("infinite") {
+            return true;
+        }
+
+        self.consume_integer_syntax()
+    }
+
     fn consume_symbol_syntax(&mut self) -> bool {
         let Some(component_value) = self.next_component_value() else {
             return false;
@@ -4828,6 +4901,21 @@ impl ComponentValueParser {
             self.index += 1;
         }
         is_symbol
+    }
+
+    fn consume_comma(&mut self) -> bool {
+        if !matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            }))
+        ) {
+            return false;
+        }
+
+        self.index += 1;
+        true
     }
 
     // https://drafts.csswg.org/css-namespaces/#syntax
@@ -7314,8 +7402,8 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssFontLanguageOverrideKind, CssFontSourceKind,
-        CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssFontLanguageOverrideKind,
+        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
         CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName,
@@ -7333,8 +7421,9 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
-        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_counter_style_symbols,
-        parse_counter_style_system, parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbols, parse_counter_style_system, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7751,6 +7840,12 @@ mod tests {
         let mut count = None;
         let parsed = parse_counter_style_symbols(input.as_bytes(), |parsed_count| count = Some(parsed_count));
         parsed.then_some(count).flatten()
+    }
+
+    fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
+        let mut range = None;
+        let parsed = parse_counter_style_range(input.as_bytes(), |kind, count| range = Some((kind, count)));
+        parsed.then_some(range).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -9411,6 +9506,45 @@ mod tests {
         assert_eq!(parse_counter_style_symbols_descriptor("\"*\" 1"), None);
         assert_eq!(parse_counter_style_symbols_descriptor("inherit"), None);
         assert_eq!(parse_counter_style_symbols_descriptor("default"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_range_descriptors() {
+        assert_eq!(
+            parse_counter_style_range_descriptor("auto"),
+            Some((CssCounterStyleRangeKind::Auto, 0))
+        );
+        assert_eq!(
+            parse_counter_style_range_descriptor("infinite infinite"),
+            Some((CssCounterStyleRangeKind::List, 1))
+        );
+        assert_eq!(
+            parse_counter_style_range_descriptor("infinite 0"),
+            Some((CssCounterStyleRangeKind::List, 1))
+        );
+        assert_eq!(
+            parse_counter_style_range_descriptor("0 infinite"),
+            Some((CssCounterStyleRangeKind::List, 1))
+        );
+        assert_eq!(
+            parse_counter_style_range_descriptor("infinite 0, 5 10, 100 infinite"),
+            Some((CssCounterStyleRangeKind::List, 3))
+        );
+        assert_eq!(
+            parse_counter_style_range_descriptor("calc(1) calc(2)"),
+            Some((CssCounterStyleRangeKind::List, 1))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_range_descriptors() {
+        assert_eq!(parse_counter_style_range_descriptor(""), None);
+        assert_eq!(parse_counter_style_range_descriptor("auto 1"), None);
+        assert_eq!(parse_counter_style_range_descriptor("0"), None);
+        assert_eq!(parse_counter_style_range_descriptor("0 1,"), None);
+        assert_eq!(parse_counter_style_range_descriptor("0 1 2"), None);
+        assert_eq!(parse_counter_style_range_descriptor("infinite"), None);
+        assert_eq!(parse_counter_style_range_descriptor("default 1"), None);
     }
 
     #[test]
