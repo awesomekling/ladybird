@@ -526,6 +526,31 @@ pub unsafe extern "C" fn rust_css_parse_syntax_component_prefix(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_css_type_prefix(
+    input: *const u8,
+    input_len: usize,
+    limit_single_component_ident_to_custom_ident: bool,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, syntax_node: *const CssSyntaxNode),
+) -> usize {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return 0;
+            };
+
+            css_parser::parse_css_type_prefix(input, limit_single_component_ident_to_custom_ident, |syntax_node| {
+                callback(ctx, &raw const syntax_node);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_supports_condition(

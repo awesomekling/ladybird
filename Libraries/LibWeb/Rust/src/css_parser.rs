@@ -1481,6 +1481,37 @@ where
     consumed_input.len()
 }
 
+pub(crate) fn parse_css_type_prefix<C>(
+    filtered_input: &[u8],
+    limit_single_component_ident_to_custom_ident: bool,
+    mut callback: C,
+) -> usize
+where
+    C: FnMut(CssSyntaxNode),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(syntax_node) = parse_css_type(
+        &mut parser,
+        limit_single_component_ident_to_custom_ident,
+        Some(filtered_input_string),
+    ) else {
+        callback(CssSyntaxNode::new(CssSyntaxNodeKind::Invalid));
+        return 0;
+    };
+
+    let Some(consumed_input) =
+        serialize_component_values_for_reparsing(&parser.component_values[..parser.index], filtered_input_string)
+    else {
+        callback(CssSyntaxNode::new(CssSyntaxNodeKind::Invalid));
+        return 0;
+    };
+
+    emit_syntax_node(&syntax_node, &mut callback);
+    consumed_input.len()
+}
+
 pub(crate) fn parse_a_supports_condition<E, C>(
     filtered_input: &[u8],
     mut event_callback: E,
@@ -7799,6 +7830,43 @@ fn parse_syntax_single_component(
         {
             return Some(SyntaxNode::Type(value.clone()));
         }
+    }
+
+    parser.index = saved_index;
+    None
+}
+
+fn parse_css_type(
+    parser: &mut ComponentValueParser,
+    limit_single_component_ident_to_custom_ident: bool,
+    filtered_input: Option<&str>,
+) -> Option<SyntaxNode> {
+    // https://drafts.csswg.org/css-mixins-1/#function-rule
+    // <css-type> = <syntax-component> | <type()>
+    // <type()> = type( <syntax> )
+    let saved_index = parser.index;
+
+    // <syntax-component>
+    if let Some(syntax_component) =
+        parse_syntax_component(parser, limit_single_component_ident_to_custom_ident, filtered_input)
+    {
+        return Some(syntax_component);
+    }
+
+    parser.index = saved_index;
+    parser.discard_whitespace();
+
+    // <type()> = type( <syntax> )
+    if let Some(ComponentValue::Function(function)) = parser.next_component_value()
+        && function.name.eq_ignore_ascii_case("type")
+    {
+        let syntax = component_values_parse_as_syntax_with_source(
+            &function.value,
+            limit_single_component_ident_to_custom_ident,
+            filtered_input,
+        )?;
+        parser.index += 1;
+        return Some(syntax);
     }
 
     parser.index = saved_index;

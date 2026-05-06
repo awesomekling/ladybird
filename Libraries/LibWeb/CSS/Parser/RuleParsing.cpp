@@ -43,6 +43,7 @@
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/PropertyName.h>
+#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
@@ -992,6 +993,55 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
     return font_feature_values_rule;
 }
 
+static void serialize_component_value_for_css_type_reparsing(StringBuilder& builder, ComponentValue const& component_value)
+{
+    if (component_value.is_token()) {
+        auto original_source_text = component_value.original_source_text();
+        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
+        return;
+    }
+
+    if (component_value.is_block()) {
+        auto const& block = component_value.block();
+        builder.append(block.token.bracket_string());
+        for (auto const& child : block.value)
+            serialize_component_value_for_css_type_reparsing(builder, child);
+        builder.append(block.token.bracket_mirror_string());
+        return;
+    }
+
+    if (component_value.is_function()) {
+        auto const& function = component_value.function();
+        serialize_an_identifier(builder, function.name);
+        builder.append('(');
+        for (auto const& child : function.value)
+            serialize_component_value_for_css_type_reparsing(builder, child);
+        builder.append(')');
+        return;
+    }
+
+    builder.append(component_value.to_string());
+}
+
+static String serialize_component_values_for_css_type_reparsing(ReadonlySpan<ComponentValue const> component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values)
+        serialize_component_value_for_css_type_reparsing(builder, component_value);
+    return builder.to_string_without_validation();
+}
+
+static bool consume_serialized_component_values(TokenStream<ComponentValue>& tokens, size_t byte_length)
+{
+    StringBuilder builder;
+    while (builder.length() < byte_length && tokens.has_next_token()) {
+        serialize_component_value_for_css_type_reparsing(builder, tokens.next_token());
+        tokens.discard_a_token();
+    }
+
+    return builder.length() == byte_length;
+}
+
 static OwnPtr<SyntaxNode> parse_css_type(TokenStream<ComponentValue>& tokens)
 {
     // https://drafts.csswg.org/css-mixins-1/#function-rule
@@ -1001,24 +1051,17 @@ static OwnPtr<SyntaxNode> parse_css_type(TokenStream<ComponentValue>& tokens)
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
-    // <syntax-component>
-    if (auto maybe_syntax_component = parse_syntax_component(tokens)) {
-        transaction.commit();
-        return maybe_syntax_component;
-    }
-
-    // <type()>
-    auto maybe_type_function_token = tokens.consume_a_token();
-
-    if (!maybe_type_function_token.is_function("type"sv))
+    auto serialized_css_type = serialize_component_values_for_css_type_reparsing(tokens.remaining_tokens());
+    auto css_type = RustComponentValueParser::parse_css_type(serialized_css_type.bytes_as_string_view(), "utf-8"sv, LimitSingleComponentIdentToCustomIdent::No);
+    if (!css_type.has_value())
         return nullptr;
 
-    if (auto maybe_type_function_syntax = parse_as_syntax(maybe_type_function_token.function().value)) {
-        transaction.commit();
-        return maybe_type_function_syntax;
-    }
+    auto component = css_type.release_value();
+    if (!consume_serialized_component_values(tokens, component.consumed_byte_length))
+        return nullptr;
 
-    return nullptr;
+    transaction.commit();
+    return component.syntax.release_nonnull();
 }
 
 Optional<Parser::FunctionPrelude> Parser::parse_function_prelude(TokenStream<ComponentValue>& tokens)

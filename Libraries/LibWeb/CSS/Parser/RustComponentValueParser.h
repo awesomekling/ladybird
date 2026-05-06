@@ -254,6 +254,7 @@ public:
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static Optional<SyntaxComponent> parse_syntax_component(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
+    static Optional<SyntaxComponent> parse_css_type(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static bool parse_empty_prelude(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
