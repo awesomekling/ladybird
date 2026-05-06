@@ -846,6 +846,14 @@ pub enum CssAnimationNameItemKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssViewTransitionNameValueKind {
+    Invalid,
+    None,
+    CustomIdent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -3250,6 +3258,40 @@ where
     }
 
     CssAnimationNameValueKind::List
+}
+
+pub(crate) fn parse_view_transition_name_value<N>(
+    filtered_input: &[u8],
+    mut name_callback: N,
+) -> CssViewTransitionNameValueKind
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-view-transitions-1/#view-transition-name-prop
+    // Value: none | <custom-ident>
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssViewTransitionNameValueKind::Invalid;
+        }
+        return CssViewTransitionNameValueKind::None;
+    }
+
+    let Some(name) = parser.parse_a_custom_ident(&["auto", "none"]) else {
+        return CssViewTransitionNameValueKind::Invalid;
+    };
+
+    // AD-HOC: The current property metadata accepts match-element as a
+    // custom ident. The specification now excludes it from <custom-ident>.
+    // Keep matching the generated parser until CSSOM represents the
+    // match-element value separately.
+    name_callback(&name);
+    CssViewTransitionNameValueKind::CustomIdent
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -9301,12 +9343,12 @@ mod tests {
         CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
         CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind,
         CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -9327,7 +9369,7 @@ mod tests {
         parse_position_anchor_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
         parse_quotes_value, parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
         parse_timeline_scope_value, parse_touch_action_value, parse_transition_property_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9915,6 +9957,14 @@ mod tests {
             names.push((kind, value.to_string()));
         });
         (kind, names)
+    }
+
+    fn parse_view_transition_name(input: &str) -> (CssViewTransitionNameValueKind, Option<String>) {
+        let mut name = None;
+        let kind = parse_view_transition_name_value(input.as_bytes(), |value| {
+            name = Some(value.to_string());
+        });
+        (kind, name)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -12354,6 +12404,64 @@ mod tests {
         );
         assert_eq!(parse_animation_name("\"\"").0, CssAnimationNameValueKind::Invalid);
         assert_eq!(parse_animation_name("one,").0, CssAnimationNameValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_view_transition_name_values() {
+        assert_eq!(
+            parse_view_transition_name("none"),
+            (CssViewTransitionNameValueKind::None, None)
+        );
+        assert_eq!(
+            parse_view_transition_name("foo"),
+            (CssViewTransitionNameValueKind::CustomIdent, Some("foo".to_string()))
+        );
+        assert_eq!(
+            parse_view_transition_name("match-element"),
+            (
+                CssViewTransitionNameValueKind::CustomIdent,
+                Some("match-element".to_string())
+            )
+        );
+        assert_eq!(
+            parse_view_transition_name("maTch-element"),
+            (
+                CssViewTransitionNameValueKind::CustomIdent,
+                Some("maTch-element".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_view_transition_name_values() {
+        assert_eq!(
+            parse_view_transition_name("").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("auto").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("default").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("inherit").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("foo foo").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("\"foo\"").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
+        assert_eq!(
+            parse_view_transition_name("12px").0,
+            CssViewTransitionNameValueKind::Invalid
+        );
     }
 
     #[test]

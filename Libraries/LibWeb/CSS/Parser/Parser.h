@@ -536,6 +536,7 @@ private:
     RefPtr<StyleValue const> parse_translate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_try_tactic_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_scale_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_view_transition_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_track_size_list(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_auto_track_sizes(TokenStream<ComponentValue>&);
     RefPtr<GridAutoFlowStyleValue const> parse_grid_auto_flow_value(TokenStream<ComponentValue>&);

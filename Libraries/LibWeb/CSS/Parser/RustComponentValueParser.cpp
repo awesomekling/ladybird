@@ -2298,6 +2298,27 @@ RustComponentValueParser::AnimationName RustComponentValueParser::parse_animatio
     };
 }
 
+RustComponentValueParser::ViewTransitionName RustComponentValueParser::parse_view_transition_name(StringView input, StringView encoding)
+{
+    FlyString name;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_view_transition_name(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &name,
+        [](void* raw_name, u8 const* value_ptr, size_t value_len) {
+            auto& name = *static_cast<FlyString*>(raw_name);
+            name = fly_string_from_ffi_bytes(value_ptr, value_len);
+        });
+
+    return ViewTransitionName {
+        .kind = kind,
+        .name = move(name),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

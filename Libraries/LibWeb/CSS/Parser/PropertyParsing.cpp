@@ -656,6 +656,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_scroll_timeline_value(tokens); });
     case PropertyID::ViewTimeline:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_view_timeline_value(tokens); });
+    case PropertyID::ViewTransitionName:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_view_transition_name_value(tokens); });
     case PropertyID::WhiteSpace:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_white_space_shorthand(tokens); });
     case PropertyID::WhiteSpaceTrim:
@@ -1069,6 +1071,30 @@ RefPtr<StyleValue const> Parser::parse_animation_name_value(TokenStream<Componen
         transaction.commit();
         return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
     }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+// https://drafts.csswg.org/css-view-transitions-1/#view-transition-name-prop
+RefPtr<StyleValue const> Parser::parse_view_transition_name_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_view_transition_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_view_transition_name = RustComponentValueParser::parse_view_transition_name(serialized_view_transition_name.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_view_transition_name.kind) {
+    case FFI::CssViewTransitionNameValueKind::Invalid:
+        return {};
+    case FFI::CssViewTransitionNameValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssViewTransitionNameValueKind::CustomIdent:
+        transaction.commit();
+        return CustomIdentStyleValue::create(parsed_view_transition_name.name);
     }
 
     VERIFY_NOT_REACHED();

@@ -40,7 +40,8 @@ pub use css_parser::{
     CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
     CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
     CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1159,6 +1160,30 @@ pub unsafe extern "C" fn rust_css_parse_animation_name(
 
             css_parser::parse_animation_name_value(input, |kind, value| {
                 name_callback(ctx, kind, value.as_ptr(), value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `name_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_view_transition_name(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(ctx: *mut c_void, value_ptr: *const u8, value_len: usize),
+) -> CssViewTransitionNameValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssViewTransitionNameValueKind::Invalid;
+            };
+
+            css_parser::parse_view_transition_name_value(input, |name| {
+                name_callback(ctx, name.as_ptr(), name.len());
             })
         })
     }
