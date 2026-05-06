@@ -699,6 +699,32 @@ pub struct CssPositionVisibilityValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPaintOrderValueKind {
+    Invalid,
+    Normal,
+    Keyword,
+    Pair,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssPaintOrderKeyword {
+    Invalid,
+    Fill,
+    Stroke,
+    Markers,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssPaintOrderValue {
+    pub kind: CssPaintOrderValueKind,
+    pub first: CssPaintOrderKeyword,
+    pub second: CssPaintOrderKeyword,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2512,6 +2538,104 @@ pub(crate) fn parse_position_visibility_value(filtered_input: &[u8]) -> CssPosit
     }
 
     value
+}
+
+pub(crate) fn parse_paint_order_value(filtered_input: &[u8]) -> CssPaintOrderValue {
+    let invalid = CssPaintOrderValue {
+        kind: CssPaintOrderValueKind::Invalid,
+        first: CssPaintOrderKeyword::Invalid,
+        second: CssPaintOrderKeyword::Invalid,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://svgwg.org/svg2-draft/painting.html#PaintOrder
+    // Value: normal | [ fill || stroke || markers ]
+    if parser.consume_ident_matching("normal") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssPaintOrderValue {
+            kind: CssPaintOrderValueKind::Normal,
+            first: CssPaintOrderKeyword::Invalid,
+            second: CssPaintOrderKeyword::Invalid,
+        };
+    }
+
+    let mut keywords = Vec::new();
+    let mut has_fill = false;
+    let mut has_stroke = false;
+    let mut has_markers = false;
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        let keyword = if ident.eq_ignore_ascii_case("fill") {
+            if has_fill {
+                return invalid;
+            }
+            has_fill = true;
+            CssPaintOrderKeyword::Fill
+        } else if ident.eq_ignore_ascii_case("stroke") {
+            if has_stroke {
+                return invalid;
+            }
+            has_stroke = true;
+            CssPaintOrderKeyword::Stroke
+        } else if ident.eq_ignore_ascii_case("markers") {
+            if has_markers {
+                return invalid;
+            }
+            has_markers = true;
+            CssPaintOrderKeyword::Markers
+        } else {
+            return invalid;
+        };
+
+        keywords.push(keyword);
+    }
+
+    let Some(first) = keywords.first().copied() else {
+        return invalid;
+    };
+
+    if keywords.len() == 1 {
+        return CssPaintOrderValue {
+            kind: CssPaintOrderValueKind::Keyword,
+            first,
+            second: CssPaintOrderKeyword::Invalid,
+        };
+    }
+
+    if keywords.len() > 3 {
+        return invalid;
+    }
+
+    let second = keywords[1];
+    let expected_second_keyword = if first == CssPaintOrderKeyword::Fill {
+        CssPaintOrderKeyword::Stroke
+    } else {
+        CssPaintOrderKeyword::Fill
+    };
+
+    if second == expected_second_keyword {
+        return CssPaintOrderValue {
+            kind: CssPaintOrderValueKind::Keyword,
+            first,
+            second: CssPaintOrderKeyword::Invalid,
+        };
+    }
+
+    CssPaintOrderValue {
+        kind: CssPaintOrderValueKind::Pair,
+        first,
+        second,
+    }
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8557,13 +8681,14 @@ mod tests {
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPositionAnchorValueKind,
-        CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssUrlFunctionType,
-        CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName,
-        FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
+        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
+        CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -8580,8 +8705,9 @@ mod tests {
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
         parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_position_anchor_value, parse_position_visibility_value,
-        parse_positive_percentage_descriptor, parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_string_descriptor,
+        parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9117,6 +9243,10 @@ mod tests {
 
     fn parse_position_visibility(input: &str) -> CssPositionVisibilityValue {
         parse_position_visibility_value(input.as_bytes())
+    }
+
+    fn parse_paint_order(input: &str) -> CssPaintOrderValue {
+        parse_paint_order_value(input.as_bytes())
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11235,6 +11365,46 @@ mod tests {
         assert_eq!(parse_contain("paint paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size, paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size nonsense").kind, CssContainValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_paint_order_values() {
+        assert_eq!(
+            parse_paint_order("normal"),
+            CssPaintOrderValue {
+                kind: CssPaintOrderValueKind::Normal,
+                first: CssPaintOrderKeyword::Invalid,
+                second: CssPaintOrderKeyword::Invalid,
+            }
+        );
+        assert_eq!(
+            parse_paint_order("fill markers stroke"),
+            CssPaintOrderValue {
+                kind: CssPaintOrderValueKind::Pair,
+                first: CssPaintOrderKeyword::Fill,
+                second: CssPaintOrderKeyword::Markers,
+            }
+        );
+        assert_eq!(
+            parse_paint_order("markers fill stroke"),
+            CssPaintOrderValue {
+                kind: CssPaintOrderValueKind::Keyword,
+                first: CssPaintOrderKeyword::Markers,
+                second: CssPaintOrderKeyword::Invalid,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_paint_order_values() {
+        assert_eq!(parse_paint_order("").kind, CssPaintOrderValueKind::Invalid);
+        assert_eq!(parse_paint_order("normal stroke").kind, CssPaintOrderValueKind::Invalid);
+        assert_eq!(parse_paint_order("fill fill").kind, CssPaintOrderValueKind::Invalid);
+        assert_eq!(
+            parse_paint_order("markers normal").kind,
+            CssPaintOrderValueKind::Invalid
+        );
+        assert_eq!(parse_paint_order("fill, stroke").kind, CssPaintOrderValueKind::Invalid);
     }
 
     #[test]

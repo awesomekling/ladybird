@@ -219,6 +219,7 @@ public:
     static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
+    static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);

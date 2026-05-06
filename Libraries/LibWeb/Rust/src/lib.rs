@@ -32,11 +32,12 @@ pub use css_parser::{
     CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
     CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
     CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
-    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPositionAnchorValueKind,
-    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
-    CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
-    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
-    CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
+    CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
+    CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier,
+    CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
+    CssWhiteSpaceTrimValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -949,6 +950,25 @@ pub unsafe extern "C" fn rust_css_parse_position_visibility(
             };
 
             css_parser::parse_position_visibility_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_paint_order(input: *const u8, input_len: usize) -> CssPaintOrderValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPaintOrderValue {
+                    kind: CssPaintOrderValueKind::Invalid,
+                    first: CssPaintOrderKeyword::Invalid,
+                    second: CssPaintOrderKeyword::Invalid,
+                };
+            };
+
+            css_parser::parse_paint_order_value(input)
         })
     }
 }
