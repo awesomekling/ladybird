@@ -24,9 +24,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontFamilyValueKind,
-    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantEastAsianValueKind,
+    CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssMediaFeature, CssMediaFeatureComparison,
+    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
+    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
     CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
     CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
@@ -747,6 +748,93 @@ pub unsafe extern "C" fn rust_css_parse_font_style(
                     css_parser::FontStyle::Oblique { has_angle } => (CssFontStyleKind::Oblique, has_angle),
                 };
                 font_style_callback(ctx, kind, has_angle);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_variant_east_asian(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantEastAsianValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_variant_east_asian(input, |value| {
+                value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_variant_numeric(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantNumericValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_variant_numeric(input, |value| {
+                value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_variant_ligatures(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontVariantLigaturesValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_variant_ligatures(input, |value| {
+                value_callback(ctx, value.kind, value.value.as_ptr(), value.value.len());
             })
         })
     }

@@ -84,6 +84,21 @@ public:
         bool has_angle { false };
     };
 
+    struct FontVariantEastAsianValue {
+        FFI::CssFontVariantEastAsianValueKind kind;
+        FlyString value;
+    };
+
+    struct FontVariantNumericValue {
+        FFI::CssFontVariantNumericValueKind kind;
+        FlyString value;
+    };
+
+    struct FontVariantLigaturesValue {
+        FFI::CssFontVariantLigaturesValueKind kind;
+        FlyString value;
+    };
+
     struct OpenTypeTaggedValue {
         FlyString tag;
         FFI::CssOpenTypeTaggedValueKind value_kind;
@@ -130,6 +145,9 @@ public:
     static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
+    static Optional<Vector<FontVariantEastAsianValue>> parse_a_font_variant_east_asian(StringView input, StringView encoding);
+    static Optional<Vector<FontVariantNumericValue>> parse_a_font_variant_numeric(StringView input, StringView encoding);
+    static Optional<Vector<FontVariantLigaturesValue>> parse_a_font_variant_ligatures(StringView input, StringView encoding);
     static Optional<Vector<FontFamilyValue>> parse_font_family_value(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);

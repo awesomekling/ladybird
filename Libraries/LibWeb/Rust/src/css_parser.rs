@@ -167,6 +167,24 @@ pub(crate) enum FontStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FontVariantEastAsianValue {
+    pub(crate) kind: CssFontVariantEastAsianValueKind,
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FontVariantNumericValue {
+    pub(crate) kind: CssFontVariantNumericValueKind,
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FontVariantLigaturesValue {
+    pub(crate) kind: CssFontVariantLigaturesValueKind,
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FontFamilyValue {
     Generic(String),
     FamilyName(FamilyName),
@@ -485,6 +503,33 @@ pub enum CssFontStyleKind {
     Left,
     Right,
     Oblique,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontVariantEastAsianValueKind {
+    Variant,
+    Width,
+    Ruby,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontVariantNumericValueKind {
+    Figure,
+    Spacing,
+    Fraction,
+    Ordinal,
+    SlashedZero,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontVariantLigaturesValueKind {
+    Common,
+    Discretionary,
+    Historical,
+    Contextual,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1166,6 +1211,72 @@ where
     }
 
     font_style_callback(font_style);
+    true
+}
+
+pub(crate) fn parse_a_font_variant_east_asian<V>(filtered_input: &[u8], mut value_callback: V) -> bool
+where
+    V: FnMut(&FontVariantEastAsianValue),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(values) = parser.parse_a_font_variant_east_asian() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    for value in &values {
+        value_callback(value);
+    }
+    true
+}
+
+pub(crate) fn parse_a_font_variant_numeric<V>(filtered_input: &[u8], mut value_callback: V) -> bool
+where
+    V: FnMut(&FontVariantNumericValue),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(values) = parser.parse_a_font_variant_numeric() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    for value in &values {
+        value_callback(value);
+    }
+    true
+}
+
+pub(crate) fn parse_a_font_variant_ligatures<V>(filtered_input: &[u8], mut value_callback: V) -> bool
+where
+    V: FnMut(&FontVariantLigaturesValue),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(values) = parser.parse_a_font_variant_ligatures() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    for value in &values {
+        value_callback(value);
+    }
     true
 }
 
@@ -2848,6 +2959,19 @@ impl ComponentValueParser {
         false
     }
 
+    fn consume_an_ident(&mut self) -> Option<String> {
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+        else {
+            return None;
+        };
+        let value = value.clone();
+        self.index += 1;
+        Some(value)
+    }
+
     fn remaining_component_values(&self) -> &[ComponentValue] {
         &self.component_values[self.index..]
     }
@@ -3525,6 +3649,225 @@ impl ComponentValueParser {
         }
 
         None
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#propdef-font-variant-east-asian
+    fn parse_a_font_variant_east_asian(&mut self) -> Option<Vec<FontVariantEastAsianValue>> {
+        // [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
+        // <east-asian-variant-values> = [ jis78 | jis83 | jis90 | jis04 | simplified | traditional ]
+        // <east-asian-width-values>   = [ full-width | proportional-width ]
+        let mut variant = false;
+        let mut width = false;
+        let mut ruby = false;
+        let mut values = Vec::new();
+
+        loop {
+            self.discard_whitespace();
+            let Some(value) = self.consume_an_ident() else {
+                break;
+            };
+            let value = value.to_ascii_lowercase();
+
+            if value == "ruby" {
+                if ruby {
+                    return None;
+                }
+                ruby = true;
+                values.push(FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Ruby,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_east_asian_width_value(&value) {
+                if width {
+                    return None;
+                }
+                width = true;
+                values.push(FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Width,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_east_asian_variant_value(&value) {
+                if variant {
+                    return None;
+                }
+                variant = true;
+                values.push(FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Variant,
+                    value,
+                });
+                continue;
+            }
+
+            return None;
+        }
+
+        (!values.is_empty()).then_some(values)
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#propdef-font-variant-numeric
+    fn parse_a_font_variant_numeric(&mut self) -> Option<Vec<FontVariantNumericValue>> {
+        // [ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero]
+        // <numeric-figure-values>       = [ lining-nums | oldstyle-nums ]
+        // <numeric-spacing-values>      = [ proportional-nums | tabular-nums ]
+        // <numeric-fraction-values>     = [ diagonal-fractions | stacked-fractions ]
+        let mut figure = false;
+        let mut spacing = false;
+        let mut fraction = false;
+        let mut ordinal = false;
+        let mut slashed_zero = false;
+        let mut values = Vec::new();
+
+        loop {
+            self.discard_whitespace();
+            let Some(value) = self.consume_an_ident() else {
+                break;
+            };
+            let value = value.to_ascii_lowercase();
+
+            if matches_numeric_figure_value(&value) {
+                if figure {
+                    return None;
+                }
+                figure = true;
+                values.push(FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Figure,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_numeric_spacing_value(&value) {
+                if spacing {
+                    return None;
+                }
+                spacing = true;
+                values.push(FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Spacing,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_numeric_fraction_value(&value) {
+                if fraction {
+                    return None;
+                }
+                fraction = true;
+                values.push(FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Fraction,
+                    value,
+                });
+                continue;
+            }
+
+            if value == "ordinal" {
+                if ordinal {
+                    return None;
+                }
+                ordinal = true;
+                values.push(FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Ordinal,
+                    value,
+                });
+                continue;
+            }
+
+            if value == "slashed-zero" {
+                if slashed_zero {
+                    return None;
+                }
+                slashed_zero = true;
+                values.push(FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::SlashedZero,
+                    value,
+                });
+                continue;
+            }
+
+            return None;
+        }
+
+        (!values.is_empty()).then_some(values)
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#propdef-font-variant-ligatures
+    fn parse_a_font_variant_ligatures(&mut self) -> Option<Vec<FontVariantLigaturesValue>> {
+        // [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]
+        // <common-lig-values>       = [ common-ligatures | no-common-ligatures ]
+        // <discretionary-lig-values> = [ discretionary-ligatures | no-discretionary-ligatures ]
+        // <historical-lig-values>   = [ historical-ligatures | no-historical-ligatures ]
+        // <contextual-alt-values>   = [ contextual | no-contextual ]
+        let mut common = false;
+        let mut discretionary = false;
+        let mut historical = false;
+        let mut contextual = false;
+        let mut values = Vec::new();
+
+        loop {
+            self.discard_whitespace();
+            let Some(value) = self.consume_an_ident() else {
+                break;
+            };
+            let value = value.to_ascii_lowercase();
+
+            if matches_common_lig_value(&value) {
+                if common {
+                    return None;
+                }
+                common = true;
+                values.push(FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Common,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_discretionary_lig_value(&value) {
+                if discretionary {
+                    return None;
+                }
+                discretionary = true;
+                values.push(FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Discretionary,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_historical_lig_value(&value) {
+                if historical {
+                    return None;
+                }
+                historical = true;
+                values.push(FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Historical,
+                    value,
+                });
+                continue;
+            }
+
+            if matches_contextual_alt_value(&value) {
+                if contextual {
+                    return None;
+                }
+                contextual = true;
+                values.push(FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Contextual,
+                    value,
+                });
+                continue;
+            }
+
+            return None;
+        }
+
+        (!values.is_empty()).then_some(values)
     }
 
     // https://drafts.csswg.org/css-fonts-4/#font-family-prop
@@ -4467,6 +4810,47 @@ fn matches_generic_font_family_keyword(value: &str) -> bool {
         || value.eq_ignore_ascii_case("ui-sans-serif")
         || value.eq_ignore_ascii_case("ui-monospace")
         || value.eq_ignore_ascii_case("ui-rounded")
+}
+
+fn matches_east_asian_variant_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("jis78")
+        || value.eq_ignore_ascii_case("jis83")
+        || value.eq_ignore_ascii_case("jis90")
+        || value.eq_ignore_ascii_case("jis04")
+        || value.eq_ignore_ascii_case("simplified")
+        || value.eq_ignore_ascii_case("traditional")
+}
+
+fn matches_east_asian_width_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("full-width") || value.eq_ignore_ascii_case("proportional-width")
+}
+
+fn matches_numeric_figure_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("lining-nums") || value.eq_ignore_ascii_case("oldstyle-nums")
+}
+
+fn matches_numeric_spacing_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("proportional-nums") || value.eq_ignore_ascii_case("tabular-nums")
+}
+
+fn matches_numeric_fraction_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("diagonal-fractions") || value.eq_ignore_ascii_case("stacked-fractions")
+}
+
+fn matches_common_lig_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("common-ligatures") || value.eq_ignore_ascii_case("no-common-ligatures")
+}
+
+fn matches_discretionary_lig_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("discretionary-ligatures") || value.eq_ignore_ascii_case("no-discretionary-ligatures")
+}
+
+fn matches_historical_lig_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("historical-ligatures") || value.eq_ignore_ascii_case("no-historical-ligatures")
+}
+
+fn matches_contextual_alt_value(value: &str) -> bool {
+    value.eq_ignore_ascii_case("contextual") || value.eq_ignore_ascii_case("no-contextual")
 }
 
 fn is_a_custom_property_name_string(value: &str) -> bool {
@@ -6080,16 +6464,19 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaQuery,
-        CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+        CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+        CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
         CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
         parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
         parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
         parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
@@ -6339,6 +6726,24 @@ mod tests {
             font_style = Some(parsed_font_style);
         });
         parsed.then_some(font_style).flatten()
+    }
+
+    fn parse_font_variant_east_asian(input: &str) -> Option<Vec<FontVariantEastAsianValue>> {
+        let mut values = Vec::new();
+        let parsed = parse_a_font_variant_east_asian(input.as_bytes(), |value| values.push(value.clone()));
+        parsed.then_some(values)
+    }
+
+    fn parse_font_variant_numeric(input: &str) -> Option<Vec<FontVariantNumericValue>> {
+        let mut values = Vec::new();
+        let parsed = parse_a_font_variant_numeric(input.as_bytes(), |value| values.push(value.clone()));
+        parsed.then_some(values)
+    }
+
+    fn parse_font_variant_ligatures(input: &str) -> Option<Vec<FontVariantLigaturesValue>> {
+        let mut values = Vec::new();
+        let parsed = parse_a_font_variant_ligatures(input.as_bytes(), |value| values.push(value.clone()));
+        parsed.then_some(values)
     }
 
     fn parse_font_family_value(input: &str) -> Option<Vec<FontFamilyValue>> {
@@ -7407,6 +7812,108 @@ mod tests {
         assert_eq!(parse_font_style("normal italic"), None);
         assert_eq!(parse_font_style("italic 10deg"), None);
         assert_eq!(parse_font_style("oblique 10px"), None);
+    }
+
+    #[test]
+    fn parses_font_variant_east_asian_values() {
+        assert_eq!(
+            parse_font_variant_east_asian("jis78 proportional-width ruby"),
+            Some(vec![
+                FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Variant,
+                    value: "jis78".to_string()
+                },
+                FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Width,
+                    value: "proportional-width".to_string()
+                },
+                FontVariantEastAsianValue {
+                    kind: CssFontVariantEastAsianValueKind::Ruby,
+                    value: "ruby".to_string()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variant_east_asian_values() {
+        assert_eq!(parse_font_variant_east_asian("jis78 jis83"), None);
+        assert_eq!(parse_font_variant_east_asian("full-width proportional-width"), None);
+        assert_eq!(parse_font_variant_east_asian("normal ruby"), None);
+        assert_eq!(parse_font_variant_east_asian(""), None);
+    }
+
+    #[test]
+    fn parses_font_variant_numeric_values() {
+        assert_eq!(
+            parse_font_variant_numeric("oldstyle-nums tabular-nums diagonal-fractions ordinal slashed-zero"),
+            Some(vec![
+                FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Figure,
+                    value: "oldstyle-nums".to_string()
+                },
+                FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Spacing,
+                    value: "tabular-nums".to_string()
+                },
+                FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Fraction,
+                    value: "diagonal-fractions".to_string()
+                },
+                FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::Ordinal,
+                    value: "ordinal".to_string()
+                },
+                FontVariantNumericValue {
+                    kind: CssFontVariantNumericValueKind::SlashedZero,
+                    value: "slashed-zero".to_string()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variant_numeric_values() {
+        assert_eq!(parse_font_variant_numeric("lining-nums oldstyle-nums"), None);
+        assert_eq!(parse_font_variant_numeric("tabular-nums proportional-nums"), None);
+        assert_eq!(parse_font_variant_numeric("normal lining-nums"), None);
+        assert_eq!(parse_font_variant_numeric(""), None);
+    }
+
+    #[test]
+    fn parses_font_variant_ligatures_values() {
+        assert_eq!(
+            parse_font_variant_ligatures("common-ligatures discretionary-ligatures historical-ligatures contextual"),
+            Some(vec![
+                FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Common,
+                    value: "common-ligatures".to_string()
+                },
+                FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Discretionary,
+                    value: "discretionary-ligatures".to_string()
+                },
+                FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Historical,
+                    value: "historical-ligatures".to_string()
+                },
+                FontVariantLigaturesValue {
+                    kind: CssFontVariantLigaturesValueKind::Contextual,
+                    value: "contextual".to_string()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variant_ligatures_values() {
+        assert_eq!(
+            parse_font_variant_ligatures("common-ligatures no-common-ligatures"),
+            None
+        );
+        assert_eq!(parse_font_variant_ligatures("contextual no-contextual"), None);
+        assert_eq!(parse_font_variant_ligatures("normal common-ligatures"), None);
+        assert_eq!(parse_font_variant_ligatures(""), None);
     }
 
     #[test]

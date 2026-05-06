@@ -3406,45 +3406,51 @@ RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream
     // [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
     // <east-asian-variant-values> = [ jis78 | jis83 | jis90 | jis04 | simplified | traditional ]
     // <east-asian-width-values>   = [ full-width | proportional-width ]
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> parsed_values;
+
+    while (tokens.has_next_token()) {
+        auto component_transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        tokens.discard_a_token();
+
+        auto serialized_font_variant_east_asian = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto maybe_values = RustComponentValueParser::parse_a_font_variant_east_asian(serialized_font_variant_east_asian.bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_values.has_value())
+            break;
+
+        component_transaction.commit();
+        parsed_values = maybe_values.release_value();
+    }
+
+    if (!parsed_values.has_value())
+        return nullptr;
+
     StyleValueTuple tuple;
     tuple.resize_with_default_value(3, nullptr);
 
-    while (tokens.has_next_token()) {
-        auto keyword_transaction = tokens.begin_transaction();
-        auto maybe_value = parse_keyword_value(tokens);
-        if (!maybe_value)
+    for (auto const& value : *parsed_values) {
+        auto maybe_keyword = keyword_from_string(value.value);
+        if (!maybe_keyword.has_value())
+            return nullptr;
+        auto style_value = KeywordStyleValue::create(*maybe_keyword);
+        switch (value.kind) {
+        case FFI::CssFontVariantEastAsianValueKind::Variant:
+            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant] = style_value;
             break;
-
-        if (maybe_value->to_keyword() == Keyword::Ruby) {
-            if (tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby] = maybe_value.release_nonnull();
-            continue;
+        case FFI::CssFontVariantEastAsianValueKind::Width:
+            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width] = style_value;
+            break;
+        case FFI::CssFontVariantEastAsianValueKind::Ruby:
+            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby] = style_value;
+            break;
         }
-
-        if (keyword_to_east_asian_width(maybe_value->to_keyword()).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword_to_east_asian_variant(maybe_value->to_keyword()).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        break;
     }
 
-    if (!any_of(tuple, [](auto& value) { return value != nullptr; }))
-        return nullptr;
-
+    transaction.commit();
     return TupleStyleValue::create(tuple);
 }
 
@@ -3455,63 +3461,57 @@ RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<Co
     // <numeric-figure-values>       = [ lining-nums | oldstyle-nums ]
     // <numeric-spacing-values>      = [ proportional-nums | tabular-nums ]
     // <numeric-fraction-values>     = [ diagonal-fractions | stacked-fractions ]
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    Optional<Vector<RustComponentValueParser::FontVariantNumericValue>> parsed_values;
+
+    while (tokens.has_next_token()) {
+        auto component_transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        tokens.discard_a_token();
+
+        auto serialized_font_variant_numeric = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto maybe_values = RustComponentValueParser::parse_a_font_variant_numeric(serialized_font_variant_numeric.bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_values.has_value())
+            break;
+
+        component_transaction.commit();
+        parsed_values = maybe_values.release_value();
+    }
+
+    if (!parsed_values.has_value())
+        return nullptr;
+
     StyleValueTuple tuple;
     tuple.resize_with_default_value(5, nullptr);
 
-    while (tokens.has_next_token()) {
-        auto keyword_transaction = tokens.begin_transaction();
-        auto maybe_value = parse_keyword_value(tokens);
-        if (!maybe_value)
+    for (auto const& value : *parsed_values) {
+        auto maybe_keyword = keyword_from_string(value.value);
+        if (!maybe_keyword.has_value())
+            return nullptr;
+        auto style_value = KeywordStyleValue::create(*maybe_keyword);
+        switch (value.kind) {
+        case FFI::CssFontVariantNumericValueKind::Figure:
+            tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure] = style_value;
             break;
-
-        auto keyword = maybe_value->to_keyword();
-
-        if (keyword_to_numeric_figure_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure] = maybe_value.release_nonnull();
-            continue;
+        case FFI::CssFontVariantNumericValueKind::Spacing:
+            tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing] = style_value;
+            break;
+        case FFI::CssFontVariantNumericValueKind::Fraction:
+            tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction] = style_value;
+            break;
+        case FFI::CssFontVariantNumericValueKind::Ordinal:
+            tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal] = style_value;
+            break;
+        case FFI::CssFontVariantNumericValueKind::SlashedZero:
+            tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero] = style_value;
+            break;
         }
-
-        if (keyword_to_numeric_spacing_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword_to_numeric_fraction_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword == Keyword::Ordinal) {
-            if (tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword == Keyword::SlashedZero) {
-            if (tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        break;
     }
 
-    if (!any_of(tuple, [](auto& value) { return value != nullptr; }))
-        return nullptr;
-
+    transaction.commit();
     return TupleStyleValue::create(tuple);
 }
 
@@ -3523,56 +3523,54 @@ RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<
     // <discretionary-lig-values> = [ discretionary-ligatures | no-discretionary-ligatures ]
     // <historical-lig-values>   = [ historical-ligatures | no-historical-ligatures ]
     // <contextual-alt-values>   = [ contextual | no-contextual ]
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    Optional<Vector<RustComponentValueParser::FontVariantLigaturesValue>> parsed_values;
+
+    while (tokens.has_next_token()) {
+        auto component_transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        tokens.discard_a_token();
+
+        auto serialized_font_variant_ligatures = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto maybe_values = RustComponentValueParser::parse_a_font_variant_ligatures(serialized_font_variant_ligatures.bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_values.has_value())
+            break;
+
+        component_transaction.commit();
+        parsed_values = maybe_values.release_value();
+    }
+
+    if (!parsed_values.has_value())
+        return nullptr;
+
     StyleValueTuple tuple;
     tuple.resize_with_default_value(4, nullptr);
 
-    while (tokens.has_next_token()) {
-        auto keyword_transaction = tokens.begin_transaction();
-
-        auto maybe_value = parse_keyword_value(tokens);
-        if (!maybe_value)
+    for (auto const& value : *parsed_values) {
+        auto maybe_keyword = keyword_from_string(value.value);
+        if (!maybe_keyword.has_value())
+            return nullptr;
+        auto style_value = KeywordStyleValue::create(*maybe_keyword);
+        switch (value.kind) {
+        case FFI::CssFontVariantLigaturesValueKind::Common:
+            tuple[TupleStyleValue::Indices::FontVariantLigatures::Common] = style_value;
             break;
-
-        auto const& keyword = maybe_value->to_keyword();
-
-        if (keyword_to_common_lig_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantLigatures::Common])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Common] = maybe_value.release_nonnull();
-            continue;
+        case FFI::CssFontVariantLigaturesValueKind::Discretionary:
+            tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary] = style_value;
+            break;
+        case FFI::CssFontVariantLigaturesValueKind::Historical:
+            tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical] = style_value;
+            break;
+        case FFI::CssFontVariantLigaturesValueKind::Contextual:
+            tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual] = style_value;
+            break;
         }
-
-        if (keyword_to_discretionary_lig_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword_to_historical_lig_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        if (keyword_to_contextual_alt_value(keyword).has_value()) {
-            if (tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual])
-                return nullptr;
-            keyword_transaction.commit();
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual] = maybe_value.release_nonnull();
-            continue;
-        }
-
-        break;
     }
 
-    if (!any_of(tuple, [](auto& value) { return value != nullptr; }))
-        return nullptr;
-
+    transaction.commit();
     return TupleStyleValue::create(tuple);
 }
 
