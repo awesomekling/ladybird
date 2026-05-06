@@ -2793,6 +2793,12 @@ RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>&
     auto transaction = tokens.begin_transaction();
 
     tokens.discard_whitespace();
+    if (!tokens.has_next_token())
+        return nullptr;
+
+    auto serialized_easing = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
+    if (RustComponentValueParser::parse_easing(serialized_easing.bytes_as_string_view(), "utf-8"sv) == FFI::CssEasingValueKind::Invalid)
+        return nullptr;
 
     auto const& part = tokens.consume_a_token();
 

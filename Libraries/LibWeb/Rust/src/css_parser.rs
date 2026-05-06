@@ -1057,6 +1057,13 @@ pub struct CssPrimitiveValueOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssEasingValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -3756,6 +3763,209 @@ fn parse_opacity_value_prefix(component_value: &ComponentValue) -> CssPrimitiveV
             _ => CssPrimitiveValueKind::Invalid,
         },
     }
+}
+
+pub(crate) fn parse_easing_value(filtered_input: &[u8]) -> CssEasingValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    match component_values {
+        [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }),
+        ] if value.eq_ignore_ascii_case("step-start") || value.eq_ignore_ascii_case("step-end") => {
+            CssEasingValueKind::Valid
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("linear") => {
+            parse_linear_easing_function(function)
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("cubic-bezier") => {
+            parse_cubic_bezier_easing_function(function)
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("steps") => {
+            parse_steps_easing_function(function)
+        }
+        _ => CssEasingValueKind::Invalid,
+    }
+}
+
+fn parse_linear_easing_function(function: &Function) -> CssEasingValueKind {
+    // https://drafts.csswg.org/css-easing-2/#typedef-linear-easing-function
+    // <linear-easing-function> = linear( [ <number> && <linear-stop-length>? ]# )
+    // <linear-stop-length> = <percentage>{1,2}
+    let groups = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let component_values: Vec<_> = component_values
+            .iter()
+            .filter(|component_value| {
+                !matches!(
+                    component_value,
+                    ComponentValue::PreservedToken(Token {
+                        token_type: TokenType::Whitespace,
+                        ..
+                    })
+                )
+            })
+            .collect();
+
+        if component_values_parse_as_linear_stop(&component_values) {
+            return Some(());
+        }
+        None
+    });
+
+    if matches!(groups, Some(groups) if !groups.is_empty()) {
+        return CssEasingValueKind::Valid;
+    }
+
+    CssEasingValueKind::Invalid
+}
+
+fn component_values_parse_as_linear_stop(component_values: &[&ComponentValue]) -> bool {
+    let mut component_values = component_values.iter().copied().peekable();
+    let mut output = false;
+
+    if component_values
+        .peek()
+        .is_some_and(|component_value| component_value_parse_as_number_prefix(component_value))
+    {
+        output = true;
+        component_values.next();
+    }
+
+    for _ in 0..2 {
+        if component_values.peek().is_some_and(|component_value| {
+            parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
+        }) {
+            component_values.next();
+        }
+    }
+
+    if component_values
+        .peek()
+        .is_some_and(|component_value| component_value_parse_as_number_prefix(component_value))
+    {
+        if output {
+            return false;
+        }
+        output = true;
+        component_values.next();
+    }
+
+    output && component_values.next().is_none()
+}
+
+fn parse_cubic_bezier_easing_function(function: &Function) -> CssEasingValueKind {
+    // https://drafts.csswg.org/css-easing-2/#typedef-cubic-bezier-easing-function
+    // <cubic-bezier-easing-function> = cubic-bezier( <number [0,1]> , <number> , <number [0,1]> , <number> )
+    let groups = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        Some(component_value.clone())
+    });
+    let Some(groups) = groups else {
+        return CssEasingValueKind::Invalid;
+    };
+    let [x1, y1, x2, y2] = groups.as_slice() else {
+        return CssEasingValueKind::Invalid;
+    };
+
+    if !component_value_parse_as_number_in_range(x1, 0.0, 1.0)
+        || !component_value_parse_as_number_prefix(y1)
+        || !component_value_parse_as_number_in_range(x2, 0.0, 1.0)
+        || !component_value_parse_as_number_prefix(y2)
+    {
+        return CssEasingValueKind::Invalid;
+    }
+
+    CssEasingValueKind::Valid
+}
+
+fn parse_steps_easing_function(function: &Function) -> CssEasingValueKind {
+    // https://drafts.csswg.org/css-easing-2/#typedef-step-easing-function
+    // <step-easing-function> = steps( <integer> , <step-position>? )
+    let groups = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        Some(component_value.clone())
+    });
+    let Some(groups) = groups else {
+        return CssEasingValueKind::Invalid;
+    };
+    if groups.is_empty() || groups.len() > 2 {
+        return CssEasingValueKind::Invalid;
+    }
+
+    let mut min_intervals = 1.0;
+    if let Some(step_position) = groups.get(1) {
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = step_position
+        else {
+            return CssEasingValueKind::Invalid;
+        };
+        if !is_step_position_keyword(value) {
+            return CssEasingValueKind::Invalid;
+        }
+        if value.eq_ignore_ascii_case("jump-none") {
+            min_intervals = 2.0;
+        }
+    }
+
+    if component_value_parse_as_integer_in_range(&groups[0], min_intervals, f64::INFINITY) {
+        return CssEasingValueKind::Valid;
+    }
+
+    CssEasingValueKind::Invalid
+}
+
+fn component_value_parse_as_number_prefix(component_value: &ComponentValue) -> bool {
+    matches!(
+        parse_number_value_prefix(component_value),
+        CssPrimitiveValueKind::Number
+    )
+}
+
+fn component_value_parse_as_number_in_range(component_value: &ComponentValue, min: f64, max: f64) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() >= min && number.value() <= max,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => true,
+        _ => false,
+    }
+}
+
+fn component_value_parse_as_integer_in_range(component_value: &ComponentValue, min: f64, max: f64) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number_is_integer(*number) && number.value() >= min && number.value() <= max,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => true,
+        _ => false,
+    }
+}
+
+fn is_step_position_keyword(input: &str) -> bool {
+    // https://drafts.csswg.org/css-easing-2/#typedef-step-position
+    // <step-position> = jump-start | jump-end | jump-none | jump-both | start | end
+    input.eq_ignore_ascii_case("jump-start")
+        || input.eq_ignore_ascii_case("jump-end")
+        || input.eq_ignore_ascii_case("jump-none")
+        || input.eq_ignore_ascii_case("jump-both")
+        || input.eq_ignore_ascii_case("start")
+        || input.eq_ignore_ascii_case("end")
 }
 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
@@ -12537,29 +12747,29 @@ mod tests {
         CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind,
         CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
         CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
-        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind,
-        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
-        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
-        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
-        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
-        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
-        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
-        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind,
+        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
+        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+        CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
+        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
+        CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
+        CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
+        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
+        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -12575,8 +12785,8 @@ mod tests {
         parse_anchor_name_or_scope_value, parse_animation_name_value, parse_color_scheme_value, parse_contain_value,
         parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_easing_value,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
@@ -13182,6 +13392,10 @@ mod tests {
         options: CssPrimitiveValueOptions,
     ) -> CssPrimitiveValueKind {
         parse_primitive_value_prefix(input.as_bytes(), value_type, options)
+    }
+
+    fn parse_easing(input: &str) -> CssEasingValueKind {
+        parse_easing_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -16218,6 +16432,35 @@ mod tests {
             parse_primitive_prefix("ident", CssPrimitiveValueType::String),
             CssPrimitiveValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_easing_values() {
+        assert_eq!(parse_easing("step-start"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("step-end"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("linear(0, 0.5, 1)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("linear(0 5%, 0.5 10%, 1 100%)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("linear(5% 0, 1 100%)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("linear(0.5 5% 10%)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("cubic-bezier(0, 0, 1, 1000)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("steps(10, jump-none)"), CssEasingValueKind::Valid);
+        assert_eq!(parse_easing("steps(10, end)"), CssEasingValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_easing_values() {
+        assert_eq!(parse_easing("linear()"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("linear(a, b, c)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("linear(5 10)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("linear(5% 10%)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("linear(0.5 5% 10)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("cubic-bezier(0, 0, 0)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("cubic-bezier(2, 0, 0, 0)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("cubic-bezier(0, 0, 2, 0)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("steps(1.5)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("steps(-1)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("steps(0, jump-none)"), CssEasingValueKind::Invalid);
+        assert_eq!(parse_easing("steps(1, elsewhere)"), CssEasingValueKind::Invalid);
     }
 
     #[test]
