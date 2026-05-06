@@ -2479,9 +2479,14 @@ Optional<FlyString> Parser::parse_counter_style_name(TokenStream<ComponentValue>
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
-    auto custom_ident = parse_custom_ident(tokens, { { "none"sv } });
-    if (!custom_ident.has_value())
+    auto const& component_value = tokens.next_token();
+    auto original_source_text = component_value.original_source_text();
+    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
+
+    auto counter_style_name = RustComponentValueParser::parse_a_counter_style_name(source.bytes_as_string_view(), "utf-8"sv);
+    if (!counter_style_name.has_value())
         return {};
+    tokens.discard_a_token();
 
     // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
     // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
@@ -2489,12 +2494,12 @@ Optional<FlyString> Parser::parse_counter_style_name(TokenStream<ComponentValue>
     // @counter-style rule, and in the counter() functions.
 
     // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
-    auto const& keyword = keyword_from_string(custom_ident.value());
+    auto const& keyword = keyword_from_string(counter_style_name.value());
     if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
-        custom_ident = custom_ident->to_ascii_lowercase();
+        counter_style_name = counter_style_name->to_ascii_lowercase();
 
     transaction.commit();
-    return custom_ident;
+    return counter_style_name;
 }
 
 // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style
