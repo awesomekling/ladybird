@@ -205,35 +205,6 @@ Optional<Vector<ComponentValue>> Parser::parse_declaration_value(TokenStream<Com
     return top_level_declaration_value;
 }
 
-// https://drafts.csswg.org/css-fonts-4/#family-name-syntax
-RefPtr<StyleValue const> Parser::parse_family_name_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-
-    StringBuilder source_builder;
-    {
-        auto serialize_transaction = tokens.begin_transaction();
-        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
-            auto const& component_value = tokens.consume_a_token();
-            auto original_source_text = component_value.original_source_text();
-            source_builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
-        }
-    }
-
-    auto source = source_builder.to_string_without_validation();
-    auto family_name = RustComponentValueParser::parse_a_family_name(source.bytes_as_string_view(), "utf-8"sv);
-    if (!family_name.has_value())
-        return nullptr;
-
-    while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma))
-        tokens.discard_a_token();
-
-    transaction.commit();
-    if (family_name->is_string)
-        return StringStyleValue::create(family_name->name);
-    return CustomIdentStyleValue::create(family_name->name);
-}
-
 // https://www.w3.org/TR/css-syntax-3/#urange-syntax
 Optional<Gfx::UnicodeRange> Parser::parse_unicode_range(TokenStream<ComponentValue>& tokens)
 {

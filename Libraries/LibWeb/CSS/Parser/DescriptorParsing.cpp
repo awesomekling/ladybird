@@ -437,8 +437,21 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     }
                     VERIFY_NOT_REACHED();
                 }
-                case DescriptorMetadata::ValueType::FamilyName:
-                    return parse_family_name_value(tokens);
+                case DescriptorMetadata::ValueType::FamilyName: {
+                    // https://drafts.csswg.org/css-fonts-4/#family-name-syntax
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_family_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto family_name = RustComponentValueParser::parse_a_family_name(serialized_family_name.bytes_as_string_view(), "utf-8"sv);
+                    if (!family_name.has_value())
+                        return nullptr;
+
+                    if (family_name->is_string)
+                        return StringStyleValue::create(family_name->name);
+                    return CustomIdentStyleValue::create(family_name->name);
+                }
                 case DescriptorMetadata::ValueType::FontSrcList: {
                     // "If a component value is parsed correctly and is of a font format or font tech that the UA
                     // supports, add it to the list of supported sources. If parsing a component value results in a

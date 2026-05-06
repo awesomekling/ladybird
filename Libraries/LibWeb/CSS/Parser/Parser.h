@@ -492,7 +492,6 @@ private:
     RefPtr<StyleValue const> parse_flex_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_flex_flow_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_family_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_family_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_language_override_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_feature_settings_value(TokenStream<ComponentValue>&);
