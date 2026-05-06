@@ -79,6 +79,11 @@ public:
         bool is_string { false };
     };
 
+    struct FontStyle {
+        FFI::CssFontStyleKind kind;
+        bool has_angle { false };
+    };
+
     struct OpenTypeTaggedValue {
         FlyString tag;
         FFI::CssOpenTypeTaggedValueKind value_kind;
@@ -124,6 +129,7 @@ public:
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
+    static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
     static Optional<Vector<FontFamilyValue>> parse_font_family_value(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);

@@ -157,6 +157,15 @@ enum OpenTypeSettings {
     TagValues(Vec<OpenTypeTaggedValue>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FontStyle {
+    Normal,
+    Italic,
+    Left,
+    Right,
+    Oblique { has_angle: bool },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FontFamilyValue {
     Generic(String),
@@ -466,6 +475,16 @@ pub enum CssFontLanguageOverrideKind {
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontStyleKind {
+    Normal,
+    Italic,
+    Left,
+    Right,
+    Oblique,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1127,6 +1146,26 @@ where
         &mut settings_callback,
         &mut tagged_value_callback,
     );
+    true
+}
+
+pub(crate) fn parse_a_font_style<F>(filtered_input: &[u8], mut font_style_callback: F) -> bool
+where
+    F: FnMut(FontStyle),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(font_style) = parser.parse_a_font_style() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    font_style_callback(font_style);
     true
 }
 
@@ -2795,6 +2834,20 @@ impl ComponentValueParser {
         Some(component_value)
     }
 
+    fn consume_ident_matching(&mut self, expected: &str) -> bool {
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+            && value.eq_ignore_ascii_case(expected)
+        {
+            self.index += 1;
+            return true;
+        }
+
+        false
+    }
+
     fn remaining_component_values(&self) -> &[ComponentValue] {
         &self.component_values[self.index..]
     }
@@ -3443,6 +3496,35 @@ impl ComponentValueParser {
         self.index = self.component_values.len();
 
         Some(OpenTypeSettings::TagValues(tag_values))
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#font-style-prop
+    fn parse_a_font_style(&mut self) -> Option<FontStyle> {
+        // normal | italic | left | right | oblique <angle [-90deg,90deg]>?
+        self.discard_whitespace();
+
+        if self.consume_ident_matching("normal") {
+            return Some(FontStyle::Normal);
+        }
+        if self.consume_ident_matching("italic") {
+            return Some(FontStyle::Italic);
+        }
+        if self.consume_ident_matching("left") {
+            return Some(FontStyle::Left);
+        }
+        if self.consume_ident_matching("right") {
+            return Some(FontStyle::Right);
+        }
+        if self.consume_ident_matching("oblique") {
+            self.discard_whitespace();
+            if self.next_component_value().is_some_and(component_value_parse_as_angle) {
+                self.index += 1;
+                return Some(FontStyle::Oblique { has_angle: true });
+            }
+            return Some(FontStyle::Oblique { has_angle: false });
+        }
+
+        None
     }
 
     // https://drafts.csswg.org/css-fonts-4/#font-family-prop
@@ -4305,6 +4387,19 @@ pub(crate) fn component_values_parse_as_number(component_values: &[ComponentValu
             token_type: TokenType::Number { number },
             ..
         }) => number.value() >= min && number.value() <= max,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => true,
+        _ => false,
+    }
+}
+
+fn component_value_parse_as_angle(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Angle)),
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
         ComponentValue::Function(_) => true,
@@ -5987,14 +6082,14 @@ mod tests {
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaQuery,
         CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
         MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
         MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
         parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
         parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
@@ -6236,6 +6331,14 @@ mod tests {
                 tag_values,
             )
         })
+    }
+
+    fn parse_font_style(input: &str) -> Option<FontStyle> {
+        let mut font_style = None;
+        let parsed = parse_a_font_style(input.as_bytes(), |parsed_font_style| {
+            font_style = Some(parsed_font_style);
+        });
+        parsed.then_some(font_style).flatten()
     }
 
     fn parse_font_family_value(input: &str) -> Option<Vec<FontFamilyValue>> {
@@ -7277,6 +7380,33 @@ mod tests {
         assert_eq!(parse_font_variation_settings("\"wgt\" 700"), None);
         assert_eq!(parse_font_variation_settings("\"wght\""), None);
         assert_eq!(parse_font_variation_settings("\"wght\" 700,"), None);
+    }
+
+    #[test]
+    fn parses_font_styles() {
+        assert_eq!(parse_font_style("normal"), Some(FontStyle::Normal));
+        assert_eq!(parse_font_style("italic"), Some(FontStyle::Italic));
+        assert_eq!(parse_font_style("left"), Some(FontStyle::Left));
+        assert_eq!(parse_font_style("right"), Some(FontStyle::Right));
+        assert_eq!(
+            parse_font_style("oblique"),
+            Some(FontStyle::Oblique { has_angle: false })
+        );
+        assert_eq!(
+            parse_font_style("oblique 10deg"),
+            Some(FontStyle::Oblique { has_angle: true })
+        );
+        assert_eq!(
+            parse_font_style("oblique calc(10deg + 1deg)"),
+            Some(FontStyle::Oblique { has_angle: true })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_styles() {
+        assert_eq!(parse_font_style("normal italic"), None);
+        assert_eq!(parse_font_style("italic 10deg"), None);
+        assert_eq!(parse_font_style("oblique 10px"), None);
     }
 
     #[test]

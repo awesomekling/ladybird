@@ -24,9 +24,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontFamilyValueKind,
-    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaFeature, CssMediaFeatureComparison,
-    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssMediaFeature,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
     CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
     CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
@@ -717,6 +717,37 @@ pub unsafe extern "C" fn rust_css_parse_font_variation_settings(
                     );
                 },
             )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_style(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    font_style_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssFontStyleKind, has_angle: bool),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_style(input, |font_style| {
+                let (kind, has_angle) = match font_style {
+                    css_parser::FontStyle::Normal => (CssFontStyleKind::Normal, false),
+                    css_parser::FontStyle::Italic => (CssFontStyleKind::Italic, false),
+                    css_parser::FontStyle::Left => (CssFontStyleKind::Left, false),
+                    css_parser::FontStyle::Right => (CssFontStyleKind::Right, false),
+                    css_parser::FontStyle::Oblique { has_angle } => (CssFontStyleKind::Oblique, has_angle),
+                };
+                font_style_callback(ctx, kind, has_angle);
+            })
         })
     }
 }

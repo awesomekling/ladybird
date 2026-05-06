@@ -1517,6 +1517,30 @@ Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::p
     return parse_open_type_settings_impl(input, encoding, true);
 }
 
+Optional<RustComponentValueParser::FontStyle> RustComponentValueParser::parse_a_font_style(StringView input, StringView encoding)
+{
+    Optional<FontStyle> font_style;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_style(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &font_style,
+        [](void* raw_font_style, FFI::CssFontStyleKind kind, bool has_angle) {
+            auto& font_style = *static_cast<Optional<FontStyle>*>(raw_font_style);
+            font_style = FontStyle {
+                .kind = kind,
+                .has_angle = has_angle,
+            };
+        });
+
+    if (!parsed)
+        return {};
+
+    return font_style;
+}
+
 Optional<Vector<RustComponentValueParser::FontFamilyValue>> RustComponentValueParser::parse_font_family_value(StringView input, StringView encoding)
 {
     Vector<FontFamilyValue> family_values;

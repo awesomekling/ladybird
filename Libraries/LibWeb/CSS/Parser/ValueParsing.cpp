@@ -3199,30 +3199,66 @@ RefPtr<StyleValue const> Parser::parse_fit_content_value(TokenStream<ComponentVa
     return FunctionStyleValue::create("fit-content"_fly_string, length_percentage_value.release_nonnull());
 }
 
+static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
+{
+    switch (font_style) {
+    case FFI::CssFontStyleKind::Normal:
+        return FontStyleKeyword::Normal;
+    case FFI::CssFontStyleKind::Italic:
+        return FontStyleKeyword::Italic;
+    case FFI::CssFontStyleKind::Left:
+        return FontStyleKeyword::Left;
+    case FFI::CssFontStyleKind::Right:
+        return FontStyleKeyword::Right;
+    case FFI::CssFontStyleKind::Oblique:
+        return FontStyleKeyword::Oblique;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentValue>& tokens)
 {
     // https://drafts.csswg.org/css-fonts/#font-style-prop
     // normal | italic | left | right | oblique <angle [-90deg,90deg]>?
     auto transaction = tokens.begin_transaction();
-    auto keyword_value = parse_keyword_value(tokens);
-
-    if (!keyword_value || !keyword_to_font_style_keyword(keyword_value->to_keyword()).has_value())
+    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    if (!tokens.has_next_token())
         return nullptr;
 
-    auto font_style = keyword_to_font_style_keyword(keyword_value->to_keyword());
+    tokens.discard_a_token();
+    auto serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_style = RustComponentValueParser::parse_a_font_style(serialized_font_style.bytes_as_string_view(), "utf-8"sv);
 
     if (!font_style.has_value())
         return nullptr;
 
-    if (tokens.has_next_token() && keyword_value->to_keyword() == Keyword::Oblique) {
-        if (auto angle_value = parse_angle_value(tokens, { .min = -90, .max = 90 })) {
-            transaction.commit();
-            return FontStyleStyleValue::create(font_style.release_value(), angle_value);
+    if (font_style->kind == FFI::CssFontStyleKind::Oblique) {
+        auto angle_transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (tokens.has_next_token()) {
+            auto angle_start = tokens.current_index();
+            tokens.discard_a_token();
+            serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            auto maybe_font_style_with_angle = RustComponentValueParser::parse_a_font_style(serialized_font_style.bytes_as_string_view(), "utf-8"sv);
+            if (maybe_font_style_with_angle.has_value() && maybe_font_style_with_angle->has_angle) {
+                Vector<ComponentValue> angle_component_values;
+                for (auto const& component_value : tokens.tokens_since(angle_start))
+                    angle_component_values.append(component_value);
+                TokenStream<ComponentValue> angle_tokens { angle_component_values };
+                auto angle_value = parse_angle_value(angle_tokens, { .min = -90, .max = 90 });
+                angle_tokens.discard_whitespace();
+                if (angle_value && !angle_tokens.has_next_token()) {
+                    angle_transaction.commit();
+                    transaction.commit();
+                    return FontStyleStyleValue::create(font_style_keyword_from_rust(font_style->kind), angle_value.release_nonnull());
+                }
+            }
         }
     }
 
     transaction.commit();
-    return FontStyleStyleValue::create(font_style.release_value());
+    return FontStyleStyleValue::create(font_style_keyword_from_rust(font_style->kind));
 }
 
 RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream<ComponentValue>& tokens)
