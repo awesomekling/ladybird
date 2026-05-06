@@ -32,8 +32,8 @@ pub use css_parser::{
     CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
     CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
     CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
-    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPositionAnchorValueKind, CssRuleContext,
+    CssRuleEvent, CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
     CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
     CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
 };
@@ -899,6 +899,30 @@ pub unsafe extern "C" fn rust_css_parse_anchor_name_or_scope(
             };
 
             css_parser::parse_anchor_name_or_scope_value(input, allow_all, |name| {
+                name_callback(ctx, name.as_ptr(), name.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `name_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_position_anchor(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
+) -> CssPositionAnchorValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPositionAnchorValueKind::Invalid;
+            };
+
+            css_parser::parse_position_anchor_value(input, |name| {
                 name_callback(ctx, name.as_ptr(), name.len());
             })
         })

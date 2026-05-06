@@ -672,6 +672,16 @@ pub enum CssAnchorNameOrScopeValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPositionAnchorValueKind {
+    Invalid,
+    Normal,
+    None,
+    Auto,
+    AnchorName,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2377,6 +2387,47 @@ where
     }
 
     CssAnchorNameOrScopeValueKind::List
+}
+
+pub(crate) fn parse_position_anchor_value<N>(filtered_input: &[u8], mut name_callback: N) -> CssPositionAnchorValueKind
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#position-anchor
+    // Value: normal | none | auto | <anchor-name>
+    if parser.consume_ident_matching("normal") {
+        if parser.has_next_component_value() {
+            return CssPositionAnchorValueKind::Invalid;
+        }
+        return CssPositionAnchorValueKind::Normal;
+    }
+
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssPositionAnchorValueKind::Invalid;
+        }
+        return CssPositionAnchorValueKind::None;
+    }
+
+    if parser.consume_ident_matching("auto") {
+        if parser.has_next_component_value() {
+            return CssPositionAnchorValueKind::Invalid;
+        }
+        return CssPositionAnchorValueKind::Auto;
+    }
+
+    let Some(name) = parser.parse_a_dashed_ident() else {
+        return CssPositionAnchorValueKind::Invalid;
+    };
+
+    name_callback(&name);
+    CssPositionAnchorValueKind::AnchorName
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8422,8 +8473,8 @@ mod tests {
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssSupportsFeatureKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPositionAnchorValueKind,
+        CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
         CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
         FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
         MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
@@ -8445,8 +8496,8 @@ mod tests {
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
         parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor,
-        parse_white_space_trim_value, strip_whitespace,
+        parse_page_size_descriptor, parse_position_anchor_value, parse_positive_percentage_descriptor,
+        parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8972,6 +9023,12 @@ mod tests {
         let mut names = Vec::new();
         let kind = parse_anchor_name_or_scope_value(input.as_bytes(), allow_all, |name| names.push(name.to_string()));
         (kind, names)
+    }
+
+    fn parse_position_anchor(input: &str) -> (CssPositionAnchorValueKind, Option<String>) {
+        let mut name = None;
+        let kind = parse_position_anchor_value(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
+        (kind, name)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11192,6 +11249,34 @@ mod tests {
             parse_anchor_name_or_scope("foo", false).0,
             CssAnchorNameOrScopeValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_position_anchor_values() {
+        assert_eq!(
+            parse_position_anchor("normal"),
+            (CssPositionAnchorValueKind::Normal, None)
+        );
+        assert_eq!(parse_position_anchor("none"), (CssPositionAnchorValueKind::None, None));
+        assert_eq!(parse_position_anchor("auto"), (CssPositionAnchorValueKind::Auto, None));
+        assert_eq!(
+            parse_position_anchor("--foo"),
+            (CssPositionAnchorValueKind::AnchorName, Some("--foo".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_position_anchor_values() {
+        assert_eq!(parse_position_anchor("").0, CssPositionAnchorValueKind::Invalid);
+        assert_eq!(
+            parse_position_anchor("normal --foo").0,
+            CssPositionAnchorValueKind::Invalid
+        );
+        assert_eq!(
+            parse_position_anchor("--foo, --bar").0,
+            CssPositionAnchorValueKind::Invalid
+        );
+        assert_eq!(parse_position_anchor("foo").0, CssPositionAnchorValueKind::Invalid);
     }
 
     #[test]

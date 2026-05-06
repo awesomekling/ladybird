@@ -3556,16 +3556,31 @@ RefPtr<StyleValue const> Parser::parse_place_self_value(TokenStream<ComponentVal
 // https://drafts.csswg.org/css-anchor-position/#position-anchor
 RefPtr<StyleValue const> Parser::parse_position_anchor_value(TokenStream<ComponentValue>& tokens)
 {
-    // normal | none | auto | <anchor-name>
-    if (auto keyword = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
-        return keyword;
-    if (auto keyword = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return keyword;
-    if (auto keyword = parse_all_as_single_keyword_value(tokens, Keyword::Auto))
-        return keyword;
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // <anchor-name> = <dashed-ident>
-    return parse_dashed_ident_value(tokens);
+    auto serialized_position_anchor = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_position_anchor = RustComponentValueParser::parse_position_anchor(serialized_position_anchor.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_position_anchor.kind) {
+    case FFI::CssPositionAnchorValueKind::Invalid:
+        return {};
+    case FFI::CssPositionAnchorValueKind::Normal:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Normal);
+    case FFI::CssPositionAnchorValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssPositionAnchorValueKind::Auto:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Auto);
+    case FFI::CssPositionAnchorValueKind::AnchorName:
+        transaction.commit();
+        return CustomIdentStyleValue::create(parsed_position_anchor.name);
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-anchor-position/#position-try-fallbacks

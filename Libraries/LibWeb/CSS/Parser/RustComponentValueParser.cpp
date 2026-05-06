@@ -2131,6 +2131,27 @@ RustComponentValueParser::AnchorNameOrScope RustComponentValueParser::parse_anch
     };
 }
 
+RustComponentValueParser::PositionAnchor RustComponentValueParser::parse_position_anchor(StringView input, StringView encoding)
+{
+    FlyString name;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_position_anchor(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &name,
+        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
+            auto& name = *static_cast<FlyString*>(raw_name);
+            name = fly_string_from_ffi_bytes(name_ptr, name_len);
+        });
+
+    return PositionAnchor {
+        .kind = kind,
+        .name = move(name),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
