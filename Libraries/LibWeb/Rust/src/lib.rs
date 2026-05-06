@@ -34,27 +34,29 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBooleanExpressionEventKind,
-    CssColorSchemeValue, CssColorSchemeValueKind, CssComponentValue, CssComponentValueKind, CssContainValue,
-    CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-    CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
-    CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind,
-    CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison,
-    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
-    CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
-    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-    CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind,
+    CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssAttributeCaseType,
+    CssAttributeMatchType, CssBooleanExpressionEventKind, CssColorSchemeValue, CssColorSchemeValueKind,
+    CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
+    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
+    CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+    CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
+    CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
+    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
+    CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
+    CssPositionVisibilityValueKind, CssPseudoElementValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind,
+    CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind, CssSupportsFeatureKind, CssSyntaxNode,
+    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
+    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
+    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
+    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransitionBehaviorItemKind,
+    CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
+    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
+    CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
+    CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -147,6 +149,70 @@ pub unsafe extern "C" fn rust_css_parse_component_values(
                 callback(ctx, &raw const component_value);
             });
         });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `declared_namespaces` and `declared_namespaces_len` must point to a valid slice
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_selector_list(
+    input: *const u8,
+    input_len: usize,
+    selector_type: u8,
+    parsing_mode: u8,
+    declared_namespaces: *const CssSelectorNamespace,
+    declared_namespaces_len: usize,
+    ctx: *mut c_void,
+    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssSelectorEvent),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+            let Some(declared_namespaces) = slice_from_raw(declared_namespaces, declared_namespaces_len) else {
+                return false;
+            };
+
+            let selector_type = match selector_type {
+                0 => css_parser::SelectorType::Standalone,
+                1 => css_parser::SelectorType::Relative,
+                _ => return false,
+            };
+            let parsing_mode = match parsing_mode {
+                0 => css_parser::SelectorParsingMode::Normal,
+                1 => css_parser::SelectorParsingMode::Forgiving,
+                _ => return false,
+            };
+            let declared_namespaces = declared_namespaces
+                .iter()
+                .map(|namespace| {
+                    bytes_from_raw(namespace.prefix_ptr, namespace.prefix_len)
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                        .map(str::to_string)
+                })
+                .collect::<Option<Vec<_>>>();
+            let Some(declared_namespaces) = declared_namespaces else {
+                return false;
+            };
+
+            css_parser::parse_a_selector_list(
+                input,
+                selector_type,
+                parsing_mode,
+                declared_namespaces,
+                |event| {
+                    event_callback(ctx, &raw const event);
+                },
+                |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                },
+            )
+        })
     }
 }
 

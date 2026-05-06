@@ -173,6 +173,147 @@ pub(crate) enum PseudoElementSelectorValue {
     IdentList(Vec<String>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssSelectorEventKind {
+    SelectorStart,
+    SelectorEnd,
+    CompoundSelectorStart,
+    CompoundSelectorEnd,
+    SimpleSelector,
+    PseudoClassSelectorStart,
+    PseudoClassSelectorEnd,
+    PseudoClassArgumentString,
+    PseudoClassArgumentNumber,
+    PseudoElementSelectorStart,
+    PseudoElementSelectorEnd,
+    PseudoElementArgumentString,
+    InvalidSelectorStart,
+    InvalidSelectorEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssSimpleSelectorKind {
+    Universal,
+    TagName,
+    Id,
+    Class,
+    Attribute,
+    Nesting,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssSelectorCombinator {
+    None,
+    ImmediateChild,
+    Descendant,
+    NextSibling,
+    SubsequentSibling,
+    Column,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssSelectorNamespaceType {
+    Default,
+    None,
+    Any,
+    Named,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssAttributeMatchType {
+    HasAttribute,
+    ExactValueMatch,
+    ContainsWord,
+    ContainsString,
+    StartsWithSegment,
+    StartsWithString,
+    EndsWithString,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+#[repr(C)]
+pub enum CssAttributeCaseType {
+    DefaultMatch,
+    CaseSensitiveMatch,
+    CaseInsensitiveMatch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssPseudoElementValueKind {
+    Empty,
+    PTNameSelector,
+    CompoundSelector,
+    IdentList,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssSelectorEvent {
+    pub kind: CssSelectorEventKind,
+    pub combinator: CssSelectorCombinator,
+    pub simple_selector_kind: CssSimpleSelectorKind,
+    pub namespace_type: CssSelectorNamespaceType,
+    pub attribute_match_type: CssAttributeMatchType,
+    pub attribute_case_type: CssAttributeCaseType,
+    pub pseudo_element_value_kind: CssPseudoElementValueKind,
+    pub pseudo_class_id: u8,
+    pub pseudo_element_id: u8,
+    pub has_an_plus_b_pattern: bool,
+    pub an_plus_b_step_size: i32,
+    pub an_plus_b_offset: i32,
+    pub argument_number: i64,
+    pub is_forgiving: bool,
+    pub is_universal: bool,
+    pub name_ptr: *const u8,
+    pub name_len: usize,
+    pub namespace_ptr: *const u8,
+    pub namespace_len: usize,
+    pub value_ptr: *const u8,
+    pub value_len: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssSelectorNamespace {
+    pub prefix_ptr: *const u8,
+    pub prefix_len: usize,
+}
+
+impl CssSelectorEvent {
+    fn new(kind: CssSelectorEventKind) -> Self {
+        Self {
+            kind,
+            combinator: CssSelectorCombinator::None,
+            simple_selector_kind: CssSimpleSelectorKind::Universal,
+            namespace_type: CssSelectorNamespaceType::Default,
+            attribute_match_type: CssAttributeMatchType::HasAttribute,
+            attribute_case_type: CssAttributeCaseType::DefaultMatch,
+            pseudo_element_value_kind: CssPseudoElementValueKind::Empty,
+            pseudo_class_id: 0,
+            pseudo_element_id: 0,
+            has_an_plus_b_pattern: false,
+            an_plus_b_step_size: 0,
+            an_plus_b_offset: 0,
+            argument_number: 0,
+            is_forgiving: false,
+            is_universal: false,
+            name_ptr: std::ptr::null(),
+            name_len: 0,
+            namespace_ptr: std::ptr::null(),
+            namespace_len: 0,
+            value_ptr: std::ptr::null(),
+            value_len: 0,
+        }
+    }
+}
+
 // https://drafts.csswg.org/css-syntax/#css-rule
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
@@ -1785,6 +1926,38 @@ where
         }
     }
 
+    true
+}
+
+pub(crate) fn parse_a_selector_list<E, C>(
+    filtered_input: &[u8],
+    selector_type: SelectorType,
+    parsing_mode: SelectorParsingMode,
+    declared_namespaces: Vec<String>,
+    mut event_callback: E,
+    mut component_value_callback: C,
+) -> bool
+where
+    E: FnMut(CssSelectorEvent),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::with_declared_namespaces(component_values, declared_namespaces);
+    let Some(selectors) = parser.parse_a_selector_list(selector_type, parsing_mode) else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.next_component_value().is_some() {
+        return false;
+    }
+
+    emit_selector_list(
+        &selectors,
+        filtered_input_string,
+        &mut event_callback,
+        &mut component_value_callback,
+    );
     true
 }
 
@@ -5449,6 +5622,233 @@ where
         kind,
         token: token.as_ffi(filtered_input),
     });
+}
+
+fn emit_selector_list<E, C>(
+    selectors: &[SelectorSyntax],
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssSelectorEvent),
+    C: FnMut(CssComponentValue),
+{
+    for selector in selectors {
+        event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorStart));
+        for compound_selector in &selector.compound_selectors {
+            let mut event = CssSelectorEvent::new(CssSelectorEventKind::CompoundSelectorStart);
+            event.combinator = selector_combinator_to_ffi(compound_selector.combinator);
+            event_callback(event);
+
+            for simple_selector in &compound_selector.simple_selectors {
+                emit_simple_selector(
+                    simple_selector,
+                    filtered_input,
+                    event_callback,
+                    component_value_callback,
+                );
+            }
+
+            event_callback(CssSelectorEvent::new(CssSelectorEventKind::CompoundSelectorEnd));
+        }
+        event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorEnd));
+    }
+}
+
+fn emit_simple_selector<E, C>(
+    simple_selector: &SimpleSelectorSyntax,
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) where
+    E: FnMut(CssSelectorEvent),
+    C: FnMut(CssComponentValue),
+{
+    match simple_selector {
+        SimpleSelectorSyntax::Universal(qualified_name) => {
+            emit_qualified_name_simple_selector(CssSimpleSelectorKind::Universal, qualified_name, event_callback);
+        }
+        SimpleSelectorSyntax::TagName(qualified_name) => {
+            emit_qualified_name_simple_selector(CssSimpleSelectorKind::TagName, qualified_name, event_callback);
+        }
+        SimpleSelectorSyntax::Id(name) => emit_name_simple_selector(CssSimpleSelectorKind::Id, name, event_callback),
+        SimpleSelectorSyntax::Class(name) => {
+            emit_name_simple_selector(CssSimpleSelectorKind::Class, name, event_callback);
+        }
+        SimpleSelectorSyntax::Attribute(attribute) => {
+            let mut event = selector_event_with_qualified_name(
+                CssSelectorEventKind::SimpleSelector,
+                CssSimpleSelectorKind::Attribute,
+                &attribute.qualified_name,
+            );
+            event.attribute_match_type = attribute_match_type_to_ffi(attribute.match_type);
+            event.attribute_case_type = attribute_case_type_to_ffi(attribute.case_type);
+            (event.value_ptr, event.value_len) = string_parts(&attribute.value);
+            event_callback(event);
+        }
+        SimpleSelectorSyntax::PseudoClass(pseudo_class) => {
+            let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoClassSelectorStart);
+            event.pseudo_class_id = pseudo_class.pseudo_class_id as u8;
+            if let Some(an_plus_b_pattern) = pseudo_class.an_plus_b_pattern {
+                event.has_an_plus_b_pattern = true;
+                event.an_plus_b_step_size = an_plus_b_pattern.step_size;
+                event.an_plus_b_offset = an_plus_b_pattern.offset;
+            }
+            event.is_forgiving = pseudo_class.is_forgiving;
+            event_callback(event);
+
+            for language in &pseudo_class.languages {
+                let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoClassArgumentString);
+                (event.value_ptr, event.value_len) = string_parts(language);
+                event_callback(event);
+            }
+            for level in &pseudo_class.levels {
+                let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoClassArgumentNumber);
+                event.argument_number = *level;
+                event_callback(event);
+            }
+            emit_selector_list(
+                &pseudo_class.argument_selector_list,
+                filtered_input,
+                event_callback,
+                component_value_callback,
+            );
+            event_callback(CssSelectorEvent::new(CssSelectorEventKind::PseudoClassSelectorEnd));
+        }
+        SimpleSelectorSyntax::PseudoElement(pseudo_element) => {
+            let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoElementSelectorStart);
+            event.pseudo_element_id = pseudo_element.pseudo_element_id as u8;
+            if let Some(name) = &pseudo_element.name {
+                (event.name_ptr, event.name_len) = string_parts(name);
+            }
+            event.pseudo_element_value_kind = pseudo_element_value_kind_to_ffi(&pseudo_element.value);
+            if let PseudoElementSelectorValue::PTNameSelector { is_universal, value } = &pseudo_element.value {
+                event.is_universal = *is_universal;
+                (event.value_ptr, event.value_len) = string_parts(value);
+            }
+            event_callback(event);
+
+            match &pseudo_element.value {
+                PseudoElementSelectorValue::CompoundSelector(selector) => {
+                    emit_selector_list(
+                        std::slice::from_ref(selector),
+                        filtered_input,
+                        event_callback,
+                        component_value_callback,
+                    );
+                }
+                PseudoElementSelectorValue::IdentList(idents) => {
+                    for ident in idents {
+                        let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoElementArgumentString);
+                        (event.value_ptr, event.value_len) = string_parts(ident);
+                        event_callback(event);
+                    }
+                }
+                PseudoElementSelectorValue::Empty | PseudoElementSelectorValue::PTNameSelector { .. } => {}
+            }
+
+            event_callback(CssSelectorEvent::new(CssSelectorEventKind::PseudoElementSelectorEnd));
+        }
+        SimpleSelectorSyntax::Nesting => {
+            event_callback(CssSelectorEvent {
+                simple_selector_kind: CssSimpleSelectorKind::Nesting,
+                ..CssSelectorEvent::new(CssSelectorEventKind::SimpleSelector)
+            });
+        }
+        SimpleSelectorSyntax::Invalid(component_values) => {
+            event_callback(CssSelectorEvent::new(CssSelectorEventKind::InvalidSelectorStart));
+            for component_value in component_values {
+                emit_component_value(component_value, filtered_input, component_value_callback);
+            }
+            event_callback(CssSelectorEvent::new(CssSelectorEventKind::InvalidSelectorEnd));
+        }
+    }
+}
+
+fn emit_qualified_name_simple_selector<E>(
+    simple_selector_kind: CssSimpleSelectorKind,
+    qualified_name: &QualifiedNameSyntax,
+    event_callback: &mut E,
+) where
+    E: FnMut(CssSelectorEvent),
+{
+    event_callback(selector_event_with_qualified_name(
+        CssSelectorEventKind::SimpleSelector,
+        simple_selector_kind,
+        qualified_name,
+    ));
+}
+
+fn emit_name_simple_selector<E>(simple_selector_kind: CssSimpleSelectorKind, name: &str, event_callback: &mut E)
+where
+    E: FnMut(CssSelectorEvent),
+{
+    let mut event = CssSelectorEvent::new(CssSelectorEventKind::SimpleSelector);
+    event.simple_selector_kind = simple_selector_kind;
+    (event.name_ptr, event.name_len) = string_parts(name);
+    event_callback(event);
+}
+
+fn selector_event_with_qualified_name(
+    event_kind: CssSelectorEventKind,
+    simple_selector_kind: CssSimpleSelectorKind,
+    qualified_name: &QualifiedNameSyntax,
+) -> CssSelectorEvent {
+    let mut event = CssSelectorEvent::new(event_kind);
+    event.simple_selector_kind = simple_selector_kind;
+    event.namespace_type = namespace_type_to_ffi(qualified_name.namespace_type);
+    (event.namespace_ptr, event.namespace_len) = string_parts(&qualified_name.namespace);
+    (event.name_ptr, event.name_len) = string_parts(&qualified_name.name);
+    event
+}
+
+fn selector_combinator_to_ffi(combinator: SelectorCombinator) -> CssSelectorCombinator {
+    match combinator {
+        SelectorCombinator::None => CssSelectorCombinator::None,
+        SelectorCombinator::ImmediateChild => CssSelectorCombinator::ImmediateChild,
+        SelectorCombinator::Descendant => CssSelectorCombinator::Descendant,
+        SelectorCombinator::NextSibling => CssSelectorCombinator::NextSibling,
+        SelectorCombinator::SubsequentSibling => CssSelectorCombinator::SubsequentSibling,
+        SelectorCombinator::Column => CssSelectorCombinator::Column,
+    }
+}
+
+fn namespace_type_to_ffi(namespace_type: NamespaceType) -> CssSelectorNamespaceType {
+    match namespace_type {
+        NamespaceType::Default => CssSelectorNamespaceType::Default,
+        NamespaceType::None => CssSelectorNamespaceType::None,
+        NamespaceType::Any => CssSelectorNamespaceType::Any,
+        NamespaceType::Named => CssSelectorNamespaceType::Named,
+    }
+}
+
+fn attribute_match_type_to_ffi(match_type: AttributeMatchType) -> CssAttributeMatchType {
+    match match_type {
+        AttributeMatchType::HasAttribute => CssAttributeMatchType::HasAttribute,
+        AttributeMatchType::ExactValueMatch => CssAttributeMatchType::ExactValueMatch,
+        AttributeMatchType::ContainsWord => CssAttributeMatchType::ContainsWord,
+        AttributeMatchType::ContainsString => CssAttributeMatchType::ContainsString,
+        AttributeMatchType::StartsWithSegment => CssAttributeMatchType::StartsWithSegment,
+        AttributeMatchType::StartsWithString => CssAttributeMatchType::StartsWithString,
+        AttributeMatchType::EndsWithString => CssAttributeMatchType::EndsWithString,
+    }
+}
+
+fn attribute_case_type_to_ffi(case_type: AttributeCaseType) -> CssAttributeCaseType {
+    match case_type {
+        AttributeCaseType::DefaultMatch => CssAttributeCaseType::DefaultMatch,
+        AttributeCaseType::CaseSensitiveMatch => CssAttributeCaseType::CaseSensitiveMatch,
+        AttributeCaseType::CaseInsensitiveMatch => CssAttributeCaseType::CaseInsensitiveMatch,
+    }
+}
+
+fn pseudo_element_value_kind_to_ffi(value: &PseudoElementSelectorValue) -> CssPseudoElementValueKind {
+    match value {
+        PseudoElementSelectorValue::Empty => CssPseudoElementValueKind::Empty,
+        PseudoElementSelectorValue::PTNameSelector { .. } => CssPseudoElementValueKind::PTNameSelector,
+        PseudoElementSelectorValue::CompoundSelector(_) => CssPseudoElementValueKind::CompoundSelector,
+        PseudoElementSelectorValue::IdentList(_) => CssPseudoElementValueKind::IdentList,
+    }
 }
 
 fn emit_syntax_node<C>(syntax_node: &SyntaxNode, callback: &mut C)
@@ -11310,27 +11710,28 @@ mod tests {
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
-        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
+        CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -11403,6 +11804,13 @@ mod tests {
                 .collect(),
         );
         parser.parse_a_selector_list(SelectorType::Standalone, SelectorParsingMode::Normal)
+    }
+
+    fn event_string<'a>(ptr: *const u8, len: usize) -> &'a str {
+        if len == 0 {
+            return "";
+        }
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
     }
 
     fn parse_media_feature_syntax(input: &str) -> Option<MediaFeatureSyntax> {
@@ -12362,6 +12770,42 @@ mod tests {
             selectors[1].compound_selectors[0].simple_selectors.as_slice(),
             [SimpleSelectorSyntax::Invalid(_)]
         ));
+    }
+
+    #[test]
+    fn emits_selector_syntax_events() {
+        let mut events = Vec::new();
+        let mut names = Vec::new();
+        let mut component_values = Vec::new();
+        assert!(super::parse_a_selector_list(
+            b"main.content:is(article, section)::before",
+            SelectorType::Standalone,
+            SelectorParsingMode::Normal,
+            Vec::new(),
+            |event| {
+                names.push(event_string(event.name_ptr, event.name_len).to_string());
+                events.push(event);
+            },
+            |component_value| component_values.push(component_value),
+        ));
+
+        assert!(component_values.is_empty());
+        assert_eq!(events[0].kind, CssSelectorEventKind::SelectorStart);
+        assert_eq!(events[1].kind, CssSelectorEventKind::CompoundSelectorStart);
+        assert_eq!(events[2].simple_selector_kind, CssSimpleSelectorKind::TagName);
+        assert_eq!(names[2], "main");
+        assert_eq!(events[3].simple_selector_kind, CssSimpleSelectorKind::Class);
+        assert_eq!(names[3], "content");
+        assert_eq!(events[4].kind, CssSelectorEventKind::PseudoClassSelectorStart);
+        assert_eq!(events[4].pseudo_class_id, PseudoClassId::Is as u8);
+        assert!(events[4].is_forgiving);
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == CssSelectorEventKind::PseudoElementSelectorStart
+                    && event.pseudo_element_id == PseudoElementId::Before as u8)
+        );
+        assert_eq!(events.last().unwrap().kind, CssSelectorEventKind::SelectorEnd);
     }
 
     #[test]
