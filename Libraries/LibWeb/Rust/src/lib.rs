@@ -23,10 +23,10 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssContainerTypeValueKind,
-    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
-    CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind,
+    CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
+    CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
     CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
     CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
@@ -806,6 +806,28 @@ pub unsafe extern "C" fn rust_css_parse_container_type(
             };
 
             css_parser::parse_container_type_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_contain(input: *const u8, input_len: usize) -> CssContainValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssContainValue {
+                    kind: CssContainValueKind::Invalid,
+                    is_size: false,
+                    is_inline_size: false,
+                    has_layout: false,
+                    has_style: false,
+                    has_paint: false,
+                };
+            };
+
+            css_parser::parse_contain_value(input)
         })
     }
 }

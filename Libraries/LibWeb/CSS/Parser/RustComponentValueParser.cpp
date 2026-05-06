@@ -2087,6 +2087,16 @@ Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(
     return kind;
 }
 
+FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_contain(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssContainerTypeValueKind RustComponentValueParser::parse_container_type(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

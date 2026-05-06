@@ -5570,82 +5570,48 @@ RefPtr<StyleValue const> Parser::parse_filter_value_list_value(TokenStream<Compo
 
 RefPtr<StyleValue const> Parser::parse_contain_value(TokenStream<ComponentValue>& tokens)
 {
-    // none | strict | content | [ [size | inline-size] || layout || style || paint ]
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // none
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None)) {
-        transaction.commit();
-        return none;
-    }
+    auto serialized_contain = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_contain = RustComponentValueParser::parse_contain(serialized_contain.bytes_as_string_view(), "utf-8"sv);
 
-    // strict
-    if (auto strict = parse_all_as_single_keyword_value(tokens, Keyword::Strict)) {
-        transaction.commit();
-        return strict;
-    }
+    auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
+        values.append(KeywordStyleValue::create(keyword));
+    };
 
-    // content
-    if (auto content = parse_all_as_single_keyword_value(tokens, Keyword::Content)) {
-        transaction.commit();
-        return content;
-    }
-
-    // [ [size | inline-size] || layout || style || paint ]
-    if (!tokens.has_next_token())
+    StyleValueVector values;
+    switch (parsed_contain.kind) {
+    case FFI::CssContainValueKind::Invalid:
         return {};
-
-    RefPtr<StyleValue const> size_value;
-    RefPtr<StyleValue const> layout_value;
-    RefPtr<StyleValue const> style_value;
-    RefPtr<StyleValue const> paint_value;
-
-    while (tokens.has_next_token()) {
-        tokens.discard_whitespace();
-        auto keyword_value = parse_keyword_value(tokens);
-        if (!keyword_value)
-            return {};
-        switch (keyword_value->to_keyword()) {
-        case Keyword::Size:
-        case Keyword::InlineSize:
-            if (size_value)
-                return {};
-            size_value = move(keyword_value);
-            break;
-        case Keyword::Layout:
-            if (layout_value)
-                return {};
-            layout_value = move(keyword_value);
-            break;
-        case Keyword::Style:
-            if (style_value)
-                return {};
-            style_value = move(keyword_value);
-            break;
-        case Keyword::Paint:
-            if (paint_value)
-                return {};
-            paint_value = move(keyword_value);
-            break;
-        default:
-            return {};
-        }
+    case FFI::CssContainValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssContainValueKind::Strict:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Strict);
+    case FFI::CssContainValueKind::Content:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Content);
+    case FFI::CssContainValueKind::List:
+        if (parsed_contain.is_size)
+            append_keyword(values, Keyword::Size);
+        if (parsed_contain.is_inline_size)
+            append_keyword(values, Keyword::InlineSize);
+        if (parsed_contain.has_layout)
+            append_keyword(values, Keyword::Layout);
+        if (parsed_contain.has_style)
+            append_keyword(values, Keyword::Style);
+        if (parsed_contain.has_paint)
+            append_keyword(values, Keyword::Paint);
+        break;
     }
-
-    StyleValueVector containment_values;
-    if (size_value)
-        containment_values.append(size_value.release_nonnull());
-    if (layout_value)
-        containment_values.append(layout_value.release_nonnull());
-    if (style_value)
-        containment_values.append(style_value.release_nonnull());
-    if (paint_value)
-        containment_values.append(paint_value.release_nonnull());
 
     transaction.commit();
 
-    return StyleValueList::create(move(containment_values), StyleValueList::Separator::Space);
+    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
 // https://drafts.csswg.org/css-conditional-5/#propdef-container-type

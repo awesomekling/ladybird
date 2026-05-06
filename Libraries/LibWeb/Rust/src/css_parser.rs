@@ -610,6 +610,27 @@ pub enum CssContainerTypeValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssContainValueKind {
+    Invalid,
+    None,
+    Strict,
+    Content,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssContainValue {
+    pub kind: CssContainValueKind,
+    pub is_size: bool,
+    pub is_inline_size: bool,
+    pub has_layout: bool,
+    pub has_style: bool,
+    pub has_paint: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2041,6 +2062,98 @@ pub(crate) fn parse_container_type_value(filtered_input: &[u8]) -> CssContainerT
         (Some(CssContainerTypeValueKind::InlineSize), true) => CssContainerTypeValueKind::InlineSizeAndScrollState,
         _ => CssContainerTypeValueKind::Invalid,
     }
+}
+
+pub(crate) fn parse_contain_value(filtered_input: &[u8]) -> CssContainValue {
+    let invalid = CssContainValue {
+        kind: CssContainValueKind::Invalid,
+        is_size: false,
+        is_inline_size: false,
+        has_layout: false,
+        has_style: false,
+        has_paint: false,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-contain-2/#contain-property
+    // none | strict | content | [ [size | inline-size] || layout || style || paint ]
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssContainValue {
+            kind: CssContainValueKind::None,
+            ..invalid
+        };
+    }
+    if parser.consume_ident_matching("strict") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssContainValue {
+            kind: CssContainValueKind::Strict,
+            ..invalid
+        };
+    }
+    if parser.consume_ident_matching("content") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssContainValue {
+            kind: CssContainValueKind::Content,
+            ..invalid
+        };
+    }
+
+    let mut value = CssContainValue {
+        kind: CssContainValueKind::List,
+        ..invalid
+    };
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("size") {
+            if value.is_size || value.is_inline_size {
+                return invalid;
+            }
+            value.is_size = true;
+        } else if ident.eq_ignore_ascii_case("inline-size") {
+            if value.is_size || value.is_inline_size {
+                return invalid;
+            }
+            value.is_inline_size = true;
+        } else if ident.eq_ignore_ascii_case("layout") {
+            if value.has_layout {
+                return invalid;
+            }
+            value.has_layout = true;
+        } else if ident.eq_ignore_ascii_case("style") {
+            if value.has_style {
+                return invalid;
+            }
+            value.has_style = true;
+        } else if ident.eq_ignore_ascii_case("paint") {
+            if value.has_paint {
+                return invalid;
+            }
+            value.has_paint = true;
+        } else {
+            return invalid;
+        }
+    }
+
+    if !value.is_size && !value.is_inline_size && !value.has_layout && !value.has_style && !value.has_paint {
+        return invalid;
+    }
+
+    value
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8080,8 +8193,8 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssContainerTypeValueKind, CssCounterStyleKind,
-        CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+        CssBooleanExpressionEventKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
+        CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
         CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
         CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
         CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
@@ -8101,7 +8214,7 @@ mod tests {
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
+        parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag, parse_contain_value,
         parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
@@ -8617,6 +8730,10 @@ mod tests {
 
     fn parse_container_type(input: &str) -> CssContainerTypeValueKind {
         parse_container_type_value(input.as_bytes())
+    }
+
+    fn parse_contain(input: &str) -> CssContainValue {
+        parse_contain_value(input.as_bytes())
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -10677,6 +10794,60 @@ mod tests {
     fn rejects_invalid_container_rule_preludes() {
         assert_eq!(parse_container_rule_prelude_items(""), None);
         assert_eq!(parse_container_rule_prelude_items(","), None);
+    }
+
+    #[test]
+    fn parses_contain_values() {
+        assert_eq!(
+            parse_contain("none"),
+            CssContainValue {
+                kind: CssContainValueKind::None,
+                is_size: false,
+                is_inline_size: false,
+                has_layout: false,
+                has_style: false,
+                has_paint: false,
+            }
+        );
+        assert_eq!(parse_contain("strict").kind, CssContainValueKind::Strict);
+        assert_eq!(parse_contain("content").kind, CssContainValueKind::Content);
+        assert_eq!(
+            parse_contain("layout paint size"),
+            CssContainValue {
+                kind: CssContainValueKind::List,
+                is_size: true,
+                is_inline_size: false,
+                has_layout: true,
+                has_style: false,
+                has_paint: true,
+            }
+        );
+        assert_eq!(
+            parse_contain("style inline-size layout paint"),
+            CssContainValue {
+                kind: CssContainValueKind::List,
+                is_size: false,
+                is_inline_size: true,
+                has_layout: true,
+                has_style: true,
+                has_paint: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_contain_values() {
+        assert_eq!(parse_contain("").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("auto").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("none layout").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("strict paint").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("content style").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("size inline-size").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("layout layout").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("style style").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("paint paint").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("size, paint").kind, CssContainValueKind::Invalid);
+        assert_eq!(parse_contain("size nonsense").kind, CssContainValueKind::Invalid);
     }
 
     #[test]
