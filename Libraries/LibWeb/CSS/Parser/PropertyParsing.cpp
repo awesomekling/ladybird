@@ -228,6 +228,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontStyle); parsed.has_value())
         return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontKerningValue); parsed.has_value())
+        return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontOpticalSizingValue); parsed.has_value())
+        return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontWeightAbsolute); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::FontWidthCss3); parsed.has_value())

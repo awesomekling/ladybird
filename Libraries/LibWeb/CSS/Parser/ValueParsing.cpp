@@ -5201,6 +5201,10 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_flex_value(tokens, infinite_range);
     case ValueType::FontStyle:
         return parse_font_style_value(tokens);
+    case ValueType::FontKerningValue:
+        return parse_font_kerning_value_value(tokens);
+    case ValueType::FontOpticalSizingValue:
+        return parse_font_optical_sizing_value_value(tokens);
     case ValueType::FontWeightAbsolute:
         return parse_font_weight_absolute_value(tokens);
     case ValueType::FontWidthCss3:

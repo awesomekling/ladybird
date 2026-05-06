@@ -39,6 +39,10 @@ Optional<ValueType> value_type_from_string(StringView string)
         return ValueType::FitContent;
     if (string.equals_ignoring_ascii_case("flex"sv))
         return ValueType::Flex;
+    if (string.equals_ignoring_ascii_case("font-kerning-value"sv))
+        return ValueType::FontKerningValue;
+    if (string.equals_ignoring_ascii_case("font-optical-sizing-value"sv))
+        return ValueType::FontOpticalSizingValue;
     if (string.equals_ignoring_ascii_case("font-variant-alternates"sv))
         return ValueType::FontVariantAlternates;
     if (string.equals_ignoring_ascii_case("font-weight-absolute"sv))
@@ -145,6 +149,10 @@ StringView value_type_to_string(ValueType value_type)
         return "Flex"sv;
     case Web::CSS::ValueType::FontStyle:
         return "FontStyle"sv;
+    case Web::CSS::ValueType::FontKerningValue:
+        return "FontKerningValue"sv;
+    case Web::CSS::ValueType::FontOpticalSizingValue:
+        return "FontOpticalSizingValue"sv;
     case Web::CSS::ValueType::FontWeightAbsolute:
         return "FontWeightAbsolute"sv;
     case Web::CSS::ValueType::FontWidthCss3:

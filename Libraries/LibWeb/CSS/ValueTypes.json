@@ -1,4 +1,36 @@
 {
+    "<font-kerning-value>": {
+        "spec": "https://drafts.csswg.org/css-fonts-4/#font-kerning-prop",
+        "grammar": "auto | normal | none",
+        "branches": [
+            {
+                "name": "Auto",
+                "syntax": { "type": "ident", "value": "auto" }
+            },
+            {
+                "name": "Normal",
+                "syntax": { "type": "ident", "value": "normal" }
+            },
+            {
+                "name": "None",
+                "syntax": { "type": "ident", "value": "none" }
+            }
+        ]
+    },
+    "<font-optical-sizing-value>": {
+        "spec": "https://drafts.csswg.org/css-fonts-4/#font-optical-sizing-def",
+        "grammar": "auto | none",
+        "branches": [
+            {
+                "name": "Auto",
+                "syntax": { "type": "ident", "value": "auto" }
+            },
+            {
+                "name": "None",
+                "syntax": { "type": "ident", "value": "none" }
+            }
+        ]
+    },
     "<font-variant-caps-value>": {
         "spec": "https://drafts.csswg.org/css-fonts-4/#font-variant-caps-prop",
         "grammar": "normal | small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps",

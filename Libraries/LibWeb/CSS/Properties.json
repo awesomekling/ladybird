@@ -2037,7 +2037,7 @@
     "initial": "auto",
     "requires-computation": "never",
     "valid-types": [
-      "font-kerning"
+      "font-kerning-value"
     ]
   },
   "font-language-override": {
@@ -2058,7 +2058,7 @@
     "initial": "auto",
     "requires-computation": "never",
     "valid-types": [
-      "font-optical-sizing"
+      "font-optical-sizing-value"
     ]
   },
   "font-size": {

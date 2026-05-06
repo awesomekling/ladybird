@@ -30,6 +30,8 @@ enum class ValueType : u8 {
     FitContent,
     Flex,
     FontStyle,
+    FontKerningValue,
+    FontOpticalSizingValue,
     FontWeightAbsolute,
     FontWidthCss3,
     FontVariantAlternates,

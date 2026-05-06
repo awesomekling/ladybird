@@ -744,6 +744,11 @@ pub struct CssMediaQuery {
 #[repr(C)]
 pub enum CssValueTypeSyntaxKind {
     Invalid,
+    FontKerningValueAuto,
+    FontKerningValueNormal,
+    FontKerningValueNone,
+    FontOpticalSizingValueAuto,
+    FontOpticalSizingValueNone,
     FontVariantCapsValueNormal,
     FontVariantCapsValueSmallCaps,
     FontVariantCapsValueAllSmallCaps,
@@ -7858,6 +7863,18 @@ mod tests {
         assert_eq!(
             parse_value_type("super", ValueTypeId::FontVariantPositionValue),
             CssValueTypeSyntaxKind::FontVariantPositionValueSuper
+        );
+    }
+
+    #[test]
+    fn parses_font_keyword_syntax_nodes() {
+        assert_eq!(
+            parse_value_type("normal", ValueTypeId::FontKerningValue),
+            CssValueTypeSyntaxKind::FontKerningValueNormal
+        );
+        assert_eq!(
+            parse_value_type("none", ValueTypeId::FontOpticalSizingValue),
+            CssValueTypeSyntaxKind::FontOpticalSizingValueNone
         );
     }
 
