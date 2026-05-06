@@ -2633,22 +2633,38 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
 RefPtr<StyleValue const> Parser::parse_font_family_value(TokenStream<ComponentValue>& tokens)
 {
     // [ <family-name> | <generic-family> ]#
-    return parse_comma_separated_value_list(tokens, [this](auto& inner_tokens) -> RefPtr<StyleValue const> {
-        inner_tokens.discard_whitespace();
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-        // <generic-family>
-        if (inner_tokens.next_token().is(Token::Type::Ident)) {
-            auto maybe_keyword = keyword_from_string(inner_tokens.next_token().token().ident());
-            if (maybe_keyword.has_value() && keyword_to_generic_font_family(maybe_keyword.value()).has_value()) {
-                inner_tokens.discard_a_token(); // Ident
-                inner_tokens.discard_whitespace();
-                return KeywordStyleValue::create(maybe_keyword.value());
-            }
+    auto serialized_font_family = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_family = RustComponentValueParser::parse_font_family_value(serialized_font_family.bytes_as_string_view(), "utf-8"sv);
+    if (!font_family.has_value())
+        return nullptr;
+
+    StyleValueVector values;
+    values.ensure_capacity(font_family->size());
+    for (auto const& family_value : *font_family) {
+        switch (family_value.kind) {
+        case FFI::CssFontFamilyValueKind::Generic: {
+            auto maybe_keyword = keyword_from_string(family_value.value);
+            if (!maybe_keyword.has_value() || !keyword_to_generic_font_family(*maybe_keyword).has_value())
+                return nullptr;
+            values.append(KeywordStyleValue::create(*maybe_keyword));
+            break;
         }
+        case FFI::CssFontFamilyValueKind::FamilyName:
+            if (family_value.is_string)
+                values.append(StringStyleValue::create(family_value.value));
+            else
+                values.append(CustomIdentStyleValue::create(family_value.value));
+            break;
+        }
+    }
 
-        // <family-name>
-        return parse_family_name_value(inner_tokens);
-    });
+    transaction.commit();
+    return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
 }
 
 RefPtr<StyleValue const> Parser::parse_font_language_override_value(TokenStream<ComponentValue>& tokens)

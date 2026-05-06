@@ -23,7 +23,7 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontFamilyValueKind,
     CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaFeature, CssMediaFeatureComparison,
     CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
     CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
@@ -717,6 +717,47 @@ pub unsafe extern "C" fn rust_css_parse_font_variation_settings(
                     );
                 },
             )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_family_value(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    family_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontFamilyValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+        is_string: bool,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_family_value(input, |family_value| match family_value {
+                css_parser::FontFamilyValue::Generic(value) => {
+                    family_callback(ctx, CssFontFamilyValueKind::Generic, value.as_ptr(), value.len(), false);
+                }
+                css_parser::FontFamilyValue::FamilyName(family_name) => {
+                    family_callback(
+                        ctx,
+                        CssFontFamilyValueKind::FamilyName,
+                        family_name.name.as_ptr(),
+                        family_name.name.len(),
+                        family_name.is_string,
+                    );
+                }
+            })
         })
     }
 }

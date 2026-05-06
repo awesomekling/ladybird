@@ -1517,6 +1517,31 @@ Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::p
     return parse_open_type_settings_impl(input, encoding, true);
 }
 
+Optional<Vector<RustComponentValueParser::FontFamilyValue>> RustComponentValueParser::parse_font_family_value(StringView input, StringView encoding)
+{
+    Vector<FontFamilyValue> family_values;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_family_value(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &family_values,
+        [](void* raw_family_values, FFI::CssFontFamilyValueKind kind, u8 const* value_ptr, size_t value_len, bool is_string) {
+            auto& family_values = *static_cast<Vector<FontFamilyValue>*>(raw_family_values);
+            family_values.append({
+                .kind = kind,
+                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                .is_string = is_string,
+            });
+        });
+
+    if (!parsed)
+        return {};
+
+    return family_values;
+}
+
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)
 {
     Optional<FlyString> name;

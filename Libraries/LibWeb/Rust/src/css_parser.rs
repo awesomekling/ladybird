@@ -158,6 +158,12 @@ enum OpenTypeSettings {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum FontFamilyValue {
+    Generic(String),
+    FamilyName(FamilyName),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpression {
     Not(Box<BooleanExpression>),
     Parens(Box<BooleanExpression>),
@@ -453,6 +459,13 @@ pub enum CssFontTech {
 pub enum CssFontLanguageOverrideKind {
     Normal,
     String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontFamilyValueKind {
+    Generic,
+    FamilyName,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1114,6 +1127,35 @@ where
         &mut settings_callback,
         &mut tagged_value_callback,
     );
+    true
+}
+
+pub(crate) fn parse_a_font_family_value<F>(filtered_input: &[u8], mut family_callback: F) -> bool
+where
+    F: FnMut(&FontFamilyValue),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let groups = parser.parse_a_comma_separated_list_of_component_values();
+    if groups.is_empty() {
+        return false;
+    }
+
+    let mut family_values = Vec::with_capacity(groups.len());
+    for group in groups {
+        let mut parser = ComponentValueParser::new(group);
+        let Some(family_value) = parser.parse_a_font_family_item() else {
+            return false;
+        };
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return false;
+        }
+        family_values.push(family_value);
+    }
+
+    for family_value in &family_values {
+        family_callback(family_value);
+    }
     true
 }
 
@@ -3401,6 +3443,27 @@ impl ComponentValueParser {
         self.index = self.component_values.len();
 
         Some(OpenTypeSettings::TagValues(tag_values))
+    }
+
+    // https://drafts.csswg.org/css-fonts-4/#font-family-prop
+    fn parse_a_font_family_item(&mut self) -> Option<FontFamilyValue> {
+        // [ <family-name> | <generic-family> ]#
+        self.discard_whitespace();
+
+        // <generic-family>
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+            && matches_generic_font_family_keyword(value)
+        {
+            let generic_family = value.to_ascii_lowercase();
+            self.index += 1;
+            return Some(FontFamilyValue::Generic(generic_family));
+        }
+
+        // <family-name>
+        self.parse_a_family_name().map(FontFamilyValue::FamilyName)
     }
 
     // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
@@ -5924,12 +5987,13 @@ mod tests {
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaQuery,
         CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style_name,
-        parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
         parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source,
         parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
@@ -6172,6 +6236,14 @@ mod tests {
                 tag_values,
             )
         })
+    }
+
+    fn parse_font_family_value(input: &str) -> Option<Vec<FontFamilyValue>> {
+        let mut family_values = Vec::new();
+        let parsed = parse_a_font_family_value(input.as_bytes(), |family_value| {
+            family_values.push(family_value.clone());
+        });
+        parsed.then_some(family_values)
     }
 
     fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
@@ -7205,6 +7277,44 @@ mod tests {
         assert_eq!(parse_font_variation_settings("\"wgt\" 700"), None);
         assert_eq!(parse_font_variation_settings("\"wght\""), None);
         assert_eq!(parse_font_variation_settings("\"wght\" 700,"), None);
+    }
+
+    #[test]
+    fn parses_font_family_values() {
+        assert_eq!(
+            parse_font_family_value("serif, Helvetica, \"Bongo Sans\""),
+            Some(vec![
+                FontFamilyValue::Generic("serif".to_string()),
+                FontFamilyValue::FamilyName(FamilyName {
+                    name: "Helvetica".to_string(),
+                    is_string: false,
+                }),
+                FontFamilyValue::FamilyName(FamilyName {
+                    name: "Bongo Sans".to_string(),
+                    is_string: true,
+                }),
+            ])
+        );
+        assert_eq!(
+            parse_font_family_value("ui-sans-serif, Great Vibes"),
+            Some(vec![
+                FontFamilyValue::Generic("ui-sans-serif".to_string()),
+                FontFamilyValue::FamilyName(FamilyName {
+                    name: "Great Vibes".to_string(),
+                    is_string: false,
+                }),
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_family_values() {
+        assert_eq!(parse_font_family_value(""), None);
+        assert_eq!(parse_font_family_value("cursive serif"), None);
+        assert_eq!(parse_font_family_value("Red/Black, sans-serif"), None);
+        assert_eq!(parse_font_family_value("\"Lucida\" Grande, sans-serif"), None);
+        assert_eq!(parse_font_family_value("Ahem!, sans-serif"), None);
+        assert_eq!(parse_font_family_value("Ahem,"), None);
     }
 
     #[test]
