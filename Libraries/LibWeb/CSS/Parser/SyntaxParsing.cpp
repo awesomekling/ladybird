@@ -69,34 +69,16 @@ static Optional<String> serialize_component_values_for_reparsing(ReadonlySpan<Co
     return builder.to_string_without_validation();
 }
 
-static bool consume_syntax_component_candidate_for_rust_reparsing(TokenStream<ComponentValue>& tokens)
+static bool consume_serialized_component_values(TokenStream<ComponentValue>& tokens, size_t byte_length)
 {
-    // <ident>
-    if (tokens.next_token().is(Token::Type::Ident)) {
-        tokens.discard_a_token();
-        if (tokens.next_token().is_delim('#') || tokens.next_token().is_delim('+'))
-            tokens.discard_a_token();
-        return true;
-    }
-
-    // '<' <syntax-type-name> '>'
-    if (tokens.next_token().is_delim('<')) {
-        tokens.discard_a_token(); // '<'
-
-        if (tokens.is_empty())
+    StringBuilder builder;
+    while (builder.length() < byte_length && tokens.has_next_token()) {
+        if (!serialize_component_value_for_reparsing(builder, tokens.next_token()))
             return false;
         tokens.discard_a_token();
-
-        if (tokens.is_empty())
-            return false;
-        tokens.discard_a_token();
-
-        if (tokens.next_token().is_delim('#') || tokens.next_token().is_delim('+'))
-            tokens.discard_a_token();
-        return true;
     }
 
-    return false;
+    return builder.length() == byte_length;
 }
 
 OwnPtr<SyntaxNode> parse_syntax_component(TokenStream<ComponentValue>& tokens, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
@@ -107,21 +89,21 @@ OwnPtr<SyntaxNode> parse_syntax_component(TokenStream<ComponentValue>& tokens, L
     auto transaction = tokens.begin_transaction();
 
     tokens.discard_whitespace();
-    auto component_start = tokens.current_index();
 
-    if (!consume_syntax_component_candidate_for_rust_reparsing(tokens))
-        return nullptr;
-
-    auto serialized_syntax = serialize_component_values_for_reparsing(tokens.tokens_since(component_start));
+    auto serialized_syntax = serialize_component_values_for_reparsing(tokens.remaining_tokens());
     if (!serialized_syntax.has_value())
         return nullptr;
 
-    if (auto syntax_component = RustComponentValueParser::parse_as_syntax(serialized_syntax->bytes_as_string_view(), "utf-8"sv, limit_single_component_ident_to_custom_ident)) {
-        transaction.commit();
-        return syntax_component;
-    }
+    auto syntax_component = RustComponentValueParser::parse_syntax_component(serialized_syntax->bytes_as_string_view(), "utf-8"sv, limit_single_component_ident_to_custom_ident);
+    if (!syntax_component.has_value())
+        return nullptr;
 
-    return nullptr;
+    auto component = syntax_component.release_value();
+    if (!consume_serialized_component_values(tokens, component.consumed_byte_length))
+        return nullptr;
+
+    transaction.commit();
+    return component.syntax.release_nonnull();
 }
 
 // https://drafts.csswg.org/css-values-5/#typedef-syntax

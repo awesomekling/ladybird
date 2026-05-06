@@ -1450,6 +1450,37 @@ pub(crate) fn parse_as_syntax<C>(
     emit_syntax_node(&syntax_node, &mut callback);
 }
 
+pub(crate) fn parse_syntax_component_prefix<C>(
+    filtered_input: &[u8],
+    limit_single_component_ident_to_custom_ident: bool,
+    mut callback: C,
+) -> usize
+where
+    C: FnMut(CssSyntaxNode),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(syntax_node) = parse_syntax_component(
+        &mut parser,
+        limit_single_component_ident_to_custom_ident,
+        Some(filtered_input_string),
+    ) else {
+        callback(CssSyntaxNode::new(CssSyntaxNodeKind::Invalid));
+        return 0;
+    };
+
+    let Some(consumed_input) =
+        serialize_component_values_for_reparsing(&parser.component_values[..parser.index], filtered_input_string)
+    else {
+        callback(CssSyntaxNode::new(CssSyntaxNodeKind::Invalid));
+        return 0;
+    };
+
+    emit_syntax_node(&syntax_node, &mut callback);
+    consumed_input.len()
+}
+
 pub(crate) fn parse_a_supports_condition<E, C>(
     filtered_input: &[u8],
     mut event_callback: E,

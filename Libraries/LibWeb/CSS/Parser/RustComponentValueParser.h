@@ -238,6 +238,11 @@ public:
         size_t count { 0 };
     };
 
+    struct SyntaxComponent {
+        OwnPtr<SyntaxNode> syntax;
+        size_t consumed_byte_length { 0 };
+    };
+
     static Optional<ComponentValue> parse_a_component_value(StringView input, StringView encoding);
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
@@ -248,6 +253,7 @@ public:
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
+    static Optional<SyntaxComponent> parse_syntax_component(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static bool parse_empty_prelude(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
