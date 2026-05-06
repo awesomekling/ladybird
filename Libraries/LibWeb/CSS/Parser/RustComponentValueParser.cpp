@@ -1986,6 +1986,14 @@ bool RustComponentValueParser::parse_length_descriptor(StringView input, StringV
     return FFI::rust_css_parse_length_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+bool RustComponentValueParser::parse_positive_percentage_descriptor(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_positive_percentage_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(StringView input, StringView encoding)
 {
     Optional<FFI::CssCropOrCrossKind> kind;

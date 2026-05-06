@@ -517,7 +517,24 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     return page_size ? page_size.release_nonnull() : orientation.release_nonnull();
                 }
                 case DescriptorMetadata::ValueType::PositivePercentage: {
-                    if (auto percentage_value = parse_percentage_value(tokens, non_negative_range)) {
+                    // https://drafts.csswg.org/css-values-4/#percentages
+                    // <percentage [0,∞]>
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_percentage = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_positive_percentage_descriptor(serialized_percentage.bytes_as_string_view(), "utf-8"sv))
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> percentage_tokens { component_values };
+
+                    if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
+                        percentage_tokens.discard_whitespace();
+                        if (percentage_tokens.has_next_token())
+                            return nullptr;
+
                         if (percentage_value->is_percentage())
                             return percentage_value.release_nonnull();
 

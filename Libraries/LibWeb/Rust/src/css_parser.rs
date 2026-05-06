@@ -1787,6 +1787,16 @@ pub(crate) fn parse_length_descriptor(filtered_input: &[u8]) -> bool {
     matches!(component_values, [component_value] if component_value_parse_as_length_descriptor(component_value))
 }
 
+pub(crate) fn parse_positive_percentage_descriptor(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-values-4/#percentages
+    // <percentage [0,∞]>
+    matches!(component_values, [component_value] if component_value_parse_as_positive_percentage_descriptor(component_value))
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -6197,6 +6207,19 @@ fn component_value_parse_as_length_descriptor(component_value: &ComponentValue) 
     }
 }
 
+fn component_value_parse_as_positive_percentage_descriptor(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => number.value() >= 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
 fn is_math_function_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -7675,7 +7698,7 @@ mod tests {
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
         parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_string_descriptor, strip_whitespace,
+        parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8104,6 +8127,10 @@ mod tests {
 
     fn parse_length_descriptor_value(input: &str) -> bool {
         parse_length_descriptor(input.as_bytes())
+    }
+
+    fn parse_positive_percentage_descriptor_value(input: &str) -> bool {
+        parse_positive_percentage_descriptor(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -9837,6 +9864,22 @@ mod tests {
         assert!(!parse_length_descriptor_value("1px 2px"));
         assert!(!parse_length_descriptor_value("auto"));
         assert!(!parse_length_descriptor_value("foo(1px)"));
+    }
+
+    #[test]
+    fn parses_positive_percentage_descriptors() {
+        assert!(parse_positive_percentage_descriptor_value("0%"));
+        assert!(parse_positive_percentage_descriptor_value("100%"));
+        assert!(parse_positive_percentage_descriptor_value("calc(50% + 25%)"));
+    }
+
+    #[test]
+    fn rejects_invalid_positive_percentage_descriptors() {
+        assert!(!parse_positive_percentage_descriptor_value(""));
+        assert!(!parse_positive_percentage_descriptor_value("-1%"));
+        assert!(!parse_positive_percentage_descriptor_value("1px"));
+        assert!(!parse_positive_percentage_descriptor_value("1% 2%"));
+        assert!(!parse_positive_percentage_descriptor_value("foo(1%)"));
     }
 
     #[test]
