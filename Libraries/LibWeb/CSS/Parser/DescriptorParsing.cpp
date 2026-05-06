@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/CSS/Enums.h>
+#include <LibWeb/CSS/FontFace.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
@@ -465,9 +466,48 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     auto source_lists = parse_a_comma_separated_list_of_component_values(tokens);
                     StyleValueVector valid_sources;
                     for (auto const& source_list : source_lists) {
-                        TokenStream source_tokens { source_list };
-                        if (auto font_source = parse_font_source_value(source_tokens); font_source && !source_tokens.has_next_token())
-                            valid_sources.append(font_source.release_nonnull());
+                        // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
+                        // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
+                        auto serialized_font_source = serialize_component_values_for_reparsing(source_list);
+                        auto font_source = RustComponentValueParser::parse_a_font_source(serialized_font_source.bytes_as_string_view(), "utf-8"sv);
+                        if (!font_source.has_value())
+                            continue;
+
+                        if (font_source->format.has_value() && !font_format_is_supported(*font_source->format)) {
+                            ErrorReporter::the().report(InvalidValueError {
+                                .value_type = "<font-src>"_fly_string,
+                                .value_string = serialized_font_source,
+                                .description = MUST(String::formatted("format({}) is not supported.", *font_source->format)),
+                            });
+                            continue;
+                        }
+
+                        bool supports_all_tech = true;
+                        for (auto font_tech : font_source->tech) {
+                            if (font_tech_is_supported(font_tech))
+                                continue;
+
+                            ErrorReporter::the().report(InvalidValueError {
+                                .value_type = "<font-src>"_fly_string,
+                                .value_string = serialized_font_source,
+                                .description = MUST(String::formatted("tech({}) is not supported.", to_string(font_tech))),
+                            });
+                            supports_all_tech = false;
+                            break;
+                        }
+                        if (!supports_all_tech)
+                            continue;
+
+                        auto source = font_source->source.visit(
+                            [](RustComponentValueParser::FamilyName const& family_name) -> FontSourceStyleValue::Source {
+                                if (family_name.is_string)
+                                    return FontSourceStyleValue::Local { StringStyleValue::create(family_name.name) };
+                                return FontSourceStyleValue::Local { CustomIdentStyleValue::create(family_name.name) };
+                            },
+                            [](URL const& url) -> FontSourceStyleValue::Source {
+                                return url;
+                            });
+                        valid_sources.append(FontSourceStyleValue::create(move(source), move(font_source->format), move(font_source->tech)));
                     }
                     if (valid_sources.is_empty())
                         return nullptr;
