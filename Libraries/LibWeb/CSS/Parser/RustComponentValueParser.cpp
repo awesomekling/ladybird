@@ -1601,6 +1601,68 @@ Optional<URL> RustComponentValueParser::parse_an_import_url(StringView input, St
     return parse_url_with_rust(input, encoding, FFI::rust_css_parse_import_url);
 }
 
+Optional<RustComponentValueParser::ImportRulePrelude> RustComponentValueParser::parse_an_import_rule_prelude(StringView input, StringView encoding)
+{
+    struct ImportRulePreludeBuilder {
+        Optional<URL::Type> url_function_type;
+        Optional<String> url;
+        Vector<RequestURLModifier> request_url_modifiers;
+        Optional<FlyString> layer;
+        Optional<String> supports;
+        Optional<String> media_query_list;
+    };
+
+    ImportRulePreludeBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_import_rule_prelude(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssUrlFunction const* rust_url_function) {
+            auto& builder = *static_cast<ImportRulePreludeBuilder*>(raw_builder);
+            builder.url_function_type = url_function_type_from_rust(rust_url_function->function_type);
+            builder.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
+        },
+        [](void* raw_builder, FFI::CssUrlModifier const* rust_modifier) {
+            auto& builder = *static_cast<ImportRulePreludeBuilder*>(raw_builder);
+            switch (rust_modifier->kind) {
+            case FFI::CssUrlModifierKind::CrossOrigin:
+                builder.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
+                break;
+            case FFI::CssUrlModifierKind::Integrity:
+                builder.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
+                break;
+            case FFI::CssUrlModifierKind::ReferrerPolicy:
+                builder.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
+                break;
+            }
+        },
+        [](void* raw_builder, u8 const* layer_ptr, size_t layer_len) {
+            auto& builder = *static_cast<ImportRulePreludeBuilder*>(raw_builder);
+            builder.layer = fly_string_from_ffi_bytes(layer_ptr, layer_len);
+        },
+        [](void* raw_builder, u8 const* supports_ptr, size_t supports_len) {
+            auto& builder = *static_cast<ImportRulePreludeBuilder*>(raw_builder);
+            builder.supports = string_from_ffi_bytes(supports_ptr, supports_len);
+        },
+        [](void* raw_builder, u8 const* media_query_list_ptr, size_t media_query_list_len) {
+            auto& builder = *static_cast<ImportRulePreludeBuilder*>(raw_builder);
+            builder.media_query_list = string_from_ffi_bytes(media_query_list_ptr, media_query_list_len);
+        });
+
+    if (!parsed || !builder.url_function_type.has_value() || !builder.url.has_value() || !builder.media_query_list.has_value())
+        return {};
+
+    return ImportRulePrelude {
+        .url = URL { builder.url.release_value(), builder.url_function_type.release_value(), move(builder.request_url_modifiers) },
+        .layer = move(builder.layer),
+        .supports = move(builder.supports),
+        .media_query_list = builder.media_query_list.release_value(),
+    };
+}
+
 struct RustFontSourceBuilder {
     Optional<FFI::CssFontSourceKind> source_kind;
     Optional<RustComponentValueParser::FamilyName> family_name;

@@ -227,12 +227,10 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     //
     // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
     //                      <media-query-list>?
-    TokenStream tokens { rule.prelude };
-
     if (rule.is_block_rule) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = tokens.dump_string(),
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Must be a statement, not a block."_string,
         });
         return {};
@@ -241,61 +239,31 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     if (rule.prelude.is_empty()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = tokens.dump_string(),
+            .prelude = {},
             .description = "Empty prelude."_string,
         });
         return {};
     }
 
-    tokens.discard_whitespace();
-
-    Optional<URL> url;
-    if (tokens.has_next_token()) {
-        auto const& component_value = tokens.next_token();
-        auto serialized_import_url = serialize_component_values_for_reparsing({ &component_value, 1 });
-        url = RustComponentValueParser::parse_an_import_url(serialized_import_url.bytes_as_string_view(), "utf-8"sv);
-        if (url.has_value())
-            tokens.discard_a_token();
-    }
-
-    if (!url.has_value()) {
+    auto serialized_import_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    auto import_prelude = RustComponentValueParser::parse_an_import_rule_prelude(serialized_import_prelude.bytes_as_string_view(), "utf-8"sv);
+    if (!import_prelude.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = tokens.dump_string(),
-            .description = MUST(String::formatted("Unable to parse `{}` as URL.", tokens.next_token().to_debug_string())),
+            .prelude = serialized_import_prelude,
+            .description = "Unable to parse prelude."_string,
         });
         return {};
     }
 
-    tokens.discard_whitespace();
-    Optional<FlyString> layer;
-    // [ layer | layer(<layer-name>) ]?
-    if (tokens.has_next_token()) {
-        auto const& component_value = tokens.next_token();
-        auto serialized_import_layer = serialize_component_values_for_reparsing({ &component_value, 1 });
-        auto name = RustComponentValueParser::parse_an_import_layer(serialized_import_layer.bytes_as_string_view(), "utf-8"sv);
-        if (name.has_value()) {
-            tokens.discard_a_token();
-            layer = name.release_value();
-        } else if (component_value.is_function("layer"sv)) {
-            ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                .rule_name = "@import"_fly_string,
-                .prelude = tokens.dump_string(),
-                .description = MUST(String::formatted("Unable to parse `{}` as a valid layer.", component_value.function().original_source_text())),
-            });
-        }
-    }
-
     // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
     //                      <media-query-list>?
-    tokens.discard_whitespace();
     RefPtr<Supports> supports {};
-    if (tokens.next_token().is_function("supports"sv)) {
-        auto component_value = tokens.consume_a_token();
-        auto serialized_supports = serialize_component_values_for_reparsing(component_value.function().value);
-        supports = parse_a_supports_from_string(serialized_supports.bytes_as_string_view(), "utf-8"sv);
-        TokenStream supports_tokens { component_value.function().value };
+    if (import_prelude->supports.has_value()) {
+        supports = parse_a_supports_from_string(import_prelude->supports->bytes_as_string_view(), "utf-8"sv);
         if (!supports) {
+            auto supports_component_values = RustComponentValueParser::parse_a_list_of_component_values(import_prelude->supports->bytes_as_string_view(), "utf-8"sv);
+            TokenStream supports_tokens { supports_component_values };
             m_rule_context.append(RuleContext::SupportsCondition);
             auto supports_declaration = parse_supports_declaration(supports_tokens);
             m_rule_context.take_last();
@@ -304,10 +272,9 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
         }
     }
 
-    auto serialized_media_query_list = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.bytes_as_string_view(), "utf-8"sv);
+    auto media_query_list = parse_a_media_query_list_from_string(import_prelude->media_query_list.bytes_as_string_view(), "utf-8"sv);
 
-    return CSSImportRule::create(realm(), url.release_value(), const_cast<DOM::Document*>(m_document.ptr()), move(layer), move(supports), MediaList::create(realm(), move(media_query_list)));
+    return CSSImportRule::create(realm(), move(import_prelude->url), const_cast<DOM::Document*>(m_document.ptr()), move(import_prelude->layer), move(supports), MediaList::create(realm(), move(media_query_list)));
 }
 
 template<typename NestedDeclarationsRule>

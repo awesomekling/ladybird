@@ -1812,6 +1812,79 @@ where
     true
 }
 
+pub(crate) fn parse_import_rule_prelude<U, M, L, S, Q>(
+    filtered_input: &[u8],
+    mut url_callback: U,
+    mut modifier_callback: M,
+    mut layer_callback: L,
+    mut supports_callback: S,
+    mut media_query_list_callback: Q,
+) -> bool
+where
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+    L: FnMut(&str),
+    S: FnMut(&str),
+    Q: FnMut(&str),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-cascade-5/#at-import
+    // @import [ <url> | <string> ]
+    //         [ layer | layer(<layer-name>) ]?
+    //         <import-conditions> ;
+    //
+    // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
+    //                      <media-query-list>?
+    let Some(url_function) = parser.parse_an_import_url_prefix() else {
+        return false;
+    };
+
+    url_callback(CssUrlFunction {
+        function_type: url_function.function_type,
+        url_ptr: url_function.url.as_ptr(),
+        url_len: url_function.url.len(),
+    });
+    for modifier in &url_function.request_url_modifiers {
+        modifier_callback(modifier.as_ffi());
+    }
+
+    // [ layer | layer(<layer-name>) ]?
+    parser.discard_whitespace();
+    let saved_index = parser.index;
+    if let Some(layer_name) = parser.parse_an_import_layer_prefix() {
+        layer_callback(&layer_name);
+    } else {
+        parser.index = saved_index;
+    }
+
+    // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
+    //                      <media-query-list>?
+    parser.discard_whitespace();
+    if let Some(ComponentValue::Function(function)) = parser.next_component_value()
+        && function.name.eq_ignore_ascii_case("supports")
+    {
+        let Some(serialized_supports) =
+            serialize_component_values_for_reparsing(&function.value, filtered_input_string)
+        else {
+            return false;
+        };
+        parser.index += 1;
+        supports_callback(&serialized_supports);
+    }
+
+    let Some(serialized_media_query_list) =
+        serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input_string)
+    else {
+        return false;
+    };
+    media_query_list_callback(&serialized_media_query_list);
+    true
+}
+
 pub(crate) fn parse_a_font_source<S, U, M, F, T>(
     filtered_input: &[u8],
     mut source_callback: S,
@@ -5998,6 +6071,18 @@ impl ComponentValueParser {
     // https://drafts.csswg.org/css-cascade-5/#at-import
     fn parse_an_import_url(&mut self) -> Option<UrlFunction> {
         // @import [ <url> | <string> ]
+        let url_function = self.parse_an_import_url_prefix()?;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(url_function)
+    }
+
+    fn parse_an_import_url_prefix(&mut self) -> Option<UrlFunction> {
+        // @import [ <url> | <string> ]
         self.discard_whitespace();
 
         let url_function = match self.next_component_value()? {
@@ -6015,11 +6100,6 @@ impl ComponentValueParser {
             }
             _ => self.parse_a_url_function_component()?,
         };
-
-        self.discard_whitespace();
-        if self.has_next_component_value() {
-            return None;
-        }
 
         Some(url_function)
     }
@@ -6690,6 +6770,18 @@ impl ComponentValueParser {
     // https://drafts.csswg.org/css-cascade-5/#at-import
     fn parse_an_import_layer(&mut self) -> Option<String> {
         // [ layer | layer(<layer-name>) ]?
+        let layer = self.parse_an_import_layer_prefix()?;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(layer)
+    }
+
+    fn parse_an_import_layer_prefix(&mut self) -> Option<String> {
+        // [ layer | layer(<layer-name>) ]?
         self.discard_whitespace();
 
         let layer = match self.consume_the_next_component_value()? {
@@ -6708,11 +6800,6 @@ impl ComponentValueParser {
             }
             _ => return None,
         };
-
-        self.discard_whitespace();
-        if self.has_next_component_value() {
-            return None;
-        }
 
         Some(layer)
     }

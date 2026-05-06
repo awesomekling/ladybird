@@ -905,6 +905,53 @@ pub unsafe extern "C" fn rust_css_parse_import_url(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_import_rule_prelude(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    url_callback: unsafe extern "C" fn(ctx: *mut c_void, url_function: *const CssUrlFunction),
+    modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
+    layer_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
+    supports_callback: unsafe extern "C" fn(ctx: *mut c_void, supports_ptr: *const u8, supports_len: usize),
+    media_query_list_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_query_list_ptr: *const u8,
+        media_query_list_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_import_rule_prelude(
+                input,
+                |url_function| {
+                    url_callback(ctx, &raw const url_function);
+                },
+                |modifier| {
+                    modifier_callback(ctx, &raw const modifier);
+                },
+                |layer| {
+                    layer_callback(ctx, layer.as_ptr(), layer.len());
+                },
+                |supports| {
+                    supports_callback(ctx, supports.as_ptr(), supports.len());
+                },
+                |media_query_list| {
+                    media_query_list_callback(ctx, media_query_list.as_ptr(), media_query_list.len());
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_font_source(
     input: *const u8,
     input_len: usize,
