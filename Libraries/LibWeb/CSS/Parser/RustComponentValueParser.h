@@ -152,6 +152,16 @@ public:
         Vector<FlyString> names;
     };
 
+    struct TimelineNameItem {
+        FFI::CssTimelineNameItemKind kind;
+        FlyString name;
+    };
+
+    struct TimelineName {
+        FFI::CssTimelineNameValueKind kind;
+        Vector<TimelineNameItem> names;
+    };
+
     struct Quotes {
         FFI::CssQuotesValueKind kind;
         Vector<FlyString> strings;
@@ -259,6 +269,7 @@ public:
     static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
+    static TimelineName parse_timeline_name(StringView input, StringView encoding);
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
     static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
     static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);

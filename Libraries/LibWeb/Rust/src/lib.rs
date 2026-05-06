@@ -37,11 +37,11 @@ pub use css_parser::{
     CssPositionVisibilityValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
     CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind,
+    CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword,
+    CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -954,6 +954,35 @@ pub unsafe extern "C" fn rust_css_parse_timeline_scope(
 
             css_parser::parse_timeline_scope_value(input, |name| {
                 name_callback(ctx, name.as_ptr(), name.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `name_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_timeline_name(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    name_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssTimelineNameItemKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
+) -> CssTimelineNameValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTimelineNameValueKind::Invalid;
+            };
+
+            css_parser::parse_timeline_name_value(input, |kind, name| {
+                name_callback(ctx, kind, name.as_ptr(), name.len());
             })
         })
     }

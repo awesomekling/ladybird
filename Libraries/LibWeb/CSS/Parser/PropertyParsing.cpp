@@ -626,6 +626,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_scrollbar_gutter_value(tokens); });
     case PropertyID::ShapeOutside:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shape_outside_value(tokens); });
+    case PropertyID::ScrollTimelineName:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::StrokeDasharray:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_stroke_dasharray_value(tokens); });
     case PropertyID::TextDecoration:
@@ -656,6 +658,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_scroll_timeline_value(tokens); });
     case PropertyID::ViewTimeline:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_view_timeline_value(tokens); });
+    case PropertyID::ViewTimelineName:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::ViewTransitionName:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_view_transition_name_value(tokens); });
     case PropertyID::WhiteSpace:
@@ -1064,6 +1068,42 @@ RefPtr<StyleValue const> Parser::parse_animation_name_value(TokenStream<Componen
                 break;
             case FFI::CssAnimationNameItemKind::String:
                 names.unchecked_append(StringStyleValue::create(name.value));
+                break;
+            }
+        }
+
+        transaction.commit();
+        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
+    }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+// https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-name
+// https://drafts.csswg.org/scroll-animations-1/#view-timeline-name
+RefPtr<StyleValue const> Parser::parse_timeline_name_value(TokenStream<ComponentValue>& tokens)
+{
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_timeline_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_timeline_name = RustComponentValueParser::parse_timeline_name(serialized_timeline_name.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_timeline_name.kind) {
+    case FFI::CssTimelineNameValueKind::Invalid:
+        return {};
+    case FFI::CssTimelineNameValueKind::List: {
+        StyleValueVector names;
+        names.ensure_capacity(parsed_timeline_name.names.size());
+        for (auto const& name : parsed_timeline_name.names) {
+            switch (name.kind) {
+            case FFI::CssTimelineNameItemKind::None:
+                names.unchecked_append(KeywordStyleValue::create(Keyword::None));
+                break;
+            case FFI::CssTimelineNameItemKind::DashedIdent:
+                names.unchecked_append(CustomIdentStyleValue::create(name.name));
                 break;
             }
         }
