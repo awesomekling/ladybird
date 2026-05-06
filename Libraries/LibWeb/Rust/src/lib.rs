@@ -27,7 +27,8 @@ pub use css_parser::{
     CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
     CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind,
     CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
-    CssValueTypeSyntaxKind,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -478,6 +479,37 @@ pub unsafe extern "C" fn rust_css_parse_unicode_range_list(
             css_parser::parse_a_unicode_range_list(input, |unicode_range| {
                 range_callback(ctx, &raw const unicode_range);
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_url_function(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    url_callback: unsafe extern "C" fn(ctx: *mut c_void, url_function: *const CssUrlFunction),
+    modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_url_function(
+                input,
+                |url_function| {
+                    url_callback(ctx, &raw const url_function);
+                },
+                |modifier| {
+                    modifier_callback(ctx, &raw const modifier);
+                },
+            )
         })
     }
 }

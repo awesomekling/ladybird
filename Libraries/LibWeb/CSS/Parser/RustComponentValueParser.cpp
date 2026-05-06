@@ -7,6 +7,7 @@
 #include <AK/StringBuilder.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/CSS/CharacterTypes.h>
+#include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
@@ -1224,6 +1225,93 @@ Optional<Vector<Gfx::UnicodeRange>> RustComponentValueParser::parse_a_unicode_ra
         return {};
 
     return unicode_ranges;
+}
+
+static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType function_type)
+{
+    switch (function_type) {
+    case FFI::CssUrlFunctionType::Url:
+        return URL::Type::Url;
+    case FFI::CssUrlFunctionType::Src:
+        return URL::Type::Src;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static CrossOriginModifierValue cross_origin_modifier_value_from_rust(FFI::CssUrlCrossOriginModifierValue value)
+{
+    switch (value) {
+    case FFI::CssUrlCrossOriginModifierValue::Anonymous:
+        return CrossOriginModifierValue::Anonymous;
+    case FFI::CssUrlCrossOriginModifierValue::UseCredentials:
+        return CrossOriginModifierValue::UseCredentials;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI::CssUrlReferrerPolicyModifierValue value)
+{
+    switch (value) {
+    case FFI::CssUrlReferrerPolicyModifierValue::NoReferrer:
+        return ReferrerPolicyModifierValue::NoReferrer;
+    case FFI::CssUrlReferrerPolicyModifierValue::NoReferrerWhenDowngrade:
+        return ReferrerPolicyModifierValue::NoReferrerWhenDowngrade;
+    case FFI::CssUrlReferrerPolicyModifierValue::SameOrigin:
+        return ReferrerPolicyModifierValue::SameOrigin;
+    case FFI::CssUrlReferrerPolicyModifierValue::Origin:
+        return ReferrerPolicyModifierValue::Origin;
+    case FFI::CssUrlReferrerPolicyModifierValue::StrictOrigin:
+        return ReferrerPolicyModifierValue::StrictOrigin;
+    case FFI::CssUrlReferrerPolicyModifierValue::OriginWhenCrossOrigin:
+        return ReferrerPolicyModifierValue::OriginWhenCrossOrigin;
+    case FFI::CssUrlReferrerPolicyModifierValue::StrictOriginWhenCrossOrigin:
+        return ReferrerPolicyModifierValue::StrictOriginWhenCrossOrigin;
+    case FFI::CssUrlReferrerPolicyModifierValue::UnsafeUrl:
+        return ReferrerPolicyModifierValue::UnsafeUrl;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+struct RustURLFunctionBuilder {
+    Optional<URL::Type> function_type;
+    Optional<String> url;
+    Vector<RequestURLModifier> request_url_modifiers;
+};
+
+Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, StringView encoding)
+{
+    RustURLFunctionBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_url_function(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssUrlFunction const* rust_url_function) {
+            auto& builder = *static_cast<RustURLFunctionBuilder*>(raw_builder);
+            builder.function_type = url_function_type_from_rust(rust_url_function->function_type);
+            builder.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
+        },
+        [](void* raw_builder, FFI::CssUrlModifier const* rust_modifier) {
+            auto& builder = *static_cast<RustURLFunctionBuilder*>(raw_builder);
+            switch (rust_modifier->kind) {
+            case FFI::CssUrlModifierKind::CrossOrigin:
+                builder.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
+                break;
+            case FFI::CssUrlModifierKind::Integrity:
+                builder.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
+                break;
+            case FFI::CssUrlModifierKind::ReferrerPolicy:
+                builder.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
+                break;
+            }
+        });
+
+    if (!parsed || !builder.function_type.has_value() || !builder.url.has_value())
+        return {};
+
+    return URL { builder.url.release_value(), builder.function_type.release_value(), move(builder.request_url_modifiers) };
 }
 
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)

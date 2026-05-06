@@ -79,6 +79,56 @@ pub(crate) struct Declaration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct UrlFunction {
+    function_type: CssUrlFunctionType,
+    url: String,
+    request_url_modifiers: Vec<UrlModifier>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum UrlModifier {
+    CrossOrigin(CssUrlCrossOriginModifierValue),
+    Integrity(String),
+    ReferrerPolicy(CssUrlReferrerPolicyModifierValue),
+}
+
+impl UrlModifier {
+    fn kind(&self) -> CssUrlModifierKind {
+        match self {
+            UrlModifier::CrossOrigin(_) => CssUrlModifierKind::CrossOrigin,
+            UrlModifier::Integrity(_) => CssUrlModifierKind::Integrity,
+            UrlModifier::ReferrerPolicy(_) => CssUrlModifierKind::ReferrerPolicy,
+        }
+    }
+
+    fn as_ffi(&self) -> CssUrlModifier {
+        match self {
+            UrlModifier::CrossOrigin(value) => CssUrlModifier {
+                kind: CssUrlModifierKind::CrossOrigin,
+                cross_origin_value: *value,
+                referrer_policy_value: CssUrlReferrerPolicyModifierValue::NoReferrer,
+                integrity_ptr: std::ptr::null(),
+                integrity_len: 0,
+            },
+            UrlModifier::Integrity(value) => CssUrlModifier {
+                kind: CssUrlModifierKind::Integrity,
+                cross_origin_value: CssUrlCrossOriginModifierValue::Anonymous,
+                referrer_policy_value: CssUrlReferrerPolicyModifierValue::NoReferrer,
+                integrity_ptr: value.as_ptr(),
+                integrity_len: value.len(),
+            },
+            UrlModifier::ReferrerPolicy(value) => CssUrlModifier {
+                kind: CssUrlModifierKind::ReferrerPolicy,
+                cross_origin_value: CssUrlCrossOriginModifierValue::Anonymous,
+                referrer_policy_value: *value,
+                integrity_ptr: std::ptr::null(),
+                integrity_len: 0,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpression {
     Not(Box<BooleanExpression>),
     Parens(Box<BooleanExpression>),
@@ -292,6 +342,57 @@ pub struct CssComponentValue {
 pub struct CssUnicodeRange {
     pub min_code_point: u32,
     pub max_code_point: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssUrlFunctionType {
+    Url,
+    Src,
+}
+
+#[repr(C)]
+pub struct CssUrlFunction {
+    pub function_type: CssUrlFunctionType,
+    pub url_ptr: *const u8,
+    pub url_len: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(C)]
+pub enum CssUrlModifierKind {
+    CrossOrigin,
+    Integrity,
+    ReferrerPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssUrlCrossOriginModifierValue {
+    Anonymous,
+    UseCredentials,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssUrlReferrerPolicyModifierValue {
+    NoReferrer,
+    NoReferrerWhenDowngrade,
+    SameOrigin,
+    Origin,
+    StrictOrigin,
+    OriginWhenCrossOrigin,
+    StrictOriginWhenCrossOrigin,
+    UnsafeUrl,
+}
+
+#[repr(C)]
+pub struct CssUrlModifier {
+    pub kind: CssUrlModifierKind,
+    pub cross_origin_value: CssUrlCrossOriginModifierValue,
+    pub referrer_policy_value: CssUrlReferrerPolicyModifierValue,
+    pub integrity_ptr: *const u8,
+    pub integrity_len: usize,
 }
 
 #[repr(C)]
@@ -764,6 +865,30 @@ where
 
     for unicode_range in unicode_ranges {
         range_callback(unicode_range);
+    }
+    true
+}
+
+pub(crate) fn parse_a_url_function<U, M>(filtered_input: &[u8], mut url_callback: U, mut modifier_callback: M) -> bool
+where
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(url_function) = parser.parse_a_url_function() else {
+        return false;
+    };
+
+    url_callback(CssUrlFunction {
+        function_type: url_function.function_type,
+        url_ptr: url_function.url.as_ptr(),
+        url_len: url_function.url.len(),
+    });
+    for modifier in &url_function.request_url_modifiers {
+        modifier_callback(modifier.as_ffi());
     }
     true
 }
@@ -1452,6 +1577,135 @@ fn parse_unicode_range_text(text: &str) -> Option<CssUnicodeRange> {
     let end_value = u32::from_str_radix(end_hex_digits, 16).ok()?;
 
     make_valid_unicode_range(start_value, end_value)
+}
+
+fn parse_url_or_src_function_contents(
+    function_type: CssUrlFunctionType,
+    component_values: &[ComponentValue],
+) -> Option<UrlFunction> {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::String { value: url },
+        ..
+    }) = parser.consume_the_next_component_value()?
+    else {
+        return None;
+    };
+    parser.discard_whitespace();
+
+    // NB: Currently <request-url-modifier> is the only kind of <url-modifier>
+    // https://drafts.csswg.org/css-values-5/#request-url-modifiers
+    // <request-url-modifier> = <cross-origin-modifier> | <integrity-modifier> | <referrer-policy-modifier>
+    let mut request_url_modifiers = Vec::new();
+    while parser.has_next_component_value() {
+        let modifier = parse_request_url_modifier(&parser.consume_the_next_component_value()?)?;
+
+        // AD-HOC: This isn't mentioned in the spec, but WPT expects modifiers to be unique (one per type).
+        // Spec issue: https://github.com/w3c/csswg-drafts/issues/12151
+        if request_url_modifiers
+            .iter()
+            .any(|existing_modifier: &UrlModifier| existing_modifier.kind() == modifier.kind())
+        {
+            return None;
+        }
+        request_url_modifiers.push(modifier);
+        parser.discard_whitespace();
+    }
+
+    // AD-HOC: This isn't mentioned in the spec, but WPT expects modifiers to be sorted alphabetically.
+    // Spec issue: https://github.com/w3c/csswg-drafts/issues/12151
+    request_url_modifiers.sort_by_key(UrlModifier::kind);
+
+    Some(UrlFunction {
+        function_type,
+        url,
+        request_url_modifiers,
+    })
+}
+
+fn parse_request_url_modifier(component_value: &ComponentValue) -> Option<UrlModifier> {
+    match component_value {
+        ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("cross-origin") => {
+            parse_cross_origin_modifier(function)
+        }
+        ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("integrity") => {
+            parse_integrity_modifier(function)
+        }
+        ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("referrer-policy") => {
+            parse_referrer_policy_modifier(function)
+        }
+        _ => None,
+    }
+}
+
+fn parse_cross_origin_modifier(function: &Function) -> Option<UrlModifier> {
+    // <cross-origin-modifier> = cross-origin(anonymous | use-credentials)
+    let ident = parse_single_ident_from_function(function)?;
+    let value = match ident.as_str() {
+        value if value.eq_ignore_ascii_case("anonymous") => CssUrlCrossOriginModifierValue::Anonymous,
+        value if value.eq_ignore_ascii_case("use-credentials") => CssUrlCrossOriginModifierValue::UseCredentials,
+        _ => return None,
+    };
+    Some(UrlModifier::CrossOrigin(value))
+}
+
+fn parse_integrity_modifier(function: &Function) -> Option<UrlModifier> {
+    // <integrity-modifier> = integrity(<string>)
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    parser.discard_whitespace();
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::String { value: integrity },
+        ..
+    }) = parser.consume_the_next_component_value()?
+    else {
+        return None;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+    Some(UrlModifier::Integrity(integrity))
+}
+
+fn parse_referrer_policy_modifier(function: &Function) -> Option<UrlModifier> {
+    // <referrer-policy-modifier> = (no-referrer | no-referrer-when-downgrade | same-origin | origin | strict-origin | origin-when-cross-origin | strict-origin-when-cross-origin | unsafe-url)
+    let ident = parse_single_ident_from_function(function)?;
+    let value = match ident.as_str() {
+        value if value.eq_ignore_ascii_case("no-referrer") => CssUrlReferrerPolicyModifierValue::NoReferrer,
+        value if value.eq_ignore_ascii_case("no-referrer-when-downgrade") => {
+            CssUrlReferrerPolicyModifierValue::NoReferrerWhenDowngrade
+        }
+        value if value.eq_ignore_ascii_case("same-origin") => CssUrlReferrerPolicyModifierValue::SameOrigin,
+        value if value.eq_ignore_ascii_case("origin") => CssUrlReferrerPolicyModifierValue::Origin,
+        value if value.eq_ignore_ascii_case("strict-origin") => CssUrlReferrerPolicyModifierValue::StrictOrigin,
+        value if value.eq_ignore_ascii_case("origin-when-cross-origin") => {
+            CssUrlReferrerPolicyModifierValue::OriginWhenCrossOrigin
+        }
+        value if value.eq_ignore_ascii_case("strict-origin-when-cross-origin") => {
+            CssUrlReferrerPolicyModifierValue::StrictOriginWhenCrossOrigin
+        }
+        value if value.eq_ignore_ascii_case("unsafe-url") => CssUrlReferrerPolicyModifierValue::UnsafeUrl,
+        _ => return None,
+    };
+    Some(UrlModifier::ReferrerPolicy(value))
+}
+
+fn parse_single_ident_from_function(function: &Function) -> Option<String> {
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    parser.discard_whitespace();
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value: ident },
+        ..
+    }) = parser.consume_the_next_component_value()?
+    else {
+        return None;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+    Some(ident)
 }
 
 fn string_parts(string: &str) -> (*const u8, usize) {
@@ -2456,6 +2710,37 @@ impl ComponentValueParser {
         }
 
         Some(name)
+    }
+
+    // https://drafts.csswg.org/css-values-4/#url-value
+    fn parse_a_url_function(&mut self) -> Option<UrlFunction> {
+        // <url> = <url()> | <src()>
+        // <url()> = url( <string> <url-modifier>* ) | <url-token>
+        // <src()> = src( <string> <url-modifier>* )
+        let url_function = match self.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Url { value },
+                ..
+            }) => UrlFunction {
+                function_type: CssUrlFunctionType::Url,
+                url: value,
+                request_url_modifiers: Vec::new(),
+            },
+            ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("url") => {
+                parse_url_or_src_function_contents(CssUrlFunctionType::Url, &function.value)?
+            }
+            ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("src") => {
+                parse_url_or_src_function_contents(CssUrlFunctionType::Src, &function.value)?
+            }
+            _ => return None,
+        };
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(url_function)
     }
 
     // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
@@ -4977,16 +5262,17 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssValueTypeSyntaxKind,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_keyframe_selector_list,
-        parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
-        parse_a_namespace_rule_prelude, parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list,
-        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
+        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssUrlFunctionType,
+        CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style_name,
+        parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
+        parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
+        parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
         parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
@@ -5119,6 +5405,29 @@ mod tests {
             ranges.push((parsed_range.min_code_point, parsed_range.max_code_point))
         });
         parsed.then_some(ranges)
+    }
+
+    fn parse_url_function(input: &str) -> Option<(CssUrlFunctionType, String, Vec<CssUrlModifierKind>)> {
+        let mut url_function = None;
+        let mut modifiers = Vec::new();
+        let parsed = parse_a_url_function(
+            input.as_bytes(),
+            |parsed_url_function| {
+                let url = unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        parsed_url_function.url_ptr,
+                        parsed_url_function.url_len,
+                    ))
+                };
+                url_function = Some((parsed_url_function.function_type, url.to_string()));
+            },
+            |modifier| {
+                modifiers.push(modifier.kind);
+            },
+        );
+        parsed
+            .then_some(url_function.map(|(function_type, url)| (function_type, url, modifiers)))
+            .flatten()
     }
 
     fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
@@ -5946,6 +6255,47 @@ mod tests {
         assert_eq!(parse_unicode_range("u+1-0"), None);
         assert_eq!(parse_unicode_range("u+0 foo"), None);
         assert_eq!(parse_unicode_range_list("u+0, nope"), None);
+    }
+
+    #[test]
+    fn parses_url_functions() {
+        assert_eq!(
+            parse_url_function("url(image.png)"),
+            Some((CssUrlFunctionType::Url, "image.png".to_string(), vec![]))
+        );
+        assert_eq!(
+            parse_url_function("url(\"image.png\")"),
+            Some((CssUrlFunctionType::Url, "image.png".to_string(), vec![]))
+        );
+        assert_eq!(
+            parse_url_function("src(\"image.png\")"),
+            Some((CssUrlFunctionType::Src, "image.png".to_string(), vec![]))
+        );
+        assert_eq!(
+            parse_url_function(
+                "url(\"image.png\" referrer-policy(no-referrer) integrity(\"sha256-deadbeef\") cross-origin(anonymous))"
+            ),
+            Some((
+                CssUrlFunctionType::Url,
+                "image.png".to_string(),
+                vec![
+                    CssUrlModifierKind::CrossOrigin,
+                    CssUrlModifierKind::Integrity,
+                    CssUrlModifierKind::ReferrerPolicy,
+                ]
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_url_functions() {
+        assert_eq!(parse_url_function("src(image.png)"), None);
+        assert_eq!(parse_url_function("url(\"image.png\" unknown())"), None);
+        assert_eq!(
+            parse_url_function("url(\"image.png\" cross-origin(anonymous) cross-origin(use-credentials))"),
+            None
+        );
+        assert_eq!(parse_url_function("url(\"image.png\" integrity(not-a-string))"), None);
     }
 
     #[test]

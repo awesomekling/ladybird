@@ -21,6 +21,7 @@
 #include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Types.h>
 #include <LibWeb/CSS/Percentage.h>
+#include <LibWeb/CSS/URL.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/RustFFI.h>
 
@@ -87,6 +88,7 @@ public:
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
     static Optional<Gfx::UnicodeRange> parse_a_unicode_range(StringView input, StringView encoding);
     static Optional<Vector<Gfx::UnicodeRange>> parse_a_unicode_range_list(StringView input, StringView encoding);
+    static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);

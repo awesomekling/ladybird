@@ -14,7 +14,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/QuickSort.h>
 #include <AK/StringConversions.h>
 #include <AK/TemporaryChange.h>
 #include <LibWeb/CSS/Enums.h>
@@ -3002,118 +3001,16 @@ RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>&
 // https://drafts.csswg.org/css-values-4/#url-value
 Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens)
 {
-    // <url> = <url()> | <src()>
-    // <url()> = url( <string> <url-modifier>* ) | <url-token>
-    // <src()> = src( <string> <url-modifier>* )
     auto transaction = tokens.begin_transaction();
-    auto const& component_value = tokens.consume_a_token();
+    auto const& component_value = tokens.next_token();
+    auto serialized_url = serialize_component_values_for_reparsing({ &component_value, 1 });
+    auto maybe_url = RustComponentValueParser::parse_a_url_function(serialized_url.bytes_as_string_view(), "utf-8"sv);
+    if (!maybe_url.has_value())
+        return {};
 
-    // <url-token>
-    if (component_value.is(Token::Type::Url)) {
-        transaction.commit();
-        return URL { component_value.token().url().to_string() };
-    }
-
-    // <url()> = url( <string> <url-modifier>* )
-    // <src()> = src( <string> <url-modifier>* )
-    if (component_value.is_function()) {
-        URL::Type function_type;
-        if (component_value.is_function("url"sv)) {
-            function_type = URL::Type::Url;
-        } else if (component_value.is_function("src"sv)) {
-            function_type = URL::Type::Src;
-        } else {
-            return {};
-        }
-
-        auto const& function_values = component_value.function().value;
-        TokenStream url_tokens { function_values };
-
-        url_tokens.discard_whitespace();
-        auto url_string = url_tokens.consume_a_token();
-        if (!url_string.is(Token::Type::String))
-            return {};
-        url_tokens.discard_whitespace();
-
-        // NB: Currently <request-url-modifier> is the only kind of <url-modifier>
-        // https://drafts.csswg.org/css-values-5/#request-url-modifiers
-        // <request-url-modifier> = <cross-origin-modifier> | <integrity-modifier> | <referrer-policy-modifier>
-        Vector<RequestURLModifier> request_url_modifiers;
-        // AD-HOC: This isn't mentioned in the spec, but WPT expects modifiers to be unique (one per type).
-        // Spec issue: https://github.com/w3c/csswg-drafts/issues/12151
-        while (url_tokens.has_next_token()) {
-            auto& modifier_token = url_tokens.consume_a_token();
-            if (modifier_token.is_function("cross-origin"sv)) {
-                // Reject duplicates
-                if (request_url_modifiers.contains([](auto& modifier) { return modifier.type() == RequestURLModifier::Type::CrossOrigin; }))
-                    return {};
-                // <cross-origin-modifier> = cross-origin(anonymous | use-credentials)
-                TokenStream modifier_tokens { modifier_token.function().value };
-                modifier_tokens.discard_whitespace();
-                if (!modifier_tokens.next_token().is(Token::Type::Ident))
-                    return {};
-                auto maybe_keyword = keyword_from_string(modifier_tokens.consume_a_token().token().ident());
-                modifier_tokens.discard_whitespace();
-                if (!maybe_keyword.has_value() || modifier_tokens.has_next_token())
-                    return {};
-                if (auto value = keyword_to_cross_origin_modifier_value(*maybe_keyword); value.has_value()) {
-                    request_url_modifiers.append(RequestURLModifier::create_cross_origin(value.release_value()));
-                } else {
-                    return {};
-                }
-            } else if (modifier_token.is_function("integrity"sv)) {
-                // Reject duplicates
-                if (request_url_modifiers.contains([](auto& modifier) { return modifier.type() == RequestURLModifier::Type::Integrity; }))
-                    return {};
-                // <integrity-modifier> = integrity(<string>)
-                TokenStream modifier_tokens { modifier_token.function().value };
-                modifier_tokens.discard_whitespace();
-                auto& maybe_string = modifier_tokens.consume_a_token();
-                modifier_tokens.discard_whitespace();
-                if (!maybe_string.is(Token::Type::String) || modifier_tokens.has_next_token())
-                    return {};
-                request_url_modifiers.append(RequestURLModifier::create_integrity(maybe_string.token().string()));
-            } else if (modifier_token.is_function("referrer-policy"sv)) {
-                // Reject duplicates
-                if (request_url_modifiers.contains([](auto& modifier) { return modifier.type() == RequestURLModifier::Type::ReferrerPolicy; }))
-                    return {};
-
-                // <referrer-policy-modifier> = (no-referrer | no-referrer-when-downgrade | same-origin | origin | strict-origin | origin-when-cross-origin | strict-origin-when-cross-origin | unsafe-url)
-                TokenStream modifier_tokens { modifier_token.function().value };
-                modifier_tokens.discard_whitespace();
-                if (!modifier_tokens.next_token().is(Token::Type::Ident))
-                    return {};
-                auto maybe_keyword = keyword_from_string(modifier_tokens.consume_a_token().token().ident());
-                modifier_tokens.discard_whitespace();
-                if (!maybe_keyword.has_value() || modifier_tokens.has_next_token())
-                    return {};
-                if (auto value = keyword_to_referrer_policy_modifier_value(*maybe_keyword); value.has_value()) {
-                    request_url_modifiers.append(RequestURLModifier::create_referrer_policy(value.release_value()));
-                } else {
-                    return {};
-                }
-            } else {
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "<url>"_fly_string,
-                    .value_string = component_value.function().to_string(),
-                    .description = MUST(String::formatted("Unrecognized URL modifier: {}", modifier_token.to_string())),
-                });
-                return {};
-            }
-            url_tokens.discard_whitespace();
-        }
-
-        // AD-HOC: This isn't mentioned in the spec, but WPT expects modifiers to be sorted alphabetically.
-        // Spec issue: https://github.com/w3c/csswg-drafts/issues/12151
-        quick_sort(request_url_modifiers, [](RequestURLModifier const& a, RequestURLModifier const& b) {
-            return to_underlying(a.type()) < to_underlying(b.type());
-        });
-
-        transaction.commit();
-        return URL { url_string.token().string().to_string(), function_type, move(request_url_modifiers) };
-    }
-
-    return {};
+    tokens.discard_a_token();
+    transaction.commit();
+    return maybe_url.release_value();
 }
 
 RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>& tokens)
