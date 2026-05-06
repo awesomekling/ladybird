@@ -3287,6 +3287,46 @@ FFI::CssBasicShapeValueKind RustComponentValueParser::parse_basic_shape(StringVi
         filtered_input_bytes.size());
 }
 
+FFI::CssGridAutoFlowValueKind RustComponentValueParser::parse_grid_auto_flow(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_grid_auto_flow(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssGridTrackPlacementValueKind RustComponentValueParser::parse_grid_track_placement(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_grid_track_placement(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_auto_track_sizes(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_grid_auto_track_sizes(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_track_size_list(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_grid_track_size_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

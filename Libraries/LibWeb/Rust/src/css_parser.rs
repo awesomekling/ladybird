@@ -1086,6 +1086,27 @@ pub enum CssBasicShapeValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssGridAutoFlowValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssGridTrackPlacementValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssGridTrackSizeListValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -4362,6 +4383,557 @@ fn component_values_parse_as_fill_rule(component_values: &[ComponentValue]) -> b
     };
     component_value_is_ident(Some(component_value), "nonzero")
         || component_value_is_ident(Some(component_value), "evenodd")
+}
+
+pub(crate) fn parse_grid_auto_flow_value(filtered_input: &[u8]) -> CssGridAutoFlowValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property
+    // grid-auto-flow = [ row | column ] || dense
+    let axis = consume_optional_grid_auto_flow_axis(&mut parser);
+    let dense = consume_optional_ident_matching(&mut parser, "dense");
+    let axis_after_dense = if axis {
+        false
+    } else {
+        consume_optional_grid_auto_flow_axis(&mut parser)
+    };
+
+    parser.discard_whitespace();
+    if (axis || dense || axis_after_dense) && !parser.has_next_component_value() {
+        CssGridAutoFlowValueKind::Valid
+    } else {
+        CssGridAutoFlowValueKind::Invalid
+    }
+}
+
+fn consume_optional_grid_auto_flow_axis(parser: &mut ComponentValueParser) -> bool {
+    consume_optional_ident_matching(parser, "row") || consume_optional_ident_matching(parser, "column")
+}
+
+fn consume_optional_ident_matching(parser: &mut ComponentValueParser, expected: &str) -> bool {
+    parser.discard_whitespace();
+    parser.consume_ident_matching(expected)
+}
+
+pub(crate) fn parse_grid_track_placement_value(filtered_input: &[u8]) -> CssGridTrackPlacementValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    if component_values_parse_as_grid_track_placement(&component_values) {
+        CssGridTrackPlacementValueKind::Valid
+    } else {
+        CssGridTrackPlacementValueKind::Invalid
+    }
+}
+
+fn component_values_parse_as_grid_track_placement(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#line-placement
+    // <grid-line> =
+    //     auto |
+    //     <custom-ident> |
+    //     [ [ <integer [-∞,-1]> | <integer [1,∞]> ] && <custom-ident>? ] |
+    //     [ span && [ <integer [1,∞]> || <custom-ident> ] ]
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("auto") {
+        parser.discard_whitespace();
+        return !parser.has_next_component_value();
+    }
+
+    let mut is_span = false;
+    let mut parsed_custom_ident = false;
+    let mut parsed_integer = false;
+    let mut parsed_integer_value = 0.0;
+    let mut parsed_integer_has_known_value = false;
+
+    while parser.has_next_component_value() {
+        if parser.consume_ident_matching("span") {
+            if is_span {
+                return false;
+            }
+
+            is_span = true;
+            continue;
+        }
+
+        if consume_grid_line_custom_ident(&mut parser) {
+            if parsed_custom_ident {
+                return false;
+            }
+            parsed_custom_ident = true;
+            continue;
+        }
+
+        if let Some(integer_value) = consume_integer_component_value(&mut parser) {
+            if parsed_integer {
+                return false;
+            }
+            parsed_integer = true;
+            parsed_integer_value = integer_value;
+            parsed_integer_has_known_value = true;
+            continue;
+        }
+
+        if consume_integer_math_function_component_value(&mut parser) {
+            if parsed_integer {
+                return false;
+            }
+            parsed_integer = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    if !is_span && (parsed_integer || parsed_custom_ident) {
+        return !parsed_integer || !parsed_integer_has_known_value || parsed_integer_value != 0.0;
+    }
+
+    if is_span && (parsed_integer || parsed_custom_ident) {
+        return !parsed_integer || !parsed_integer_has_known_value || parsed_integer_value > 0.0;
+    }
+
+    false
+}
+
+fn consume_grid_line_custom_ident(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return false;
+    };
+
+    if !is_valid_custom_ident(value, &["auto"]) {
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn consume_integer_component_value(parser: &mut ComponentValueParser) -> Option<f64> {
+    parser.discard_whitespace();
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Number { number },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return None;
+    };
+
+    if !number_is_integer(*number) {
+        return None;
+    }
+
+    let value = number.value();
+    parser.index += 1;
+    Some(value)
+}
+
+fn consume_integer_math_function_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
+        return false;
+    };
+
+    if !is_math_function_name(&function.name)
+        && !function.name.eq_ignore_ascii_case("sibling-index")
+        && !function.name.eq_ignore_ascii_case("sibling-count")
+    {
+        return false;
+    }
+
+    // AD-HOC: C++ still owns resolving math functions and tree counting functions here.
+    parser.index += 1;
+    true
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GridTrackSizeListSyntax {
+    TrackSizeList,
+    TrackList,
+}
+
+pub(crate) fn parse_grid_auto_track_sizes_value(filtered_input: &[u8]) -> CssGridTrackSizeListValueKind {
+    if parse_grid_track_size_list_value_with_syntax(filtered_input, GridTrackSizeListSyntax::TrackSizeList) {
+        CssGridTrackSizeListValueKind::Valid
+    } else {
+        CssGridTrackSizeListValueKind::Invalid
+    }
+}
+
+pub(crate) fn parse_grid_track_size_list_value(filtered_input: &[u8]) -> CssGridTrackSizeListValueKind {
+    if parse_grid_track_size_list_value_with_syntax(filtered_input, GridTrackSizeListSyntax::TrackList) {
+        CssGridTrackSizeListValueKind::Valid
+    } else {
+        CssGridTrackSizeListValueKind::Invalid
+    }
+}
+
+fn parse_grid_track_size_list_value_with_syntax(filtered_input: &[u8], syntax: GridTrackSizeListSyntax) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let stripped_component_values = strip_whitespace(&component_values);
+
+    if syntax == GridTrackSizeListSyntax::TrackList
+        && matches!(stripped_component_values, [component_value] if component_value_is_ident(Some(component_value), "none"))
+    {
+        return true;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let parsed_track_count = match syntax {
+        GridTrackSizeListSyntax::TrackSizeList => parse_one_or_more_grid_track_sizes(&mut parser),
+        GridTrackSizeListSyntax::TrackList => {
+            parse_grid_auto_track_list(&mut parser) || parse_grid_track_list(&mut parser)
+        }
+    };
+
+    parser.discard_whitespace();
+    parsed_track_count && !parser.has_next_component_value()
+}
+
+fn parse_one_or_more_grid_track_sizes(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#auto-tracks
+    // <track-size>+
+    let mut parsed_track_count = 0;
+    while parse_grid_track_size(parser) {
+        parsed_track_count += 1;
+    }
+    parsed_track_count > 0
+}
+
+fn parse_grid_track_list(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-track-list
+    // <track-list> = [ <line-names>? [ <track-size> | <track-repeat> ] ]+ <line-names>?
+    let parsed_track_count = parse_track_list_impl(parser, |parser| {
+        parse_grid_track_repeat(parser) || parse_grid_track_size(parser)
+    });
+    parsed_track_count > 0
+}
+
+fn parse_grid_auto_track_list(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-auto-track-list
+    // <auto-track-list> = [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>? <auto-repeat>
+    //                     [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>?
+    let start = parser.index;
+    parse_track_list_impl(parser, |parser| {
+        parse_grid_fixed_repeat(parser) || parse_grid_fixed_size(parser)
+    });
+    if !parse_grid_auto_repeat(parser) {
+        parser.index = start;
+        return false;
+    }
+    parse_track_list_impl(parser, |parser| {
+        parse_grid_fixed_repeat(parser) || parse_grid_fixed_size(parser)
+    });
+    true
+}
+
+fn parse_track_list_impl<F>(parser: &mut ComponentValueParser, mut track_parser: F) -> usize
+where
+    F: FnMut(&mut ComponentValueParser) -> bool,
+{
+    let mut parsed_track_count = 0;
+    loop {
+        let before_track = parser.index;
+        parse_grid_line_names(parser);
+        if !track_parser(parser) {
+            parser.index = before_track;
+            break;
+        }
+        parse_grid_line_names(parser);
+        parsed_track_count += 1;
+    }
+
+    parse_grid_line_names(parser);
+    parsed_track_count
+}
+
+fn parse_grid_line_names(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-line-names
+    // <line-names> = '[' <custom-ident>* ']'
+    parser.discard_whitespace();
+    let Some(ComponentValue::SimpleBlock(block)) = parser.next_component_value() else {
+        return false;
+    };
+    if !is_square_block(block) {
+        return false;
+    }
+
+    let mut block_parser = ComponentValueParser::new(block.value.clone());
+    while block_parser.has_next_component_value() {
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = block_parser.next_component_value()
+        else {
+            return false;
+        };
+        if !is_valid_custom_ident(value, &["span", "auto"]) {
+            return false;
+        }
+        block_parser.index += 1;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn parse_grid_track_repeat(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-track-repeat
+    // <track-repeat> = repeat( [ <integer [1,∞]> ] , [ <line-names>? <track-size> ]+ <line-names>? )
+    parse_grid_repeat_function(parser, parse_positive_integer_component_values, |parser| {
+        parse_track_list_impl(parser, parse_grid_track_size) > 0
+    })
+}
+
+fn parse_grid_auto_repeat(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-auto-repeat
+    // <auto-repeat> = repeat( [ auto-fill | auto-fit ] , [ <line-names>? <fixed-size> ]+ <line-names>? )
+    parse_grid_repeat_function(
+        parser,
+        |component_values| {
+            let [component_value] = strip_whitespace(component_values) else {
+                return false;
+            };
+            component_value_is_ident(Some(component_value), "auto-fill")
+                || component_value_is_ident(Some(component_value), "auto-fit")
+        },
+        |parser| parse_track_list_impl(parser, parse_grid_fixed_size) > 0,
+    )
+}
+
+fn parse_grid_fixed_repeat(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-fixed-repeat
+    // <fixed-repeat> = repeat( [ <integer [1,∞]> ] , [ <line-names>? <fixed-size> ]+ <line-names>? )
+    parse_grid_repeat_function(parser, parse_positive_integer_component_values, |parser| {
+        parse_track_list_impl(parser, parse_grid_fixed_size) > 0
+    })
+}
+
+fn parse_grid_repeat_function<F, G>(
+    parser: &mut ComponentValueParser,
+    repeat_type_parser: F,
+    repeat_track_parser: G,
+) -> bool
+where
+    F: Fn(&[ComponentValue]) -> bool,
+    G: Fn(&mut ComponentValueParser) -> bool,
+{
+    parser.discard_whitespace();
+    let start = parser.index;
+    let Some(ComponentValue::Function(function)) = parser.next_component_value().cloned() else {
+        return false;
+    };
+    if !function.name.eq_ignore_ascii_case("repeat") {
+        return false;
+    }
+
+    let Some(arguments) = parse_comma_separated_component_values(function.value, Some) else {
+        return false;
+    };
+    let [repeat_type, repeat_track_list] = arguments.as_slice() else {
+        return false;
+    };
+    if !repeat_type_parser(repeat_type) {
+        return false;
+    }
+
+    let mut repeat_track_list_parser = ComponentValueParser::new(repeat_track_list.clone());
+    if !repeat_track_parser(&mut repeat_track_list_parser) {
+        return false;
+    }
+    repeat_track_list_parser.discard_whitespace();
+    if repeat_track_list_parser.has_next_component_value() {
+        parser.index = start;
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn parse_grid_track_size(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-track-size
+    // <track-size> = <track-breadth> | minmax( <inflexible-breadth> , <track-breadth> ) | fit-content( <length-percentage [0,∞]> )
+    let start = parser.index;
+    if parse_grid_track_breadth(parser) {
+        return true;
+    }
+
+    if parse_grid_minmax_function(parser, parse_grid_inflexible_breadth, parse_grid_track_breadth) {
+        return true;
+    }
+
+    parser.index = start;
+    parse_grid_fit_content_function(parser)
+}
+
+fn parse_grid_fixed_size(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-fixed-size
+    // <fixed-size> = <fixed-breadth> | minmax( <fixed-breadth> , <track-breadth> ) | minmax( <inflexible-breadth> , <fixed-breadth> )
+    let start = parser.index;
+    if parse_grid_fixed_breadth(parser) {
+        return true;
+    }
+
+    if parse_grid_minmax_function(parser, parse_grid_fixed_breadth, parse_grid_track_breadth) {
+        return true;
+    }
+
+    parser.index = start;
+    parse_grid_minmax_function(parser, parse_grid_inflexible_breadth, parse_grid_fixed_breadth)
+}
+
+fn parse_grid_minmax_function<F, G>(parser: &mut ComponentValueParser, min_parser: F, max_parser: G) -> bool
+where
+    F: Fn(&mut ComponentValueParser) -> bool,
+    G: Fn(&mut ComponentValueParser) -> bool,
+{
+    parser.discard_whitespace();
+    let start = parser.index;
+    let Some(ComponentValue::Function(function)) = parser.next_component_value().cloned() else {
+        return false;
+    };
+    if !function.name.eq_ignore_ascii_case("minmax") {
+        return false;
+    }
+
+    let Some(arguments) = parse_comma_separated_component_values(function.value, Some) else {
+        return false;
+    };
+    let [min_value, max_value] = arguments.as_slice() else {
+        return false;
+    };
+
+    let mut min_value_parser = ComponentValueParser::new(min_value.clone());
+    let mut max_value_parser = ComponentValueParser::new(max_value.clone());
+    if !min_parser(&mut min_value_parser) || min_value_parser.has_next_component_value() {
+        parser.index = start;
+        return false;
+    }
+    if !max_parser(&mut max_value_parser) || max_value_parser.has_next_component_value() {
+        parser.index = start;
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn parse_grid_fit_content_function(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
+        return false;
+    };
+    if !function.name.eq_ignore_ascii_case("fit-content") {
+        return false;
+    }
+    if !component_values_parse_as_single_non_negative_length_percentage(&function.value) {
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn parse_grid_track_breadth(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-track-breadth
+    // <track-breadth> = <length-percentage [0,∞]> | <flex [0,∞]> | min-content | max-content | auto
+    parse_grid_inflexible_breadth(parser) || consume_grid_flex_component_value(parser)
+}
+
+fn parse_grid_inflexible_breadth(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-inflexible-breadth
+    // <inflexible-breadth>  = <length-percentage [0,∞]> | min-content | max-content | auto
+    parse_grid_fixed_breadth(parser)
+        || consume_optional_ident_matching(parser, "min-content")
+        || consume_optional_ident_matching(parser, "max-content")
+        || consume_optional_ident_matching(parser, "auto")
+}
+
+fn parse_grid_fixed_breadth(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-grid-2/#typedef-fixed-breadth
+    // <fixed-breadth> = <length-percentage [0,∞]>
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_non_negative_length_percentage(component_value) {
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn component_values_parse_as_single_non_negative_length_percentage(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = strip_whitespace(component_values) else {
+        return false;
+    };
+    component_value_parse_as_non_negative_length_percentage(component_value)
+}
+
+fn component_value_parse_as_non_negative_length_percentage(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => number.value() >= 0.0,
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn consume_grid_flex_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_non_negative_flex(component_value) {
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn component_value_parse_as_non_negative_flex(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && unit.eq_ignore_ascii_case("fr"),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn parse_positive_integer_component_values(component_values: &[ComponentValue]) -> bool {
+    let [component_value] = strip_whitespace(component_values) else {
+        return false;
+    };
+    component_value_parse_as_integer_in_range(component_value, 1.0, f64::INFINITY)
 }
 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
@@ -13146,7 +13718,8 @@ mod tests {
         CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind,
         CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
         CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
+        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
+        CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind,
         CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
@@ -13184,17 +13757,18 @@ mod tests {
         parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
         parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
         parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
-        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
-        parse_position_anchor_value, parse_position_try_order_value, parse_position_visibility_value,
-        parse_positive_percentage_descriptor, parse_primitive_value_prefix, parse_quotes_value,
-        parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value, parse_scrollbar_gutter_value,
-        parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transform_function_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
+        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
+        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
+        parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value_prefix,
+        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -13806,6 +14380,22 @@ mod tests {
 
     fn parse_basic_shape(input: &str) -> CssBasicShapeValueKind {
         parse_basic_shape_value(input.as_bytes())
+    }
+
+    fn parse_grid_auto_flow(input: &str) -> CssGridAutoFlowValueKind {
+        parse_grid_auto_flow_value(input.as_bytes())
+    }
+
+    fn parse_grid_track_placement(input: &str) -> CssGridTrackPlacementValueKind {
+        parse_grid_track_placement_value(input.as_bytes())
+    }
+
+    fn parse_grid_auto_track_sizes(input: &str) -> CssGridTrackSizeListValueKind {
+        parse_grid_auto_track_sizes_value(input.as_bytes())
+    }
+
+    fn parse_grid_track_size_list(input: &str) -> CssGridTrackSizeListValueKind {
+        parse_grid_track_size_list_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -17018,6 +17608,102 @@ mod tests {
         assert_eq!(parse_basic_shape("polygon(evenodd)"), CssBasicShapeValueKind::Invalid);
         assert_eq!(parse_basic_shape("polygon(0 0, 100%)"), CssBasicShapeValueKind::Invalid);
         assert_eq!(parse_basic_shape("path(nonzero)"), CssBasicShapeValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_grid_auto_flow_values() {
+        assert_eq!(parse_grid_auto_flow("row"), CssGridAutoFlowValueKind::Valid);
+        assert_eq!(parse_grid_auto_flow("column dense"), CssGridAutoFlowValueKind::Valid);
+        assert_eq!(parse_grid_auto_flow("dense row"), CssGridAutoFlowValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_grid_auto_flow_values() {
+        assert_eq!(parse_grid_auto_flow("row column"), CssGridAutoFlowValueKind::Invalid);
+        assert_eq!(parse_grid_auto_flow("dense dense"), CssGridAutoFlowValueKind::Invalid);
+        assert_eq!(parse_grid_auto_flow("auto"), CssGridAutoFlowValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_grid_track_placement_values() {
+        assert_eq!(
+            parse_grid_track_placement("auto"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_placement("2 foo"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_placement("foo 2"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_placement("span 2 foo"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_placement("foo span 2"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_placement("span sibling-count()"),
+            CssGridTrackPlacementValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_grid_track_placement_values() {
+        assert_eq!(parse_grid_track_placement("0"), CssGridTrackPlacementValueKind::Invalid);
+        assert_eq!(
+            parse_grid_track_placement("span -1"),
+            CssGridTrackPlacementValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_placement("auto foo"),
+            CssGridTrackPlacementValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_grid_track_size_list_values() {
+        assert_eq!(
+            parse_grid_auto_track_sizes("10px minmax(1px, 1fr) fit-content(50%)"),
+            CssGridTrackSizeListValueKind::Valid
+        );
+        assert_eq!(parse_grid_track_size_list("none"), CssGridTrackSizeListValueKind::Valid);
+        assert_eq!(
+            parse_grid_track_size_list("[a] 10px [b] repeat(2, [c] minmax(auto, 1fr))"),
+            CssGridTrackSizeListValueKind::Valid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("10px repeat(auto-fit, minmax(10px, 1fr)) 20px"),
+            CssGridTrackSizeListValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_grid_track_size_list_values() {
+        assert_eq!(
+            parse_grid_auto_track_sizes("repeat(auto-fit, 10px)"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("repeat(auto-fit, 1fr)"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("repeat(0, 10px)"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("minmax(1fr, 10px)"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("[span] 10px"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
     }
 
     #[test]

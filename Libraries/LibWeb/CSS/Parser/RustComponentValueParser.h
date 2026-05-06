@@ -372,6 +372,10 @@ public:
     static FFI::CssTransformFunctionValueKind parse_transform_function(StringView input, StringView encoding);
     static FFI::CssFitContentValueKind parse_fit_content(StringView input, StringView encoding);
     static FFI::CssBasicShapeValueKind parse_basic_shape(StringView input, StringView encoding);
+    static FFI::CssGridAutoFlowValueKind parse_grid_auto_flow(StringView input, StringView encoding);
+    static FFI::CssGridTrackPlacementValueKind parse_grid_track_placement(StringView input, StringView encoding);
+    static FFI::CssGridTrackSizeListValueKind parse_grid_auto_track_sizes(StringView input, StringView encoding);
+    static FFI::CssGridTrackSizeListValueKind parse_grid_track_size_list(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);

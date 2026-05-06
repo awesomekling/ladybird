@@ -5448,6 +5448,23 @@ RefPtr<StyleValue const> Parser::parse_grid_auto_track_sizes(TokenStream<Compone
 {
     // https://www.w3.org/TR/css-grid-2/#auto-tracks
     // <track-size>+
+    auto remaining_tokens = tokens.remaining_tokens();
+    auto contains_solidus = false;
+    for (auto const& component_value : remaining_tokens) {
+        if (component_value.is_delim('/')) {
+            contains_solidus = true;
+            break;
+        }
+    }
+    // AD-HOC: The grid shorthand calls this as an optional prefix parser
+    // before consuming `/ <'grid-template-columns'>`. Rust validates the
+    // complete property form, so keep C++ in charge of those prefixes.
+    if (!contains_solidus) {
+        auto serialized_grid_auto_track_sizes = serialize_component_values_for_reparsing(remaining_tokens);
+        if (RustComponentValueParser::parse_grid_auto_track_sizes(serialized_grid_auto_track_sizes.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackSizeListValueKind::Invalid)
+            return GridTrackSizeListStyleValue::create({});
+    }
+
     auto transaction = tokens.begin_transaction();
     GridTrackSizeList track_list;
     while (tokens.has_next_token()) {
@@ -5467,6 +5484,10 @@ RefPtr<GridAutoFlowStyleValue const> Parser::parse_grid_auto_flow_value(TokenStr
 {
     // [ row | column ] || dense
     if (!tokens.has_next_token())
+        return nullptr;
+
+    auto serialized_grid_auto_flow = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (RustComponentValueParser::parse_grid_auto_flow(serialized_grid_auto_flow.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridAutoFlowValueKind::Invalid)
         return nullptr;
 
     auto transaction = tokens.begin_transaction();
@@ -5523,6 +5544,22 @@ RefPtr<GridAutoFlowStyleValue const> Parser::parse_grid_auto_flow_value(TokenStr
 RefPtr<StyleValue const> Parser::parse_grid_track_size_list(TokenStream<ComponentValue>& tokens)
 {
     // none | <track-list> | <auto-track-list> | FIXME: subgrid <line-name-list>?
+    auto remaining_tokens = tokens.remaining_tokens();
+    auto contains_solidus = false;
+    for (auto const& component_value : remaining_tokens) {
+        if (component_value.is_delim('/')) {
+            contains_solidus = true;
+            break;
+        }
+    }
+    // AD-HOC: The grid-template shorthand calls this as a prefix parser before
+    // consuming the `/ <'grid-template-columns'>` half. Rust validates the
+    // complete property form, so keep the C++ prefix parser in charge there.
+    if (!contains_solidus) {
+        auto serialized_grid_track_size_list = serialize_component_values_for_reparsing(remaining_tokens);
+        if (RustComponentValueParser::parse_grid_track_size_list(serialized_grid_track_size_list.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackSizeListValueKind::Invalid)
+            return nullptr;
+    }
 
     // none
     {

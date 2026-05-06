@@ -44,7 +44,8 @@ pub use css_parser::{
     CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssEasingValueKind,
     CssFitContentValueKind, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind,
     CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison,
+    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
+    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaFeature, CssMediaFeatureComparison,
     CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
     CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
     CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
@@ -1368,6 +1369,75 @@ pub unsafe extern "C" fn rust_css_parse_basic_shape(input: *const u8, input_len:
             };
 
             css_parser::parse_basic_shape_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_grid_auto_flow(input: *const u8, input_len: usize) -> CssGridAutoFlowValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssGridAutoFlowValueKind::Invalid;
+            };
+
+            css_parser::parse_grid_auto_flow_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_grid_track_placement(
+    input: *const u8,
+    input_len: usize,
+) -> CssGridTrackPlacementValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssGridTrackPlacementValueKind::Invalid;
+            };
+
+            css_parser::parse_grid_track_placement_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_grid_auto_track_sizes(
+    input: *const u8,
+    input_len: usize,
+) -> CssGridTrackSizeListValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssGridTrackSizeListValueKind::Invalid;
+            };
+
+            css_parser::parse_grid_auto_track_sizes_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_grid_track_size_list(
+    input: *const u8,
+    input_len: usize,
+) -> CssGridTrackSizeListValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssGridTrackSizeListValueKind::Invalid;
+            };
+
+            css_parser::parse_grid_track_size_list_value(input)
         })
     }
 }

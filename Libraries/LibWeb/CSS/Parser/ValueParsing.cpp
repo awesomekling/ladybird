@@ -4419,6 +4419,24 @@ RefPtr<GridTrackPlacementStyleValue const> Parser::parse_grid_track_placement(To
     //     <custom-ident> |
     //     [ [ <integer [-∞,-1]> | <integer [1,∞]> ] && <custom-ident>? ] |
     //     [ span && [ <integer [1,∞]> || <custom-ident> ] ]
+    auto remaining_tokens = tokens.remaining_tokens();
+    auto contains_whitespace = false;
+    for (auto const& component_value : remaining_tokens) {
+        if (component_value.is(Token::Type::Whitespace)) {
+            contains_whitespace = true;
+            break;
+        }
+    }
+    // AD-HOC: Some shorthand parsers split grid-line values into synthetic
+    // token streams without preserving the original separating whitespace.
+    // Reparsing those streams would merge adjacent tokens such as `2 i` into
+    // `2i`, so keep C++ as the source of truth for those materialization paths.
+    if (remaining_tokens.size() <= 1 || contains_whitespace) {
+        auto serialized_grid_track_placement = serialize_component_values_for_reparsing(remaining_tokens);
+        if (RustComponentValueParser::parse_grid_track_placement(serialized_grid_track_placement.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackPlacementValueKind::Invalid)
+            return nullptr;
+    }
+
     bool is_span = false;
     Optional<String> parsed_custom_ident;
     RefPtr<StyleValue const> parsed_integer;
