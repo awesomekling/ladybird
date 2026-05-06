@@ -9,7 +9,6 @@
  */
 
 #include <AK/StdLibExtras.h>
-#include <AK/StringBuilder.h>
 #include <LibWeb/CSS/CSSFunctionDeclarations.h>
 #include <LibWeb/CSS/CSSMediaRule.h>
 #include <LibWeb/CSS/CSSNestedDeclarations.h>
@@ -39,18 +38,6 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
     // https://www.w3.org/TR/mediaqueries-4/#mq-list
     return parse_a_media_query_list_from_string(m_input, m_encoding);
-}
-
-template<typename T>
-Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list(TokenStream<T>& tokens)
-{
-    // https://www.w3.org/TR/mediaqueries-4/#mq-list
-
-    StringBuilder serialized_media_query_list;
-    while (tokens.has_next_token())
-        serialized_media_query_list.append(tokens.consume_a_token().original_source_text());
-
-    return parse_a_media_query_list_from_string(serialized_media_query_list.string_view(), "utf-8"sv);
 }
 
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(StringView input, StringView encoding)
@@ -279,8 +266,8 @@ GC::Ptr<CSSMediaRule> Parser::convert_to_media_rule(AtRule const& rule, Nested n
         return nullptr;
     }
 
-    auto media_query_tokens = TokenStream { rule.prelude };
-    auto media_query_list = parse_a_media_query_list(media_query_tokens);
+    auto serialized_media_query_list = serialize_component_values_for_reparsing(rule.prelude);
+    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.bytes_as_string_view(), "utf-8"sv);
     auto media_list = MediaList::create(realm(), move(media_query_list));
 
     GC::RootVector<GC::Ref<CSSRule>> child_rules { realm().heap() };

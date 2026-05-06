@@ -12,6 +12,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/StringBuilder.h>
 #include <LibGC/HeapVector.h>
 #include <LibWeb/CSS/CSSContainerRule.h>
 #include <LibWeb/CSS/CSSCounterStyleRule.h>
@@ -302,7 +303,10 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
         }
     }
 
-    auto media_query_list = parse_a_media_query_list(tokens);
+    StringBuilder serialized_media_query_list;
+    while (tokens.has_next_token())
+        serialized_media_query_list.append(tokens.consume_a_token().original_source_text());
+    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.string_view(), "utf-8"sv);
 
     if (tokens.has_next_token()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
