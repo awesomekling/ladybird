@@ -1752,6 +1752,22 @@ where
     true
 }
 
+pub(crate) fn parse_counter_style_symbol(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    if parser.parse_counter_style_symbol().is_none() {
+        return false;
+    }
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    true
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -4813,6 +4829,13 @@ impl ComponentValueParser {
         Some(count)
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
+    fn parse_counter_style_symbol(&mut self) -> Option<()> {
+        // <symbol> = <string> | <image> | <custom-ident>
+        self.discard_whitespace();
+        self.consume_symbol_syntax().then_some(())
+    }
+
     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
     fn parse_counter_style_range(&mut self) -> Option<(CssCounterStyleRangeKind, usize)> {
         // [ [ <integer> | infinite ]{2} ]# | auto
@@ -7583,8 +7606,8 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
         parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
         parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbols,
-        parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
         parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
@@ -8002,6 +8025,10 @@ mod tests {
         let mut count = None;
         let parsed = parse_counter_style_symbols(input.as_bytes(), |parsed_count| count = Some(parsed_count));
         parsed.then_some(count).flatten()
+    }
+
+    fn parse_counter_style_symbol_descriptor(input: &str) -> bool {
+        parse_counter_style_symbol(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -9690,6 +9717,22 @@ mod tests {
         assert_eq!(parse_counter_style_symbols_descriptor("\"*\" 1"), None);
         assert_eq!(parse_counter_style_symbols_descriptor("inherit"), None);
         assert_eq!(parse_counter_style_symbols_descriptor("default"), None);
+    }
+
+    #[test]
+    fn parses_counter_style_symbol_descriptors() {
+        assert!(parse_counter_style_symbol_descriptor("\"*\""));
+        assert!(parse_counter_style_symbol_descriptor("\"\""));
+        assert!(parse_counter_style_symbol_descriptor("symbol"));
+    }
+
+    #[test]
+    fn rejects_invalid_counter_style_symbol_descriptors() {
+        assert!(!parse_counter_style_symbol_descriptor(""));
+        assert!(!parse_counter_style_symbol_descriptor("1"));
+        assert!(!parse_counter_style_symbol_descriptor("\"*\" \"**\""));
+        assert!(!parse_counter_style_symbol_descriptor("inherit"));
+        assert!(!parse_counter_style_symbol_descriptor("default"));
     }
 
     #[test]

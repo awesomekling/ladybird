@@ -1899,6 +1899,14 @@ Optional<FFI::CssCounterStyleSystemKind> RustComponentValueParser::parse_counter
     return system;
 }
 
+bool RustComponentValueParser::parse_counter_style_symbol(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_counter_style_symbol(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 Optional<size_t> RustComponentValueParser::parse_counter_style_symbols(StringView input, StringView encoding)
 {
     Optional<size_t> count;

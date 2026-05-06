@@ -186,6 +186,7 @@ public:
     static Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding);
     static Optional<FFI::CssCounterStyleNegativeSymbolCount> parse_counter_style_negative(StringView input, StringView encoding);
     static Optional<FFI::CssCounterStyleSystemKind> parse_counter_style_system(StringView input, StringView encoding);
+    static bool parse_counter_style_symbol(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_symbols(StringView input, StringView encoding);
     static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
