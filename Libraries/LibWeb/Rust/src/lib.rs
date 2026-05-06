@@ -37,12 +37,12 @@ pub use css_parser::{
     CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssQuotesValueKind, CssRuleContext, CssRuleEvent,
     CssRuleEventKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword,
-    CssTouchActionValue, CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind,
+    CssTextWrapModeValue, CssTextWrapStyleValue, CssTimelineNameItemKind, CssTimelineNameValueKind,
+    CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1066,6 +1066,36 @@ pub unsafe extern "C" fn rust_css_parse_text_underline_position(
             };
 
             css_parser::parse_text_underline_position_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_text_wrap_mode(input: *const u8, input_len: usize) -> CssTextWrapModeValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTextWrapModeValue::Invalid;
+            };
+
+            css_parser::parse_text_wrap_mode_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_text_wrap_style(input: *const u8, input_len: usize) -> CssTextWrapStyleValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTextWrapStyleValue::Invalid;
+            };
+
+            css_parser::parse_text_wrap_style_value(input)
         })
     }
 }

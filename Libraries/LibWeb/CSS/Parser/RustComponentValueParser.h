@@ -279,6 +279,8 @@ public:
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
     static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
     static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);
+    static FFI::CssTextWrapModeValue parse_text_wrap_mode(StringView input, StringView encoding);
+    static FFI::CssTextWrapStyleValue parse_text_wrap_style(StringView input, StringView encoding);
     static FFI::CssTouchActionValue parse_touch_action(StringView input, StringView encoding);
     static FFI::CssScrollbarGutterValueKind parse_scrollbar_gutter(StringView input, StringView encoding);
     static Quotes parse_quotes(StringView input, StringView encoding);
