@@ -1836,6 +1836,27 @@ Optional<RustComponentValueParser::CounterStyle> RustComponentValueParser::parse
     return counter_style;
 }
 
+Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> RustComponentValueParser::parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding)
+{
+    Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> order;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_nonnegative_integer_symbol_pair(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &order,
+        [](void* raw_order, FFI::CssNonnegativeIntegerSymbolPairOrder parsed_order) {
+            auto& order = *static_cast<Optional<FFI::CssNonnegativeIntegerSymbolPairOrder>*>(raw_order);
+            order = parsed_order;
+        });
+
+    if (!parsed || !order.has_value())
+        return {};
+
+    return order;
+}
+
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
 {
     Optional<FamilyName> family_name;

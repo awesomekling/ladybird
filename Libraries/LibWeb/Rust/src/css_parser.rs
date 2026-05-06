@@ -547,6 +547,13 @@ pub enum CssCounterStyleSymbolsType {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssNonnegativeIntegerSymbolPairOrder {
+    IntegerFirst,
+    SymbolFirst,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -1627,6 +1634,26 @@ where
         }
     }
 
+    true
+}
+
+pub(crate) fn parse_a_nonnegative_integer_symbol_pair<O>(filtered_input: &[u8], mut order_callback: O) -> bool
+where
+    O: FnMut(CssNonnegativeIntegerSymbolPairOrder),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(order) = parser.parse_a_nonnegative_integer_symbol_pair() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    order_callback(order);
     true
 }
 
@@ -4537,6 +4564,77 @@ impl ComponentValueParser {
         Some(CounterStyle::SymbolsFunction { symbols_type, symbols })
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
+    fn parse_a_nonnegative_integer_symbol_pair(&mut self) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
+        // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
+        let saved_index = self.index;
+        if self.consume_nonnegative_integer_syntax() {
+            self.discard_whitespace();
+            if self.consume_symbol_syntax() {
+                return Some(CssNonnegativeIntegerSymbolPairOrder::IntegerFirst);
+            }
+        }
+        self.index = saved_index;
+
+        if self.consume_symbol_syntax() {
+            self.discard_whitespace();
+            if self.consume_nonnegative_integer_syntax() {
+                return Some(CssNonnegativeIntegerSymbolPairOrder::SymbolFirst);
+            }
+        }
+        self.index = saved_index;
+        None
+    }
+
+    fn consume_nonnegative_integer_syntax(&mut self) -> bool {
+        let Some(component_value) = self.next_component_value() else {
+            return false;
+        };
+
+        let is_nonnegative_integer = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { number },
+                ..
+            }) => number_is_integer(*number) && number.value() >= 0.0,
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing and range-checking math functions still happens in C++.
+            ComponentValue::Function(_) => true,
+            _ => false,
+        };
+
+        if is_nonnegative_integer {
+            self.index += 1;
+        }
+        is_nonnegative_integer
+    }
+
+    fn consume_symbol_syntax(&mut self) -> bool {
+        let Some(component_value) = self.next_component_value() else {
+            return false;
+        };
+
+        // <symbol> = <string> | <image> | <custom-ident>
+        let is_symbol = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { .. },
+                ..
+            }) => true,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) => is_valid_custom_ident(value, &[]),
+            // AD-HOC: In line with the generated <symbol> parser, we don't
+            // support <image> here since that part of the grammar is at-risk
+            // and unsupported by other engines.
+            _ => false,
+        };
+
+        if is_symbol {
+            self.index += 1;
+        }
+        is_symbol
+    }
+
     // https://drafts.csswg.org/css-namespaces/#syntax
     fn parse_a_namespace_rule_prelude(&mut self) -> Option<(Option<String>, String)> {
         // @namespace <namespace-prefix>? [ <string> | <url> ] ;
@@ -7023,12 +7121,12 @@ mod tests {
         CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleSymbolsType, CssFontLanguageOverrideKind,
         CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
         CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
-        FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName,
+        FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -7037,9 +7135,10 @@ mod tests {
         parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
         parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
-        parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
-        parse_a_value_type, parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
-        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
+        parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
+        parse_an_opentype_tag, parse_container_rule_prelude, parse_empty_prelude,
+        parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7431,6 +7530,13 @@ mod tests {
         parsed
             .then_some(counter_style.map(|(kind, symbols_type, name)| (kind, symbols_type, name, symbols)))
             .flatten()
+    }
+
+    fn parse_nonnegative_integer_symbol_pair(input: &str) -> Option<CssNonnegativeIntegerSymbolPairOrder> {
+        let mut order = None;
+        let parsed =
+            parse_a_nonnegative_integer_symbol_pair(input.as_bytes(), |parsed_order| order = Some(parsed_order));
+        parsed.then_some(order).flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -8968,6 +9074,36 @@ mod tests {
         assert_eq!(parse_counter_style("symbols(numeric \"1\")"), None);
         assert_eq!(parse_counter_style("symbols(\"1\" ident)"), None);
         assert_eq!(parse_counter_style("symbols(\"1\") extra"), None);
+    }
+
+    #[test]
+    fn parses_nonnegative_integer_symbol_pairs() {
+        assert_eq!(
+            parse_nonnegative_integer_symbol_pair("1 \"I\""),
+            Some(CssNonnegativeIntegerSymbolPairOrder::IntegerFirst)
+        );
+        assert_eq!(
+            parse_nonnegative_integer_symbol_pair("\"I\" 1"),
+            Some(CssNonnegativeIntegerSymbolPairOrder::SymbolFirst)
+        );
+        assert_eq!(
+            parse_nonnegative_integer_symbol_pair("calc(1) \"I\""),
+            Some(CssNonnegativeIntegerSymbolPairOrder::IntegerFirst)
+        );
+        assert_eq!(
+            parse_nonnegative_integer_symbol_pair("symbol 1"),
+            Some(CssNonnegativeIntegerSymbolPairOrder::SymbolFirst)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_nonnegative_integer_symbol_pairs() {
+        assert_eq!(parse_nonnegative_integer_symbol_pair("1"), None);
+        assert_eq!(parse_nonnegative_integer_symbol_pair("\"I\""), None);
+        assert_eq!(parse_nonnegative_integer_symbol_pair("1 \"I\" extra"), None);
+        assert_eq!(parse_nonnegative_integer_symbol_pair("-1 \"I\""), None);
+        assert_eq!(parse_nonnegative_integer_symbol_pair("inherit 1"), None);
+        assert_eq!(parse_nonnegative_integer_symbol_pair("1 default"), None);
     }
 
     #[test]
