@@ -37,9 +37,10 @@ pub use css_parser::{
     CssQuotesValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollbarGutterValueKind,
     CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
     CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind, CssTouchActionKeyword,
-    CssTouchActionValue, CssTouchActionValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssTouchActionValue, CssTouchActionValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
+    CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1105,6 +1106,30 @@ pub unsafe extern "C" fn rust_css_parse_will_change(
 
             css_parser::parse_will_change_value(input, |kind, value| {
                 feature_callback(ctx, kind, value.as_ptr(), value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `property_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_transition_property(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    property_callback: unsafe extern "C" fn(ctx: *mut c_void, value_ptr: *const u8, value_len: usize),
+) -> CssTransitionPropertyValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTransitionPropertyValueKind::Invalid;
+            };
+
+            css_parser::parse_transition_property_value(input, |property| {
+                property_callback(ctx, property.as_ptr(), property.len());
             })
         })
     }

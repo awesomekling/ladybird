@@ -823,6 +823,14 @@ pub enum CssWillChangeFeatureKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTransitionPropertyValueKind {
+    Invalid,
+    None,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -3116,6 +3124,49 @@ where
     }
 
     CssWillChangeValueKind::List
+}
+
+pub(crate) fn parse_transition_property_value<N>(
+    filtered_input: &[u8],
+    mut property_callback: N,
+) -> CssTransitionPropertyValueKind
+where
+    N: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-transitions/#transition-property-property
+    // Value: none | <single-transition-property>#
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return CssTransitionPropertyValueKind::Invalid;
+        }
+        return CssTransitionPropertyValueKind::None;
+    }
+
+    let Some(properties) = parse_comma_separated_component_values(component_values, |component_values| {
+        let mut parser = ComponentValueParser::new(component_values);
+
+        // https://drafts.csswg.org/css-transitions/#single-transition-property
+        // <single-transition-property> = all | <custom-ident>
+        parser.parse_a_custom_ident(&["none"])
+    }) else {
+        return CssTransitionPropertyValueKind::Invalid;
+    };
+
+    if properties.is_empty() {
+        return CssTransitionPropertyValueKind::Invalid;
+    }
+
+    for property in properties {
+        property_callback(&property);
+    }
+
+    CssTransitionPropertyValueKind::List
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -9166,12 +9217,12 @@ mod tests {
         CssPositionVisibilityValueKind, CssQuotesValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -9191,8 +9242,8 @@ mod tests {
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_quotes_value,
         parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_white_space_trim_value, parse_will_change_value,
-        strip_whitespace,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transition_property_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9764,6 +9815,14 @@ mod tests {
             features.push((kind, value.to_string()));
         });
         (kind, features)
+    }
+
+    fn parse_transition_property(input: &str) -> (CssTransitionPropertyValueKind, Vec<String>) {
+        let mut properties = Vec::new();
+        let kind = parse_transition_property_value(input.as_bytes(), |property| {
+            properties.push(property.to_string());
+        });
+        (kind, properties)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -12110,6 +12169,53 @@ mod tests {
         assert_eq!(parse_will_change("all").0, CssWillChangeValueKind::Invalid);
         assert_eq!(parse_will_change("will-change").0, CssWillChangeValueKind::Invalid);
         assert_eq!(parse_will_change("transform,").0, CssWillChangeValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_transition_property_values() {
+        assert_eq!(
+            parse_transition_property("none"),
+            (CssTransitionPropertyValueKind::None, vec![])
+        );
+        assert_eq!(
+            parse_transition_property("all"),
+            (CssTransitionPropertyValueKind::List, vec!["all".to_string()])
+        );
+        assert_eq!(
+            parse_transition_property("width, ALL, opacity"),
+            (
+                CssTransitionPropertyValueKind::List,
+                vec!["width".to_string(), "ALL".to_string(), "opacity".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_transition_property("one-two-three, --custom"),
+            (
+                CssTransitionPropertyValueKind::List,
+                vec!["one-two-three".to_string(), "--custom".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_transition_property_values() {
+        assert_eq!(parse_transition_property("").0, CssTransitionPropertyValueKind::Invalid);
+        assert_eq!(
+            parse_transition_property("none, opacity").0,
+            CssTransitionPropertyValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_property("width opacity").0,
+            CssTransitionPropertyValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_property("initial").0,
+            CssTransitionPropertyValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transition_property("width,").0,
+            CssTransitionPropertyValueKind::Invalid
+        );
     }
 
     #[test]

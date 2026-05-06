@@ -2253,6 +2253,27 @@ RustComponentValueParser::WillChange RustComponentValueParser::parse_will_change
     };
 }
 
+RustComponentValueParser::TransitionProperty RustComponentValueParser::parse_transition_property(StringView input, StringView encoding)
+{
+    Vector<FlyString> properties;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto kind = FFI::rust_css_parse_transition_property(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &properties,
+        [](void* raw_properties, u8 const* value_ptr, size_t value_len) {
+            auto& properties = *static_cast<Vector<FlyString>*>(raw_properties);
+            properties.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+        });
+
+    return TransitionProperty {
+        .kind = kind,
+        .properties = move(properties),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

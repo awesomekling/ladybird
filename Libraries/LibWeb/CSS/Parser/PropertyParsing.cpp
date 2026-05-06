@@ -4483,29 +4483,31 @@ RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentVal
 
 RefPtr<StyleValue const> Parser::parse_transition_property_value(TokenStream<ComponentValue>& tokens)
 {
-    // https://drafts.csswg.org/css-transitions/#transition-property-property
-    // none | <single-transition-property>#
-
-    // none
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return StyleValueList::create({ none.release_nonnull() }, StyleValueList::Separator::Comma);
-
-    // <single-transition-property>#
-    // <single-transition-property> = all | <custom-ident>
     auto transaction = tokens.begin_transaction();
-    auto transition_property_values = parse_a_comma_separated_list_of_component_values(tokens);
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    StyleValueVector transition_properties;
-    for (auto const& value : transition_property_values) {
-        TokenStream transition_property_tokens { value };
-        auto custom_ident = parse_custom_ident_value(transition_property_tokens, { { "none"sv } });
-        if (!custom_ident || transition_property_tokens.has_next_token())
-            return nullptr;
+    auto serialized_transition_property = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_transition_property = RustComponentValueParser::parse_transition_property(serialized_transition_property.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_transition_property.kind) {
+    case FFI::CssTransitionPropertyValueKind::Invalid:
+        return {};
+    case FFI::CssTransitionPropertyValueKind::None:
+        transaction.commit();
+        return StyleValueList::create({ KeywordStyleValue::create(Keyword::None) }, StyleValueList::Separator::Comma);
+    case FFI::CssTransitionPropertyValueKind::List: {
+        StyleValueVector transition_properties;
+        transition_properties.ensure_capacity(parsed_transition_property.properties.size());
+        for (auto const& property : parsed_transition_property.properties)
+            transition_properties.unchecked_append(CustomIdentStyleValue::create(property));
 
-        transition_properties.append(custom_ident.release_nonnull());
+        transaction.commit();
+        return StyleValueList::create(move(transition_properties), StyleValueList::Separator::Comma);
     }
-    transaction.commit();
-    return StyleValueList::create(move(transition_properties), StyleValueList::Separator::Comma);
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-transforms-2/#propdef-translate
