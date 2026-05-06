@@ -631,6 +631,23 @@ pub struct CssContainValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssWhiteSpaceTrimValueKind {
+    Invalid,
+    None,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssWhiteSpaceTrimValue {
+    pub kind: CssWhiteSpaceTrimValueKind,
+    pub has_discard_before: bool,
+    pub has_discard_after: bool,
+    pub has_discard_inner: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2150,6 +2167,68 @@ pub(crate) fn parse_contain_value(filtered_input: &[u8]) -> CssContainValue {
     }
 
     if !value.is_size && !value.is_inline_size && !value.has_layout && !value.has_style && !value.has_paint {
+        return invalid;
+    }
+
+    value
+}
+
+pub(crate) fn parse_white_space_trim_value(filtered_input: &[u8]) -> CssWhiteSpaceTrimValue {
+    let invalid = CssWhiteSpaceTrimValue {
+        kind: CssWhiteSpaceTrimValueKind::Invalid,
+        has_discard_before: false,
+        has_discard_after: false,
+        has_discard_inner: false,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-text-4/#white-space-trim
+    // none | discard-before || discard-after || discard-inner
+    if parser.consume_ident_matching("none") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssWhiteSpaceTrimValue {
+            kind: CssWhiteSpaceTrimValueKind::None,
+            ..invalid
+        };
+    }
+
+    let mut value = CssWhiteSpaceTrimValue {
+        kind: CssWhiteSpaceTrimValueKind::List,
+        ..invalid
+    };
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("discard-before") {
+            if value.has_discard_before {
+                return invalid;
+            }
+            value.has_discard_before = true;
+        } else if ident.eq_ignore_ascii_case("discard-after") {
+            if value.has_discard_after {
+                return invalid;
+            }
+            value.has_discard_after = true;
+        } else if ident.eq_ignore_ascii_case("discard-inner") {
+            if value.has_discard_inner {
+                return invalid;
+            }
+            value.has_discard_inner = true;
+        } else {
+            return invalid;
+        }
+    }
+
+    if !value.has_discard_before && !value.has_discard_after && !value.has_discard_inner {
         return invalid;
     }
 
@@ -8200,18 +8279,19 @@ mod tests {
         CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
         CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
-        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
+        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
+        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag, parse_contain_value,
@@ -8220,7 +8300,7 @@ mod tests {
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
         parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
         parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_positive_percentage_descriptor,
-        parse_string_descriptor, strip_whitespace,
+        parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8734,6 +8814,10 @@ mod tests {
 
     fn parse_contain(input: &str) -> CssContainValue {
         parse_contain_value(input.as_bytes())
+    }
+
+    fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
+        parse_white_space_trim_value(input.as_bytes())
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -10848,6 +10932,63 @@ mod tests {
         assert_eq!(parse_contain("paint paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size, paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size nonsense").kind, CssContainValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_white_space_trim_values() {
+        assert_eq!(
+            parse_white_space_trim("none"),
+            CssWhiteSpaceTrimValue {
+                kind: CssWhiteSpaceTrimValueKind::None,
+                has_discard_before: false,
+                has_discard_after: false,
+                has_discard_inner: false,
+            }
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-inner discard-before"),
+            CssWhiteSpaceTrimValue {
+                kind: CssWhiteSpaceTrimValueKind::List,
+                has_discard_before: true,
+                has_discard_after: false,
+                has_discard_inner: true,
+            }
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-after discard-inner discard-before"),
+            CssWhiteSpaceTrimValue {
+                kind: CssWhiteSpaceTrimValueKind::List,
+                has_discard_before: true,
+                has_discard_after: true,
+                has_discard_inner: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_white_space_trim_values() {
+        assert_eq!(parse_white_space_trim("").kind, CssWhiteSpaceTrimValueKind::Invalid);
+        assert_eq!(parse_white_space_trim("auto").kind, CssWhiteSpaceTrimValueKind::Invalid);
+        assert_eq!(
+            parse_white_space_trim("none discard-before").kind,
+            CssWhiteSpaceTrimValueKind::Invalid
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-before discard-before").kind,
+            CssWhiteSpaceTrimValueKind::Invalid
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-after discard-after").kind,
+            CssWhiteSpaceTrimValueKind::Invalid
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-inner discard-inner").kind,
+            CssWhiteSpaceTrimValueKind::Invalid
+        );
+        assert_eq!(
+            parse_white_space_trim("discard-inner, discard-before").kind,
+            CssWhiteSpaceTrimValueKind::Invalid
+        );
     }
 
     #[test]

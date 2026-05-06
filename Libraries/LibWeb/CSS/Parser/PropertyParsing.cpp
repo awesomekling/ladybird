@@ -5662,55 +5662,38 @@ RefPtr<StyleValue const> Parser::parse_container_type_value(TokenStream<Componen
 // https://www.w3.org/TR/css-text-4/#white-space-trim
 RefPtr<StyleValue const> Parser::parse_white_space_trim_value(TokenStream<ComponentValue>& tokens)
 {
-    // none | discard-before || discard-after || discard-inner
-
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    RefPtr<StyleValue const> discard_before;
-    RefPtr<StyleValue const> discard_after;
-    RefPtr<StyleValue const> discard_inner;
+    auto serialized_white_space_trim = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_white_space_trim = RustComponentValueParser::parse_white_space_trim(serialized_white_space_trim.bytes_as_string_view(), "utf-8"sv);
 
-    while (auto parsed_value = parse_css_value_for_property(PropertyID::WhiteSpaceTrim, tokens)) {
-        switch (parsed_value->as_keyword().keyword()) {
-        case Keyword::DiscardBefore:
-            if (discard_before)
-                return {};
-            discard_before = parsed_value;
-            break;
-        case Keyword::DiscardAfter:
-            if (discard_after)
-                return {};
-            discard_after = parsed_value;
-            break;
-        case Keyword::DiscardInner:
-            if (discard_inner)
-                return {};
-            discard_inner = parsed_value;
-            break;
-        default:
-            return {};
-        }
+    auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
+        values.append(KeywordStyleValue::create(keyword));
+    };
 
-        if (!tokens.has_next_token())
-            break;
+    StyleValueVector values;
+    switch (parsed_white_space_trim.kind) {
+    case FFI::CssWhiteSpaceTrimValueKind::Invalid:
+        return {};
+    case FFI::CssWhiteSpaceTrimValueKind::None:
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::None);
+    case FFI::CssWhiteSpaceTrimValueKind::List:
+        if (parsed_white_space_trim.has_discard_before)
+            append_keyword(values, Keyword::DiscardBefore);
+        if (parsed_white_space_trim.has_discard_after)
+            append_keyword(values, Keyword::DiscardAfter);
+        if (parsed_white_space_trim.has_discard_inner)
+            append_keyword(values, Keyword::DiscardInner);
+        break;
     }
-
-    StyleValueVector parsed_values;
-
-    // NOTE: The values are appended here rather than in the loop above to canonicalize their order.
-    if (discard_before)
-        parsed_values.append(discard_before.release_nonnull());
-    if (discard_after)
-        parsed_values.append(discard_after.release_nonnull());
-    if (discard_inner)
-        parsed_values.append(discard_inner.release_nonnull());
 
     transaction.commit();
 
-    return StyleValueList::create(move(parsed_values), StyleValueList::Separator::Space);
+    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
 // https://www.w3.org/TR/css-text-4/#white-space-property

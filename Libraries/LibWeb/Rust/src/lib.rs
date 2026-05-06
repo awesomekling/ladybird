@@ -34,7 +34,7 @@ pub use css_parser::{
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
     CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
     CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -828,6 +828,26 @@ pub unsafe extern "C" fn rust_css_parse_contain(input: *const u8, input_len: usi
             };
 
             css_parser::parse_contain_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_white_space_trim(input: *const u8, input_len: usize) -> CssWhiteSpaceTrimValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssWhiteSpaceTrimValue {
+                    kind: CssWhiteSpaceTrimValueKind::Invalid,
+                    has_discard_before: false,
+                    has_discard_after: false,
+                    has_discard_inner: false,
+                };
+            };
+
+            css_parser::parse_white_space_trim_value(input)
         })
     }
 }

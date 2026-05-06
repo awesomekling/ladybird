@@ -2097,6 +2097,16 @@ FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, S
         filtered_input_bytes.size());
 }
 
+FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_white_space_trim(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssContainerTypeValueKind RustComponentValueParser::parse_container_type(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
