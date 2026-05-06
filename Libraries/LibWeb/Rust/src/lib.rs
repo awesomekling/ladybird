@@ -23,10 +23,11 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind,
-    CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
-    CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind,
-    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssBooleanExpressionEventKind, CssColorSchemeValue, CssColorSchemeValueKind, CssComponentValue,
+    CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
+    CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
+    CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
     CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
     CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
@@ -848,6 +849,33 @@ pub unsafe extern "C" fn rust_css_parse_white_space_trim(input: *const u8, input
             };
 
             css_parser::parse_white_space_trim_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `scheme_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_color_scheme(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    scheme_callback: unsafe extern "C" fn(ctx: *mut c_void, scheme_ptr: *const u8, scheme_len: usize),
+) -> CssColorSchemeValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssColorSchemeValue {
+                    kind: CssColorSchemeValueKind::Invalid,
+                    only: false,
+                };
+            };
+
+            css_parser::parse_color_scheme_value(input, |scheme| {
+                scheme_callback(ctx, scheme.as_ptr(), scheme.len());
+            })
         })
     }
 }

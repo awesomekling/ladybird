@@ -131,6 +131,12 @@ public:
         Vector<OpenTypeTaggedValue> tag_values;
     };
 
+    struct ColorScheme {
+        FFI::CssColorSchemeValueKind kind;
+        bool only { false };
+        Vector<String> schemes;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -199,6 +205,7 @@ public:
     static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
+    static ColorScheme parse_color_scheme(StringView input, StringView encoding);
     static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);

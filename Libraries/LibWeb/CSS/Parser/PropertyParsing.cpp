@@ -794,67 +794,25 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
 
 RefPtr<StyleValue const> Parser::parse_color_scheme_value(TokenStream<ComponentValue>& tokens)
 {
-    // normal | [ light | dark | <custom-ident> ]+ && only?
+    auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    // normal
-    {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (tokens.consume_a_token().is_ident("normal"sv)) {
-            if (tokens.has_next_token())
-                return {};
-            transaction.commit();
-            return ColorSchemeStyleValue::normal();
-        }
-    }
-
-    bool only = false;
-    Vector<String> schemes;
-
-    // only? && (..)
-    {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (tokens.consume_a_token().is_ident("only"sv)) {
-            only = true;
-            transaction.commit();
-        }
-    }
-
-    // [ light | dark | <custom-ident> ]+
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        auto transaction = tokens.begin_transaction();
-
-        // The 'normal', 'light', 'dark', and 'only' keywords are not valid <custom-ident>s in this property.
-        // Note: only 'normal' is blacklisted here because 'light' and 'dark' aren't parsed differently and 'only' is checked for afterwards
-        auto ident = parse_custom_ident_value(tokens, { { "normal"sv } });
-        if (!ident)
-            return {};
-
-        if (ident->custom_ident() == "only"_fly_string)
-            break;
-
-        schemes.append(ident->custom_ident().to_string());
-        tokens.discard_whitespace();
-        transaction.commit();
-    }
-
-    // (..) && only?
-    if (!only) {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (tokens.consume_a_token().is_ident("only"sv)) {
-            only = true;
-            transaction.commit();
-        }
-    }
-
-    tokens.discard_whitespace();
-    if (tokens.has_next_token() || schemes.is_empty())
+    auto serialized_color_scheme = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_color_scheme = RustComponentValueParser::parse_color_scheme(serialized_color_scheme.bytes_as_string_view(), "utf-8"sv);
+    switch (parsed_color_scheme.kind) {
+    case FFI::CssColorSchemeValueKind::Invalid:
         return {};
+    case FFI::CssColorSchemeValueKind::Normal:
+        transaction.commit();
+        return ColorSchemeStyleValue::normal();
+    case FFI::CssColorSchemeValueKind::List:
+        transaction.commit();
+        return ColorSchemeStyleValue::create(move(parsed_color_scheme.schemes), parsed_color_scheme.only);
+    }
 
-    return ColorSchemeStyleValue::create(schemes, only);
+    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_counter_definitions_value(TokenStream<ComponentValue>& tokens, AllowReversed allow_reversed, i32 default_value_if_not_reversed)

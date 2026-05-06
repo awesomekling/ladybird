@@ -2087,6 +2087,28 @@ Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(
     return kind;
 }
 
+RustComponentValueParser::ColorScheme RustComponentValueParser::parse_color_scheme(StringView input, StringView encoding)
+{
+    Vector<String> schemes;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed_color_scheme = FFI::rust_css_parse_color_scheme(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &schemes,
+        [](void* raw_schemes, u8 const* scheme_ptr, size_t scheme_len) {
+            auto& schemes = *static_cast<Vector<String>*>(raw_schemes);
+            schemes.append(string_from_ffi_bytes(scheme_ptr, scheme_len));
+        });
+
+    return ColorScheme {
+        .kind = parsed_color_scheme.kind,
+        .only = parsed_color_scheme.only,
+        .schemes = move(schemes),
+    };
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

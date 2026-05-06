@@ -648,6 +648,21 @@ pub struct CssWhiteSpaceTrimValue {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssColorSchemeValueKind {
+    Invalid,
+    Normal,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssColorSchemeValue {
+    pub kind: CssColorSchemeValueKind,
+    pub only: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2233,6 +2248,76 @@ pub(crate) fn parse_white_space_trim_value(filtered_input: &[u8]) -> CssWhiteSpa
     }
 
     value
+}
+
+pub(crate) fn parse_color_scheme_value<S>(filtered_input: &[u8], mut scheme_callback: S) -> CssColorSchemeValue
+where
+    S: FnMut(&str),
+{
+    let invalid = CssColorSchemeValue {
+        kind: CssColorSchemeValueKind::Invalid,
+        only: false,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-prop
+    // normal | [ light | dark | <custom-ident> ]+ && only?
+    if parser.consume_ident_matching("normal") {
+        if parser.has_next_component_value() {
+            return invalid;
+        }
+        return CssColorSchemeValue {
+            kind: CssColorSchemeValueKind::Normal,
+            only: false,
+        };
+    }
+
+    let mut only = false;
+    if parser.consume_ident_matching("only") {
+        only = true;
+    }
+
+    let mut schemes = Vec::new();
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("only") {
+            if only {
+                return invalid;
+            }
+            only = true;
+            break;
+        }
+
+        if !ident.eq_ignore_ascii_case("light")
+            && !ident.eq_ignore_ascii_case("dark")
+            && !is_valid_custom_ident(&ident, &["normal", "light", "dark", "only"])
+        {
+            return invalid;
+        }
+
+        schemes.push(ident);
+    }
+
+    if parser.has_next_component_value() || schemes.is_empty() {
+        return invalid;
+    }
+
+    for scheme in schemes {
+        scheme_callback(&scheme);
+    }
+
+    CssColorSchemeValue {
+        kind: CssColorSchemeValueKind::List,
+        only,
+    }
 }
 
 pub(crate) fn parse_font_weight_absolute_pair<C>(filtered_input: &[u8], mut count_callback: C) -> bool
@@ -8272,12 +8357,12 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
-        CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-        CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
-        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
+        CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
+        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssFontLanguageOverrideKind,
+        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
+        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssSupportsFeatureKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
         CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
         FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
@@ -8294,13 +8379,13 @@ mod tests {
         parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag, parse_contain_value,
-        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_positive_percentage_descriptor,
-        parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
+        parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
+        parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
+        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair,
+        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
+        parse_positive_percentage_descriptor, parse_string_descriptor, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8814,6 +8899,12 @@ mod tests {
 
     fn parse_contain(input: &str) -> CssContainValue {
         parse_contain_value(input.as_bytes())
+    }
+
+    fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
+        let mut schemes = Vec::new();
+        let parsed = parse_color_scheme_value(input.as_bytes(), |scheme| schemes.push(scheme.to_string()));
+        (parsed.kind, parsed.only, schemes)
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -10932,6 +11023,57 @@ mod tests {
         assert_eq!(parse_contain("paint paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size, paint").kind, CssContainValueKind::Invalid);
         assert_eq!(parse_contain("size nonsense").kind, CssContainValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_color_scheme_values() {
+        assert_eq!(
+            parse_color_scheme("normal"),
+            (CssColorSchemeValueKind::Normal, false, vec![])
+        );
+        assert_eq!(
+            parse_color_scheme("light"),
+            (CssColorSchemeValueKind::List, false, vec!["light".to_string()])
+        );
+        assert_eq!(
+            parse_color_scheme("dark light"),
+            (
+                CssColorSchemeValueKind::List,
+                false,
+                vec!["dark".to_string(), "light".to_string()]
+            )
+        );
+        assert_eq!(
+            parse_color_scheme("only dark"),
+            (CssColorSchemeValueKind::List, true, vec!["dark".to_string()])
+        );
+        assert_eq!(
+            parse_color_scheme("dark only"),
+            (CssColorSchemeValueKind::List, true, vec!["dark".to_string()])
+        );
+        assert_eq!(
+            parse_color_scheme("sepia dark"),
+            (
+                CssColorSchemeValueKind::List,
+                false,
+                vec!["sepia".to_string(), "dark".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_color_scheme_values() {
+        assert_eq!(parse_color_scheme("").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(parse_color_scheme("normal light").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(parse_color_scheme("only").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(parse_color_scheme("only dark only").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(
+            parse_color_scheme("dark only light").0,
+            CssColorSchemeValueKind::Invalid
+        );
+        assert_eq!(parse_color_scheme("default").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(parse_color_scheme("inherit").0, CssColorSchemeValueKind::Invalid);
+        assert_eq!(parse_color_scheme("dark, light").0, CssColorSchemeValueKind::Invalid);
     }
 
     #[test]
