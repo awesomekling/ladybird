@@ -604,6 +604,30 @@ pub unsafe extern "C" fn rust_css_parse_font_language_override(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_opentype_tag(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    opentype_tag_callback: unsafe extern "C" fn(ctx: *mut c_void, value_ptr: *const u8, value_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_an_opentype_tag(input, |value| {
+                opentype_tag_callback(ctx, value.as_ptr(), value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_font_feature_settings(
     input: *const u8,
     input_len: usize,

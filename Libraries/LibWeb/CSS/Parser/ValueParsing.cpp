@@ -4960,25 +4960,20 @@ RefPtr<StyleValue const> Parser::parse_opacity_value_value(TokenStream<Component
 RefPtr<StringStyleValue const> Parser::parse_opentype_tag_value(TokenStream<ComponentValue>& tokens)
 {
     // <opentype-tag> = <string>
-    // The <opentype-tag> is a case-sensitive OpenType feature tag.
-    // As specified in the OpenType specification [OPENTYPE], feature tags contain four ASCII characters.
-    // Tag strings longer or shorter than four characters, or containing characters outside the U+20–7E codepoint range are invalid.
-
     auto transaction = tokens.begin_transaction();
-    auto string_value = parse_string_value(tokens);
-    if (string_value == nullptr)
+    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    if (!tokens.has_next_token())
         return nullptr;
+    tokens.discard_a_token();
 
-    auto string = string_value->string_value().bytes_as_string_view();
-    if (string.length() != 4)
+    auto serialized_opentype_tag = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto opentype_tag = RustComponentValueParser::parse_an_opentype_tag(serialized_opentype_tag.bytes_as_string_view(), "utf-8"sv);
+    if (!opentype_tag.has_value())
         return nullptr;
-    for (char c : string) {
-        if (c < 0x20 || c > 0x7E)
-            return nullptr;
-    }
 
     transaction.commit();
-    return string_value;
+    return StringStyleValue::create(opentype_tag.release_value());
 }
 
 // https://drafts.csswg.org/css-fonts/#font-face-src-parsing

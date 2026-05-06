@@ -1454,6 +1454,27 @@ Optional<RustComponentValueParser::FontLanguageOverride> RustComponentValueParse
     return font_language_override;
 }
 
+Optional<FlyString> RustComponentValueParser::parse_an_opentype_tag(StringView input, StringView encoding)
+{
+    Optional<FlyString> opentype_tag;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_opentype_tag(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &opentype_tag,
+        [](void* raw_opentype_tag, u8 const* value_ptr, size_t value_len) {
+            auto& opentype_tag = *static_cast<Optional<FlyString>*>(raw_opentype_tag);
+            opentype_tag = fly_string_from_ffi_bytes(value_ptr, value_len);
+        });
+
+    if (!parsed)
+        return {};
+
+    return opentype_tag;
+}
+
 static Optional<RustComponentValueParser::OpenTypeSettings> parse_open_type_settings_impl(StringView input, StringView encoding, bool is_variation_settings)
 {
     RustComponentValueParser::OpenTypeSettings settings {};

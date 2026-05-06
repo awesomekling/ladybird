@@ -1046,6 +1046,27 @@ where
     true
 }
 
+pub(crate) fn parse_an_opentype_tag<F>(filtered_input: &[u8], mut opentype_tag_callback: F) -> bool
+where
+    F: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let Some(opentype_tag) = parse_opentype_tag(&mut parser) else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    opentype_tag_callback(&opentype_tag);
+    true
+}
+
 pub(crate) fn parse_a_font_feature_settings<K, V>(
     filtered_input: &[u8],
     mut settings_callback: K,
@@ -5913,8 +5934,8 @@ mod tests {
         parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
-        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_a_value_type, parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -6113,6 +6134,12 @@ mod tests {
             font_language_override = Some((kind, value.map(ToString::to_string)));
         });
         parsed.then_some(font_language_override).flatten()
+    }
+
+    fn parse_opentype_tag(input: &str) -> Option<String> {
+        let mut opentype_tag = None;
+        let parsed = parse_an_opentype_tag(input.as_bytes(), |value| opentype_tag = Some(value.to_string()));
+        parsed.then_some(opentype_tag).flatten()
     }
 
     fn parse_font_feature_settings(input: &str) -> Option<(CssOpenTypeSettingsKind, Vec<OpenTypeTaggedValue>)> {
@@ -7083,6 +7110,23 @@ mod tests {
         assert_eq!(parse_font_language_override("\"\""), None);
         assert_eq!(parse_font_language_override("\"ENG  \""), None);
         assert_eq!(parse_font_language_override("\"    \""), None);
+    }
+
+    #[test]
+    fn parses_opentype_tags() {
+        assert_eq!(parse_opentype_tag("\"dlig\""), Some("dlig".to_string()));
+        assert_eq!(parse_opentype_tag("\"AB@D\""), Some("AB@D".to_string()));
+        assert_eq!(parse_opentype_tag("\"a cd\""), Some("a cd".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_opentype_tags() {
+        assert_eq!(parse_opentype_tag("dlig"), None);
+        assert_eq!(parse_opentype_tag("\"dli\""), None);
+        assert_eq!(parse_opentype_tag("\"dligx\""), None);
+        assert_eq!(parse_opentype_tag("\"abc\u{1f}\""), None);
+        assert_eq!(parse_opentype_tag("\"abc\u{7f}\""), None);
+        assert_eq!(parse_opentype_tag("\"dlig\" 1"), None);
     }
 
     #[test]

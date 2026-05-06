@@ -115,6 +115,7 @@ public:
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
     static Optional<FontLanguageOverride> parse_a_font_language_override(StringView input, StringView encoding);
+    static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
     static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
