@@ -2104,6 +2104,8 @@ pub(crate) fn parse_a_media_condition<E, M, V, C>(
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
 
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-condition
+    // <media-condition> = <media-not> | <media-in-parens> [ <media-and>* | <media-or>* ]
     let mut parser = ComponentValueParser::new(component_values);
     if parser
         .parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature)
@@ -2145,6 +2147,9 @@ pub(crate) fn parse_a_media_test<E, M, V, C>(
 
     // https://drafts.csswg.org/css-values-5/#typedef-if-test
     // media( <media-feature> | <media-condition> )
+    //
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-feature
+    // <media-feature> = [ <mf-plain> | <mf-boolean> | <mf-range> ]
     if let Some(media_feature) = component_values_parse_as_media_feature(&component_values) {
         event_callback(CssBooleanExpressionEventKind::TestStart);
         media_feature_callback(css_media_feature_from_syntax(&media_feature));
@@ -2195,6 +2200,12 @@ pub(crate) fn parse_a_media_query_list<Q, E, M, V, C>(
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-query-list
+    // To parse a <media-query-list> production,
+    // parse a comma-separated list of component values,
+    // then parse each entry in the returned list as a <media-query>.
+    // Its value is the list of <media-query>s so produced.
     for media_query in parser.parse_a_media_query_list() {
         emit_media_query_syntax(
             media_query,
@@ -5696,6 +5707,9 @@ fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) 
 }
 
 fn component_values_parse_as_media_query(component_values: Vec<ComponentValue>) -> MediaQuerySyntax {
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-query
+    // <media-query> = <media-condition>
+    //              | [ not | only ]? <media-type> [ and <media-condition-without-or> ]?
     let mut parser = ComponentValueParser::new(component_values.clone());
     if let Some(condition) = parser.parse_media_condition()
         && !parser.has_next_component_value()
@@ -5711,6 +5725,9 @@ fn component_values_parse_as_media_query(component_values: Vec<ComponentValue>) 
     parser.discard_whitespace();
     let modifier = parser.parse_media_query_modifier();
     parser.discard_whitespace();
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-type
+    // <media-type> = <ident>
     let Some(media_type) = parser.parse_media_type() else {
         return MediaQuerySyntax::Invalid;
     };
@@ -5728,6 +5745,9 @@ fn component_values_parse_as_media_query(component_values: Vec<ComponentValue>) 
     }
     parser.index += 1;
     parser.discard_whitespace();
+
+    // https://drafts.csswg.org/mediaqueries-5/#typedef-media-condition-without-or
+    // <media-condition-without-or> = <media-not> | <media-in-parens> <media-and>*
     let Some(condition) = parser.parse_media_condition_without_or() else {
         return MediaQuerySyntax::Invalid;
     };
@@ -7019,6 +7039,11 @@ impl Parser {
     }
 
     pub(crate) fn parse_a_media_query_list(&mut self) -> Vec<MediaQuerySyntax> {
+        // https://drafts.csswg.org/mediaqueries-5/#typedef-media-query-list
+        // To parse a <media-query-list> production,
+        // parse a comma-separated list of component values,
+        // then parse each entry in the returned list as a <media-query>.
+        // Its value is the list of <media-query>s so produced.
         let groups = self.parse_a_comma_separated_list_of_component_values();
 
         // AD-HOC: Ignore whitespace-only queries
