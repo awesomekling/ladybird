@@ -798,6 +798,30 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_supports_condition(S
         });
 }
 
+Optional<RustComponentValueParser::SupportsFeature> RustComponentValueParser::parse_a_supports_feature(StringView input, StringView encoding)
+{
+    Optional<SupportsFeature> feature;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_supports_feature(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &feature,
+        [](void* raw_feature, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len) {
+            auto& feature = *static_cast<Optional<SupportsFeature>*>(raw_feature);
+            Optional<FlyString> name;
+            if (name_ptr)
+                name = fly_string_from_ffi_bytes(name_ptr, name_len);
+            feature = SupportsFeature { kind, move(name) };
+        });
+
+    if (!parsed)
+        return {};
+
+    return feature;
+}
+
 OwnPtr<BooleanExpression> RustComponentValueParser::parse_an_if_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test)
 {
     return parse_a_boolean_expression(

@@ -32,9 +32,9 @@ pub use css_parser::{
     CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
     CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
-    CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
-    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
-    CssValueTypeSyntaxKind,
+    CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -361,6 +361,36 @@ pub unsafe extern "C" fn rust_css_parse_supports_condition(
                 },
             );
         });
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_supports_feature(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_supports_feature(input, |kind, name| {
+                let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                feature_callback(ctx, kind, name_ptr, name_len);
+            })
+        })
     }
 }
 

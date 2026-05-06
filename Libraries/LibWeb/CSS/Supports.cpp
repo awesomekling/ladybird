@@ -88,7 +88,7 @@ MatchResult Supports::Env::evaluate(DOM::Document const*) const
 
 String Supports::Env::to_string() const
 {
-    return MUST(String::formatted("font-format({})", serialize_an_identifier(m_variable_name)));
+    return MUST(String::formatted("env({})", serialize_an_identifier(m_variable_name)));
 }
 
 void Supports::Env::dump(StringBuilder& builder, int indent_levels) const

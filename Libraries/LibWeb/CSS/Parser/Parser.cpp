@@ -299,19 +299,33 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
     //                    | <supports-decl>
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
-    auto const& first_token = tokens.consume_a_token();
 
-    // `<supports-decl> = ( <declaration> )`
-    if (first_token.is_block() && first_token.block().is_paren()) {
+    auto feature_start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_feature = serialize_component_values_for_reparsing(tokens.tokens_since(feature_start));
+    auto feature = RustComponentValueParser::parse_a_supports_feature(serialized_feature.bytes_as_string_view(), "utf-8"sv);
+    if (!feature.has_value())
+        return {};
+
+    auto component_values = Vector<ComponentValue> { tokens.tokens_since(feature_start) };
+    TokenStream<ComponentValue> feature_tokens { component_values };
+    feature_tokens.discard_whitespace();
+    auto const& first_token = feature_tokens.consume_a_token();
+
+    switch (feature->kind) {
+    case FFI::CssSupportsFeatureKind::Declaration: {
+        VERIFY(first_token.is_block() && first_token.block().is_paren());
         TokenStream block_tokens { first_token.block().value };
         if (auto declaration = parse_supports_declaration(block_tokens)) {
             transaction.commit();
             return BooleanExpressionInParens::create(declaration.release_nonnull<BooleanExpression>());
         }
+        return {};
     }
-
-    // `<supports-selector-fn> = selector( <complex-selector> )`
-    if (first_token.is_function("selector"sv)) {
+    case FFI::CssSupportsFeatureKind::Selector: {
+        VERIFY(first_token.is_function("selector"sv));
         // FIXME: Parsing and then converting back to a string is weird.
         StringBuilder builder;
         for (auto const& item : first_token.function().value)
@@ -326,56 +340,33 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
         bool matches = !maybe_selector.is_error() && !maybe_selector.value()->contains_unknown_webkit_pseudo_element();
         return Supports::Selector::create(builder.to_string_without_validation(), matches);
     }
-
-    // `<supports-font-tech-fn> = font-tech( <font-tech> )`
-    if (first_token.is_function("font-tech"sv)) {
-        TokenStream tech_tokens { first_token.function().value };
-        tech_tokens.discard_whitespace();
-        auto tech_token = tech_tokens.consume_a_token();
-        tech_tokens.discard_whitespace();
-        if (tech_tokens.has_next_token() || !tech_token.is(Token::Type::Ident))
-            return {};
-
+    case FFI::CssSupportsFeatureKind::FontTech: {
+        VERIFY(feature->name.has_value());
         transaction.commit();
-        auto tech_name = tech_token.token().ident();
+        auto tech_name = feature->name.release_value();
         bool matches = font_tech_is_supported(tech_name);
         return Supports::FontTech::create(move(tech_name), matches);
     }
-
-    // `<supports-font-format-fn> = font-format( <font-format> )`
-    if (first_token.is_function("font-format"sv)) {
-        TokenStream format_tokens { first_token.function().value };
-        format_tokens.discard_whitespace();
-        auto format_token = format_tokens.consume_a_token();
-        format_tokens.discard_whitespace();
-        if (format_tokens.has_next_token() || !format_token.is(Token::Type::Ident))
-            return {};
-
+    case FFI::CssSupportsFeatureKind::FontFormat: {
+        VERIFY(feature->name.has_value());
         transaction.commit();
-        auto format_name = format_token.token().ident();
+        auto format_name = feature->name.release_value();
         bool matches = font_format_is_supported(format_name);
         return Supports::FontFormat::create(move(format_name), matches);
     }
-
-    // `<supports-env-fn> = env( <ident> )`
-    if (first_token.is_function("env"sv)) {
-        TokenStream format_tokens { first_token.function().value };
-        format_tokens.discard_whitespace();
-        auto variable_token = format_tokens.consume_a_token();
-        format_tokens.discard_whitespace();
-        if (format_tokens.has_next_token() || !variable_token.is(Token::Type::Ident))
-            return {};
-
+    case FFI::CssSupportsFeatureKind::Env: {
+        VERIFY(feature->name.has_value());
         transaction.commit();
-        auto variable_name = variable_token.token().ident();
+        auto variable_name = feature->name.release_value();
         // https://drafts.csswg.org/css-conditional-5/#support-definition-env
         // A CSS processor is considered to support an environment variable if the <ident> is a supported environment
         // variable.
         bool matches = environment_variable_from_string(variable_name).has_value();
-        return Supports::FontFormat::create(move(variable_name), matches);
+        return Supports::Env::create(move(variable_name), matches);
+    }
     }
 
-    return {};
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-decl

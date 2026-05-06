@@ -248,6 +248,15 @@ pub(crate) enum BooleanExpressionTest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SupportsFeature {
+    Declaration,
+    Selector,
+    FontTech(String),
+    FontFormat(String),
+    Env(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SyntaxNode {
     Universal,
     Type(String),
@@ -725,6 +734,16 @@ pub enum CssBooleanExpressionEventKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssSupportsFeatureKind {
+    Declaration,
+    Selector,
+    FontTech,
+    FontFormat,
+    Env,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssMediaFeatureSyntaxKind {
     Boolean,
     Plain,
@@ -986,6 +1005,37 @@ pub(crate) fn parse_a_supports_condition<E, C>(
         &mut |_| {},
         &mut |_| {},
     );
+}
+
+pub(crate) fn parse_a_supports_feature<F>(filtered_input: &[u8], mut feature_callback: F) -> bool
+where
+    F: FnMut(CssSupportsFeatureKind, Option<&str>),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    parser.rule_context.push(RuleContext::SupportsCondition);
+    let component_values = parser.parse_a_list_of_component_values();
+    parser.rule_context.pop();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let Some((feature, _)) = parser.parse_supports_feature_syntax() else {
+        return false;
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    match feature {
+        SupportsFeature::Declaration => feature_callback(CssSupportsFeatureKind::Declaration, None),
+        SupportsFeature::Selector => feature_callback(CssSupportsFeatureKind::Selector, None),
+        SupportsFeature::FontTech(name) => feature_callback(CssSupportsFeatureKind::FontTech, Some(&name)),
+        SupportsFeature::FontFormat(name) => feature_callback(CssSupportsFeatureKind::FontFormat, Some(&name)),
+        SupportsFeature::Env(name) => feature_callback(CssSupportsFeatureKind::Env, Some(&name)),
+    }
+
+    true
 }
 
 pub(crate) fn parse_an_if_condition<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
@@ -3700,6 +3750,15 @@ impl ComponentValueParser {
         // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
         //                    | <supports-font-format-fn> | <supports-env-fn>
         //                    | <supports-decl>
+        let (_, component_value) = self.parse_supports_feature_syntax()?;
+        Some(BooleanExpressionTest::SupportsFeature(vec![component_value]))
+    }
+
+    // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
+    fn parse_supports_feature_syntax(&mut self) -> Option<(SupportsFeature, ComponentValue)> {
+        // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
+        //                    | <supports-font-format-fn> | <supports-env-fn>
+        //                    | <supports-decl>
         let component_value = self.next_component_value()?.clone();
 
         // `<supports-decl> = ( <declaration> )`
@@ -3708,7 +3767,7 @@ impl ComponentValueParser {
             && component_values_start_like_a_declaration(&block.value)
         {
             self.index += 1;
-            return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
+            return Some((SupportsFeature::Declaration, component_value));
         }
 
         let ComponentValue::Function(function) = &component_value else {
@@ -3718,7 +3777,7 @@ impl ComponentValueParser {
         // `<supports-selector-fn> = selector( <complex-selector> )`
         if function.name.eq_ignore_ascii_case("selector") {
             self.index += 1;
-            return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
+            return Some((SupportsFeature::Selector, component_value));
         }
 
         // `<supports-font-tech-fn> = font-tech( <font-tech> )`
@@ -3732,16 +3791,21 @@ impl ComponentValueParser {
             parser.discard_whitespace();
             let ident = parser.consume_the_next_component_value();
             parser.discard_whitespace();
-            if matches!(
-                ident,
-                Some(ComponentValue::PreservedToken(Token {
-                    token_type: TokenType::Ident { .. },
-                    ..
-                }))
-            ) && parser.next_component_value().is_none()
+            if let Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            })) = ident
+                && parser.next_component_value().is_none()
             {
+                let feature = if function.name.eq_ignore_ascii_case("font-tech") {
+                    SupportsFeature::FontTech(value)
+                } else if function.name.eq_ignore_ascii_case("font-format") {
+                    SupportsFeature::FontFormat(value)
+                } else {
+                    SupportsFeature::Env(value)
+                };
                 self.index += 1;
-                return Some(BooleanExpressionTest::SupportsFeature(vec![component_value]));
+                return Some((feature, component_value));
             }
         }
 
@@ -7832,28 +7896,28 @@ mod tests {
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssUrlFunctionType,
-        CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
-        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
-        parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_unicode_range,
-        parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
-        parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_positive_percentage_descriptor,
-        parse_string_descriptor, strip_whitespace,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssSupportsFeatureKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
+        FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
+        parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
+        parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
+        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair,
+        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
+        parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7913,6 +7977,14 @@ mod tests {
         let mut events = Vec::new();
         parse_an_if_condition(input.as_bytes(), |event| events.push(event), |_| {});
         events
+    }
+
+    fn parse_supports_feature(input: &str) -> Option<(CssSupportsFeatureKind, Option<String>)> {
+        let mut feature = None;
+        let parsed = parse_a_supports_feature(input.as_bytes(), |kind, name| {
+            feature = Some((kind, name.map(ToOwned::to_owned)));
+        });
+        parsed.then_some(feature).flatten()
     }
 
     fn parse_page_selector_list(input: &str) -> Option<Vec<(Option<String>, Vec<CssPagePseudoClassKind>)>> {
@@ -8535,6 +8607,40 @@ mod tests {
         };
         assert_eq!(children.len(), 2);
         assert!(children.iter().all(|child| matches!(child, BooleanExpression::Test(_))));
+    }
+
+    #[test]
+    fn parses_supports_features() {
+        assert_eq!(
+            parse_supports_feature("(color: green)"),
+            Some((CssSupportsFeatureKind::Declaration, None))
+        );
+        assert_eq!(
+            parse_supports_feature("selector(:has(.foo))"),
+            Some((CssSupportsFeatureKind::Selector, None))
+        );
+        assert_eq!(
+            parse_supports_feature("font-tech(color-COLRv1)"),
+            Some((CssSupportsFeatureKind::FontTech, Some("color-COLRv1".to_string())))
+        );
+        assert_eq!(
+            parse_supports_feature("font-format(opentype)"),
+            Some((CssSupportsFeatureKind::FontFormat, Some("opentype".to_string())))
+        );
+        assert_eq!(
+            parse_supports_feature("env(safe-area-inset-top)"),
+            Some((CssSupportsFeatureKind::Env, Some("safe-area-inset-top".to_string())))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_supports_features() {
+        assert_eq!(parse_supports_feature(""), None);
+        assert_eq!(parse_supports_feature("width: 1px"), None);
+        assert_eq!(parse_supports_feature("font-tech(color-COLRv1 extra)"), None);
+        assert_eq!(parse_supports_feature("font-format(\"opentype\")"), None);
+        assert_eq!(parse_supports_feature("env()"), None);
+        assert_eq!(parse_supports_feature("selector(.foo) extra"), None);
     }
 
     #[test]
