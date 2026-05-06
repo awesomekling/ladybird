@@ -1777,6 +1777,16 @@ pub(crate) fn parse_string_descriptor(filtered_input: &[u8]) -> bool {
     component_values_parse_as_string(strip_whitespace(&component_values))
 }
 
+pub(crate) fn parse_length_descriptor(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-values-4/#lengths
+    // <length>
+    matches!(component_values, [component_value] if component_value_parse_as_length_descriptor(component_value))
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -6168,6 +6178,53 @@ fn component_values_parse_as_length(component_values: &[ComponentValue]) -> bool
     }
 }
 
+fn component_value_parse_as_length_descriptor(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn is_math_function_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "abs"
+            | "acos"
+            | "asin"
+            | "atan"
+            | "atan2"
+            | "calc"
+            | "clamp"
+            | "cos"
+            | "exp"
+            | "hypot"
+            | "log"
+            | "max"
+            | "min"
+            | "mod"
+            | "pow"
+            | "random"
+            | "rem"
+            | "round"
+            | "sign"
+            | "sin"
+            | "sqrt"
+            | "tan"
+    )
+}
+
 fn component_values_parse_as_resolution(component_values: &[ComponentValue]) -> bool {
     let [component_value] = component_values else {
         return false;
@@ -7617,8 +7674,8 @@ mod tests {
         parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_string_descriptor,
-        strip_whitespace,
+        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
+        parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8043,6 +8100,10 @@ mod tests {
 
     fn parse_string_descriptor_value(input: &str) -> bool {
         parse_string_descriptor(input.as_bytes())
+    }
+
+    fn parse_length_descriptor_value(input: &str) -> bool {
+        parse_length_descriptor(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -9760,6 +9821,22 @@ mod tests {
         assert!(!parse_string_descriptor_value(""));
         assert!(!parse_string_descriptor_value("ident"));
         assert!(!parse_string_descriptor_value("\"hello\" \"world\""));
+    }
+
+    #[test]
+    fn parses_length_descriptors() {
+        assert!(parse_length_descriptor_value("1px"));
+        assert!(parse_length_descriptor_value("0"));
+        assert!(parse_length_descriptor_value("calc(1px + 2px)"));
+    }
+
+    #[test]
+    fn rejects_invalid_length_descriptors() {
+        assert!(!parse_length_descriptor_value(""));
+        assert!(!parse_length_descriptor_value("1%"));
+        assert!(!parse_length_descriptor_value("1px 2px"));
+        assert!(!parse_length_descriptor_value("auto"));
+        assert!(!parse_length_descriptor_value("foo(1px)"));
     }
 
     #[test]

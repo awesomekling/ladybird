@@ -426,8 +426,30 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     return StyleValueList::create({ first.release_nonnull(), second.release_nonnull() }, StyleValueList::Separator::Space);
                 }
-                case DescriptorMetadata::ValueType::Length:
-                    return parse_length_value(tokens, infinite_range);
+                case DescriptorMetadata::ValueType::Length: {
+                    // https://drafts.csswg.org/css-values-4/#lengths
+                    // <length>
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_length = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_length_descriptor(serialized_length.bytes_as_string_view(), "utf-8"sv))
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> length_tokens { component_values };
+
+                    auto length = parse_length_value(length_tokens, infinite_range);
+                    if (!length)
+                        return nullptr;
+
+                    length_tokens.discard_whitespace();
+                    if (length_tokens.has_next_token())
+                        return nullptr;
+
+                    return length.release_nonnull();
+                }
                 case DescriptorMetadata::ValueType::OptionalDeclarationValue: {
                     tokens.discard_whitespace();
 
