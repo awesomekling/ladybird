@@ -4188,46 +4188,48 @@ RefPtr<StyleValue const> Parser::parse_text_indent_value(TokenStream<ComponentVa
 // https://drafts.csswg.org/css-text-decor-4/#text-underline-position-property
 RefPtr<StyleValue const> Parser::parse_text_underline_position_value(TokenStream<ComponentValue>& tokens)
 {
-    // auto | [ from-font | under ] || [ left | right ]
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    if (parse_all_as_single_keyword_value(tokens, Keyword::Auto)) {
-        transaction.commit();
-        return TextUnderlinePositionStyleValue::create(TextUnderlinePositionHorizontal::Auto, TextUnderlinePositionVertical::Auto);
-    }
-
-    Optional<TextUnderlinePositionHorizontal> horizontal_value;
-    Optional<TextUnderlinePositionVertical> vertical_value;
-
-    while (tokens.has_next_token()) {
-        auto keyword_value = parse_keyword_value(tokens);
-
-        if (!keyword_value)
-            return nullptr;
-
-        if (auto maybe_horizontal_value = keyword_to_text_underline_position_horizontal(keyword_value->to_keyword()); maybe_horizontal_value.has_value()) {
-            if (maybe_horizontal_value == TextUnderlinePositionHorizontal::Auto || horizontal_value.has_value())
-                return nullptr;
-
-            horizontal_value = maybe_horizontal_value;
-
-            continue;
+    auto horizontal_from_rust = [](FFI::CssTextUnderlinePositionHorizontal horizontal) {
+        switch (horizontal) {
+        case FFI::CssTextUnderlinePositionHorizontal::Invalid:
+            break;
+        case FFI::CssTextUnderlinePositionHorizontal::Auto:
+            return TextUnderlinePositionHorizontal::Auto;
+        case FFI::CssTextUnderlinePositionHorizontal::FromFont:
+            return TextUnderlinePositionHorizontal::FromFont;
+        case FFI::CssTextUnderlinePositionHorizontal::Under:
+            return TextUnderlinePositionHorizontal::Under;
         }
 
-        if (auto maybe_vertical_value = keyword_to_text_underline_position_vertical(keyword_value->to_keyword()); maybe_vertical_value.has_value()) {
-            if (maybe_vertical_value == TextUnderlinePositionVertical::Auto || vertical_value.has_value())
-                return nullptr;
+        VERIFY_NOT_REACHED();
+    };
 
-            vertical_value = maybe_vertical_value;
-
-            continue;
+    auto vertical_from_rust = [](FFI::CssTextUnderlinePositionVertical vertical) {
+        switch (vertical) {
+        case FFI::CssTextUnderlinePositionVertical::Invalid:
+            break;
+        case FFI::CssTextUnderlinePositionVertical::Auto:
+            return TextUnderlinePositionVertical::Auto;
+        case FFI::CssTextUnderlinePositionVertical::Left:
+            return TextUnderlinePositionVertical::Left;
+        case FFI::CssTextUnderlinePositionVertical::Right:
+            return TextUnderlinePositionVertical::Right;
         }
 
-        return nullptr;
-    }
+        VERIFY_NOT_REACHED();
+    };
+
+    auto serialized_text_underline_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_text_underline_position = RustComponentValueParser::parse_text_underline_position(serialized_text_underline_position.bytes_as_string_view(), "utf-8"sv);
+    if (parsed_text_underline_position.horizontal == FFI::CssTextUnderlinePositionHorizontal::Invalid || parsed_text_underline_position.vertical == FFI::CssTextUnderlinePositionVertical::Invalid)
+        return {};
 
     transaction.commit();
-    return TextUnderlinePositionStyleValue::create(horizontal_value.value_or(TextUnderlinePositionHorizontal::Auto), vertical_value.value_or(TextUnderlinePositionVertical::Auto));
+    return TextUnderlinePositionStyleValue::create(horizontal_from_rust(parsed_text_underline_position.horizontal), vertical_from_rust(parsed_text_underline_position.vertical));
 }
 
 // https://drafts.csswg.org/scroll-animations-1/#propdef-timeline-scope

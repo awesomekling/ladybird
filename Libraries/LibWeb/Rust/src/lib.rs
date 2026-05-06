@@ -35,6 +35,7 @@ pub use css_parser::{
     CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
     CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
     CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
     CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier,
     CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
     CssWhiteSpaceTrimValueKind,
@@ -969,6 +970,27 @@ pub unsafe extern "C" fn rust_css_parse_paint_order(input: *const u8, input_len:
             };
 
             css_parser::parse_paint_order_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_text_underline_position(
+    input: *const u8,
+    input_len: usize,
+) -> CssTextUnderlinePositionValue {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssTextUnderlinePositionValue {
+                    horizontal: CssTextUnderlinePositionHorizontal::Invalid,
+                    vertical: CssTextUnderlinePositionVertical::Invalid,
+                };
+            };
+
+            css_parser::parse_text_underline_position_value(input)
         })
     }
 }

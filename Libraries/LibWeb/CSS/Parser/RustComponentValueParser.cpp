@@ -2166,6 +2166,13 @@ FFI::CssPaintOrderValue RustComponentValueParser::parse_paint_order(StringView i
     return FFI::rust_css_parse_paint_order(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+FFI::CssTextUnderlinePositionValue RustComponentValueParser::parse_text_underline_position(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+    return FFI::rust_css_parse_text_underline_position(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
