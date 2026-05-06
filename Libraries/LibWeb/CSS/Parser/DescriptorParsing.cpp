@@ -451,12 +451,30 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     return length.release_nonnull();
                 }
                 case DescriptorMetadata::ValueType::OptionalDeclarationValue: {
-                    tokens.discard_whitespace();
+                    // https://drafts.csswg.org/css-syntax/#typedef-declaration-value
+                    // The <declaration-value> production matches any sequence of one or more tokens, so long as the
+                    // sequence does not contain <bad-string-token>, <bad-url-token>, unmatched <)-token>, <]-token>,
+                    // or <}-token>, or top-level <semicolon-token> tokens or <delim-token> tokens with a value of
+                    // "!". It represents the entirety of what a valid declaration can have as its value.
+                    //
+                    // https://drafts.css-houdini.org/css-properties-values-api/#the-initial-value-descriptor
+                    // <declaration-value>?
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
 
-                    if (tokens.is_empty())
+                    auto serialized_declaration_value = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_optional_declaration_value_descriptor(serialized_declaration_value.bytes_as_string_view(), "utf-8"sv))
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> declaration_value_tokens { component_values };
+
+                    declaration_value_tokens.discard_whitespace();
+                    if (declaration_value_tokens.is_empty())
                         return UnresolvedStyleValue::create({}, {});
 
-                    if (auto parsed_declaration_value = parse_declaration_value(tokens); parsed_declaration_value.has_value() && tokens.is_empty()) {
+                    if (auto parsed_declaration_value = parse_declaration_value(declaration_value_tokens); parsed_declaration_value.has_value() && declaration_value_tokens.is_empty()) {
                         // NB: We know this contains no substitution functions otherwise we would have returned earlier
                         return UnresolvedStyleValue::create(parsed_declaration_value.release_value(), {});
                     }

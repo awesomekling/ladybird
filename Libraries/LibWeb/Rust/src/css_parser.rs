@@ -1812,6 +1812,22 @@ pub(crate) fn parse_page_size_descriptor(filtered_input: &[u8]) -> bool {
     !parser.has_next_component_value()
 }
 
+pub(crate) fn parse_optional_declaration_value_descriptor(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-syntax/#typedef-declaration-value
+    // The <declaration-value> production matches any sequence of one or more tokens, so long as the sequence does
+    // not contain <bad-string-token>, <bad-url-token>, unmatched <)-token>, <]-token>, or <}-token>, or top-level
+    // <semicolon-token> tokens or <delim-token> tokens with a value of "!". It represents the entirety of what a
+    // valid declaration can have as its value.
+    //
+    // https://drafts.css-houdini.org/css-properties-values-api/#the-initial-value-descriptor
+    // <declaration-value>?
+    component_values.is_empty() || contains_only_declaration_value(component_values, Nested::No)
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -5465,6 +5481,40 @@ fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
     true
 }
 
+fn contains_only_declaration_value(component_values: &[ComponentValue], nested: Nested) -> bool {
+    for component_value in component_values {
+        match component_value {
+            ComponentValue::Function(function) => {
+                if !contains_only_declaration_value(&function.value, Nested::Yes) {
+                    return false;
+                }
+            }
+            ComponentValue::SimpleBlock(block) => {
+                if !contains_only_declaration_value(&block.value, Nested::Yes) {
+                    return false;
+                }
+            }
+            ComponentValue::PreservedToken(token) => match token.token_type {
+                TokenType::EndOfFile
+                | TokenType::BadString
+                | TokenType::BadUrl
+                | TokenType::Function { .. }
+                | TokenType::OpenCurly
+                | TokenType::OpenParen
+                | TokenType::OpenSquare
+                | TokenType::CloseCurly
+                | TokenType::CloseParen
+                | TokenType::CloseSquare => return false,
+                TokenType::Semicolon if nested == Nested::No => return false,
+                TokenType::Delim { value } if nested == Nested::No && value == u32::from(b'!') => return false,
+                _ => {}
+            },
+        }
+    }
+
+    true
+}
+
 fn component_values_parse_as_media_feature(component_values: &[ComponentValue]) -> Option<MediaFeatureSyntax> {
     let component_values = strip_whitespace(component_values);
     if let Some(boolean) = component_values_parse_as_mf_boolean(component_values) {
@@ -7802,7 +7852,8 @@ mod tests {
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
         parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_length_descriptor,
-        parse_page_size_descriptor, parse_positive_percentage_descriptor, parse_string_descriptor, strip_whitespace,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_positive_percentage_descriptor,
+        parse_string_descriptor, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8239,6 +8290,10 @@ mod tests {
 
     fn parse_page_size_descriptor_value(input: &str) -> bool {
         parse_page_size_descriptor(input.as_bytes())
+    }
+
+    fn parse_optional_declaration_value_descriptor_value(input: &str) -> bool {
+        parse_optional_declaration_value_descriptor(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -10014,6 +10069,24 @@ mod tests {
         assert!(!parse_page_size_descriptor_value("a4 letter"));
         assert!(!parse_page_size_descriptor_value("landscape portrait"));
         assert!(!parse_page_size_descriptor_value("orange"));
+    }
+
+    #[test]
+    fn parses_optional_declaration_value_descriptors() {
+        assert!(parse_optional_declaration_value_descriptor_value(""));
+        assert!(parse_optional_declaration_value_descriptor_value("  "));
+        assert!(parse_optional_declaration_value_descriptor_value("red"));
+        assert!(parse_optional_declaration_value_descriptor_value("calc(1px + 2px)"));
+        assert!(parse_optional_declaration_value_descriptor_value("(;)"));
+        assert!(parse_optional_declaration_value_descriptor_value("foo(!)"));
+    }
+
+    #[test]
+    fn rejects_invalid_optional_declaration_value_descriptors() {
+        assert!(!parse_optional_declaration_value_descriptor_value(";"));
+        assert!(!parse_optional_declaration_value_descriptor_value("red;"));
+        assert!(!parse_optional_declaration_value_descriptor_value("!important"));
+        assert!(!parse_optional_declaration_value_descriptor_value("]"));
     }
 
     #[test]

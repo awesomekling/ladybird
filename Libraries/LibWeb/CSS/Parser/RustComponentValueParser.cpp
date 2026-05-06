@@ -2002,6 +2002,14 @@ bool RustComponentValueParser::parse_page_size_descriptor(StringView input, Stri
     return FFI::rust_css_parse_page_size_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_optional_declaration_value_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(StringView input, StringView encoding)
 {
     Optional<FFI::CssCropOrCrossKind> kind;
