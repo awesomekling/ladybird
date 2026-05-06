@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/HashTable.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/StringView.h>
@@ -24,6 +25,7 @@
 #include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Types.h>
 #include <LibWeb/CSS/Percentage.h>
+#include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/Export.h>
@@ -233,6 +235,16 @@ public:
         Yes,
     };
 
+    enum class SelectorType : u8 {
+        Standalone,
+        Relative,
+    };
+
+    enum class SelectorParsingMode : u8 {
+        Normal,
+        Forgiving,
+    };
+
     struct CounterStyle {
         FFI::CssCounterStyleKind kind;
         FFI::CssCounterStyleSymbolsType symbols_type;
@@ -253,6 +265,7 @@ public:
     static Optional<ComponentValue> parse_a_component_value(StringView input, StringView encoding);
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
+    static Optional<SelectorList> parse_a_selector_list(StringView input, StringView encoding, SelectorType, SelectorParsingMode, HashTable<FlyString> const& declared_namespaces);
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);
     static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
     static bool property_accepts_keyword(PropertyID, Keyword);

@@ -234,6 +234,473 @@ Vector<Vector<ComponentValue>> RustComponentValueParser::parse_a_comma_separated
     return move(builder.groups);
 }
 
+static Selector::Combinator selector_combinator_from_ffi(FFI::CssSelectorCombinator combinator)
+{
+    switch (combinator) {
+    case FFI::CssSelectorCombinator::None:
+        return Selector::Combinator::None;
+    case FFI::CssSelectorCombinator::ImmediateChild:
+        return Selector::Combinator::ImmediateChild;
+    case FFI::CssSelectorCombinator::Descendant:
+        return Selector::Combinator::Descendant;
+    case FFI::CssSelectorCombinator::NextSibling:
+        return Selector::Combinator::NextSibling;
+    case FFI::CssSelectorCombinator::SubsequentSibling:
+        return Selector::Combinator::SubsequentSibling;
+    case FFI::CssSelectorCombinator::Column:
+        return Selector::Combinator::Column;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Selector::SimpleSelector::QualifiedName::NamespaceType selector_namespace_type_from_ffi(FFI::CssSelectorNamespaceType namespace_type)
+{
+    switch (namespace_type) {
+    case FFI::CssSelectorNamespaceType::Default:
+        return Selector::SimpleSelector::QualifiedName::NamespaceType::Default;
+    case FFI::CssSelectorNamespaceType::None:
+        return Selector::SimpleSelector::QualifiedName::NamespaceType::None;
+    case FFI::CssSelectorNamespaceType::Any:
+        return Selector::SimpleSelector::QualifiedName::NamespaceType::Any;
+    case FFI::CssSelectorNamespaceType::Named:
+        return Selector::SimpleSelector::QualifiedName::NamespaceType::Named;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Selector::SimpleSelector::Attribute::MatchType selector_attribute_match_type_from_ffi(FFI::CssAttributeMatchType match_type)
+{
+    switch (match_type) {
+    case FFI::CssAttributeMatchType::HasAttribute:
+        return Selector::SimpleSelector::Attribute::MatchType::HasAttribute;
+    case FFI::CssAttributeMatchType::ExactValueMatch:
+        return Selector::SimpleSelector::Attribute::MatchType::ExactValueMatch;
+    case FFI::CssAttributeMatchType::ContainsWord:
+        return Selector::SimpleSelector::Attribute::MatchType::ContainsWord;
+    case FFI::CssAttributeMatchType::ContainsString:
+        return Selector::SimpleSelector::Attribute::MatchType::ContainsString;
+    case FFI::CssAttributeMatchType::StartsWithSegment:
+        return Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment;
+    case FFI::CssAttributeMatchType::StartsWithString:
+        return Selector::SimpleSelector::Attribute::MatchType::StartsWithString;
+    case FFI::CssAttributeMatchType::EndsWithString:
+        return Selector::SimpleSelector::Attribute::MatchType::EndsWithString;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Selector::SimpleSelector::Attribute::CaseType selector_attribute_case_type_from_ffi(FFI::CssAttributeCaseType case_type)
+{
+    switch (case_type) {
+    case FFI::CssAttributeCaseType::DefaultMatch:
+        return Selector::SimpleSelector::Attribute::CaseType::DefaultMatch;
+    case FFI::CssAttributeCaseType::CaseSensitiveMatch:
+        return Selector::SimpleSelector::Attribute::CaseType::CaseSensitiveMatch;
+    case FFI::CssAttributeCaseType::CaseInsensitiveMatch:
+        return Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Selector::SimpleSelector::QualifiedName selector_qualified_name_from_ffi(FFI::CssSelectorEvent const& event)
+{
+    return Selector::SimpleSelector::QualifiedName {
+        .namespace_type = selector_namespace_type_from_ffi(event.namespace_type),
+        .namespace_ = fly_string_from_ffi_bytes(event.namespace_ptr, event.namespace_len),
+        .name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
+    };
+}
+
+struct SelectorBuilder {
+    struct SelectorListFrame {
+        SelectorList selectors;
+        Vector<Selector::CompoundSelector> compound_selectors;
+        Optional<Selector::CompoundSelector> current_compound_selector;
+    };
+
+    struct PendingPseudoSelector {
+        enum class Type : u8 {
+            PseudoClass,
+            PseudoElement,
+        };
+
+        Type type;
+        Selector::SimpleSelector::PseudoClassSelector pseudo_class {};
+        PseudoElement pseudo_element { PseudoElement::KnownPseudoElementCount };
+        String pseudo_element_name;
+        FFI::CssPseudoElementValueKind pseudo_element_value_kind { FFI::CssPseudoElementValueKind::Empty };
+        Selector::PseudoElementSelector::Value pseudo_element_value {};
+    };
+
+    Optional<SelectorList> root_selector_list;
+    Vector<SelectorListFrame> selector_list_stack;
+    Vector<PendingPseudoSelector> pending_pseudo_selectors;
+    Optional<ComponentValueBuilder> invalid_selector_builder;
+    bool failed { false };
+
+    void fail()
+    {
+        failed = true;
+    }
+
+    SelectorListFrame& current_selector_list_frame()
+    {
+        VERIFY(!selector_list_stack.is_empty());
+        return selector_list_stack.last();
+    }
+
+    Selector::CompoundSelector& current_compound_selector()
+    {
+        auto& frame = current_selector_list_frame();
+        VERIFY(frame.current_compound_selector.has_value());
+        return *frame.current_compound_selector;
+    }
+
+    void append_simple_selector(Selector::SimpleSelector simple_selector)
+    {
+        current_compound_selector().simple_selectors.append(move(simple_selector));
+    }
+
+    void finish_invalid_selector()
+    {
+        VERIFY(invalid_selector_builder.has_value());
+        auto component_values = move(invalid_selector_builder->root_values);
+        invalid_selector_builder.clear();
+
+        while (!component_values.is_empty() && component_values.first().is(Token::Type::Whitespace))
+            component_values.take_first();
+        while (!component_values.is_empty() && component_values.last().is(Token::Type::Whitespace))
+            component_values.take_last();
+
+        append_simple_selector(Selector::SimpleSelector {
+            .type = Selector::SimpleSelector::Type::Invalid,
+            .value = Selector::SimpleSelector::Invalid {
+                .component_values = move(component_values),
+            },
+        });
+    }
+
+    void finish_selector_list(SelectorList selector_list)
+    {
+        if (selector_list_stack.is_empty() && pending_pseudo_selectors.is_empty()) {
+            root_selector_list = move(selector_list);
+            return;
+        }
+
+        if (pending_pseudo_selectors.is_empty()) {
+            fail();
+            return;
+        }
+
+        auto& pending_pseudo_selector = pending_pseudo_selectors.last();
+        switch (pending_pseudo_selector.type) {
+        case PendingPseudoSelector::Type::PseudoClass:
+            pending_pseudo_selector.pseudo_class.argument_selector_list = move(selector_list);
+            break;
+        case PendingPseudoSelector::Type::PseudoElement:
+            if (pending_pseudo_selector.pseudo_element_value_kind != FFI::CssPseudoElementValueKind::CompoundSelector || selector_list.size() != 1) {
+                fail();
+                return;
+            }
+            pending_pseudo_selector.pseudo_element_value = selector_list.take_first();
+            break;
+        }
+    }
+    void finish_pseudo_class_selector()
+    {
+        VERIFY(!pending_pseudo_selectors.is_empty());
+        auto pending_pseudo_selector = pending_pseudo_selectors.take_last();
+        VERIFY(pending_pseudo_selector.type == PendingPseudoSelector::Type::PseudoClass);
+
+        append_simple_selector(Selector::SimpleSelector {
+            .type = Selector::SimpleSelector::Type::PseudoClass,
+            .value = move(pending_pseudo_selector.pseudo_class),
+        });
+    }
+
+    void finish_pseudo_element_selector()
+    {
+        VERIFY(!pending_pseudo_selectors.is_empty());
+        auto pending_pseudo_selector = pending_pseudo_selectors.take_last();
+        VERIFY(pending_pseudo_selector.type == PendingPseudoSelector::Type::PseudoElement);
+
+        Selector::PseudoElementSelector pseudo_element_selector = pending_pseudo_selector.pseudo_element_name.is_empty()
+            ? Selector::PseudoElementSelector { pending_pseudo_selector.pseudo_element, move(pending_pseudo_selector.pseudo_element_value) }
+            : Selector::PseudoElementSelector { pending_pseudo_selector.pseudo_element, move(pending_pseudo_selector.pseudo_element_name), move(pending_pseudo_selector.pseudo_element_value) };
+
+        append_simple_selector(Selector::SimpleSelector {
+            .type = Selector::SimpleSelector::Type::PseudoElement,
+            .value = move(pseudo_element_selector),
+        });
+    }
+
+    void handle_event(FFI::CssSelectorEvent const& event)
+    {
+        if (failed)
+            return;
+
+        switch (event.kind) {
+        case FFI::CssSelectorEventKind::SelectorListStart:
+            selector_list_stack.append({});
+            break;
+        case FFI::CssSelectorEventKind::SelectorListEnd: {
+            if (selector_list_stack.is_empty() || selector_list_stack.last().current_compound_selector.has_value()) {
+                fail();
+                return;
+            }
+            auto selector_list = move(selector_list_stack.take_last().selectors);
+            finish_selector_list(move(selector_list));
+            break;
+        }
+        case FFI::CssSelectorEventKind::SelectorStart:
+            current_selector_list_frame().compound_selectors.clear();
+            break;
+        case FFI::CssSelectorEventKind::SelectorEnd: {
+            auto& frame = current_selector_list_frame();
+            if (frame.current_compound_selector.has_value()) {
+                fail();
+                return;
+            }
+            frame.selectors.append(Selector::create(move(frame.compound_selectors)));
+            break;
+        }
+        case FFI::CssSelectorEventKind::CompoundSelectorStart:
+            current_selector_list_frame().current_compound_selector = Selector::CompoundSelector {
+                .combinator = selector_combinator_from_ffi(event.combinator),
+            };
+            break;
+        case FFI::CssSelectorEventKind::CompoundSelectorEnd: {
+            auto& frame = current_selector_list_frame();
+            if (!frame.current_compound_selector.has_value()) {
+                fail();
+                return;
+            }
+            frame.compound_selectors.append(frame.current_compound_selector.release_value());
+            break;
+        }
+        case FFI::CssSelectorEventKind::SimpleSelector:
+            handle_simple_selector_event(event);
+            break;
+        case FFI::CssSelectorEventKind::PseudoClassSelectorStart: {
+            Selector::SimpleSelector::PseudoClassSelector pseudo_class {
+                .type = static_cast<PseudoClass>(event.pseudo_class_id),
+                .is_forgiving = event.is_forgiving,
+            };
+            if (event.has_an_plus_b_pattern) {
+                pseudo_class.an_plus_b_pattern = {
+                    .step_size = event.an_plus_b_step_size,
+                    .offset = event.an_plus_b_offset,
+                };
+            }
+            pending_pseudo_selectors.append(PendingPseudoSelector {
+                .type = PendingPseudoSelector::Type::PseudoClass,
+                .pseudo_class = move(pseudo_class),
+            });
+            break;
+        }
+        case FFI::CssSelectorEventKind::PseudoClassSelectorEnd:
+            finish_pseudo_class_selector();
+            break;
+        case FFI::CssSelectorEventKind::PseudoClassArgumentString:
+            handle_pseudo_class_argument_string(event);
+            break;
+        case FFI::CssSelectorEventKind::PseudoClassArgumentNumber: {
+            if (pending_pseudo_selectors.is_empty() || pending_pseudo_selectors.last().type != PendingPseudoSelector::Type::PseudoClass) {
+                fail();
+                return;
+            }
+            pending_pseudo_selectors.last().pseudo_class.levels.append(event.argument_number);
+            break;
+        }
+        case FFI::CssSelectorEventKind::PseudoElementSelectorStart:
+            handle_pseudo_element_selector_start(event);
+            break;
+        case FFI::CssSelectorEventKind::PseudoElementSelectorEnd:
+            finish_pseudo_element_selector();
+            break;
+        case FFI::CssSelectorEventKind::PseudoElementArgumentString: {
+            if (pending_pseudo_selectors.is_empty() || pending_pseudo_selectors.last().type != PendingPseudoSelector::Type::PseudoElement) {
+                fail();
+                return;
+            }
+            auto& pending_pseudo_selector = pending_pseudo_selectors.last();
+            auto ident_list = pending_pseudo_selector.pseudo_element_value.get_pointer<Selector::PseudoElementSelector::IdentList>();
+            if (ident_list == nullptr) {
+                fail();
+                return;
+            }
+            ident_list->append(fly_string_from_ffi_bytes(event.value_ptr, event.value_len));
+            break;
+        }
+        case FFI::CssSelectorEventKind::InvalidSelectorStart:
+            invalid_selector_builder = ComponentValueBuilder {};
+            break;
+        case FFI::CssSelectorEventKind::InvalidSelectorEnd:
+            finish_invalid_selector();
+            break;
+        }
+    }
+
+    void handle_component_value(FFI::CssComponentValue const& component_value)
+    {
+        if (!invalid_selector_builder.has_value()) {
+            fail();
+            return;
+        }
+        append_component_value_token(*invalid_selector_builder, component_value.kind, RustTokenizer::token_from_ffi(component_value.token));
+    }
+
+    void handle_simple_selector_event(FFI::CssSelectorEvent const& event)
+    {
+        switch (event.simple_selector_kind) {
+        case FFI::CssSimpleSelectorKind::Universal:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::Universal,
+                .value = selector_qualified_name_from_ffi(event),
+            });
+            break;
+        case FFI::CssSimpleSelectorKind::TagName:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::TagName,
+                .value = selector_qualified_name_from_ffi(event),
+            });
+            break;
+        case FFI::CssSimpleSelectorKind::Id:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::Id,
+                .value = Selector::SimpleSelector::Name { fly_string_from_ffi_bytes(event.name_ptr, event.name_len) },
+            });
+            break;
+        case FFI::CssSimpleSelectorKind::Class:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::Class,
+                .value = Selector::SimpleSelector::Name { fly_string_from_ffi_bytes(event.name_ptr, event.name_len) },
+            });
+            break;
+        case FFI::CssSimpleSelectorKind::Attribute:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::Attribute,
+                .value = Selector::SimpleSelector::Attribute {
+                    .match_type = selector_attribute_match_type_from_ffi(event.attribute_match_type),
+                    .qualified_name = selector_qualified_name_from_ffi(event),
+                    .value = string_from_ffi_bytes(event.value_ptr, event.value_len),
+                    .case_type = selector_attribute_case_type_from_ffi(event.attribute_case_type),
+                },
+            });
+            break;
+        case FFI::CssSimpleSelectorKind::Nesting:
+            append_simple_selector(Selector::SimpleSelector {
+                .type = Selector::SimpleSelector::Type::Nesting,
+            });
+            break;
+        }
+    }
+
+    void handle_pseudo_class_argument_string(FFI::CssSelectorEvent const& event)
+    {
+        if (pending_pseudo_selectors.is_empty() || pending_pseudo_selectors.last().type != PendingPseudoSelector::Type::PseudoClass) {
+            fail();
+            return;
+        }
+
+        auto& pseudo_class = pending_pseudo_selectors.last().pseudo_class;
+        switch (pseudo_class_metadata(pseudo_class.type).parameter_type) {
+        case PseudoClassMetadata::ParameterType::Ident: {
+            auto string_value = fly_string_from_ffi_bytes(event.value_ptr, event.value_len);
+            pseudo_class.ident = Selector::SimpleSelector::PseudoClassSelector::Ident {
+                .keyword = keyword_from_string(string_value).value_or(Keyword::Invalid),
+                .string_value = move(string_value),
+            };
+            break;
+        }
+        case PseudoClassMetadata::ParameterType::LanguageRanges:
+            pseudo_class.languages.append(fly_string_from_ffi_bytes(event.value_ptr, event.value_len));
+            break;
+        case PseudoClassMetadata::ParameterType::ANPlusB:
+        case PseudoClassMetadata::ParameterType::ANPlusBOf:
+        case PseudoClassMetadata::ParameterType::CompoundSelector:
+        case PseudoClassMetadata::ParameterType::ForgivingRelativeSelectorList:
+        case PseudoClassMetadata::ParameterType::ForgivingSelectorList:
+        case PseudoClassMetadata::ParameterType::LevelList:
+        case PseudoClassMetadata::ParameterType::RelativeSelectorList:
+        case PseudoClassMetadata::ParameterType::SelectorList:
+        case PseudoClassMetadata::ParameterType::None:
+            fail();
+            break;
+        }
+    }
+
+    void handle_pseudo_element_selector_start(FFI::CssSelectorEvent const& event)
+    {
+        Selector::PseudoElementSelector::Value value;
+        switch (event.pseudo_element_value_kind) {
+        case FFI::CssPseudoElementValueKind::Empty:
+        case FFI::CssPseudoElementValueKind::CompoundSelector:
+            value = Empty {};
+            break;
+        case FFI::CssPseudoElementValueKind::PTNameSelector:
+            value = Selector::PseudoElementSelector::PTNameSelector {
+                .is_universal = event.is_universal,
+                .value = fly_string_from_ffi_bytes(event.value_ptr, event.value_len),
+            };
+            break;
+        case FFI::CssPseudoElementValueKind::IdentList:
+            value = Selector::PseudoElementSelector::IdentList {};
+            break;
+        }
+
+        pending_pseudo_selectors.append(PendingPseudoSelector {
+            .type = PendingPseudoSelector::Type::PseudoElement,
+            .pseudo_element = static_cast<PseudoElement>(event.pseudo_element_id),
+            .pseudo_element_name = string_from_ffi_bytes(event.name_ptr, event.name_len),
+            .pseudo_element_value_kind = event.pseudo_element_value_kind,
+            .pseudo_element_value = move(value),
+        });
+    }
+};
+
+Optional<SelectorList> RustComponentValueParser::parse_a_selector_list(StringView input, StringView encoding, SelectorType selector_type, SelectorParsingMode parsing_mode, HashTable<FlyString> const& declared_namespaces)
+{
+    Vector<FFI::CssSelectorNamespace> ffi_declared_namespaces;
+    ffi_declared_namespaces.ensure_capacity(declared_namespaces.size());
+    for (auto const& namespace_ : declared_namespaces) {
+        auto bytes = namespace_.bytes_as_string_view().bytes();
+        ffi_declared_namespaces.unchecked_append(FFI::CssSelectorNamespace {
+            .prefix_ptr = bytes.data(),
+            .prefix_len = bytes.size(),
+        });
+    }
+
+    SelectorBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    bool const did_parse = FFI::rust_css_parse_selector_list(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        static_cast<u8>(selector_type),
+        static_cast<u8>(parsing_mode),
+        ffi_declared_namespaces.data(),
+        ffi_declared_namespaces.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssSelectorEvent const* event) {
+            auto& builder = *static_cast<SelectorBuilder*>(raw_builder);
+            builder.handle_event(*event);
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<SelectorBuilder*>(raw_builder);
+            builder.handle_component_value(*component_value);
+        });
+
+    if (!did_parse || builder.failed || !builder.root_selector_list.has_value())
+        return {};
+
+    VERIFY(builder.selector_list_stack.is_empty());
+    VERIFY(builder.pending_pseudo_selectors.is_empty());
+    VERIFY(!builder.invalid_selector_builder.has_value());
+    return builder.root_selector_list.release_value();
+}
+
 Optional<ComponentValue> RustComponentValueParser::parse_a_component_value(StringView input, StringView encoding)
 {
     ComponentValueBuilder builder;

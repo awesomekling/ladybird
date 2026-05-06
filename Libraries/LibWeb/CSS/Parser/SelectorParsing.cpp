@@ -37,36 +37,56 @@ static bool next_is_pseudo_element(TokenStream<ComponentValue>& tokens)
 
 Optional<SelectorList> Parser::parse_as_selector(SelectorParsingMode parsing_mode)
 {
-    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
-    TokenStream tokens { component_values };
-    auto selector_list = parse_a_selector_list(tokens, SelectorType::Standalone, parsing_mode);
-    if (!selector_list.is_error())
-        return selector_list.release_value();
-
-    return {};
+    return RustComponentValueParser::parse_a_selector_list(
+        m_input,
+        m_encoding,
+        RustComponentValueParser::SelectorType::Standalone,
+        parsing_mode == SelectorParsingMode::Forgiving
+            ? RustComponentValueParser::SelectorParsingMode::Forgiving
+            : RustComponentValueParser::SelectorParsingMode::Normal,
+        m_declared_namespaces);
 }
 
 Optional<SelectorList> Parser::parse_as_relative_selector(SelectorParsingMode parsing_mode)
 {
-    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
-    TokenStream tokens { component_values };
-    auto selector_list = parse_a_selector_list(tokens, SelectorType::Relative, parsing_mode);
-    if (!selector_list.is_error())
-        return selector_list.release_value();
-
-    return {};
+    return RustComponentValueParser::parse_a_selector_list(
+        m_input,
+        m_encoding,
+        RustComponentValueParser::SelectorType::Relative,
+        parsing_mode == SelectorParsingMode::Forgiving
+            ? RustComponentValueParser::SelectorParsingMode::Forgiving
+            : RustComponentValueParser::SelectorParsingMode::Normal,
+        m_declared_namespaces);
 }
 
 Optional<Selector::PseudoElementSelector> Parser::parse_as_pseudo_element_selector()
 {
-    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
-    TokenStream tokens { component_values };
-    auto maybe_simple_selector = parse_pseudo_element_simple_selector(tokens);
-    if (maybe_simple_selector.is_error())
+    auto is_css_input_whitespace = [](char byte) {
+        return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\f';
+    };
+    auto input_bytes = m_input.bytes_as_string_view();
+    if (!input_bytes.is_empty() && (is_css_input_whitespace(input_bytes[0]) || is_css_input_whitespace(input_bytes[input_bytes.length() - 1])))
         return {};
-    if (tokens.has_next_token())
+
+    auto maybe_selector_list = RustComponentValueParser::parse_a_selector_list(
+        m_input,
+        m_encoding,
+        RustComponentValueParser::SelectorType::Standalone,
+        RustComponentValueParser::SelectorParsingMode::Normal,
+        m_declared_namespaces);
+    if (!maybe_selector_list.has_value())
         return {};
-    auto simple_selector = maybe_simple_selector.release_value();
+    auto selector_list = maybe_selector_list.release_value();
+    if (selector_list.size() != 1)
+        return {};
+
+    auto const& compound_selectors = selector_list.first()->compound_selectors();
+    if (compound_selectors.size() != 1)
+        return {};
+    auto const& simple_selectors = compound_selectors.first().simple_selectors;
+    if (simple_selectors.size() != 1)
+        return {};
+    auto const& simple_selector = simple_selectors.first();
     if (simple_selector.type != Selector::SimpleSelector::Type::PseudoElement)
         return {};
     return simple_selector.pseudo_element();

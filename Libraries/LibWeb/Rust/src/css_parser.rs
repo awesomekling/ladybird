@@ -176,6 +176,8 @@ pub(crate) enum PseudoElementSelectorValue {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum CssSelectorEventKind {
+    SelectorListStart,
+    SelectorListEnd,
     SelectorStart,
     SelectorEnd,
     CompoundSelectorStart,
@@ -4986,7 +4988,7 @@ fn parse_ndashdigit_ident(string: &str, prefix: &str) -> Option<i32> {
         return None;
     }
     let value = digits.parse::<i32>().ok()?;
-    Some(if prefix.starts_with("-n-") { -value } else { value })
+    Some(-value)
 }
 
 fn token_is_delim(token: &Token, value: char) -> bool {
@@ -5633,6 +5635,7 @@ fn emit_selector_list<E, C>(
     E: FnMut(CssSelectorEvent),
     C: FnMut(CssComponentValue),
 {
+    event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorListStart));
     for selector in selectors {
         event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorStart));
         for compound_selector in &selector.compound_selectors {
@@ -5653,6 +5656,7 @@ fn emit_selector_list<E, C>(
         }
         event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorEnd));
     }
+    event_callback(CssSelectorEvent::new(CssSelectorEventKind::SelectorListEnd));
 }
 
 fn emit_simple_selector<E, C>(
@@ -5700,6 +5704,11 @@ fn emit_simple_selector<E, C>(
             for language in &pseudo_class.languages {
                 let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoClassArgumentString);
                 (event.value_ptr, event.value_len) = string_parts(language);
+                event_callback(event);
+            }
+            if let Some(ident) = &pseudo_class.ident {
+                let mut event = CssSelectorEvent::new(CssSelectorEventKind::PseudoClassArgumentString);
+                (event.value_ptr, event.value_len) = string_parts(ident);
                 event_callback(event);
             }
             for level in &pseudo_class.levels {
@@ -6999,7 +7008,12 @@ impl ComponentValueParser {
         // and that are not functional notations must be treated as valid at parse time. (That is, ::-webkit-asdf is
         // valid at parse time, but ::-webkit-jkl() is not.) If they’re not otherwise recognized and supported, they
         // must be treated as matching nothing, and are unknown -webkit- pseudo-elements.
-        if !is_function && pseudo_name.len() >= 8 && pseudo_name[..8].eq_ignore_ascii_case("-webkit-") {
+        if !is_function
+            && pseudo_name
+                .as_bytes()
+                .get(..8)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"-webkit-"))
+        {
             if self.pseudo_class_context.contains(&PseudoClassId::Has) {
                 return None;
             }
@@ -12720,6 +12734,15 @@ mod tests {
         assert_eq!(pseudo_class.an_plus_b_pattern.unwrap().offset, 1);
         assert_eq!(pseudo_class.argument_selector_list.len(), 1);
 
+        let selectors = parse_selector_list(":nth-child(4n-1)").unwrap();
+        let [SimpleSelectorSyntax::PseudoClass(pseudo_class)] =
+            selectors[0].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected pseudo-class selector");
+        };
+        assert_eq!(pseudo_class.an_plus_b_pattern.unwrap().step_size, 4);
+        assert_eq!(pseudo_class.an_plus_b_pattern.unwrap().offset, -1);
+
         assert!(parse_selector_list(":has(:has(.nested))").is_none());
     }
 
@@ -12790,22 +12813,28 @@ mod tests {
         ));
 
         assert!(component_values.is_empty());
-        assert_eq!(events[0].kind, CssSelectorEventKind::SelectorStart);
-        assert_eq!(events[1].kind, CssSelectorEventKind::CompoundSelectorStart);
-        assert_eq!(events[2].simple_selector_kind, CssSimpleSelectorKind::TagName);
-        assert_eq!(names[2], "main");
-        assert_eq!(events[3].simple_selector_kind, CssSimpleSelectorKind::Class);
-        assert_eq!(names[3], "content");
-        assert_eq!(events[4].kind, CssSelectorEventKind::PseudoClassSelectorStart);
-        assert_eq!(events[4].pseudo_class_id, PseudoClassId::Is as u8);
-        assert!(events[4].is_forgiving);
+        assert_eq!(events[0].kind, CssSelectorEventKind::SelectorListStart);
+        assert_eq!(events[1].kind, CssSelectorEventKind::SelectorStart);
+        assert_eq!(events[2].kind, CssSelectorEventKind::CompoundSelectorStart);
+        assert_eq!(events[3].simple_selector_kind, CssSimpleSelectorKind::TagName);
+        assert_eq!(names[3], "main");
+        assert_eq!(events[4].simple_selector_kind, CssSimpleSelectorKind::Class);
+        assert_eq!(names[4], "content");
+        assert_eq!(events[5].kind, CssSelectorEventKind::PseudoClassSelectorStart);
+        assert_eq!(events[5].pseudo_class_id, PseudoClassId::Is as u8);
+        assert!(events[5].is_forgiving);
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == CssSelectorEventKind::SelectorListEnd)
+        );
         assert!(
             events
                 .iter()
                 .any(|event| event.kind == CssSelectorEventKind::PseudoElementSelectorStart
                     && event.pseudo_element_id == PseudoElementId::Before as u8)
         );
-        assert_eq!(events.last().unwrap().kind, CssSelectorEventKind::SelectorEnd);
+        assert_eq!(events.last().unwrap().kind, CssSelectorEventKind::SelectorListEnd);
     }
 
     #[test]
