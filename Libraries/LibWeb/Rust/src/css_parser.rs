@@ -19,6 +19,13 @@ use crate::generated_properties::{
     property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name,
     resolve_legacy_value_alias,
 };
+use crate::generated_pseudo_classes::{
+    PseudoClassId, PseudoClassParameterType, pseudo_class_id_from_string, pseudo_class_metadata,
+};
+use crate::generated_pseudo_elements::{
+    PseudoElementId, PseudoElementParameterType, aliased_pseudo_element_id_from_string, is_has_allowed_pseudo_element,
+    pseudo_element_id_from_string, pseudo_element_metadata,
+};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
@@ -44,6 +51,126 @@ pub(crate) struct SimpleBlock {
     pub(crate) token: Token,
     pub(crate) value: Vec<ComponentValue>,
     pub(crate) end_token: Token,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectorType {
+    Standalone,
+    Relative,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectorParsingMode {
+    Normal,
+    Forgiving,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SelectorSyntax {
+    pub(crate) compound_selectors: Vec<CompoundSelectorSyntax>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompoundSelectorSyntax {
+    pub(crate) combinator: SelectorCombinator,
+    pub(crate) simple_selectors: Vec<SimpleSelectorSyntax>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectorCombinator {
+    None,
+    ImmediateChild,
+    Descendant,
+    NextSibling,
+    SubsequentSibling,
+    Column,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SimpleSelectorSyntax {
+    Universal(QualifiedNameSyntax),
+    TagName(QualifiedNameSyntax),
+    Id(String),
+    Class(String),
+    Attribute(AttributeSelectorSyntax),
+    PseudoClass(PseudoClassSelectorSyntax),
+    PseudoElement(PseudoElementSelectorSyntax),
+    Nesting,
+    Invalid(Vec<ComponentValue>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct QualifiedNameSyntax {
+    pub(crate) namespace_type: NamespaceType,
+    pub(crate) namespace: String,
+    pub(crate) name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NamespaceType {
+    Default,
+    None,
+    Any,
+    Named,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AttributeSelectorSyntax {
+    pub(crate) match_type: AttributeMatchType,
+    pub(crate) qualified_name: QualifiedNameSyntax,
+    pub(crate) value: String,
+    pub(crate) case_type: AttributeCaseType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AttributeMatchType {
+    HasAttribute,
+    ExactValueMatch,
+    ContainsWord,
+    ContainsString,
+    StartsWithSegment,
+    StartsWithString,
+    EndsWithString,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum AttributeCaseType {
+    DefaultMatch,
+    CaseSensitiveMatch,
+    CaseInsensitiveMatch,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PseudoClassSelectorSyntax {
+    pub(crate) pseudo_class_id: PseudoClassId,
+    pub(crate) an_plus_b_pattern: Option<ANPlusBPattern>,
+    pub(crate) is_forgiving: bool,
+    pub(crate) argument_selector_list: Vec<SelectorSyntax>,
+    pub(crate) languages: Vec<String>,
+    pub(crate) ident: Option<String>,
+    pub(crate) levels: Vec<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ANPlusBPattern {
+    pub(crate) step_size: i32,
+    pub(crate) offset: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PseudoElementSelectorSyntax {
+    pub(crate) pseudo_element_id: PseudoElementId,
+    pub(crate) name: Option<String>,
+    pub(crate) value: PseudoElementSelectorValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PseudoElementSelectorValue {
+    Empty,
+    PTNameSelector { is_universal: bool, value: String },
+    CompoundSelector(Box<SelectorSyntax>),
+    IdentList(Vec<String>),
 }
 
 // https://drafts.csswg.org/css-syntax/#css-rule
@@ -358,6 +485,8 @@ struct ComponentValueParser {
     component_values: Vec<ComponentValue>,
     index: usize,
     boolean_expression: Option<BooleanExpression>,
+    declared_namespaces: Vec<String>,
+    pseudo_class_context: Vec<PseudoClassId>,
 }
 
 #[derive(Clone, Copy)]
@@ -365,6 +494,12 @@ enum BooleanExpressionTestKind {
     SupportsFeature,
     MediaFeature,
     IfTest,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AllowWildcardName {
+    No,
+    Yes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4470,6 +4605,217 @@ fn parser_from_filtered_input(filtered_input: &[u8]) -> (Parser, &str) {
     (Parser::new(tokens), filtered_input_string)
 }
 
+fn create_invalid_selector_syntax(
+    combinator: SelectorCombinator,
+    component_values: Vec<ComponentValue>,
+) -> SelectorSyntax {
+    SelectorSyntax {
+        compound_selectors: vec![CompoundSelectorSyntax {
+            combinator,
+            simple_selectors: vec![SimpleSelectorSyntax::Invalid(
+                strip_whitespace(&component_values).to_vec(),
+            )],
+        }],
+    }
+}
+
+fn validate_pseudo_element_chain(compound_selectors: &[CompoundSelectorSyntax]) -> Option<()> {
+    for compound_selector in compound_selectors
+        .iter()
+        .take(compound_selectors.len().saturating_sub(1))
+    {
+        if compound_selector
+            .simple_selectors
+            .iter()
+            .any(|simple_selector| matches!(simple_selector, SimpleSelectorSyntax::PseudoElement(_)))
+        {
+            return None;
+        }
+    }
+
+    let pseudo_elements: Vec<_> = compound_selectors
+        .last()
+        .into_iter()
+        .flat_map(|compound_selector| compound_selector.simple_selectors.iter())
+        .filter_map(|simple_selector| match simple_selector {
+            SimpleSelectorSyntax::PseudoElement(pseudo_element) => Some(pseudo_element.pseudo_element_id),
+            _ => None,
+        })
+        .collect();
+
+    if pseudo_elements.len() <= 1 {
+        return Some(());
+    }
+
+    if pseudo_elements.len() == 2
+        && pseudo_elements[0] == PseudoElementId::Part
+        && pseudo_elements[1] != PseudoElementId::Part
+    {
+        return Some(());
+    }
+
+    None
+}
+
+fn selector_component_value_ends_selector(component_value: Option<&ComponentValue>) -> bool {
+    matches!(
+        component_value,
+        None | Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Whitespace | TokenType::Comma,
+            ..
+        }))
+    )
+}
+
+fn selector_component_value_is_name(component_value: Option<&ComponentValue>) -> bool {
+    component_value_is_delim(component_value, '*')
+        || matches!(
+            component_value,
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { .. },
+                ..
+            }))
+        )
+}
+
+fn selector_component_value_name(component_value: &ComponentValue) -> Option<String> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Delim { value },
+            ..
+        }) if *value == u32::from(b'*') => Some("*".to_string()),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn component_value_is_one_of_delims(component_value: Option<&ComponentValue>, delimiters: &[char]) -> bool {
+    delimiters
+        .iter()
+        .any(|delimiter| component_value_is_delim(component_value, *delimiter))
+}
+
+fn is_square_block(block: &SimpleBlock) -> bool {
+    matches!(block.token.token_type, TokenType::OpenSquare)
+}
+
+fn is_legacy_single_colon_pseudo_element(pseudo_element_id: PseudoElementId) -> bool {
+    matches!(
+        pseudo_element_id,
+        PseudoElementId::After | PseudoElementId::Before | PseudoElementId::FirstLetter | PseudoElementId::FirstLine
+    )
+}
+
+fn split_component_values_by_comma(component_values: Vec<ComponentValue>) -> Vec<Vec<ComponentValue>> {
+    let mut groups = Vec::new();
+    let mut current_group = Vec::new();
+
+    for component_value in component_values {
+        if matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            groups.push(current_group);
+            current_group = Vec::new();
+        } else {
+            current_group.push(component_value);
+        }
+    }
+
+    groups.push(current_group);
+    groups
+}
+
+fn parse_integer_component_value(component_value: ComponentValue) -> Option<i32> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Number { number },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+    numeric_value_to_i32(number)
+}
+
+fn parse_signed_integer_component_value(component_value: ComponentValue) -> Option<i32> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Number { number },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+    if number.number_type() != CssNumberType::IntegerWithExplicitSign {
+        return None;
+    }
+    numeric_value_to_i32(number)
+}
+
+fn parse_signless_integer_component_value(component_value: ComponentValue) -> Option<i32> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Number { number },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+    if number.number_type() != CssNumberType::Integer {
+        return None;
+    }
+    numeric_value_to_i32(number)
+}
+
+fn numeric_value_to_i32(number: NumericValue) -> Option<i32> {
+    if !matches!(
+        number.number_type(),
+        CssNumberType::Integer | CssNumberType::IntegerWithExplicitSign
+    ) {
+        return None;
+    }
+
+    if number.value() < f64::from(i32::MIN) || number.value() > f64::from(i32::MAX) {
+        return None;
+    }
+    Some(number.value() as i32)
+}
+
+fn parse_an_plus_b_dimension(component_value: &ComponentValue) -> Option<(i32, i32)> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Dimension { number, unit },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+    let step_size = numeric_value_to_i32(*number)?;
+
+    if unit.eq_ignore_ascii_case("n") {
+        return Some((step_size, 0));
+    }
+    if unit.eq_ignore_ascii_case("n-") {
+        return Some((step_size, i32::MIN));
+    }
+    parse_ndashdigit_ident(unit, "n-").map(|offset| (step_size, offset))
+}
+
+fn parse_ndashdigit_ident(string: &str, prefix: &str) -> Option<i32> {
+    if string.len() <= prefix.len() || !string[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let digits = &string[prefix.len()..];
+    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let value = digits.parse::<i32>().ok()?;
+    Some(if prefix.starts_with("-n-") { -value } else { value })
+}
+
 fn token_is_delim(token: &Token, value: char) -> bool {
     matches!(token.token_type, TokenType::Delim { value: delimiter } if delimiter == value as u32)
 }
@@ -5522,6 +5868,15 @@ impl ComponentValueParser {
             component_values,
             index: 0,
             boolean_expression: None,
+            declared_namespaces: Vec::new(),
+            pseudo_class_context: Vec::new(),
+        }
+    }
+
+    fn with_declared_namespaces(component_values: Vec<ComponentValue>, declared_namespaces: Vec<String>) -> Self {
+        Self {
+            declared_namespaces,
+            ..Self::new(component_values)
         }
     }
 
@@ -5581,6 +5936,902 @@ impl ComponentValueParser {
     fn has_next_component_value(&mut self) -> bool {
         self.discard_whitespace();
         self.next_component_value().is_some()
+    }
+
+    fn parse_a_selector_list(
+        &mut self,
+        selector_type: SelectorType,
+        parsing_mode: SelectorParsingMode,
+    ) -> Option<Vec<SelectorSyntax>> {
+        let mut selectors = Vec::new();
+
+        loop {
+            let selector_parts = self.consume_a_list_of_component_values_until_comma();
+            let mut parser = ComponentValueParser::with_declared_namespaces(
+                selector_parts.clone(),
+                self.declared_namespaces.clone(),
+            );
+            parser.pseudo_class_context = self.pseudo_class_context.clone();
+
+            if let Some(selector) = parser.parse_complex_selector(selector_type) {
+                selectors.push(selector);
+            } else if parsing_mode == SelectorParsingMode::Forgiving {
+                let combinator = match selector_type {
+                    SelectorType::Standalone => SelectorCombinator::None,
+                    SelectorType::Relative => SelectorCombinator::Descendant,
+                };
+                selectors.push(create_invalid_selector_syntax(combinator, selector_parts));
+            } else {
+                return None;
+            }
+
+            self.discard_whitespace();
+            if !matches!(
+                self.next_component_value(),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Comma,
+                    ..
+                }))
+            ) {
+                break;
+            }
+
+            self.index += 1;
+        }
+
+        if selectors.is_empty() && parsing_mode != SelectorParsingMode::Forgiving {
+            return None;
+        }
+
+        Some(selectors)
+    }
+
+    fn consume_a_list_of_component_values_until_comma(&mut self) -> Vec<ComponentValue> {
+        let start = self.index;
+        while let Some(component_value) = self.next_component_value() {
+            if matches!(
+                component_value,
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Comma,
+                    ..
+                })
+            ) {
+                break;
+            }
+            self.index += 1;
+        }
+        self.component_values[start..self.index].to_vec()
+    }
+
+    fn parse_complex_selector(&mut self, selector_type: SelectorType) -> Option<SelectorSyntax> {
+        let mut compound_selectors = Vec::new();
+        let mut first_combinator = self.parse_selector_combinator();
+
+        match selector_type {
+            SelectorType::Standalone => {
+                if first_combinator.is_some_and(|combinator| combinator != SelectorCombinator::Descendant) {
+                    return None;
+                }
+                first_combinator = Some(SelectorCombinator::None);
+            }
+            SelectorType::Relative => {
+                first_combinator = Some(first_combinator.unwrap_or(SelectorCombinator::Descendant));
+            }
+        }
+
+        let mut first_selector = self.parse_compound_selector()?;
+        if first_selector.simple_selectors.is_empty() {
+            return None;
+        }
+        first_selector.combinator = first_combinator.unwrap_or(SelectorCombinator::None);
+        compound_selectors.push(first_selector);
+
+        while self.index < self.component_values.len() {
+            let Some(combinator) = self.parse_selector_combinator() else {
+                break;
+            };
+            let mut compound_selector = self.parse_compound_selector()?;
+            if compound_selector.simple_selectors.is_empty() {
+                if self.index < self.component_values.len() || combinator != SelectorCombinator::Descendant {
+                    return None;
+                }
+                break;
+            }
+            compound_selector.combinator = combinator;
+            compound_selectors.push(compound_selector);
+        }
+
+        if compound_selectors.is_empty() || self.index < self.component_values.len() {
+            return None;
+        }
+
+        validate_pseudo_element_chain(&compound_selectors)?;
+        Some(SelectorSyntax { compound_selectors })
+    }
+
+    fn parse_compound_selector(&mut self) -> Option<CompoundSelectorSyntax> {
+        let mut simple_selectors = Vec::new();
+
+        while self.index < self.component_values.len() {
+            let Some(simple_selector) = self.parse_simple_selector()? else {
+                break;
+            };
+            if matches!(simple_selector, SimpleSelectorSyntax::TagName(_)) && !simple_selectors.is_empty() {
+                return None;
+            }
+            simple_selectors.push(simple_selector);
+        }
+
+        Some(CompoundSelectorSyntax {
+            combinator: SelectorCombinator::None,
+            simple_selectors,
+        })
+    }
+
+    fn parse_selector_combinator(&mut self) -> Option<SelectorCombinator> {
+        let saved_index = self.index;
+        let had_initial_whitespace = matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            }))
+        );
+        self.discard_whitespace();
+
+        if component_value_is_delim(self.next_component_value(), '>') {
+            self.index += 1;
+            self.discard_whitespace();
+            return Some(SelectorCombinator::ImmediateChild);
+        }
+        if component_value_is_delim(self.next_component_value(), '+') {
+            self.index += 1;
+            self.discard_whitespace();
+            return Some(SelectorCombinator::NextSibling);
+        }
+        if component_value_is_delim(self.next_component_value(), '~') {
+            self.index += 1;
+            self.discard_whitespace();
+            return Some(SelectorCombinator::SubsequentSibling);
+        }
+        if component_value_is_delim(self.next_component_value(), '|')
+            && component_value_is_delim(self.component_values.get(self.index + 1), '|')
+        {
+            self.index += 2;
+            self.discard_whitespace();
+            return Some(SelectorCombinator::Column);
+        }
+
+        if had_initial_whitespace {
+            return Some(SelectorCombinator::Descendant);
+        }
+
+        self.index = saved_index;
+        None
+    }
+
+    fn parse_simple_selector(&mut self) -> Option<Option<SimpleSelectorSyntax>> {
+        if selector_component_value_ends_selector(self.next_component_value()) {
+            return Some(None);
+        }
+
+        if let Some(qualified_name) = self.parse_selector_qualified_name(AllowWildcardName::Yes) {
+            if qualified_name.name == "*" {
+                return Some(Some(SimpleSelectorSyntax::Universal(qualified_name)));
+            }
+            return Some(Some(SimpleSelectorSyntax::TagName(qualified_name)));
+        }
+
+        if self.next_is_pseudo_element() {
+            return Some(Some(self.parse_pseudo_element_simple_selector()?));
+        }
+
+        if matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        ) {
+            return Some(Some(self.parse_pseudo_class_simple_selector()?));
+        }
+
+        if component_value_is_one_of_delims(self.next_component_value(), &['>', '+', '~', '|']) {
+            return Some(None);
+        }
+
+        let first_value = self.consume_the_next_component_value()?;
+        match first_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            }) if value == u32::from(b'&') => Some(Some(SimpleSelectorSyntax::Nesting)),
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            }) if value == u32::from(b'.') => {
+                if selector_component_value_ends_selector(self.next_component_value()) {
+                    return None;
+                }
+                let Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                })) = self.consume_the_next_component_value()
+                else {
+                    return None;
+                };
+                Some(Some(SimpleSelectorSyntax::Class(value)))
+            }
+            ComponentValue::PreservedToken(Token {
+                token_type:
+                    TokenType::Hash {
+                        hash_type: crate::css_tokenizer::CssHashType::Id,
+                        value,
+                    },
+                ..
+            }) => Some(Some(SimpleSelectorSyntax::Id(value))),
+            ComponentValue::SimpleBlock(block) if is_square_block(&block) => {
+                Some(Some(self.parse_attribute_simple_selector(block)?))
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_selector_qualified_name(&mut self, allow_wildcard_name: AllowWildcardName) -> Option<QualifiedNameSyntax> {
+        let saved_index = self.index;
+        let first_token = self.consume_the_next_component_value()?;
+
+        if component_value_is_delim(Some(&first_token), '|') {
+            if selector_component_value_is_name(self.next_component_value()) {
+                let name_token = self.consume_the_next_component_value()?;
+                if allow_wildcard_name == AllowWildcardName::No && component_value_is_delim(Some(&name_token), '*') {
+                    self.index = saved_index;
+                    return None;
+                }
+                return Some(QualifiedNameSyntax {
+                    namespace_type: NamespaceType::None,
+                    namespace: String::new(),
+                    name: selector_component_value_name(&name_token)?,
+                });
+            }
+            self.index = saved_index;
+            return None;
+        }
+
+        if !selector_component_value_is_name(Some(&first_token)) {
+            self.index = saved_index;
+            return None;
+        }
+
+        if component_value_is_delim(self.next_component_value(), '|')
+            && selector_component_value_is_name(self.component_values.get(self.index + 1))
+        {
+            self.index += 1;
+            let namespace = selector_component_value_name(&first_token)?;
+            let name_token = self.consume_the_next_component_value()?;
+            let name = selector_component_value_name(&name_token)?;
+
+            if allow_wildcard_name == AllowWildcardName::No && name == "*" {
+                self.index = saved_index;
+                return None;
+            }
+
+            let namespace_type = if namespace == "*" {
+                NamespaceType::Any
+            } else {
+                NamespaceType::Named
+            };
+            if namespace_type == NamespaceType::Named
+                && !self
+                    .declared_namespaces
+                    .iter()
+                    .any(|declared_namespace| declared_namespace.eq_ignore_ascii_case(&namespace))
+            {
+                self.index = saved_index;
+                return None;
+            }
+
+            return Some(QualifiedNameSyntax {
+                namespace_type,
+                namespace,
+                name,
+            });
+        }
+
+        let name = selector_component_value_name(&first_token)?;
+        if allow_wildcard_name == AllowWildcardName::No && name == "*" {
+            self.index = saved_index;
+            return None;
+        }
+
+        Some(QualifiedNameSyntax {
+            namespace_type: NamespaceType::Default,
+            namespace: String::new(),
+            name,
+        })
+    }
+
+    fn parse_attribute_simple_selector(&self, block: SimpleBlock) -> Option<SimpleSelectorSyntax> {
+        let mut parser = ComponentValueParser::with_declared_namespaces(block.value, self.declared_namespaces.clone());
+        parser.discard_whitespace();
+        let qualified_name = parser.parse_selector_qualified_name(AllowWildcardName::No)?;
+
+        let mut attribute = AttributeSelectorSyntax {
+            match_type: AttributeMatchType::HasAttribute,
+            qualified_name,
+            value: String::new(),
+            case_type: AttributeCaseType::DefaultMatch,
+        };
+
+        parser.discard_whitespace();
+        if parser.next_component_value().is_none() {
+            return Some(SimpleSelectorSyntax::Attribute(attribute));
+        }
+
+        attribute.match_type = parser.parse_attribute_match_type()?;
+        parser.discard_whitespace();
+        attribute.value = match parser.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value } | TokenType::String { value },
+                ..
+            }) => value,
+            _ => return None,
+        };
+
+        parser.discard_whitespace();
+        if let Some(component_value) = parser.consume_the_next_component_value() {
+            let ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) = component_value
+            else {
+                return None;
+            };
+            if value.eq_ignore_ascii_case("i") {
+                attribute.case_type = AttributeCaseType::CaseInsensitiveMatch;
+            } else if value.eq_ignore_ascii_case("s") {
+                attribute.case_type = AttributeCaseType::CaseSensitiveMatch;
+            } else {
+                return None;
+            }
+        }
+
+        parser.discard_whitespace();
+        if parser.next_component_value().is_some() {
+            return None;
+        }
+
+        Some(SimpleSelectorSyntax::Attribute(attribute))
+    }
+
+    fn parse_attribute_match_type(&mut self) -> Option<AttributeMatchType> {
+        let first_delim = self.consume_the_next_component_value()?;
+        if component_value_is_delim(Some(&first_delim), '=') {
+            return Some(AttributeMatchType::ExactValueMatch);
+        }
+
+        let match_type = if component_value_is_delim(Some(&first_delim), '~') {
+            AttributeMatchType::ContainsWord
+        } else if component_value_is_delim(Some(&first_delim), '*') {
+            AttributeMatchType::ContainsString
+        } else if component_value_is_delim(Some(&first_delim), '|') {
+            AttributeMatchType::StartsWithSegment
+        } else if component_value_is_delim(Some(&first_delim), '^') {
+            AttributeMatchType::StartsWithString
+        } else if component_value_is_delim(Some(&first_delim), '$') {
+            AttributeMatchType::EndsWithString
+        } else {
+            return None;
+        };
+
+        if !component_value_is_delim(self.next_component_value(), '=') {
+            return None;
+        }
+        self.index += 1;
+        Some(match_type)
+    }
+
+    fn parse_pseudo_class_simple_selector(&mut self) -> Option<SimpleSelectorSyntax> {
+        if selector_component_value_ends_selector(self.next_component_value()) {
+            return None;
+        }
+        if !matches!(
+            self.consume_the_next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        ) {
+            return None;
+        }
+        if selector_component_value_ends_selector(self.next_component_value()) {
+            return None;
+        }
+
+        match self.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) => {
+                let pseudo_class_id = pseudo_class_id_from_string(&value)?;
+                if !pseudo_class_metadata(pseudo_class_id).is_valid_as_identifier {
+                    return None;
+                }
+                Some(SimpleSelectorSyntax::PseudoClass(PseudoClassSelectorSyntax {
+                    pseudo_class_id,
+                    an_plus_b_pattern: None,
+                    is_forgiving: false,
+                    argument_selector_list: Vec::new(),
+                    languages: Vec::new(),
+                    ident: None,
+                    levels: Vec::new(),
+                }))
+            }
+            ComponentValue::Function(function) => self.parse_pseudo_class_function(function),
+            _ => None,
+        }
+    }
+
+    fn parse_pseudo_class_function(&mut self, function: Function) -> Option<SimpleSelectorSyntax> {
+        let pseudo_class_id = pseudo_class_id_from_string(&function.name)?;
+        let metadata = pseudo_class_metadata(pseudo_class_id);
+        if !metadata.is_valid_as_function || function.value.is_empty() {
+            return None;
+        }
+
+        // "The :has() pseudo-class cannot be nested; :has() is not valid within :has()."
+        // https://drafts.csswg.org/selectors/#relational
+        if pseudo_class_id == PseudoClassId::Has && self.pseudo_class_context.contains(&PseudoClassId::Has) {
+            return None;
+        }
+
+        self.pseudo_class_context.push(pseudo_class_id);
+        let selector = self.parse_pseudo_class_function_value(pseudo_class_id, metadata.parameter_type, function.value);
+        self.pseudo_class_context.pop();
+        selector
+    }
+
+    fn parse_pseudo_class_function_value(
+        &mut self,
+        pseudo_class_id: PseudoClassId,
+        parameter_type: PseudoClassParameterType,
+        function_values: Vec<ComponentValue>,
+    ) -> Option<SimpleSelectorSyntax> {
+        let mut pseudo_class = PseudoClassSelectorSyntax {
+            pseudo_class_id,
+            an_plus_b_pattern: None,
+            is_forgiving: false,
+            argument_selector_list: Vec::new(),
+            languages: Vec::new(),
+            ident: None,
+            levels: Vec::new(),
+        };
+
+        match parameter_type {
+            PseudoClassParameterType::AnPlusB => {
+                let mut parser = ComponentValueParser::new(function_values);
+                pseudo_class.an_plus_b_pattern = Some(parser.parse_a_n_plus_b_pattern()?);
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+            }
+            PseudoClassParameterType::AnPlusBOf => {
+                let mut parser =
+                    ComponentValueParser::with_declared_namespaces(function_values, self.declared_namespaces.clone());
+                parser.pseudo_class_context = self.pseudo_class_context.clone();
+                pseudo_class.an_plus_b_pattern = Some(parser.parse_a_n_plus_b_pattern()?);
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    if !parser.consume_ident_matching("of") {
+                        return None;
+                    }
+                    parser.discard_whitespace();
+                    pseudo_class.argument_selector_list =
+                        parser.parse_a_selector_list(SelectorType::Standalone, SelectorParsingMode::Normal)?;
+                    parser.discard_whitespace();
+                    if parser.next_component_value().is_some() {
+                        return None;
+                    }
+                }
+            }
+            PseudoClassParameterType::CompoundSelector => {
+                let mut parser =
+                    ComponentValueParser::with_declared_namespaces(function_values, self.declared_namespaces.clone());
+                parser.pseudo_class_context = self.pseudo_class_context.clone();
+                let mut compound_selector = parser.parse_compound_selector()?;
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+                compound_selector.combinator = SelectorCombinator::None;
+                pseudo_class.argument_selector_list.push(SelectorSyntax {
+                    compound_selectors: vec![compound_selector],
+                });
+            }
+            PseudoClassParameterType::ForgivingRelativeSelectorList
+            | PseudoClassParameterType::ForgivingSelectorList
+            | PseudoClassParameterType::RelativeSelectorList
+            | PseudoClassParameterType::SelectorList => {
+                let mut parser =
+                    ComponentValueParser::with_declared_namespaces(function_values, self.declared_namespaces.clone());
+                parser.pseudo_class_context = self.pseudo_class_context.clone();
+                let selector_type = match parameter_type {
+                    PseudoClassParameterType::ForgivingSelectorList | PseudoClassParameterType::SelectorList => {
+                        SelectorType::Standalone
+                    }
+                    _ => SelectorType::Relative,
+                };
+                let parsing_mode = match parameter_type {
+                    PseudoClassParameterType::ForgivingRelativeSelectorList
+                    | PseudoClassParameterType::ForgivingSelectorList => SelectorParsingMode::Forgiving,
+                    _ => SelectorParsingMode::Normal,
+                };
+                pseudo_class.is_forgiving = parsing_mode == SelectorParsingMode::Forgiving;
+                pseudo_class.argument_selector_list = parser.parse_a_selector_list(selector_type, parsing_mode)?;
+            }
+            PseudoClassParameterType::Ident => {
+                let mut parser = ComponentValueParser::new(function_values);
+                parser.discard_whitespace();
+                pseudo_class.ident = Some(parser.consume_an_ident()?);
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+            }
+            PseudoClassParameterType::LanguageRanges => {
+                for group in split_component_values_by_comma(function_values) {
+                    let mut parser = ComponentValueParser::new(group);
+                    parser.discard_whitespace();
+                    let ComponentValue::PreservedToken(Token {
+                        token_type: TokenType::Ident { value } | TokenType::String { value },
+                        ..
+                    }) = parser.consume_the_next_component_value()?
+                    else {
+                        return None;
+                    };
+                    parser.discard_whitespace();
+                    if parser.next_component_value().is_some() {
+                        return None;
+                    }
+                    pseudo_class.languages.push(value);
+                }
+            }
+            PseudoClassParameterType::LevelList => {
+                for group in split_component_values_by_comma(function_values) {
+                    let mut parser = ComponentValueParser::new(group);
+                    parser.discard_whitespace();
+                    let level = parse_integer_component_value(parser.consume_the_next_component_value()?)?;
+                    parser.discard_whitespace();
+                    if parser.next_component_value().is_some() {
+                        return None;
+                    }
+                    pseudo_class.levels.push(i64::from(level));
+                }
+            }
+            PseudoClassParameterType::None => return None,
+        }
+
+        Some(SimpleSelectorSyntax::PseudoClass(pseudo_class))
+    }
+
+    fn parse_pseudo_element_simple_selector(&mut self) -> Option<SimpleSelectorSyntax> {
+        if selector_component_value_ends_selector(self.next_component_value()) {
+            return None;
+        }
+        if !matches!(
+            self.consume_the_next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        ) {
+            return None;
+        }
+
+        let started_with_double_colon = matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        );
+        if started_with_double_colon {
+            self.index += 1;
+        }
+
+        let (pseudo_name, is_function, function_values) = match self.consume_the_next_component_value()? {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) => (value, false, Vec::new()),
+            ComponentValue::Function(function) => (function.name, true, function.value),
+            _ => return None,
+        };
+
+        let mut is_aliased_pseudo = false;
+        let mut pseudo_element_id = pseudo_element_id_from_string(&pseudo_name);
+        if pseudo_element_id.is_none() {
+            pseudo_element_id = aliased_pseudo_element_id_from_string(&pseudo_name);
+            is_aliased_pseudo = pseudo_element_id.is_some();
+        }
+
+        if let Some(pseudo_element_id) = pseudo_element_id {
+            if self.pseudo_class_context.contains(&PseudoClassId::Has)
+                && !is_has_allowed_pseudo_element(pseudo_element_id)
+            {
+                return None;
+            }
+
+            if !started_with_double_colon {
+                if is_legacy_single_colon_pseudo_element(pseudo_element_id) {
+                    return Some(SimpleSelectorSyntax::PseudoElement(PseudoElementSelectorSyntax {
+                        pseudo_element_id,
+                        name: None,
+                        value: PseudoElementSelectorValue::Empty,
+                    }));
+                }
+                return None;
+            }
+
+            let metadata = pseudo_element_metadata(pseudo_element_id);
+            let value = if is_function {
+                if !metadata.is_valid_as_function {
+                    return None;
+                }
+                self.parse_pseudo_element_function_value(metadata.parameter_type, function_values)?
+            } else {
+                if !metadata.is_valid_as_identifier {
+                    return None;
+                }
+                PseudoElementSelectorValue::Empty
+            };
+
+            return Some(SimpleSelectorSyntax::PseudoElement(PseudoElementSelectorSyntax {
+                pseudo_element_id,
+                name: is_aliased_pseudo.then(|| pseudo_name.to_ascii_lowercase()),
+                value,
+            }));
+        }
+
+        // https://drafts.csswg.org/selectors-4/#compat
+        // All other pseudo-elements whose names begin with the string “-webkit-” (matched ASCII case-insensitively)
+        // and that are not functional notations must be treated as valid at parse time. (That is, ::-webkit-asdf is
+        // valid at parse time, but ::-webkit-jkl() is not.) If they’re not otherwise recognized and supported, they
+        // must be treated as matching nothing, and are unknown -webkit- pseudo-elements.
+        if !is_function && pseudo_name.len() >= 8 && pseudo_name[..8].eq_ignore_ascii_case("-webkit-") {
+            if self.pseudo_class_context.contains(&PseudoClassId::Has) {
+                return None;
+            }
+            return Some(SimpleSelectorSyntax::PseudoElement(PseudoElementSelectorSyntax {
+                pseudo_element_id: PseudoElementId::UnknownWebKit,
+                name: Some(pseudo_name.to_ascii_lowercase()),
+                value: PseudoElementSelectorValue::Empty,
+            }));
+        }
+
+        None
+    }
+
+    fn parse_pseudo_element_function_value(
+        &mut self,
+        parameter_type: PseudoElementParameterType,
+        function_values: Vec<ComponentValue>,
+    ) -> Option<PseudoElementSelectorValue> {
+        let mut parser =
+            ComponentValueParser::with_declared_namespaces(function_values, self.declared_namespaces.clone());
+        parser.pseudo_class_context = self.pseudo_class_context.clone();
+        parser.discard_whitespace();
+
+        match parameter_type {
+            PseudoElementParameterType::None => {
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+                Some(PseudoElementSelectorValue::Empty)
+            }
+            PseudoElementParameterType::CompoundSelector => {
+                let mut compound_selector = parser.parse_compound_selector()?;
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+                compound_selector.combinator = SelectorCombinator::None;
+                Some(PseudoElementSelectorValue::CompoundSelector(Box::new(SelectorSyntax {
+                    compound_selectors: vec![compound_selector],
+                })))
+            }
+            PseudoElementParameterType::IdentList => {
+                let mut idents = Vec::new();
+                while parser.next_component_value().is_some() {
+                    idents.push(parser.consume_an_ident()?);
+                    parser.discard_whitespace();
+                }
+                if idents.is_empty() {
+                    return None;
+                }
+                Some(PseudoElementSelectorValue::IdentList(idents))
+            }
+            PseudoElementParameterType::PTNameSelector => {
+                let value = if component_value_is_delim(parser.next_component_value(), '*') {
+                    parser.index += 1;
+                    PseudoElementSelectorValue::PTNameSelector {
+                        is_universal: true,
+                        value: String::new(),
+                    }
+                } else {
+                    PseudoElementSelectorValue::PTNameSelector {
+                        is_universal: false,
+                        value: parser.consume_an_ident()?,
+                    }
+                };
+                parser.discard_whitespace();
+                if parser.next_component_value().is_some() {
+                    return None;
+                }
+                Some(value)
+            }
+        }
+    }
+
+    fn next_is_pseudo_element(&self) -> bool {
+        if !matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        ) {
+            return false;
+        }
+        if matches!(
+            self.component_values.get(self.index + 1),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Colon,
+                ..
+            }))
+        ) {
+            return true;
+        }
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.component_values.get(self.index + 1)
+            && let Some(pseudo_element_id) = pseudo_element_id_from_string(value)
+        {
+            return is_legacy_single_colon_pseudo_element(pseudo_element_id);
+        }
+
+        false
+    }
+
+    fn parse_a_n_plus_b_pattern(&mut self) -> Option<ANPlusBPattern> {
+        let saved_index = self.index;
+        self.discard_whitespace();
+
+        if component_value_is_ident(self.next_component_value(), "odd") {
+            self.index += 1;
+            return Some(ANPlusBPattern {
+                step_size: 2,
+                offset: 1,
+            });
+        }
+        if component_value_is_ident(self.next_component_value(), "even") {
+            self.index += 1;
+            return Some(ANPlusBPattern {
+                step_size: 2,
+                offset: 0,
+            });
+        }
+        if let Some(integer) = self
+            .next_component_value()
+            .cloned()
+            .and_then(parse_integer_component_value)
+        {
+            self.index += 1;
+            return Some(ANPlusBPattern {
+                step_size: 0,
+                offset: integer,
+            });
+        }
+
+        let result = self.parse_a_n_plus_b_pattern_with_leading_sign();
+        if result.is_none() {
+            self.index = saved_index;
+        }
+        result
+    }
+
+    fn parse_a_n_plus_b_pattern_with_leading_sign(&mut self) -> Option<ANPlusBPattern> {
+        let sign = if component_value_is_delim(self.next_component_value(), '+') {
+            self.index += 1;
+            1
+        } else {
+            1
+        };
+        self.parse_a_n_plus_b_pattern_after_optional_plus(sign)
+    }
+
+    fn parse_a_n_plus_b_pattern_after_optional_plus(&mut self, sign: i32) -> Option<ANPlusBPattern> {
+        let first = self.consume_the_next_component_value()?;
+
+        if let Some((step_size, offset)) = parse_an_plus_b_dimension(&first) {
+            if offset == i32::MIN {
+                self.discard_whitespace();
+                let offset = -parse_signless_integer_component_value(self.consume_the_next_component_value()?)?;
+                return Some(ANPlusBPattern { step_size, offset });
+            }
+            if let Some(b) = self.parse_optional_an_plus_b_offset() {
+                return Some(ANPlusBPattern { step_size, offset: b });
+            }
+            return Some(ANPlusBPattern { step_size, offset });
+        }
+
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = first
+        else {
+            return None;
+        };
+
+        if value.eq_ignore_ascii_case("n") || value.eq_ignore_ascii_case("-n") {
+            let step_size = if value.starts_with('-') { -1 } else { sign };
+            let offset = self.parse_optional_an_plus_b_offset().unwrap_or(0);
+            return Some(ANPlusBPattern { step_size, offset });
+        }
+
+        if value.eq_ignore_ascii_case("n-") || value.eq_ignore_ascii_case("-n-") {
+            self.discard_whitespace();
+            let offset = -parse_signless_integer_component_value(self.consume_the_next_component_value()?)?;
+            let step_size = if value.starts_with('-') { -1 } else { sign };
+            return Some(ANPlusBPattern { step_size, offset });
+        }
+
+        if let Some(offset) = parse_ndashdigit_ident(&value, "n-") {
+            return Some(ANPlusBPattern {
+                step_size: sign,
+                offset,
+            });
+        }
+
+        if let Some(offset) = parse_ndashdigit_ident(&value, "-n-") {
+            return Some(ANPlusBPattern { step_size: -1, offset });
+        }
+
+        None
+    }
+
+    fn parse_optional_an_plus_b_offset(&mut self) -> Option<i32> {
+        self.discard_whitespace();
+        if let Some(integer) = self
+            .next_component_value()
+            .cloned()
+            .and_then(parse_signed_integer_component_value)
+        {
+            self.index += 1;
+            return Some(integer);
+        }
+
+        let saved_index = self.index;
+        let sign = if component_value_is_delim(self.next_component_value(), '+') {
+            self.index += 1;
+            1
+        } else if component_value_is_delim(self.next_component_value(), '-') {
+            self.index += 1;
+            -1
+        } else {
+            return None;
+        };
+        self.discard_whitespace();
+        let Some(integer) = self
+            .consume_the_next_component_value()
+            .and_then(parse_signless_integer_component_value)
+        else {
+            self.index = saved_index;
+            return None;
+        };
+        Some(sign * integer)
     }
 
     fn parse_a_boolean_expression(&mut self, test_kind: BooleanExpressionTestKind) -> Option<()> {
@@ -10069,16 +11320,17 @@ mod tests {
         CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
         FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
         MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
+        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -10125,6 +11377,32 @@ mod tests {
 
     fn parse(input: &str) -> Vec<ComponentValue> {
         parse_with(input, Parser::parse_a_list_of_component_values)
+    }
+
+    fn parse_selector_list(input: &str) -> Option<Vec<SelectorSyntax>> {
+        let mut parser = ComponentValueParser::new(parse(input));
+        parser.parse_a_selector_list(SelectorType::Standalone, SelectorParsingMode::Normal)
+    }
+
+    fn parse_relative_selector_list(input: &str) -> Option<Vec<SelectorSyntax>> {
+        let mut parser = ComponentValueParser::new(parse(input));
+        parser.parse_a_selector_list(SelectorType::Relative, SelectorParsingMode::Normal)
+    }
+
+    fn parse_forgiving_selector_list(input: &str) -> Option<Vec<SelectorSyntax>> {
+        let mut parser = ComponentValueParser::new(parse(input));
+        parser.parse_a_selector_list(SelectorType::Standalone, SelectorParsingMode::Forgiving)
+    }
+
+    fn parse_selector_list_with_namespaces(input: &str, declared_namespaces: &[&str]) -> Option<Vec<SelectorSyntax>> {
+        let mut parser = ComponentValueParser::with_declared_namespaces(
+            parse(input),
+            declared_namespaces
+                .iter()
+                .map(|declared_namespace| declared_namespace.to_string())
+                .collect(),
+        );
+        parser.parse_a_selector_list(SelectorType::Standalone, SelectorParsingMode::Normal)
     }
 
     fn parse_media_feature_syntax(input: &str) -> Option<MediaFeatureSyntax> {
@@ -10918,6 +12196,172 @@ mod tests {
         assert_eq!(metadata.parameter_type, PseudoElementParameterType::IdentList);
         assert!(metadata.is_valid_as_function);
         assert!(!metadata.is_valid_as_identifier);
+    }
+
+    #[test]
+    fn parses_basic_selector_syntax() {
+        let selectors = parse_selector_list("main#app.content > article + .card ~ *").unwrap();
+        assert_eq!(selectors.len(), 1);
+        let selector = &selectors[0];
+        assert_eq!(selector.compound_selectors.len(), 4);
+
+        assert_eq!(selector.compound_selectors[0].combinator, SelectorCombinator::None);
+        assert!(matches!(
+            selector.compound_selectors[0].simple_selectors.as_slice(),
+            [
+                SimpleSelectorSyntax::TagName(tag_name),
+                SimpleSelectorSyntax::Id(id),
+                SimpleSelectorSyntax::Class(class_name)
+            ] if tag_name.name == "main" && id == "app" && class_name == "content"
+        ));
+        assert_eq!(
+            selector.compound_selectors[1].combinator,
+            SelectorCombinator::ImmediateChild
+        );
+        assert_eq!(
+            selector.compound_selectors[2].combinator,
+            SelectorCombinator::NextSibling
+        );
+        assert_eq!(
+            selector.compound_selectors[3].combinator,
+            SelectorCombinator::SubsequentSibling
+        );
+        assert!(matches!(
+            selector.compound_selectors[3].simple_selectors.as_slice(),
+            [SimpleSelectorSyntax::Universal(_)]
+        ));
+
+        assert!(parse_selector_list("> article").is_none());
+        let relative = parse_relative_selector_list("> article").unwrap();
+        assert_eq!(
+            relative[0].compound_selectors[0].combinator,
+            SelectorCombinator::ImmediateChild
+        );
+    }
+
+    #[test]
+    fn parses_selector_qualified_names() {
+        let selectors = parse_selector_list_with_namespaces("svg|circle, *|rect, |section", &["svg"]).unwrap();
+        assert_eq!(selectors.len(), 3);
+
+        let [SimpleSelectorSyntax::TagName(first)] = selectors[0].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected tag-name selector");
+        };
+        assert_eq!(first.namespace_type, NamespaceType::Named);
+        assert_eq!(first.namespace, "svg");
+        assert_eq!(first.name, "circle");
+
+        let [SimpleSelectorSyntax::TagName(second)] = selectors[1].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected tag-name selector");
+        };
+        assert_eq!(second.namespace_type, NamespaceType::Any);
+
+        let [SimpleSelectorSyntax::TagName(third)] = selectors[2].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected tag-name selector");
+        };
+        assert_eq!(third.namespace_type, NamespaceType::None);
+
+        assert!(parse_selector_list_with_namespaces("svg|circle", &[]).is_none());
+    }
+
+    #[test]
+    fn parses_attribute_selector_syntax() {
+        let selectors = parse_selector_list(r#"[data-state~="open" i][href]"#).unwrap();
+        let simple_selectors = &selectors[0].compound_selectors[0].simple_selectors;
+        assert_eq!(simple_selectors.len(), 2);
+
+        let SimpleSelectorSyntax::Attribute(first) = &simple_selectors[0] else {
+            panic!("expected attribute selector");
+        };
+        assert_eq!(first.match_type, super::AttributeMatchType::ContainsWord);
+        assert_eq!(first.qualified_name.name, "data-state");
+        assert_eq!(first.value, "open");
+        assert_eq!(first.case_type, super::AttributeCaseType::CaseInsensitiveMatch);
+
+        assert!(parse_selector_list("[data-state=]").is_none());
+        assert!(parse_selector_list("[data-state=open q]").is_none());
+    }
+
+    #[test]
+    fn parses_pseudo_class_selector_syntax() {
+        let selectors = parse_selector_list(":is(article, section)::before").unwrap();
+        let simple_selectors = &selectors[0].compound_selectors[0].simple_selectors;
+        let SimpleSelectorSyntax::PseudoClass(pseudo_class) = &simple_selectors[0] else {
+            panic!("expected pseudo-class selector");
+        };
+        assert_eq!(pseudo_class.pseudo_class_id, PseudoClassId::Is);
+        assert!(pseudo_class.is_forgiving);
+        assert_eq!(pseudo_class.argument_selector_list.len(), 2);
+
+        let SimpleSelectorSyntax::PseudoElement(pseudo_element) = &simple_selectors[1] else {
+            panic!("expected pseudo-element selector");
+        };
+        assert_eq!(pseudo_element.pseudo_element_id, PseudoElementId::Before);
+
+        let selectors = parse_selector_list(":nth-child(2n + 1 of .item)").unwrap();
+        let [SimpleSelectorSyntax::PseudoClass(pseudo_class)] =
+            selectors[0].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected pseudo-class selector");
+        };
+        assert_eq!(pseudo_class.pseudo_class_id, PseudoClassId::NthChild);
+        assert_eq!(pseudo_class.an_plus_b_pattern.unwrap().step_size, 2);
+        assert_eq!(pseudo_class.an_plus_b_pattern.unwrap().offset, 1);
+        assert_eq!(pseudo_class.argument_selector_list.len(), 1);
+
+        assert!(parse_selector_list(":has(:has(.nested))").is_none());
+    }
+
+    #[test]
+    fn parses_pseudo_element_selector_syntax() {
+        let selectors = parse_selector_list("::part(foo bar)::before").unwrap();
+        let simple_selectors = &selectors[0].compound_selectors[0].simple_selectors;
+        let SimpleSelectorSyntax::PseudoElement(part) = &simple_selectors[0] else {
+            panic!("expected pseudo-element selector");
+        };
+        assert_eq!(part.pseudo_element_id, PseudoElementId::Part);
+        assert_eq!(
+            part.value,
+            PseudoElementSelectorValue::IdentList(vec!["foo".to_string(), "bar".to_string()])
+        );
+
+        let SimpleSelectorSyntax::PseudoElement(before) = &simple_selectors[1] else {
+            panic!("expected pseudo-element selector");
+        };
+        assert_eq!(before.pseudo_element_id, PseudoElementId::Before);
+
+        let selectors = parse_selector_list("::-webkit-slider-thumb").unwrap();
+        let [SimpleSelectorSyntax::PseudoElement(slider_thumb)] =
+            selectors[0].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected pseudo-element selector");
+        };
+        assert_eq!(slider_thumb.pseudo_element_id, PseudoElementId::SliderThumb);
+        assert_eq!(slider_thumb.name.as_deref(), Some("-webkit-slider-thumb"));
+
+        let selectors = parse_selector_list("::-webkit-unknown").unwrap();
+        let [SimpleSelectorSyntax::PseudoElement(unknown_webkit)] =
+            selectors[0].compound_selectors[0].simple_selectors.as_slice()
+        else {
+            panic!("expected pseudo-element selector");
+        };
+        assert_eq!(unknown_webkit.pseudo_element_id, PseudoElementId::UnknownWebKit);
+
+        assert!(parse_selector_list("::before::after").is_none());
+        assert!(parse_selector_list("::part(foo)::part(bar)").is_none());
+    }
+
+    #[test]
+    fn parses_forgiving_selector_list_syntax() {
+        let selectors = parse_forgiving_selector_list(".valid, > invalid, .also-valid").unwrap();
+        assert_eq!(selectors.len(), 3);
+        assert!(matches!(
+            selectors[1].compound_selectors[0].simple_selectors.as_slice(),
+            [SimpleSelectorSyntax::Invalid(_)]
+        ));
     }
 
     #[test]
