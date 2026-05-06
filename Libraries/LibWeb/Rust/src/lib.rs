@@ -15,6 +15,14 @@ mod generated_media_features {
 mod generated_properties {
     include!(concat!(env!("OUT_DIR"), "/generated_properties.rs"));
 }
+#[allow(dead_code)]
+mod generated_pseudo_classes {
+    include!(concat!(env!("OUT_DIR"), "/generated_pseudo_classes.rs"));
+}
+#[allow(dead_code)]
+mod generated_pseudo_elements {
+    include!(concat!(env!("OUT_DIR"), "/generated_pseudo_elements.rs"));
+}
 mod generated_units {
     include!(concat!(env!("OUT_DIR"), "/generated_units.rs"));
 }

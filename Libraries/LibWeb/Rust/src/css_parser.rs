@@ -10107,6 +10107,13 @@ mod tests {
         property_custom_ident_blacklist, property_id_from_string, property_name,
         property_resolves_percentages_relative_to, resolve_legacy_value_alias,
     };
+    use crate::generated_pseudo_classes::{
+        PseudoClassId, PseudoClassParameterType, pseudo_class_id_from_string, pseudo_class_metadata, pseudo_class_name,
+    };
+    use crate::generated_pseudo_elements::{
+        PseudoElementId, PseudoElementParameterType, aliased_pseudo_element_id_from_string,
+        pseudo_element_id_from_string, pseudo_element_metadata, pseudo_element_name,
+    };
     use crate::generated_units::{DimensionType, dimension_for_unit};
     use crate::generated_value_types::ValueTypeId;
 
@@ -10861,6 +10868,56 @@ mod tests {
             Some(PropertyId::AnimationName)
         );
         assert_eq!(property_name(PropertyId::TextWrap), "text-wrap");
+    }
+
+    #[test]
+    fn generated_pseudo_class_metadata_matches_pseudo_class_ids() {
+        assert_eq!(pseudo_class_id_from_string("hover"), Some(PseudoClassId::Hover));
+        assert_eq!(
+            pseudo_class_id_from_string("-webkit-autofill"),
+            Some(PseudoClassId::Autofill)
+        );
+        assert_eq!(pseudo_class_name(PseudoClassId::NthChild), "nth-child");
+
+        let metadata = pseudo_class_metadata(PseudoClassId::Hover);
+        assert_eq!(metadata.parameter_type, PseudoClassParameterType::None);
+        assert!(!metadata.is_valid_as_function);
+        assert!(metadata.is_valid_as_identifier);
+
+        let metadata = pseudo_class_metadata(PseudoClassId::NthChild);
+        assert_eq!(metadata.parameter_type, PseudoClassParameterType::AnPlusBOf);
+        assert!(metadata.is_valid_as_function);
+        assert!(!metadata.is_valid_as_identifier);
+
+        let metadata = pseudo_class_metadata(PseudoClassId::Host);
+        assert_eq!(metadata.parameter_type, PseudoClassParameterType::CompoundSelector);
+        assert!(metadata.is_valid_as_function);
+        assert!(metadata.is_valid_as_identifier);
+    }
+
+    #[test]
+    fn generated_pseudo_element_metadata_matches_pseudo_element_ids() {
+        assert_eq!(pseudo_element_id_from_string("before"), Some(PseudoElementId::Before));
+        assert_eq!(
+            aliased_pseudo_element_id_from_string("-webkit-slider-thumb"),
+            Some(PseudoElementId::SliderThumb)
+        );
+        assert_eq!(pseudo_element_name(PseudoElementId::Slotted), "slotted");
+
+        let metadata = pseudo_element_metadata(PseudoElementId::Before);
+        assert_eq!(metadata.parameter_type, PseudoElementParameterType::None);
+        assert!(!metadata.is_valid_as_function);
+        assert!(metadata.is_valid_as_identifier);
+
+        let metadata = pseudo_element_metadata(PseudoElementId::Slotted);
+        assert_eq!(metadata.parameter_type, PseudoElementParameterType::CompoundSelector);
+        assert!(metadata.is_valid_as_function);
+        assert!(!metadata.is_valid_as_identifier);
+
+        let metadata = pseudo_element_metadata(PseudoElementId::Part);
+        assert_eq!(metadata.parameter_type, PseudoElementParameterType::IdentList);
+        assert!(metadata.is_valid_as_function);
+        assert!(!metadata.is_valid_as_identifier);
     }
 
     #[test]
