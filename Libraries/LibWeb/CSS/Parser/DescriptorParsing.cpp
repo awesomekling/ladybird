@@ -510,8 +510,30 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     }
                     return nullptr;
                 }
-                case DescriptorMetadata::ValueType::String:
-                    return parse_string_value(tokens);
+                case DescriptorMetadata::ValueType::String: {
+                    // https://drafts.csswg.org/css-values-4/#strings
+                    // <string>
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_string = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    if (!RustComponentValueParser::parse_string_descriptor(serialized_string.bytes_as_string_view(), "utf-8"sv))
+                        return nullptr;
+
+                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    TokenStream<ComponentValue> string_tokens { component_values };
+
+                    auto string = parse_string_value(string_tokens);
+                    if (!string)
+                        return nullptr;
+
+                    string_tokens.discard_whitespace();
+                    if (string_tokens.has_next_token())
+                        return nullptr;
+
+                    return string.release_nonnull();
+                }
                 case DescriptorMetadata::ValueType::Symbol: {
                     // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
                     // <symbol> = <string> | <image> | <custom-ident>

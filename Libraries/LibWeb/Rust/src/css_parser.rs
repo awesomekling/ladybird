@@ -1768,6 +1768,15 @@ pub(crate) fn parse_counter_style_symbol(filtered_input: &[u8]) -> bool {
     true
 }
 
+pub(crate) fn parse_string_descriptor(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/css-values-4/#strings
+    // <string>
+    component_values_parse_as_string(strip_whitespace(&component_values))
+}
+
 pub(crate) fn parse_counter_style_range<R>(filtered_input: &[u8], mut range_callback: R) -> bool
 where
     R: FnMut(CssCounterStyleRangeKind, usize),
@@ -7608,7 +7617,8 @@ mod tests {
         parse_an_opentype_tag, parse_container_rule_prelude, parse_counter_style_additive_symbols,
         parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
         parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, strip_whitespace,
+        parse_font_feature_values_family_name_list, parse_font_weight_absolute_pair, parse_string_descriptor,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -8029,6 +8039,10 @@ mod tests {
 
     fn parse_counter_style_symbol_descriptor(input: &str) -> bool {
         parse_counter_style_symbol(input.as_bytes())
+    }
+
+    fn parse_string_descriptor_value(input: &str) -> bool {
+        parse_string_descriptor(input.as_bytes())
     }
 
     fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
@@ -9733,6 +9747,19 @@ mod tests {
         assert!(!parse_counter_style_symbol_descriptor("\"*\" \"**\""));
         assert!(!parse_counter_style_symbol_descriptor("inherit"));
         assert!(!parse_counter_style_symbol_descriptor("default"));
+    }
+
+    #[test]
+    fn parses_string_descriptors() {
+        assert!(parse_string_descriptor_value("\"hello\""));
+        assert!(parse_string_descriptor_value("\"\""));
+    }
+
+    #[test]
+    fn rejects_invalid_string_descriptors() {
+        assert!(!parse_string_descriptor_value(""));
+        assert!(!parse_string_descriptor_value("ident"));
+        assert!(!parse_string_descriptor_value("\"hello\" \"world\""));
     }
 
     #[test]
