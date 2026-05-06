@@ -789,6 +789,15 @@ pub enum CssTimelineScopeValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssScrollbarGutterValueKind {
+    Invalid,
+    Auto,
+    Stable,
+    BothEdges,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssFontFamilyValueKind {
     Generic,
     FamilyName,
@@ -2913,6 +2922,55 @@ pub(crate) fn parse_touch_action_value(filtered_input: &[u8]) -> CssTouchActionV
         kind: CssTouchActionValueKind::List,
         first: horizontal,
         second: vertical,
+    }
+}
+
+pub(crate) fn parse_scrollbar_gutter_value(filtered_input: &[u8]) -> CssScrollbarGutterValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-overflow-4/#propdef-scrollbar-gutter
+    // Value: auto | stable && both-edges?
+    if parser.consume_ident_matching("auto") {
+        if parser.has_next_component_value() {
+            return CssScrollbarGutterValueKind::Invalid;
+        }
+        return CssScrollbarGutterValueKind::Auto;
+    }
+
+    let mut stable = false;
+    let mut both_edges = false;
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return CssScrollbarGutterValueKind::Invalid;
+        };
+
+        if ident.eq_ignore_ascii_case("stable") {
+            if stable {
+                return CssScrollbarGutterValueKind::Invalid;
+            }
+            stable = true;
+        } else if ident.eq_ignore_ascii_case("both-edges") {
+            if both_edges {
+                return CssScrollbarGutterValueKind::Invalid;
+            }
+            both_edges = true;
+        } else {
+            return CssScrollbarGutterValueKind::Invalid;
+        }
+    }
+
+    if !stable {
+        return CssScrollbarGutterValueKind::Invalid;
+    }
+
+    if both_edges {
+        CssScrollbarGutterValueKind::BothEdges
+    } else {
+        CssScrollbarGutterValueKind::Stable
     }
 }
 
@@ -8961,22 +9019,23 @@ mod tests {
         CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
         CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
         CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTimelineScopeValueKind,
-        CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssUrlFunctionType, CssUrlModifierKind,
-        CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssPositionVisibilityValueKind, CssScrollbarGutterValueKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -8986,9 +9045,9 @@ mod tests {
         parse_crop_or_cross, parse_empty_prelude, parse_font_feature_values_family_name_list,
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_string_descriptor,
-        parse_text_underline_position_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_white_space_trim_value, strip_whitespace,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_scrollbar_gutter_value,
+        parse_string_descriptor, parse_text_underline_position_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_white_space_trim_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -9542,6 +9601,10 @@ mod tests {
 
     fn parse_touch_action(input: &str) -> CssTouchActionValue {
         parse_touch_action_value(input.as_bytes())
+    }
+
+    fn parse_scrollbar_gutter(input: &str) -> CssScrollbarGutterValueKind {
+        parse_scrollbar_gutter_value(input.as_bytes())
     }
 
     fn parse_white_space_trim(input: &str) -> CssWhiteSpaceTrimValue {
@@ -11792,6 +11855,41 @@ mod tests {
         assert_eq!(
             parse_touch_action("pan-x, pan-y").kind,
             CssTouchActionValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_scrollbar_gutter_values() {
+        assert_eq!(parse_scrollbar_gutter("auto"), CssScrollbarGutterValueKind::Auto);
+        assert_eq!(parse_scrollbar_gutter("stable"), CssScrollbarGutterValueKind::Stable);
+        assert_eq!(
+            parse_scrollbar_gutter("stable both-edges"),
+            CssScrollbarGutterValueKind::BothEdges
+        );
+        assert_eq!(
+            parse_scrollbar_gutter("both-edges stable"),
+            CssScrollbarGutterValueKind::BothEdges
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_scrollbar_gutter_values() {
+        assert_eq!(parse_scrollbar_gutter(""), CssScrollbarGutterValueKind::Invalid);
+        assert_eq!(
+            parse_scrollbar_gutter("both-edges"),
+            CssScrollbarGutterValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scrollbar_gutter("auto stable"),
+            CssScrollbarGutterValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scrollbar_gutter("stable both-edges both-edges"),
+            CssScrollbarGutterValueKind::Invalid
+        );
+        assert_eq!(
+            parse_scrollbar_gutter("stable, both-edges"),
+            CssScrollbarGutterValueKind::Invalid
         );
     }
 

@@ -2201,6 +2201,13 @@ FFI::CssTouchActionValue RustComponentValueParser::parse_touch_action(StringView
     return FFI::rust_css_parse_touch_action(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
+FFI::CssScrollbarGutterValueKind RustComponentValueParser::parse_scrollbar_gutter(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+    return FFI::rust_css_parse_scrollbar_gutter(filtered_input_bytes.data(), filtered_input_bytes.size());
+}
+
 FFI::CssContainValue RustComponentValueParser::parse_contain(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

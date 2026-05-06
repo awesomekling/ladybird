@@ -4686,70 +4686,29 @@ RefPtr<StyleValue const> Parser::parse_scrollbar_color_value(TokenStream<Compone
 // https://drafts.csswg.org/css-overflow/#propdef-scrollbar-gutter
 RefPtr<StyleValue const> Parser::parse_scrollbar_gutter_value(TokenStream<ComponentValue>& tokens)
 {
-    // auto | stable && both-edges?
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return nullptr;
-
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    auto parse_stable = [&]() -> Optional<bool> {
-        auto stable_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        auto const& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-        auto const& ident = token.token().ident();
-        if (ident.equals_ignoring_ascii_case("auto"sv)) {
-            stable_transaction.commit();
-            return false;
-        }
-        if (ident.equals_ignoring_ascii_case("stable"sv)) {
-            stable_transaction.commit();
-            return true;
-        }
+    auto serialized_scrollbar_gutter = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto parsed_scrollbar_gutter = RustComponentValueParser::parse_scrollbar_gutter(serialized_scrollbar_gutter.bytes_as_string_view(), "utf-8"sv);
+
+    switch (parsed_scrollbar_gutter) {
+    case FFI::CssScrollbarGutterValueKind::Invalid:
         return {};
-    };
-
-    auto parse_both_edges = [&]() -> Optional<bool> {
-        auto edges_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        auto const& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-        auto const& ident = token.token().ident();
-        if (ident.equals_ignoring_ascii_case("both-edges"sv)) {
-            edges_transaction.commit();
-            return true;
-        }
-        return {};
-    };
-
-    Optional<bool> stable;
-    Optional<bool> both_edges;
-    if (stable = parse_stable(); stable.has_value()) {
-        if (stable.value())
-            both_edges = parse_both_edges();
-    } else if (both_edges = parse_both_edges(); both_edges.has_value()) {
-        stable = parse_stable();
-        if (!stable.has_value() || !stable.value())
-            return nullptr;
+    case FFI::CssScrollbarGutterValueKind::Auto:
+        transaction.commit();
+        return ScrollbarGutterStyleValue::create(ScrollbarGutter::Auto);
+    case FFI::CssScrollbarGutterValueKind::Stable:
+        transaction.commit();
+        return ScrollbarGutterStyleValue::create(ScrollbarGutter::Stable);
+    case FFI::CssScrollbarGutterValueKind::BothEdges:
+        transaction.commit();
+        return ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges);
     }
 
-    tokens.discard_whitespace();
-    if (tokens.has_next_token())
-        return nullptr;
-
-    transaction.commit();
-
-    ScrollbarGutter gutter_value;
-    if (both_edges.has_value())
-        gutter_value = ScrollbarGutter::BothEdges;
-    else if (stable.has_value() && stable.value())
-        gutter_value = ScrollbarGutter::Stable;
-    else
-        gutter_value = ScrollbarGutter::Auto;
-    return ScrollbarGutterStyleValue::create(gutter_value);
+    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
