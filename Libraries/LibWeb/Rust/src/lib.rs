@@ -23,15 +23,16 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontFamilyValueKind,
-    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
-    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-    CssFontVariantSimpleValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
-    CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
-    CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-    CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssCounterStyleKind,
+    CssCounterStyleSymbolsType, CssDeclaration, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
+    CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+    CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaFeature,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
+    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
+    CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1054,6 +1055,44 @@ pub unsafe extern "C" fn rust_css_parse_counter_style_name(
             css_parser::parse_a_counter_style_name(input, |name| {
                 name_callback(ctx, name.as_ptr(), name.len());
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_counter_style(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    counter_style_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCounterStyleKind,
+        symbols_type: CssCounterStyleSymbolsType,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
+    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_counter_style(
+                input,
+                |kind, symbols_type, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    counter_style_callback(ctx, kind, symbols_type, name_ptr, name_len);
+                },
+                |symbol| {
+                    symbol_callback(ctx, symbol.as_ptr(), symbol.len());
+                },
+            )
         })
     }
 }

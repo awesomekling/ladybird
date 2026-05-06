@@ -2225,63 +2225,57 @@ Optional<FlyString> Parser::parse_counter_style_name(TokenStream<ComponentValue>
 RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<ComponentValue>& tokens)
 {
     // <counter-style> = <counter-style-name> | <symbols()>
-    // <symbols()> = symbols( <symbols-type>? [ <string> | <image> ]+ )
-    // <symbols-type> = cyclic | numeric | alphabetic | symbolic | fixed
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
+    if (!tokens.has_next_token())
+        return nullptr;
 
-    // <counter-style-name>
-    if (auto const& counter_style_name = parse_counter_style_name(tokens); counter_style_name.has_value()) {
-        transaction.commit();
-        return CounterStyleStyleValue::create(counter_style_name.value());
-    }
+    auto start = tokens.current_index();
+    tokens.discard_a_token();
+    auto serialized_counter_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto maybe_counter_style = RustComponentValueParser::parse_a_counter_style(serialized_counter_style.bytes_as_string_view(), "utf-8"sv);
+    if (!maybe_counter_style.has_value())
+        return nullptr;
 
-    // <symbols()>
-    auto const& maybe_function_token = tokens.consume_a_token();
+    auto counter_style = maybe_counter_style.release_value();
+    if (counter_style.kind == FFI::CssCounterStyleKind::Name) {
+        auto counter_style_name = counter_style.name;
 
-    if (maybe_function_token.is_function("symbols"sv)) {
-        TokenStream argument_tokens { maybe_function_token.function().value };
+        // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+        // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
+        // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
+        // @counter-style rule, and in the counter() functions.
 
-        // <symbols-type>?
-        // NB: <symbols-type> defaults to symbolic if not provided.
-        SymbolsType symbols_type = SymbolsType::Symbolic;
-        if (auto keyword = parse_keyword_value(argument_tokens); keyword) {
-            auto maybe_symbols_type = keyword_to_symbols_type(keyword->to_keyword());
-
-            if (!maybe_symbols_type.has_value())
-                return nullptr;
-
-            symbols_type = maybe_symbols_type.value();
-        }
-
-        // [ <string> | <image> ]+
-        // FIXME: In line with <symbol> we don't support <image> here - we may need to revisit this if other browsers
-        //        implement it.
-        Vector<FlyString> symbols;
-        while (argument_tokens.has_next_token()) {
-            auto maybe_string = parse_string_value(argument_tokens);
-
-            if (!maybe_string)
-                break;
-
-            symbols.append(maybe_string->string_value());
-        }
-
-        argument_tokens.discard_whitespace();
-
-        if (argument_tokens.has_next_token())
-            return nullptr;
-
-        // https://drafts.csswg.org/css-counter-styles-3/#symbols-function
-        // If the system is alphabetic or numeric, there must be at least two <string>s or <image>s, or else the function is invalid.
-        if (symbols.is_empty() || (first_is_one_of(symbols_type, SymbolsType::Alphabetic, SymbolsType::Numeric) && symbols.size() < 2))
-            return nullptr;
+        // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
+        auto const& keyword = keyword_from_string(counter_style_name);
+        if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+            counter_style_name = counter_style_name.to_ascii_lowercase();
 
         transaction.commit();
-        return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(symbols) });
+        return CounterStyleStyleValue::create(counter_style_name);
     }
 
-    return nullptr;
+    if (counter_style.kind == FFI::CssCounterStyleKind::SymbolsFunction) {
+        auto symbols_type = [&] {
+            switch (counter_style.symbols_type) {
+            case FFI::CssCounterStyleSymbolsType::Cyclic:
+                return SymbolsType::Cyclic;
+            case FFI::CssCounterStyleSymbolsType::Numeric:
+                return SymbolsType::Numeric;
+            case FFI::CssCounterStyleSymbolsType::Alphabetic:
+                return SymbolsType::Alphabetic;
+            case FFI::CssCounterStyleSymbolsType::Symbolic:
+                return SymbolsType::Symbolic;
+            case FFI::CssCounterStyleSymbolsType::Fixed:
+                return SymbolsType::Fixed;
+            }
+            VERIFY_NOT_REACHED();
+        }();
+        transaction.commit();
+        return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_nonnegative_integer_symbol_pair_value(TokenStream<ComponentValue>& tokens)

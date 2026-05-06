@@ -1805,6 +1805,37 @@ Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringV
     return name;
 }
 
+Optional<RustComponentValueParser::CounterStyle> RustComponentValueParser::parse_a_counter_style(StringView input, StringView encoding)
+{
+    Optional<CounterStyle> counter_style;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &counter_style,
+        [](void* raw_counter_style, FFI::CssCounterStyleKind kind, FFI::CssCounterStyleSymbolsType symbols_type, u8 const* name_ptr, size_t name_len) {
+            auto& counter_style = *static_cast<Optional<CounterStyle>*>(raw_counter_style);
+            counter_style = CounterStyle {
+                .kind = kind,
+                .symbols_type = symbols_type,
+                .name = fly_string_from_ffi_bytes(name_ptr, name_len),
+                .symbols = {},
+            };
+        },
+        [](void* raw_counter_style, u8 const* symbol_ptr, size_t symbol_len) {
+            auto& counter_style = *static_cast<Optional<CounterStyle>*>(raw_counter_style);
+            VERIFY(counter_style.has_value());
+            counter_style->symbols.append(fly_string_from_ffi_bytes(symbol_ptr, symbol_len));
+        });
+
+    if (!parsed || !counter_style.has_value())
+        return {};
+
+    return counter_style;
+}
+
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
 {
     Optional<FamilyName> family_name;

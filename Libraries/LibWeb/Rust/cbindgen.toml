@@ -20,7 +20,7 @@ parse_deps = false
 all_features = false
 
 [export]
-include = ["CssBooleanExpressionEventKind", "CssComponentValue", "CssComponentValueKind", "CssDeclaration", "CssHashType", "CssMediaFeature", "CssMediaFeatureComparison", "CssMediaFeatureNameKind", "CssMediaFeatureSyntaxKind", "CssMediaFeatureValue", "CssMediaFeatureValueKind", "CssMediaQuery", "CssNumberType", "CssRuleContext", "CssRuleEvent", "CssRuleEventKind", "CssToken", "CssTokenType", "CssValueTypeSyntaxKind"]
+include = ["CssBooleanExpressionEventKind", "CssComponentValue", "CssComponentValueKind", "CssCounterStyleKind", "CssCounterStyleSymbolsType", "CssDeclaration", "CssHashType", "CssMediaFeature", "CssMediaFeatureComparison", "CssMediaFeatureNameKind", "CssMediaFeatureSyntaxKind", "CssMediaFeatureValue", "CssMediaFeatureValueKind", "CssMediaQuery", "CssNumberType", "CssRuleContext", "CssRuleEvent", "CssRuleEventKind", "CssToken", "CssTokenType", "CssValueTypeSyntaxKind"]
 
 [export.mangle]
 rename_types = "PascalCase"

@@ -145,6 +145,15 @@ enum FontLanguageOverride {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum CounterStyle {
+    Name(String),
+    SymbolsFunction {
+        symbols_type: CssCounterStyleSymbolsType,
+        symbols: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpenTypeTaggedValue {
     pub(crate) tag: String,
     pub(crate) value_kind: CssOpenTypeTaggedValueKind,
@@ -517,6 +526,23 @@ pub enum CssFontTech {
 pub enum CssFontLanguageOverrideKind {
     Normal,
     String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssCounterStyleKind {
+    Name,
+    SymbolsFunction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssCounterStyleSymbolsType {
+    Cyclic,
+    Numeric,
+    Alphabetic,
+    Symbolic,
+    Fixed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1561,6 +1587,46 @@ where
     };
 
     name_callback(&name);
+    true
+}
+
+pub(crate) fn parse_a_counter_style<C, S>(
+    filtered_input: &[u8],
+    mut counter_style_callback: C,
+    mut symbol_callback: S,
+) -> bool
+where
+    C: FnMut(CssCounterStyleKind, CssCounterStyleSymbolsType, Option<&str>),
+    S: FnMut(&str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(counter_style) = parser.parse_a_counter_style() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    match counter_style {
+        CounterStyle::Name(name) => {
+            counter_style_callback(
+                CssCounterStyleKind::Name,
+                CssCounterStyleSymbolsType::Symbolic,
+                Some(&name),
+            );
+        }
+        CounterStyle::SymbolsFunction { symbols_type, symbols } => {
+            counter_style_callback(CssCounterStyleKind::SymbolsFunction, symbols_type, None);
+            for symbol in &symbols {
+                symbol_callback(symbol);
+            }
+        }
+    }
+
     true
 }
 
@@ -4399,6 +4465,78 @@ impl ComponentValueParser {
         Some(name)
     }
 
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style
+    fn parse_a_counter_style(&mut self) -> Option<CounterStyle> {
+        // <counter-style> = <counter-style-name> | <symbols()>
+        let saved_index = self.index;
+        if let Some(name) = self.parse_a_counter_style_name() {
+            return Some(CounterStyle::Name(name));
+        }
+        self.index = saved_index;
+
+        // <symbols()> = symbols( <symbols-type>? [ <string> | <image> ]+ )
+        let ComponentValue::Function(Function { name, value, .. }) = self.consume_the_next_component_value()? else {
+            return None;
+        };
+        if !name.eq_ignore_ascii_case("symbols") {
+            return None;
+        }
+
+        let mut parser = ComponentValueParser::new(value);
+        parser.discard_whitespace();
+
+        // <symbols-type> = cyclic | numeric | alphabetic | symbolic | fixed
+        // NB: <symbols-type> defaults to symbolic if not provided.
+        let symbols_type = if parser.consume_ident_matching("cyclic") {
+            CssCounterStyleSymbolsType::Cyclic
+        } else if parser.consume_ident_matching("numeric") {
+            CssCounterStyleSymbolsType::Numeric
+        } else if parser.consume_ident_matching("alphabetic") {
+            CssCounterStyleSymbolsType::Alphabetic
+        } else if parser.consume_ident_matching("symbolic") {
+            CssCounterStyleSymbolsType::Symbolic
+        } else if parser.consume_ident_matching("fixed") {
+            CssCounterStyleSymbolsType::Fixed
+        } else {
+            CssCounterStyleSymbolsType::Symbolic
+        };
+
+        // AD-HOC: In line with <symbol>, we don't support <image> here since
+        // that part of the grammar is at-risk and unsupported by other engines.
+        let mut symbols = Vec::new();
+        loop {
+            parser.discard_whitespace();
+            let Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { value },
+                ..
+            })) = parser.next_component_value()
+            else {
+                break;
+            };
+            symbols.push(value.clone());
+            parser.index += 1;
+        }
+
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+
+        // https://drafts.csswg.org/css-counter-styles-3/#symbols-function
+        // If the system is alphabetic or numeric, there must be at least two
+        // <string>s or <image>s, or else the function is invalid.
+        if symbols.is_empty()
+            || (matches!(
+                symbols_type,
+                CssCounterStyleSymbolsType::Alphabetic | CssCounterStyleSymbolsType::Numeric
+            ) && symbols.len() < 2)
+        {
+            return None;
+        }
+
+        Some(CounterStyle::SymbolsFunction { symbols_type, symbols })
+    }
+
     // https://drafts.csswg.org/css-namespaces/#syntax
     fn parse_a_namespace_rule_prelude(&mut self) -> Option<(Option<String>, String)> {
         // @namespace <namespace-prefix>? [ <string> | <url> ] ;
@@ -6882,26 +7020,26 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery, CssMediaTypeKind,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssUrlFunctionType,
-        CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle, FontVariant,
-        FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude, parse_empty_prelude,
-        parse_font_feature_values_family_name_list, strip_whitespace,
+        CssBooleanExpressionEventKind, CssCounterStyleKind, CssCounterStyleSymbolsType, CssFontLanguageOverrideKind,
+        CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+        CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssMediaQuery,
+        CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, FamilyName, FontFamilyValue, FontStyle,
+        FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser, Rule, RuleContext,
+        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
+        parse_a_value_type, parse_an_if_condition, parse_an_opentype_tag, parse_container_rule_prelude,
+        parse_empty_prelude, parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -7273,6 +7411,26 @@ mod tests {
         let mut name = None;
         let parsed = parse_a_counter_style_name(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         parsed.then_some(name).flatten()
+    }
+
+    fn parse_counter_style(
+        input: &str,
+    ) -> Option<(
+        CssCounterStyleKind,
+        CssCounterStyleSymbolsType,
+        Option<String>,
+        Vec<String>,
+    )> {
+        let mut counter_style = None;
+        let mut symbols = Vec::new();
+        let parsed = parse_a_counter_style(
+            input.as_bytes(),
+            |kind, symbols_type, name| counter_style = Some((kind, symbols_type, name.map(ToString::to_string))),
+            |symbol| symbols.push(symbol.to_string()),
+        );
+        parsed
+            .then_some(counter_style.map(|(kind, symbols_type, name)| (kind, symbols_type, name, symbols)))
+            .flatten()
     }
 
     fn parse_namespace_rule_prelude(input: &str) -> Option<(Option<String>, String)> {
@@ -8764,12 +8922,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_counter_styles() {
+        assert_eq!(
+            parse_counter_style("custom-counter"),
+            Some((
+                CssCounterStyleKind::Name,
+                CssCounterStyleSymbolsType::Symbolic,
+                Some("custom-counter".to_string()),
+                vec![]
+            ))
+        );
+        assert_eq!(
+            parse_counter_style("symbols(\"*\" \"**\")"),
+            Some((
+                CssCounterStyleKind::SymbolsFunction,
+                CssCounterStyleSymbolsType::Symbolic,
+                None,
+                vec!["*".to_string(), "**".to_string()]
+            ))
+        );
+        assert_eq!(
+            parse_counter_style("symbols(cyclic \"*\" \"**\")"),
+            Some((
+                CssCounterStyleKind::SymbolsFunction,
+                CssCounterStyleSymbolsType::Cyclic,
+                None,
+                vec!["*".to_string(), "**".to_string()]
+            ))
+        );
+    }
+
+    #[test]
     fn rejects_invalid_counter_style_names() {
         assert_eq!(parse_counter_style_name("none"), None);
         assert_eq!(parse_counter_style_name("default"), None);
         assert_eq!(parse_counter_style_name("inherit"), None);
         assert_eq!(parse_counter_style_name("custom-counter extra"), None);
         assert_eq!(parse_counter_style_name("\"custom-counter\""), None);
+    }
+
+    #[test]
+    fn rejects_invalid_counter_styles() {
+        assert_eq!(parse_counter_style("none"), None);
+        assert_eq!(parse_counter_style("symbols()"), None);
+        assert_eq!(parse_counter_style("symbols(numeric \"1\")"), None);
+        assert_eq!(parse_counter_style("symbols(\"1\" ident)"), None);
+        assert_eq!(parse_counter_style("symbols(\"1\") extra"), None);
     }
 
     #[test]
