@@ -29,7 +29,6 @@
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
-#include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/PropertyName.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/Serialize.h>
@@ -77,24 +76,20 @@ ParsingParams::ParsingParams(DOM::Document const& document, ParsingMode mode)
 
 Parser Parser::create(ParsingParams const& context, StringView input, StringView encoding)
 {
-    auto tokens = RustTokenizer::tokenize(input, encoding);
     return Parser {
         context,
-        move(tokens),
         String::from_utf8_without_validation(input.bytes()),
         String::from_utf8_without_validation(encoding.bytes())
     };
 }
 
-Parser::Parser(ParsingParams const& context, Vector<Token> tokens, String input, String encoding)
+Parser::Parser(ParsingParams const& context, String input, String encoding)
     : m_document(context.document)
     , m_realm(context.realm)
     , m_parsing_mode(context.mode)
     , m_is_ua_style_sheet(context.is_ua_style_sheet)
     , m_input(move(input))
     , m_encoding(move(encoding))
-    , m_tokens(move(tokens))
-    , m_token_stream(m_tokens)
     , m_value_context(move(context.value_context))
     , m_rule_context(move(context.rule_context))
     , m_declared_namespaces(move(context.declared_namespaces))
@@ -1229,7 +1224,7 @@ Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)
     //    Otherwise, if the next token from input is an <at-keyword-token>,
     //    consume an at-rule from input, and let rule be the return value.
     else if (input.next_token().is(Token::Type::AtKeyword)) {
-        rule = consume_an_at_rule(m_token_stream).map([](auto&& it) { return Rule { it }; });
+        rule = consume_an_at_rule(input).map([](auto&& it) { return Rule { it }; });
     }
     //    Otherwise, consume a qualified rule from input and let rule be the return value.
     //    If nothing or an invalid rule error was returned, return a syntax error.
@@ -1855,7 +1850,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
             log_parse_error();
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = "sizes attribute"_fly_string,
-                .value_string = m_token_stream.dump_string(),
+                .value_string = m_input,
                 .description = "Failed in step 3.1; all whitespace"_string,
             });
             continue;
@@ -1873,7 +1868,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
             log_parse_error();
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = "sizes attribute"_fly_string,
-                .value_string = m_token_stream.dump_string(),
+                .value_string = m_input,
                 .description = "Failed in step 3.2; couldn't parse {} as a <source-size-value>"_string,
             });
             continue;
@@ -1902,7 +1897,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
                 log_parse_error();
                 ErrorReporter::the().report(InvalidValueError {
                     .value_type = "sizes attribute"_fly_string,
-                    .value_string = m_token_stream.dump_string(),
+                    .value_string = m_input,
                     .description = MUST(String::formatted("Failed in step 3.4.1; is unparsed size #{}, count {}", i, unparsed_sizes_list.size())),
                 });
             }
