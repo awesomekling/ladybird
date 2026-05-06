@@ -169,6 +169,13 @@ public:
         return m_tokens.slice(start, m_index - start);
     }
 
+    ReadonlySpan<T> remaining_tokens() const
+    {
+        if (m_index >= m_tokens.size())
+            return {};
+        return m_tokens.slice(m_index);
+    }
+
     void dump_all_tokens()
     {
         dbgln("Dumping all tokens:");

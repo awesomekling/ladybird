@@ -303,19 +303,8 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
         }
     }
 
-    StringBuilder serialized_media_query_list;
-    while (tokens.has_next_token())
-        serialized_media_query_list.append(tokens.consume_a_token().original_source_text());
-    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.string_view(), "utf-8"sv);
-
-    if (tokens.has_next_token()) {
-        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-            .rule_name = "@import"_fly_string,
-            .prelude = tokens.dump_string(),
-            .description = "Trailing tokens in prelude."_string,
-        });
-        return {};
-    }
+    auto serialized_media_query_list = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.bytes_as_string_view(), "utf-8"sv);
 
     return CSSImportRule::create(realm(), url.release_value(), const_cast<DOM::Document*>(m_document.ptr()), move(layer), move(supports), MediaList::create(realm(), move(media_query_list)));
 }
