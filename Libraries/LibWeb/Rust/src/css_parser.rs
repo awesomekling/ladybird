@@ -1002,6 +1002,20 @@ pub enum CssRectValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssRatioValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CssRatioValue {
+    pub kind: CssRatioValueKind,
+    pub has_denominator: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -3459,6 +3473,40 @@ pub(crate) fn parse_rect_value(filtered_input: &[u8]) -> CssRectValueKind {
     CssRectValueKind::Invalid
 }
 
+pub(crate) fn parse_ratio_value_prefix(filtered_input: &[u8]) -> CssRatioValue {
+    let invalid = CssRatioValue {
+        kind: CssRatioValueKind::Invalid,
+        has_denominator: false,
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-values-4/#ratios
+    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
+    if !parse_non_negative_number_prefix(&mut parser) {
+        return invalid;
+    }
+
+    parser.discard_whitespace();
+    if !parser.consume_a_delim('/') {
+        return CssRatioValue {
+            kind: CssRatioValueKind::Valid,
+            has_denominator: false,
+        };
+    }
+
+    if !parse_non_negative_number_prefix(&mut parser) {
+        return invalid;
+    }
+
+    CssRatioValue {
+        kind: CssRatioValueKind::Valid,
+        has_denominator: true,
+    }
+}
+
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
     let mut parser = ComponentValueParser::new(component_values);
     let axis = parse_view_function_axis(&mut parser);
@@ -3515,6 +3563,21 @@ fn parse_rect_side(parser: &mut ComponentValueParser) -> bool {
     };
 
     if component_value_parse_as_length(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
+}
+
+fn parse_non_negative_number_prefix(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_non_negative_number(component_value) {
         parser.index += 1;
         return true;
     }
@@ -6735,6 +6798,21 @@ impl ComponentValueParser {
                 token_type: TokenType::Comma,
                 ..
             }))
+        ) {
+            self.index += 1;
+            return true;
+        }
+
+        false
+    }
+
+    fn consume_a_delim(&mut self, expected: char) -> bool {
+        if matches!(
+            self.next_component_value(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            })) if *value == expected as u32
         ) {
             self.index += 1;
             return true;
@@ -12214,22 +12292,22 @@ mod tests {
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssQuotesValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
-        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
-        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
-        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
-        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
-        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        CssPositionVisibilityValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
+        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
+        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -12250,12 +12328,13 @@ mod tests {
         parse_font_weight_absolute_pair, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_visibility_value, parse_positive_percentage_descriptor,
-        parse_quotes_value, parse_rect_value, parse_scroll_function_value, parse_scrollbar_gutter_value,
-        parse_string_descriptor, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -12835,6 +12914,10 @@ mod tests {
 
     fn parse_rect(input: &str) -> CssRectValueKind {
         parse_rect_value(input.as_bytes())
+    }
+
+    fn parse_ratio_prefix(input: &str) -> CssRatioValue {
+        parse_ratio_value_prefix(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -15746,6 +15829,27 @@ mod tests {
         assert_eq!(parse_rect("rect(auto, 1px, 0)"), CssRectValueKind::Invalid);
         assert_eq!(parse_rect("rect(auto, 1px, 0, 2px,)"), CssRectValueKind::Invalid);
         assert_eq!(parse_rect("rect(auto, 1%, 0, 2px)"), CssRectValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_ratio_value_prefixes() {
+        assert_eq!(
+            parse_ratio_prefix("1"),
+            CssRatioValue {
+                kind: CssRatioValueKind::Valid,
+                has_denominator: false,
+            }
+        );
+        assert_eq!(parse_ratio_prefix("16 / 9").has_denominator, true);
+        assert_eq!(parse_ratio_prefix("16 / 9 auto").has_denominator, true);
+    }
+
+    #[test]
+    fn rejects_invalid_ratio_value_prefixes() {
+        assert_eq!(parse_ratio_prefix("").kind, CssRatioValueKind::Invalid);
+        assert_eq!(parse_ratio_prefix("-1").kind, CssRatioValueKind::Invalid);
+        assert_eq!(parse_ratio_prefix("1 /").kind, CssRatioValueKind::Invalid);
+        assert_eq!(parse_ratio_prefix("1 / auto").kind, CssRatioValueKind::Invalid);
     }
 
     #[test]

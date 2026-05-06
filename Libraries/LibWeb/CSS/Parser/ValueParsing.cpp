@@ -2227,16 +2227,22 @@ RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& 
     // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
     auto transaction = tokens.begin_transaction();
 
+    auto serialized_ratio = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto ratio = RustComponentValueParser::parse_ratio_prefix(serialized_ratio.bytes_as_string_view(), "utf-8"sv);
+    if (ratio.kind == FFI::CssRatioValueKind::Invalid)
+        return nullptr;
+
     tokens.discard_whitespace();
 
     auto numerator = parse_number_value(tokens, non_negative_range);
-
     if (!numerator)
         return nullptr;
 
     tokens.discard_whitespace();
 
-    if (tokens.next_token().is(Token::Type::Delim) && tokens.next_token().token().delim() == '/') {
+    if (ratio.has_denominator) {
+        if (!tokens.next_token().is(Token::Type::Delim) || tokens.next_token().token().delim() != '/')
+            return nullptr;
         tokens.discard_a_token();
         tokens.discard_whitespace();
 
