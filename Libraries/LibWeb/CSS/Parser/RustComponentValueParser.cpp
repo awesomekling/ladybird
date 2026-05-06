@@ -1454,6 +1454,48 @@ Optional<RustComponentValueParser::FontLanguageOverride> RustComponentValueParse
     return font_language_override;
 }
 
+static Optional<RustComponentValueParser::OpenTypeSettings> parse_open_type_settings_impl(StringView input, StringView encoding, bool is_variation_settings)
+{
+    RustComponentValueParser::OpenTypeSettings settings {};
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = (is_variation_settings ? FFI::rust_css_parse_font_variation_settings : FFI::rust_css_parse_font_feature_settings)(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &settings,
+        [](void* raw_settings, FFI::CssOpenTypeSettingsKind kind) {
+            auto& settings = *static_cast<RustComponentValueParser::OpenTypeSettings*>(raw_settings);
+            settings.kind = kind;
+        },
+        [](void* raw_settings, u8 const* tag_ptr, size_t tag_len, FFI::CssOpenTypeTaggedValueKind value_kind, u8 const* value_ptr, size_t value_len) {
+            auto& settings = *static_cast<RustComponentValueParser::OpenTypeSettings*>(raw_settings);
+            Optional<String> value;
+            if (value_kind == FFI::CssOpenTypeTaggedValueKind::Value)
+                value = string_from_ffi_bytes(value_ptr, value_len);
+            settings.tag_values.append({
+                .tag = fly_string_from_ffi_bytes(tag_ptr, tag_len),
+                .value_kind = value_kind,
+                .value = move(value),
+            });
+        });
+
+    if (!parsed)
+        return {};
+
+    return settings;
+}
+
+Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::parse_font_feature_settings(StringView input, StringView encoding)
+{
+    return parse_open_type_settings_impl(input, encoding, false);
+}
+
+Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::parse_font_variation_settings(StringView input, StringView encoding)
+{
+    return parse_open_type_settings_impl(input, encoding, true);
+}
+
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)
 {
     Optional<FlyString> name;

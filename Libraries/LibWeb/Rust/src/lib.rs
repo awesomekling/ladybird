@@ -26,10 +26,11 @@ pub use css_parser::{
     CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration,
     CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaFeature, CssMediaFeatureComparison,
     CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssPageSelector,
-    CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent,
+    CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
+    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
+    CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -594,6 +595,104 @@ pub unsafe extern "C" fn rust_css_parse_font_language_override(
                 let (value_ptr, value_len) = value.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
                 font_language_override_callback(ctx, kind, value_ptr, value_len);
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_feature_settings(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    settings_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssOpenTypeSettingsKind),
+    tagged_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        tag_ptr: *const u8,
+        tag_len: usize,
+        value_kind: CssOpenTypeTaggedValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_feature_settings(
+                input,
+                |kind| {
+                    settings_callback(ctx, kind);
+                },
+                |tagged_value| {
+                    let (value_ptr, value_len) = tagged_value
+                        .value
+                        .as_ref()
+                        .map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+                    tagged_value_callback(
+                        ctx,
+                        tagged_value.tag.as_ptr(),
+                        tagged_value.tag.len(),
+                        tagged_value.value_kind,
+                        value_ptr,
+                        value_len,
+                    );
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_variation_settings(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    settings_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssOpenTypeSettingsKind),
+    tagged_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        tag_ptr: *const u8,
+        tag_len: usize,
+        value_kind: CssOpenTypeTaggedValueKind,
+        value_ptr: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_variation_settings(
+                input,
+                |kind| {
+                    settings_callback(ctx, kind);
+                },
+                |tagged_value| {
+                    let (value_ptr, value_len) = tagged_value
+                        .value
+                        .as_ref()
+                        .map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+                    tagged_value_callback(
+                        ctx,
+                        tagged_value.tag.as_ptr(),
+                        tagged_value.tag.len(),
+                        tagged_value.value_kind,
+                        value_ptr,
+                        value_len,
+                    );
+                },
+            )
         })
     }
 }

@@ -2681,53 +2681,49 @@ RefPtr<StyleValue const> Parser::parse_font_feature_settings_value(TokenStream<C
 {
     // https://drafts.csswg.org/css-fonts/#propdef-font-feature-settings
     // normal | <feature-tag-value>#
-
-    // normal
-    if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
-        return normal;
-
-    // <feature-tag-value>#
     auto transaction = tokens.begin_transaction();
-    auto tag_values = parse_a_comma_separated_list_of_component_values(tokens);
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_font_feature_settings = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_feature_settings = RustComponentValueParser::parse_font_feature_settings(serialized_font_feature_settings.bytes_as_string_view(), "utf-8"sv);
+    if (!font_feature_settings.has_value())
+        return nullptr;
+
+    if (font_feature_settings->kind == FFI::CssOpenTypeSettingsKind::Normal) {
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Normal);
+    }
 
     StyleValueVector feature_tags;
-    feature_tags.ensure_capacity(tag_values.size());
-    for (auto const& values : tag_values) {
-        // <feature-tag-value> = <opentype-tag> [ <integer [0,∞]> | on | off ]?
-        TokenStream tag_tokens { values };
-        tag_tokens.discard_whitespace();
-        auto opentype_tag = parse_opentype_tag_value(tag_tokens);
-        tag_tokens.discard_whitespace();
+    feature_tags.ensure_capacity(font_feature_settings->tag_values.size());
+    for (auto const& tag_value : font_feature_settings->tag_values) {
         RefPtr<StyleValue const> value;
-        if (tag_tokens.has_next_token()) {
-            if (auto integer = parse_integer_value(tag_tokens, non_negative_integer_range)) {
-                value = integer;
-            } else {
-                // A value of on is synonymous with 1 and off is synonymous with 0.
-                auto keyword = parse_keyword_value(tag_tokens);
-                if (!keyword)
-                    return nullptr;
-                switch (keyword->to_keyword()) {
-                case Keyword::On:
-                    value = IntegerStyleValue::create(1);
-                    break;
-                case Keyword::Off:
-                    value = IntegerStyleValue::create(0);
-                    break;
-                default:
-                    return nullptr;
-                }
-            }
-            tag_tokens.discard_whitespace();
-        } else {
+        switch (tag_value.value_kind) {
+        case FFI::CssOpenTypeTaggedValueKind::Implicit:
+        case FFI::CssOpenTypeTaggedValueKind::On:
             // "If the value is omitted, a value of 1 is assumed."
+            // A value of on is synonymous with 1 and off is synonymous with 0.
             value = IntegerStyleValue::create(1);
+            break;
+        case FFI::CssOpenTypeTaggedValueKind::Off:
+            // A value of on is synonymous with 1 and off is synonymous with 0.
+            value = IntegerStyleValue::create(0);
+            break;
+        case FFI::CssOpenTypeTaggedValueKind::Value: {
+            VERIFY(tag_value.value.has_value());
+            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+            TokenStream value_tokens { component_values };
+            value = parse_integer_value(value_tokens, non_negative_integer_range);
+            value_tokens.discard_whitespace();
+            if (!value || value_tokens.has_next_token())
+                return nullptr;
+            break;
+        }
         }
 
-        if (!opentype_tag || !value || tag_tokens.has_next_token())
-            return nullptr;
-
-        feature_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, opentype_tag->string_value(), value.release_nonnull()));
+        feature_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, tag_value.tag, value.release_nonnull()));
     }
 
     transaction.commit();
@@ -2738,28 +2734,35 @@ RefPtr<StyleValue const> Parser::parse_font_variation_settings_value(TokenStream
 {
     // https://drafts.csswg.org/css-fonts/#propdef-font-variation-settings
     // normal | [ <opentype-tag> <number> ]#
-
-    // normal
-    if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
-        return normal;
-
-    // [ <opentype-tag> <number>]#
     auto transaction = tokens.begin_transaction();
-    auto tag_values = parse_a_comma_separated_list_of_component_values(tokens);
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+
+    auto serialized_font_variation_settings = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_variation_settings = RustComponentValueParser::parse_font_variation_settings(serialized_font_variation_settings.bytes_as_string_view(), "utf-8"sv);
+    if (!font_variation_settings.has_value())
+        return nullptr;
+
+    if (font_variation_settings->kind == FFI::CssOpenTypeSettingsKind::Normal) {
+        transaction.commit();
+        return KeywordStyleValue::create(Keyword::Normal);
+    }
 
     StyleValueVector axis_tags;
-    for (auto const& values : tag_values) {
-        TokenStream tag_tokens { values };
-        tag_tokens.discard_whitespace();
-        auto opentype_tag = parse_opentype_tag_value(tag_tokens);
-        tag_tokens.discard_whitespace();
-        auto number = parse_number_value(tag_tokens, infinite_range);
-        tag_tokens.discard_whitespace();
-
-        if (!opentype_tag || !number || tag_tokens.has_next_token())
+    axis_tags.ensure_capacity(font_variation_settings->tag_values.size());
+    for (auto const& tag_value : font_variation_settings->tag_values) {
+        if (tag_value.value_kind != FFI::CssOpenTypeTaggedValueKind::Value || !tag_value.value.has_value())
             return nullptr;
 
-        axis_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontVariationSettings, opentype_tag->string_value(), number.release_nonnull()));
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+        TokenStream value_tokens { component_values };
+        auto number = parse_number_value(value_tokens, infinite_range);
+        value_tokens.discard_whitespace();
+        if (!number || value_tokens.has_next_token())
+            return nullptr;
+
+        axis_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontVariationSettings, tag_value.tag, number.release_nonnull()));
     }
 
     transaction.commit();

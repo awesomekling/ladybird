@@ -73,6 +73,17 @@ public:
         Optional<FlyString> value;
     };
 
+    struct OpenTypeTaggedValue {
+        FlyString tag;
+        FFI::CssOpenTypeTaggedValueKind value_kind;
+        Optional<String> value;
+    };
+
+    struct OpenTypeSettings {
+        FFI::CssOpenTypeSettingsKind kind;
+        Vector<OpenTypeTaggedValue> tag_values;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -104,6 +115,8 @@ public:
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
     static Optional<FontLanguageOverride> parse_a_font_language_override(StringView input, StringView encoding);
+    static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
+    static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);

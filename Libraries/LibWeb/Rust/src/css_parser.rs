@@ -145,6 +145,19 @@ enum FontLanguageOverride {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OpenTypeTaggedValue {
+    pub(crate) tag: String,
+    pub(crate) value_kind: CssOpenTypeTaggedValueKind,
+    pub(crate) value: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum OpenTypeSettings {
+    Normal,
+    TagValues(Vec<OpenTypeTaggedValue>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpression {
     Not(Box<BooleanExpression>),
     Parens(Box<BooleanExpression>),
@@ -440,6 +453,22 @@ pub enum CssFontTech {
 pub enum CssFontLanguageOverrideKind {
     Normal,
     String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssOpenTypeSettingsKind {
+    Normal,
+    TagValues,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssOpenTypeTaggedValueKind {
+    Implicit,
+    On,
+    Off,
+    Value,
 }
 
 #[repr(C)]
@@ -1015,6 +1044,77 @@ where
     }
 
     true
+}
+
+pub(crate) fn parse_a_font_feature_settings<K, V>(
+    filtered_input: &[u8],
+    mut settings_callback: K,
+    mut tagged_value_callback: V,
+) -> bool
+where
+    K: FnMut(CssOpenTypeSettingsKind),
+    V: FnMut(&OpenTypeTaggedValue),
+{
+    let (mut parser, filtered_input) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(font_feature_settings) = parser.parse_a_font_feature_settings(filtered_input) else {
+        return false;
+    };
+
+    emit_open_type_settings(
+        font_feature_settings,
+        &mut settings_callback,
+        &mut tagged_value_callback,
+    );
+    true
+}
+
+pub(crate) fn parse_a_font_variation_settings<K, V>(
+    filtered_input: &[u8],
+    mut settings_callback: K,
+    mut tagged_value_callback: V,
+) -> bool
+where
+    K: FnMut(CssOpenTypeSettingsKind),
+    V: FnMut(&OpenTypeTaggedValue),
+{
+    let (mut parser, filtered_input) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(font_variation_settings) = parser.parse_a_font_variation_settings(filtered_input) else {
+        return false;
+    };
+
+    emit_open_type_settings(
+        font_variation_settings,
+        &mut settings_callback,
+        &mut tagged_value_callback,
+    );
+    true
+}
+
+fn emit_open_type_settings<K, V>(
+    open_type_settings: OpenTypeSettings,
+    settings_callback: &mut K,
+    tagged_value_callback: &mut V,
+) where
+    K: FnMut(CssOpenTypeSettingsKind),
+    V: FnMut(&OpenTypeTaggedValue),
+{
+    match &open_type_settings {
+        OpenTypeSettings::Normal => {
+            settings_callback(CssOpenTypeSettingsKind::Normal);
+        }
+        OpenTypeSettings::TagValues(tag_values) => {
+            settings_callback(CssOpenTypeSettingsKind::TagValues);
+            for tag_value in tag_values {
+                tagged_value_callback(tag_value);
+            }
+        }
+    }
 }
 
 pub(crate) fn parse_a_layer_name<N>(filtered_input: &[u8], allow_blank_layer_name: bool, mut name_callback: N) -> bool
@@ -1921,6 +2021,129 @@ fn parse_font_tech_function(function: &Function) -> Option<Vec<CssFontTech>> {
     Some(tech)
 }
 
+fn parse_comma_separated_component_values<T, F>(
+    component_values: Vec<ComponentValue>,
+    mut parse_group: F,
+) -> Option<Vec<T>>
+where
+    F: FnMut(Vec<ComponentValue>) -> Option<T>,
+{
+    let mut groups = Vec::new();
+    let mut current_group = Vec::new();
+    for component_value in component_values {
+        if matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            groups.push(current_group);
+            current_group = Vec::new();
+            continue;
+        }
+        current_group.push(component_value);
+    }
+    groups.push(current_group);
+
+    if groups.is_empty() {
+        return None;
+    }
+
+    groups.into_iter().map(&mut parse_group).collect()
+}
+
+// https://drafts.csswg.org/css-fonts/#typedef-opentype-tag
+fn parse_opentype_tag(parser: &mut ComponentValueParser) -> Option<String> {
+    // <opentype-tag> = <string>
+    // The <opentype-tag> is a case-sensitive OpenType feature tag.
+    // As specified in the OpenType specification [OPENTYPE], feature tags contain four ASCII characters.
+    // Tag strings longer or shorter than four characters, or containing characters outside the U+20–7E codepoint range are invalid.
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::String { value },
+        ..
+    }) = parser.consume_the_next_component_value()?
+    else {
+        return None;
+    };
+
+    (value.len() == 4 && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))).then_some(value)
+}
+
+fn parse_feature_tag_value(component_values: Vec<ComponentValue>, filtered_input: &str) -> Option<OpenTypeTaggedValue> {
+    // <feature-tag-value> = <opentype-tag> [ <integer [0,∞]> | on | off ]?
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let tag = parse_opentype_tag(&mut parser)?;
+    parser.discard_whitespace();
+
+    if !parser.has_next_component_value() {
+        // "If the value is omitted, a value of 1 is assumed."
+        return Some(OpenTypeTaggedValue {
+            tag,
+            value_kind: CssOpenTypeTaggedValueKind::Implicit,
+            value: None,
+        });
+    }
+
+    if let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    {
+        // A value of on is synonymous with 1 and off is synonymous with 0.
+        let value_kind = if value.eq_ignore_ascii_case("on") {
+            CssOpenTypeTaggedValueKind::On
+        } else if value.eq_ignore_ascii_case("off") {
+            CssOpenTypeTaggedValueKind::Off
+        } else {
+            CssOpenTypeTaggedValueKind::Value
+        };
+
+        if value_kind != CssOpenTypeTaggedValueKind::Value {
+            parser.index += 1;
+            parser.discard_whitespace();
+            if parser.has_next_component_value() {
+                return None;
+            }
+            return Some(OpenTypeTaggedValue {
+                tag,
+                value_kind,
+                value: None,
+            });
+        }
+    }
+
+    let value = serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input)?;
+    Some(OpenTypeTaggedValue {
+        tag,
+        value_kind: CssOpenTypeTaggedValueKind::Value,
+        value: Some(value),
+    })
+}
+
+fn parse_variation_tag_value(
+    component_values: Vec<ComponentValue>,
+    filtered_input: &str,
+) -> Option<OpenTypeTaggedValue> {
+    // [ <opentype-tag> <number>]
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let tag = parse_opentype_tag(&mut parser)?;
+    parser.discard_whitespace();
+
+    if !parser.has_next_component_value() {
+        return None;
+    }
+
+    let value = serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input)?;
+    Some(OpenTypeTaggedValue {
+        tag,
+        value_kind: CssOpenTypeTaggedValueKind::Value,
+        value: Some(value),
+    })
+}
+
 fn parse_font_tech_name(value: &str) -> Option<CssFontTech> {
     match value {
         value if value.eq_ignore_ascii_case("avar2") => Some(CssFontTech::Avar2),
@@ -2507,6 +2730,10 @@ impl ComponentValueParser {
         let component_value = self.next_component_value()?.clone();
         self.index += 1;
         Some(component_value)
+    }
+
+    fn remaining_component_values(&self) -> &[ComponentValue] {
+        &self.component_values[self.index..]
     }
 
     fn discard_whitespace(&mut self) {
@@ -3101,6 +3328,58 @@ impl ComponentValueParser {
         }
 
         Some(font_language_override)
+    }
+
+    // https://drafts.csswg.org/css-fonts/#propdef-font-feature-settings
+    fn parse_a_font_feature_settings(&mut self, filtered_input: &str) -> Option<OpenTypeSettings> {
+        // normal | <feature-tag-value>#
+        self.discard_whitespace();
+
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+            && value.eq_ignore_ascii_case("normal")
+        {
+            self.index += 1;
+            self.discard_whitespace();
+            return (!self.has_next_component_value()).then_some(OpenTypeSettings::Normal);
+        }
+
+        // <feature-tag-value>#
+        let tag_values =
+            parse_comma_separated_component_values(self.remaining_component_values().to_vec(), |component_values| {
+                parse_feature_tag_value(component_values, filtered_input)
+            })?;
+        self.index = self.component_values.len();
+
+        Some(OpenTypeSettings::TagValues(tag_values))
+    }
+
+    // https://drafts.csswg.org/css-fonts/#propdef-font-variation-settings
+    fn parse_a_font_variation_settings(&mut self, filtered_input: &str) -> Option<OpenTypeSettings> {
+        // normal | [ <opentype-tag> <number> ]#
+        self.discard_whitespace();
+
+        if let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = self.next_component_value()
+            && value.eq_ignore_ascii_case("normal")
+        {
+            self.index += 1;
+            self.discard_whitespace();
+            return (!self.has_next_component_value()).then_some(OpenTypeSettings::Normal);
+        }
+
+        // [ <opentype-tag> <number>]#
+        let tag_values =
+            parse_comma_separated_component_values(self.remaining_component_values().to_vec(), |component_values| {
+                parse_variation_tag_value(component_values, filtered_input)
+            })?;
+        self.index = self.component_values.len();
+
+        Some(OpenTypeSettings::TagValues(tag_values))
     }
 
     // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
@@ -5623,14 +5902,15 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssBooleanExpressionEventKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssMediaQuery,
-        CssMediaTypeKind, CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-        MfComparison, Parser, Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_language_override,
-        parse_a_font_source, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        CssMediaTypeKind, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, OpenTypeTaggedValue, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style_name,
+        parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
         parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
         parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
@@ -5833,6 +6113,38 @@ mod tests {
             font_language_override = Some((kind, value.map(ToString::to_string)));
         });
         parsed.then_some(font_language_override).flatten()
+    }
+
+    fn parse_font_feature_settings(input: &str) -> Option<(CssOpenTypeSettingsKind, Vec<OpenTypeTaggedValue>)> {
+        let mut settings_kind = None;
+        let mut tag_values = Vec::new();
+        let parsed = parse_a_font_feature_settings(
+            input.as_bytes(),
+            |kind| settings_kind = Some(kind),
+            |tagged_value| tag_values.push(tagged_value.clone()),
+        );
+        parsed.then(|| {
+            (
+                settings_kind.expect("font feature settings kind must be parsed"),
+                tag_values,
+            )
+        })
+    }
+
+    fn parse_font_variation_settings(input: &str) -> Option<(CssOpenTypeSettingsKind, Vec<OpenTypeTaggedValue>)> {
+        let mut settings_kind = None;
+        let mut tag_values = Vec::new();
+        let parsed = parse_a_font_variation_settings(
+            input.as_bytes(),
+            |kind| settings_kind = Some(kind),
+            |tagged_value| tag_values.push(tagged_value.clone()),
+        );
+        parsed.then(|| {
+            (
+                settings_kind.expect("font variation settings kind must be parsed"),
+                tag_values,
+            )
+        })
     }
 
     fn parse_layer_name(input: &str, allow_blank_layer_name: bool) -> Option<String> {
@@ -6771,6 +7083,84 @@ mod tests {
         assert_eq!(parse_font_language_override("\"\""), None);
         assert_eq!(parse_font_language_override("\"ENG  \""), None);
         assert_eq!(parse_font_language_override("\"    \""), None);
+    }
+
+    #[test]
+    fn parses_font_feature_settings() {
+        assert_eq!(
+            parse_font_feature_settings("normal"),
+            Some((CssOpenTypeSettingsKind::Normal, vec![]))
+        );
+        assert_eq!(
+            parse_font_feature_settings("\"dlig\" 1, \"smcp\" on, \"liga\" off, \"c2sc\""),
+            Some((
+                CssOpenTypeSettingsKind::TagValues,
+                vec![
+                    OpenTypeTaggedValue {
+                        tag: "dlig".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::Value,
+                        value: Some("1".to_string())
+                    },
+                    OpenTypeTaggedValue {
+                        tag: "smcp".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::On,
+                        value: None
+                    },
+                    OpenTypeTaggedValue {
+                        tag: "liga".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::Off,
+                        value: None
+                    },
+                    OpenTypeTaggedValue {
+                        tag: "c2sc".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::Implicit,
+                        value: None
+                    },
+                ],
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_feature_settings() {
+        assert_eq!(parse_font_feature_settings("normal, \"dlig\""), None);
+        assert_eq!(parse_font_feature_settings("\"dli\" 1"), None);
+        assert_eq!(parse_font_feature_settings("\"dlig\" on off"), None);
+        assert_eq!(parse_font_feature_settings("\"dlig\","), None);
+    }
+
+    #[test]
+    fn parses_font_variation_settings() {
+        assert_eq!(
+            parse_font_variation_settings("normal"),
+            Some((CssOpenTypeSettingsKind::Normal, vec![]))
+        );
+        assert_eq!(
+            parse_font_variation_settings("\"wght\" 700, \"XHGT\" calc(0.4 + 0.3)"),
+            Some((
+                CssOpenTypeSettingsKind::TagValues,
+                vec![
+                    OpenTypeTaggedValue {
+                        tag: "wght".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::Value,
+                        value: Some("700".to_string())
+                    },
+                    OpenTypeTaggedValue {
+                        tag: "XHGT".to_string(),
+                        value_kind: CssOpenTypeTaggedValueKind::Value,
+                        value: Some("calc(0.4 + 0.3)".to_string())
+                    },
+                ],
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_variation_settings() {
+        assert_eq!(parse_font_variation_settings("normal, \"wght\" 700"), None);
+        assert_eq!(parse_font_variation_settings("\"wgt\" 700"), None);
+        assert_eq!(parse_font_variation_settings("\"wght\""), None);
+        assert_eq!(parse_font_variation_settings("\"wght\" 700,"), None);
     }
 
     #[test]
