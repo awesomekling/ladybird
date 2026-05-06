@@ -376,14 +376,21 @@ OwnPtr<Supports::Declaration> Parser::parse_supports_declaration(TokenStream<Com
     // NB: Here, we only care about the <declaration> part.
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
-    if (auto declaration = consume_a_declaration(tokens, Nested::No, SaveOriginalText::Yes); declaration.has_value()) {
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token()) {
-            transaction.commit();
-            return Supports::Declaration::create(declaration->original_full_text.release_value(), convert_to_style_property(*declaration).has_value());
-        }
+
+    auto declaration_start = tokens.current_index();
+    while (tokens.has_next_token()) {
+        if (tokens.next_token().is(Token::Type::Semicolon))
+            return {};
+        tokens.discard_a_token();
     }
-    return {};
+
+    auto serialized_declaration = serialize_component_values_for_reparsing(tokens.tokens_since(declaration_start));
+    auto declaration = RustComponentValueParser::parse_a_declaration(serialized_declaration.bytes_as_string_view(), "utf-8"sv, m_rule_context);
+    if (!declaration.has_value())
+        return {};
+
+    transaction.commit();
+    return Supports::Declaration::create(move(serialized_declaration), convert_to_style_property(declaration.value()).has_value());
 }
 
 // https://drafts.csswg.org/css-syntax/#consume-stylesheet-contents
