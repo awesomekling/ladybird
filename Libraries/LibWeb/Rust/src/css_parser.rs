@@ -26,6 +26,7 @@ use crate::generated_pseudo_elements::{
     PseudoElementId, PseudoElementParameterType, aliased_pseudo_element_id_from_string, is_has_allowed_pseudo_element,
     pseudo_element_id_from_string, pseudo_element_metadata,
 };
+use crate::generated_transform_functions::{TransformFunctionParameterType, transform_function_parameters_from_name};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
@@ -1058,6 +1059,13 @@ pub struct CssPrimitiveValueOptions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum CssEasingValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssTransformFunctionValueKind {
     Invalid,
     Valid,
 }
@@ -3966,6 +3974,100 @@ fn is_step_position_keyword(input: &str) -> bool {
         || input.eq_ignore_ascii_case("jump-both")
         || input.eq_ignore_ascii_case("start")
         || input.eq_ignore_ascii_case("end")
+}
+
+pub(crate) fn parse_transform_function_value(filtered_input: &[u8]) -> CssTransformFunctionValueKind {
+    // https://drafts.csswg.org/css-transforms-1/#typedef-transform-function
+    // <transform-function> = <matrix()> | <translate()> | <translateX()> | <translateY()> | <scale()> | <scaleX()> | <scaleY()> | <rotate()> | <skew()> | <skewX()> | <skewY()>
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return CssTransformFunctionValueKind::Invalid;
+    };
+
+    let Some(parameters) = transform_function_parameters_from_name(&function.name) else {
+        return CssTransformFunctionValueKind::Invalid;
+    };
+
+    let arguments = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        Some(component_value.clone())
+    });
+    let Some(arguments) = arguments else {
+        return CssTransformFunctionValueKind::Invalid;
+    };
+
+    if arguments.len() > parameters.len() {
+        return CssTransformFunctionValueKind::Invalid;
+    }
+
+    if arguments.len() < parameters.len() && parameters[arguments.len()].required {
+        return CssTransformFunctionValueKind::Invalid;
+    }
+
+    for (argument, parameter) in arguments.iter().zip(parameters) {
+        if !component_value_matches_transform_function_parameter(argument, parameter.parameter_type) {
+            return CssTransformFunctionValueKind::Invalid;
+        }
+    }
+
+    CssTransformFunctionValueKind::Valid
+}
+
+fn component_value_matches_transform_function_parameter(
+    component_value: &ComponentValue,
+    parameter_type: TransformFunctionParameterType,
+) -> bool {
+    match parameter_type {
+        TransformFunctionParameterType::Angle => {
+            parse_angle_value_prefix(component_value, CssPrimitiveValueOptions::default())
+                == CssPrimitiveValueKind::Angle
+                || component_value_is_zero_number(component_value)
+        }
+        TransformFunctionParameterType::Length => {
+            parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default())
+                == CssPrimitiveValueKind::Length
+        }
+        TransformFunctionParameterType::LengthNone => {
+            parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default())
+                == CssPrimitiveValueKind::Length
+                || component_value_ref_is_ident(component_value, "none")
+        }
+        TransformFunctionParameterType::LengthPercentage => {
+            parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default())
+                == CssPrimitiveValueKind::Length
+                || parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
+        }
+        TransformFunctionParameterType::Number => {
+            parse_number_value_prefix(component_value) == CssPrimitiveValueKind::Number
+        }
+        TransformFunctionParameterType::NumberPercentage => {
+            parse_number_value_prefix(component_value) == CssPrimitiveValueKind::Number
+                || parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
+        }
+    }
+}
+
+fn component_value_is_zero_number(component_value: &ComponentValue) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() == 0.0
+    )
+}
+
+fn component_value_ref_is_ident(component_value: &ComponentValue, ident: &str) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case(ident)
+    )
 }
 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
@@ -12760,25 +12862,25 @@ mod tests {
         CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
         CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
         CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransitionBehaviorItemKind,
+        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
+        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
+        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -12794,9 +12896,9 @@ mod tests {
         parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
         parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
         parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_transform_function_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -13396,6 +13498,10 @@ mod tests {
 
     fn parse_easing(input: &str) -> CssEasingValueKind {
         parse_easing_value(input.as_bytes())
+    }
+
+    fn parse_transform_function(input: &str) -> CssTransformFunctionValueKind {
+        parse_transform_function_value(input.as_bytes())
     }
 
     fn parse_color_scheme(input: &str) -> (CssColorSchemeValueKind, bool, Vec<String>) {
@@ -16461,6 +16567,87 @@ mod tests {
         assert_eq!(parse_easing("steps(-1)"), CssEasingValueKind::Invalid);
         assert_eq!(parse_easing("steps(0, jump-none)"), CssEasingValueKind::Invalid);
         assert_eq!(parse_easing("steps(1, elsewhere)"), CssEasingValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_transform_function_values() {
+        assert_eq!(
+            parse_transform_function("matrix(1, 0, 0, 1, 10, 20)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 20, 30, 1)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("translate(10px, 20%)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("translateX(calc(10px + 5%))"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("translateZ(0)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("scale(1, 50%)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("rotate(0)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("rotate3d(1, 0, 0, 45deg)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("perspective(none)"),
+            CssTransformFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_function("skew(10deg, 0)"),
+            CssTransformFunctionValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_transform_function_values() {
+        assert_eq!(parse_transform_function("none"), CssTransformFunctionValueKind::Invalid);
+        assert_eq!(
+            parse_transform_function("unknown(1)"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("translate()"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("translate(10px, 20%, 30px)"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("translateZ(10%)"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("scale()"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("rotate(1px)"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("matrix(1, 0, 0, 1, 10)"),
+            CssTransformFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_function("matrix(1 0 0 1 10 20)"),
+            CssTransformFunctionValueKind::Invalid
+        );
     }
 
     #[test]

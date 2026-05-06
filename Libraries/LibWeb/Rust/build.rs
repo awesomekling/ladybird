@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let logical_property_groups_json = libweb_dir.join("CSS").join("LogicalPropertyGroups.json");
     let units_json = libweb_dir.join("CSS").join("Units.json");
     let value_types_json = libweb_dir.join("CSS").join("ValueTypes.json");
+    let transform_functions_json = libweb_dir.join("CSS").join("TransformFunctions.json");
     let media_features_generator = repository_root
         .join("Meta")
         .join("Generators")
@@ -49,12 +50,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         .join("Meta")
         .join("Generators")
         .join("generate_libweb_css_value_types_rust.py");
+    let transform_functions_generator = repository_root
+        .join("Meta")
+        .join("Generators")
+        .join("generate_libweb_css_transform_functions_rust.py");
     let generated_media_features = out_dir.join("generated_media_features.rs");
     let generated_properties = out_dir.join("generated_properties.rs");
     let generated_pseudo_classes = out_dir.join("generated_pseudo_classes.rs");
     let generated_pseudo_elements = out_dir.join("generated_pseudo_elements.rs");
     let generated_units = out_dir.join("generated_units.rs");
     let generated_value_types = out_dir.join("generated_value_types.rs");
+    let generated_transform_functions = out_dir.join("generated_transform_functions.rs");
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");
@@ -68,12 +74,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", logical_property_groups_json.display());
     println!("cargo:rerun-if-changed={}", units_json.display());
     println!("cargo:rerun-if-changed={}", value_types_json.display());
+    println!("cargo:rerun-if-changed={}", transform_functions_json.display());
     println!("cargo:rerun-if-changed={}", media_features_generator.display());
     println!("cargo:rerun-if-changed={}", properties_generator.display());
     println!("cargo:rerun-if-changed={}", pseudo_classes_generator.display());
     println!("cargo:rerun-if-changed={}", pseudo_elements_generator.display());
     println!("cargo:rerun-if-changed={}", units_generator.display());
     println!("cargo:rerun-if-changed={}", value_types_generator.display());
+    println!("cargo:rerun-if-changed={}", transform_functions_generator.display());
 
     let status = Command::new("python3")
         .arg(&media_features_generator)
@@ -143,6 +151,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .status()?;
     if !status.success() {
         return Err(format!("{} failed with status {status}", value_types_generator.display()).into());
+    }
+
+    let status = Command::new("python3")
+        .arg(&transform_functions_generator)
+        .arg("--json")
+        .arg(&transform_functions_json)
+        .arg("--output")
+        .arg(&generated_transform_functions)
+        .status()?;
+    if !status.success() {
+        return Err(format!(
+            "{} failed with status {status}",
+            transform_functions_generator.display()
+        )
+        .into());
     }
 
     let ffi_out_dir = env::var("FFI_OUTPUT_DIR")
