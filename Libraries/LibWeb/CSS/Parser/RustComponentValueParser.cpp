@@ -300,6 +300,54 @@ Optional<RustComponentValueParser::PropertyKeyword> RustComponentValueParser::pa
     return property_keyword;
 }
 
+Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<PropertyID> accepted_property_id;
+    auto value_type_string = value_type_to_string(value_type);
+    auto value_type_bytes = value_type_string.bytes();
+    FFI::rust_css_property_accepting_type(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        value_type_bytes.data(),
+        value_type_bytes.size(),
+        &accepted_property_id,
+        [](void* raw_property_id, u16 property_id) {
+            auto& accepted_property_id = *static_cast<Optional<PropertyID>*>(raw_property_id);
+            accepted_property_id = static_cast<PropertyID>(property_id);
+        });
+
+    return accepted_property_id;
+}
+
+Optional<RustComponentValueParser::PropertyCustomIdent> RustComponentValueParser::parse_property_custom_ident_value(ReadonlySpan<PropertyID> property_ids, StringView input)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<PropertyCustomIdent> property_custom_ident;
+    auto input_bytes = input.bytes();
+    FFI::rust_css_parse_property_custom_ident_value(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        input_bytes.data(),
+        input_bytes.size(),
+        &property_custom_ident,
+        [](void* raw_property_custom_ident, u16 property_id, u8 const* custom_ident_ptr, size_t custom_ident_len) {
+            auto& property_custom_ident = *static_cast<Optional<PropertyCustomIdent>*>(raw_property_custom_ident);
+            property_custom_ident = PropertyCustomIdent {
+                .property_id = static_cast<PropertyID>(property_id),
+                .custom_ident = fly_string_from_ffi_bytes(custom_ident_ptr, custom_ident_len),
+            };
+        });
+
+    return property_custom_ident;
+}
+
 struct RustSyntaxNodeBuilder {
     enum class FrameType : u8 {
         Multiplier,

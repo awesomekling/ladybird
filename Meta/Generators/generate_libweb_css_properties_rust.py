@@ -176,6 +176,25 @@ pub(crate) fn property_value_type_from_u8(value_type: u8) -> Option<PropertyValu
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn property_value_type_from_css_value_type_name(value_type: &str) -> Option<PropertyValueType> {""")
+
+    for name in value_types:
+        title_name = value_type_title(name)
+        out.write(f"""
+    if value_type == {rust_string_literal(title_name)} {{
+        return Some(PropertyValueType::{title_name});
+    }}""")
+        if name == "opentype-tag":
+            out.write(f"""
+    if value_type == "OpenTypeTag" {{
+        return Some(PropertyValueType::{title_name});
+    }}""")
+
+    out.write("""
+    None
+}
+
 """)
 
 

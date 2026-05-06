@@ -168,11 +168,7 @@ RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID propert
 Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens)
 {
     auto any_property_accepts_type = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<PropertyID> {
-        for (auto const& property : property_ids) {
-            if (property_accepts_type(property, value_type))
-                return property;
-        }
-        return {};
+        return RustComponentValueParser::property_accepting_type(property_ids, value_type);
     };
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
@@ -195,10 +191,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
 
         // Custom idents
-        if (auto property = any_property_accepts_type(property_ids, ValueType::CustomIdent); property.has_value()) {
-            auto context_guard = push_temporary_value_parsing_context(*property);
-            if (auto custom_ident = parse_custom_ident_value(tokens, property_custom_ident_blacklist(*property)))
-                return PropertyAndValue { *property, custom_ident };
+        auto original_source_text = peek_token.original_source_text();
+        auto source = original_source_text.is_empty() ? peek_token.to_string() : original_source_text;
+        if (auto property_custom_ident = RustComponentValueParser::parse_property_custom_ident_value(property_ids, source.bytes_as_string_view()); property_custom_ident.has_value()) {
+            tokens.discard_a_token();
+            return PropertyAndValue { property_custom_ident->property_id, CustomIdentStyleValue::create(property_custom_ident->custom_ident) };
         }
     }
 

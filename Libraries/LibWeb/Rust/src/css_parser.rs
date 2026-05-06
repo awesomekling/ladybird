@@ -13,7 +13,10 @@ use crate::generated_media_features::{
     MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
     media_feature_id_from_string, media_feature_type_is_range,
 };
-use crate::generated_properties::{property_accepts_keyword, property_id_from_u16, resolve_legacy_value_alias};
+use crate::generated_properties::{
+    property_accepts_keyword, property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
+    property_value_type_from_css_value_type_name, resolve_legacy_value_alias,
+};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
@@ -1286,6 +1289,59 @@ where
 
         let resolved_keyword = resolve_legacy_value_alias(property_id, keyword).unwrap_or(keyword);
         callback(property_id as u16, resolved_keyword);
+        return true;
+    }
+
+    false
+}
+
+pub(crate) fn property_accepting_type<C>(property_ids: &[u16], value_type: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16),
+{
+    let Ok(value_type) = std::str::from_utf8(value_type) else {
+        return false;
+    };
+    let Some(value_type) = property_value_type_from_css_value_type_name(value_type) else {
+        return false;
+    };
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_value_type(property_id, value_type) {
+            continue;
+        }
+
+        callback(property_id as u16);
+        return true;
+    }
+
+    false
+}
+
+pub(crate) fn parse_property_custom_ident_value<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_value_type(property_id, crate::generated_properties::PropertyValueType::CustomIdent) {
+            continue;
+        }
+
+        let mut parser = ComponentValueParser::new(component_values.clone());
+        let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) else {
+            continue;
+        };
+
+        callback(property_id as u16, &name);
         return true;
     }
 
@@ -10429,6 +10485,27 @@ mod tests {
         parsed_keyword
     }
 
+    fn property_accepting_type(property_ids: &[PropertyId], value_type: &str) -> Option<PropertyId> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut accepted_property = None;
+        super::property_accepting_type(&property_ids, value_type.as_bytes(), |property_id| {
+            accepted_property = Some(crate::generated_properties::property_id_from_u16(property_id).unwrap());
+        });
+        accepted_property
+    }
+
+    fn parse_property_custom_ident(property_ids: &[PropertyId], input: &str) -> Option<(PropertyId, String)> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut parsed_custom_ident = None;
+        super::parse_property_custom_ident_value(&property_ids, input.as_bytes(), |property_id, custom_ident| {
+            parsed_custom_ident = Some((
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                custom_ident.to_string(),
+            ));
+        });
+        parsed_custom_ident
+    }
+
     #[test]
     fn generated_property_metadata_matches_property_ids() {
         assert_eq!(property_id_from_string("color"), Some(PropertyId::Color));
@@ -10522,6 +10599,29 @@ mod tests {
             parse_property_keyword(&[PropertyId::AnimationDirection], "allow-discrete"),
             None
         );
+    }
+
+    #[test]
+    fn selects_property_value_types_with_generated_metadata() {
+        assert_eq!(
+            property_accepting_type(&[PropertyId::AnimationDirection, PropertyId::Color], "Color"),
+            Some(PropertyId::Color)
+        );
+        assert_eq!(
+            property_accepting_type(&[PropertyId::Color, PropertyId::AnimationDuration], "Time"),
+            Some(PropertyId::AnimationDuration)
+        );
+        assert_eq!(property_accepting_type(&[PropertyId::Color], "OpenTypeTag"), None);
+    }
+
+    #[test]
+    fn parses_property_custom_ident_values_with_generated_metadata() {
+        assert_eq!(
+            parse_property_custom_ident(&[PropertyId::Color, PropertyId::AnimationName], "slide"),
+            Some((PropertyId::AnimationName, "slide".to_string()))
+        );
+        assert_eq!(parse_property_custom_ident(&[PropertyId::AnimationName], "none"), None);
+        assert_eq!(parse_property_custom_ident(&[PropertyId::Color], "slide"), None);
     }
 
     fn parse_syntax(input: &str) -> Option<SyntaxNode> {

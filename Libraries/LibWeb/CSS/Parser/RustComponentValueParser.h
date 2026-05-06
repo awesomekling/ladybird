@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/Parser/Types.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/URL.h>
+#include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/RustFFI.h>
 
@@ -55,6 +56,11 @@ public:
     struct PropertyKeyword {
         PropertyID property_id;
         Keyword keyword;
+    };
+
+    struct PropertyCustomIdent {
+        PropertyID property_id;
+        FlyString custom_ident;
     };
 
     struct NamespaceRulePrelude {
@@ -229,6 +235,8 @@ public:
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);
     static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
+    static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
+    static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static bool parse_empty_prelude(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);

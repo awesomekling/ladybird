@@ -350,6 +350,69 @@ pub unsafe extern "C" fn rust_css_parse_property_keyword_value(
 }
 
 /// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `value_type` and `value_type_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_property_accepting_type(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    value_type: *const u8,
+    value_type_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, property_id: u16),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(value_type) = bytes_from_raw(value_type, value_type_len) else {
+                return false;
+            };
+
+            css_parser::property_accepting_type(property_ids, value_type, |property_id| {
+                callback(ctx, property_id);
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_property_custom_ident_value(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        property_id: u16,
+        custom_ident: *const u8,
+        custom_ident_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_property_custom_ident_value(property_ids, input, |property_id, custom_ident| {
+                callback(ctx, property_id, custom_ident.as_ptr(), custom_ident.len());
+            })
+        })
+    }
+}
+
+/// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to `callback` must be valid pointers
