@@ -850,11 +850,11 @@ GC::Ptr<CSSFontFaceRule> Parser::convert_to_font_face_rule(AtRule const& rule)
         return nullptr;
     }
 
-    prelude_stream.discard_whitespace();
-    if (prelude_stream.has_next_token()) {
+    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    if (!RustComponentValueParser::parse_empty_prelude(serialized_prelude.bytes_as_string_view(), "utf-8"sv)) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@font-face"_fly_string,
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_prelude,
             .description = "Prelude is not allowed."_string,
         });
         return {};
@@ -1258,11 +1258,11 @@ GC::Ptr<CSSMarginRule> Parser::convert_to_margin_rule(AtRule const& rule)
         return nullptr;
     }
 
-    prelude_stream.discard_whitespace();
-    if (prelude_stream.has_next_token()) {
+    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
+    if (!RustComponentValueParser::parse_empty_prelude(serialized_prelude.bytes_as_string_view(), "utf-8"sv)) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = MUST(String::formatted("@{}", rule.name)),
-            .prelude = prelude_stream.dump_string(),
+            .prelude = serialized_prelude,
             .description = "Prelude is not allowed."_string,
         });
         return {};

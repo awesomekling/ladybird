@@ -488,6 +488,12 @@ pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
     }
 }
 
+pub(crate) fn parse_empty_prelude(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    strip_whitespace(&component_values).is_empty()
+}
+
 pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> CssValueTypeSyntaxKind {
     let Some(value_type_id) = value_type_id_from_u8(value_type_id) else {
         return CssValueTypeSyntaxKind::Invalid;
@@ -4503,7 +4509,8 @@ mod tests {
         component_values_parse_as_value_type, parse_a_counter_style_name, parse_a_custom_property_name,
         parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
         parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_value_type, parse_an_if_condition, parse_font_feature_values_family_name_list, strip_whitespace,
+        parse_a_value_type, parse_an_if_condition, parse_empty_prelude, parse_font_feature_values_family_name_list,
+        strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -5467,6 +5474,13 @@ mod tests {
         assert_eq!(parse_font_feature_values_family_names("initial"), None);
         assert_eq!(parse_font_feature_values_family_names("\"Bongo\" Sans"), None);
         assert_eq!(parse_font_feature_values_family_names("123"), None);
+    }
+
+    #[test]
+    fn parses_empty_preludes() {
+        assert!(parse_empty_prelude("".as_bytes()));
+        assert!(parse_empty_prelude(" \t\n".as_bytes()));
+        assert!(!parse_empty_prelude("foo".as_bytes()));
     }
 
     #[test]
