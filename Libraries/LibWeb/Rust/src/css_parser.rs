@@ -129,6 +129,16 @@ impl UrlModifier {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum FontSource {
+    Local(FamilyName),
+    Url {
+        url_function: UrlFunction,
+        format: Option<String>,
+        tech: Vec<CssFontTech>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpression {
     Not(Box<BooleanExpression>),
     Parens(Box<BooleanExpression>),
@@ -395,6 +405,30 @@ pub struct CssUrlModifier {
     pub integrity_len: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontSourceKind {
+    Local,
+    Url,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssFontTech {
+    Avar2,
+    ColorCbdt,
+    ColorColrv0,
+    ColorColrv1,
+    ColorSbix,
+    ColorSvg,
+    FeaturesAat,
+    FeaturesGraphite,
+    FeaturesOpentype,
+    Incremental,
+    Palettes,
+    Variations,
+}
+
 #[repr(C)]
 pub struct CssDeclaration {
     pub is_valid: bool,
@@ -568,10 +602,10 @@ pub struct CssSyntaxNode {
     pub value_len: usize,
 }
 
-#[derive(Debug, PartialEq)]
-struct FamilyName {
-    name: String,
-    is_string: bool,
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FamilyName {
+    pub(crate) name: String,
+    pub(crate) is_string: bool,
 }
 
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
@@ -890,6 +924,59 @@ where
     for modifier in &url_function.request_url_modifiers {
         modifier_callback(modifier.as_ffi());
     }
+    true
+}
+
+pub(crate) fn parse_a_font_source<S, U, M, F, T>(
+    filtered_input: &[u8],
+    mut source_callback: S,
+    mut url_callback: U,
+    mut modifier_callback: M,
+    mut format_callback: F,
+    mut tech_callback: T,
+) -> bool
+where
+    S: FnMut(CssFontSourceKind, Option<&FamilyName>),
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+    F: FnMut(&str),
+    T: FnMut(CssFontTech),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let Some(font_source) = parser.parse_a_font_source() else {
+        return false;
+    };
+
+    match &font_source {
+        FontSource::Local(family_name) => {
+            source_callback(CssFontSourceKind::Local, Some(family_name));
+        }
+        FontSource::Url {
+            url_function,
+            format,
+            tech,
+        } => {
+            source_callback(CssFontSourceKind::Url, None);
+            url_callback(CssUrlFunction {
+                function_type: url_function.function_type,
+                url_ptr: url_function.url.as_ptr(),
+                url_len: url_function.url.len(),
+            });
+            for modifier in &url_function.request_url_modifiers {
+                modifier_callback(modifier.as_ffi());
+            }
+            if let Some(format) = format {
+                format_callback(format);
+            }
+            for tech in tech {
+                tech_callback(*tech);
+            }
+        }
+    }
+
     true
 }
 
@@ -1689,6 +1776,130 @@ fn parse_referrer_policy_modifier(function: &Function) -> Option<UrlModifier> {
         _ => return None,
     };
     Some(UrlModifier::ReferrerPolicy(value))
+}
+
+fn parse_font_format_function(function: &Function) -> Option<(String, Vec<CssFontTech>)> {
+    // <font-format> = [ <string> | collection | embedded-opentype | opentype | svg | truetype | woff | woff2 ]
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    parser.discard_whitespace();
+    let format_name_token = parser.consume_the_next_component_value()?;
+    let (format, tech) = match format_name_token {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) => (value, Vec::new()),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        }) => parse_font_format_string(&value)?,
+        _ => return None,
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+    Some((format, tech))
+}
+
+fn parse_font_format_string(value: &str) -> Option<(String, Vec<CssFontTech>)> {
+    // https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing
+    // There's a fixed set of strings allowed here, which we'll assume are case-insensitive:
+    // format("woff2")                 -> format(woff2)
+    // format("woff")                  -> format(woff)
+    // format("truetype")              -> format(truetype)
+    // format("opentype")              -> format(opentype)
+    // format("collection")            -> format(collection)
+    // format("woff2-variations")      -> format(woff2) tech(variations)
+    // format("woff-variations")       -> format(woff) tech(variations)
+    // format("truetype-variations")   -> format(truetype) tech(variations)
+    // format("opentype-variations")   -> format(opentype) tech(variations)
+    let (format, has_variations) = match value {
+        value if value.eq_ignore_ascii_case("woff2") => ("woff2", false),
+        value if value.eq_ignore_ascii_case("woff") => ("woff", false),
+        value if value.eq_ignore_ascii_case("truetype") => ("truetype", false),
+        value if value.eq_ignore_ascii_case("opentype") => ("opentype", false),
+        value if value.eq_ignore_ascii_case("collection") => ("collection", false),
+        value if value.eq_ignore_ascii_case("woff2-variations") => ("woff2", true),
+        value if value.eq_ignore_ascii_case("woff-variations") => ("woff", true),
+        value if value.eq_ignore_ascii_case("truetype-variations") => ("truetype", true),
+        value if value.eq_ignore_ascii_case("opentype-variations") => ("opentype", true),
+        _ => return None,
+    };
+
+    Some((
+        format.to_string(),
+        if has_variations {
+            vec![CssFontTech::Variations]
+        } else {
+            Vec::new()
+        },
+    ))
+}
+
+fn parse_font_tech_function(function: &Function) -> Option<Vec<CssFontTech>> {
+    // <font-tech> = features-opentype | features-aat | features-graphite | variations | color-COLRv0 | color-COLRv1
+    //             | color-SVG | color-sbix | color-CBDT | palettes | incremental
+    let mut groups = Vec::new();
+    let mut current_group = Vec::new();
+    for component_value in &function.value {
+        if matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            groups.push(current_group);
+            current_group = Vec::new();
+            continue;
+        }
+        current_group.push(component_value.clone());
+    }
+    groups.push(current_group);
+
+    if groups.is_empty() {
+        return None;
+    }
+
+    let mut tech = Vec::new();
+    for group in groups {
+        let mut parser = ComponentValueParser::new(group);
+        parser.discard_whitespace();
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = parser.consume_the_next_component_value()?
+        else {
+            return None;
+        };
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+
+        tech.push(parse_font_tech_name(&value)?);
+    }
+
+    Some(tech)
+}
+
+fn parse_font_tech_name(value: &str) -> Option<CssFontTech> {
+    match value {
+        value if value.eq_ignore_ascii_case("avar2") => Some(CssFontTech::Avar2),
+        value if value.eq_ignore_ascii_case("color-cbdt") => Some(CssFontTech::ColorCbdt),
+        value if value.eq_ignore_ascii_case("color-colrv0") => Some(CssFontTech::ColorColrv0),
+        value if value.eq_ignore_ascii_case("color-colrv1") => Some(CssFontTech::ColorColrv1),
+        value if value.eq_ignore_ascii_case("color-sbix") => Some(CssFontTech::ColorSbix),
+        value if value.eq_ignore_ascii_case("color-svg") => Some(CssFontTech::ColorSvg),
+        value if value.eq_ignore_ascii_case("features-aat") => Some(CssFontTech::FeaturesAat),
+        value if value.eq_ignore_ascii_case("features-graphite") => Some(CssFontTech::FeaturesGraphite),
+        value if value.eq_ignore_ascii_case("features-opentype") => Some(CssFontTech::FeaturesOpentype),
+        value if value.eq_ignore_ascii_case("incremental") => Some(CssFontTech::Incremental),
+        value if value.eq_ignore_ascii_case("palettes") => Some(CssFontTech::Palettes),
+        value if value.eq_ignore_ascii_case("variations") => Some(CssFontTech::Variations),
+        _ => None,
+    }
 }
 
 fn parse_single_ident_from_function(function: &Function) -> Option<String> {
@@ -2714,6 +2925,17 @@ impl ComponentValueParser {
 
     // https://drafts.csswg.org/css-values-4/#url-value
     fn parse_a_url_function(&mut self) -> Option<UrlFunction> {
+        let url_function = self.parse_a_url_function_component()?;
+
+        self.discard_whitespace();
+        if self.has_next_component_value() {
+            return None;
+        }
+
+        Some(url_function)
+    }
+
+    fn parse_a_url_function_component(&mut self) -> Option<UrlFunction> {
         // <url> = <url()> | <src()>
         // <url()> = url( <string> <url-modifier>* ) | <url-token>
         // <src()> = src( <string> <url-modifier>* )
@@ -2735,12 +2957,70 @@ impl ComponentValueParser {
             _ => return None,
         };
 
+        Some(url_function)
+    }
+
+    // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
+    fn parse_a_font_source(&mut self) -> Option<FontSource> {
+        // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
+        self.discard_whitespace();
+
+        // local(<family-name>)
+        if let Some(ComponentValue::Function(function)) = self.next_component_value()
+            && function.name.eq_ignore_ascii_case("local")
+        {
+            let mut function_parser = ComponentValueParser::new(function.value.clone());
+            let family_name = function_parser.parse_a_family_name()?;
+            function_parser.discard_whitespace();
+            if function_parser.has_next_component_value() {
+                return None;
+            }
+
+            self.index += 1;
+            self.discard_whitespace();
+            if self.has_next_component_value() {
+                return None;
+            }
+            return Some(FontSource::Local(family_name));
+        }
+
+        // <url> [ format(<font-format>)]? [ tech( <font-tech>#)]?
+        let url_function = self.parse_a_url_function_component()?;
+        let mut format = None;
+        let mut tech = Vec::new();
+
+        self.discard_whitespace();
+
+        // [ format(<font-format>)]?
+        if let Some(ComponentValue::Function(function)) = self.next_component_value()
+            && function.name.eq_ignore_ascii_case("format")
+        {
+            let (parsed_format, parsed_tech) = parse_font_format_function(function)?;
+            format = Some(parsed_format);
+            tech.extend(parsed_tech);
+            self.index += 1;
+        }
+
+        self.discard_whitespace();
+
+        // [ tech( <font-tech>#)]?
+        if let Some(ComponentValue::Function(function)) = self.next_component_value()
+            && function.name.eq_ignore_ascii_case("tech")
+        {
+            tech.extend(parse_font_tech_function(function)?);
+            self.index += 1;
+        }
+
         self.discard_whitespace();
         if self.has_next_component_value() {
             return None;
         }
 
-        Some(url_function)
+        Some(FontSource::Url {
+            url_function,
+            format,
+            tech,
+        })
     }
 
     // https://drafts.csswg.org/css-variables-2/#typedef-custom-property-name
@@ -5262,17 +5542,17 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssBooleanExpressionEventKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind, CssUrlFunctionType,
-        CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser, Rule, RuleContext,
-        RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
+        CssBooleanExpressionEventKind, CssFontSourceKind, CssFontTech, CssMediaQuery, CssMediaTypeKind,
+        CssPagePseudoClassKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, Parser,
+        Rule, RuleContext, RuleOrListOfDeclarations, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style_name,
         parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude, parse_a_page_selector_list,
-        parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
-        parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
+        parse_a_font_source, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        parse_a_page_selector_list, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
+        parse_a_value_type, parse_an_if_condition, parse_container_rule_prelude, parse_empty_prelude,
         parse_font_feature_values_family_name_list, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
@@ -5427,6 +5707,42 @@ mod tests {
         );
         parsed
             .then_some(url_function.map(|(function_type, url)| (function_type, url, modifiers)))
+            .flatten()
+    }
+
+    fn parse_font_source(input: &str) -> Option<(CssFontSourceKind, Option<String>, Option<String>, Vec<CssFontTech>)> {
+        let mut source_kind = None;
+        let mut local_name = None;
+        let mut url = None;
+        let mut format = None;
+        let mut tech = Vec::new();
+        let parsed = parse_a_font_source(
+            input.as_bytes(),
+            |kind, family_name| {
+                source_kind = Some(kind);
+                if let Some(family_name) = family_name {
+                    local_name = Some(family_name.name.clone());
+                }
+            },
+            |url_function| {
+                let parsed_url = unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        url_function.url_ptr,
+                        url_function.url_len,
+                    ))
+                };
+                url = Some(parsed_url.to_string());
+            },
+            |_| {},
+            |parsed_format| {
+                format = Some(parsed_format.to_string());
+            },
+            |parsed_tech| {
+                tech.push(parsed_tech);
+            },
+        );
+        parsed
+            .then_some(source_kind.map(|kind| (kind, local_name.or(url), format, tech)))
             .flatten()
     }
 
@@ -6296,6 +6612,45 @@ mod tests {
             None
         );
         assert_eq!(parse_url_function("url(\"image.png\" integrity(not-a-string))"), None);
+    }
+
+    #[test]
+    fn parses_font_sources() {
+        assert_eq!(
+            parse_font_source("local(\"Ahem\")"),
+            Some((CssFontSourceKind::Local, Some("Ahem".to_string()), None, vec![]))
+        );
+        assert_eq!(
+            parse_font_source("url(\"ahem.woff2\") format(woff2) tech(variations, color-COLRv1)"),
+            Some((
+                CssFontSourceKind::Url,
+                Some("ahem.woff2".to_string()),
+                Some("woff2".to_string()),
+                vec![CssFontTech::Variations, CssFontTech::ColorColrv1],
+            ))
+        );
+        assert_eq!(
+            parse_font_source("url(\"ahem.woff2\") format(\"woff2-variations\")"),
+            Some((
+                CssFontSourceKind::Url,
+                Some("ahem.woff2".to_string()),
+                Some("woff2".to_string()),
+                vec![CssFontTech::Variations],
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_font_sources() {
+        assert_eq!(parse_font_source("local(serif)"), None);
+        assert_eq!(
+            parse_font_source("url(\"ahem.woff2\") tech(variations) format(woff2)"),
+            None
+        );
+        assert_eq!(parse_font_source("url(\"ahem.woff2\") format(\"unknown\")"), None);
+        assert_eq!(parse_font_source("url(\"ahem.woff2\") tech()"), None);
+        assert_eq!(parse_font_source("url(\"ahem.woff2\") tech(variations,)"), None);
+        assert_eq!(parse_font_source("url(\"ahem.woff2\") tech(unknown)"), None);
     }
 
     #[test]

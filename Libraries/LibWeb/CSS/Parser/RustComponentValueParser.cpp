@@ -1272,6 +1272,37 @@ static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI:
     VERIFY_NOT_REACHED();
 }
 
+static FontTech font_tech_from_rust(FFI::CssFontTech font_tech)
+{
+    switch (font_tech) {
+    case FFI::CssFontTech::Avar2:
+        return FontTech::Avar2;
+    case FFI::CssFontTech::ColorCbdt:
+        return FontTech::ColorCbdt;
+    case FFI::CssFontTech::ColorColrv0:
+        return FontTech::ColorColrv0;
+    case FFI::CssFontTech::ColorColrv1:
+        return FontTech::ColorColrv1;
+    case FFI::CssFontTech::ColorSbix:
+        return FontTech::ColorSbix;
+    case FFI::CssFontTech::ColorSvg:
+        return FontTech::ColorSvg;
+    case FFI::CssFontTech::FeaturesAat:
+        return FontTech::FeaturesAat;
+    case FFI::CssFontTech::FeaturesGraphite:
+        return FontTech::FeaturesGraphite;
+    case FFI::CssFontTech::FeaturesOpentype:
+        return FontTech::FeaturesOpentype;
+    case FFI::CssFontTech::Incremental:
+        return FontTech::Incremental;
+    case FFI::CssFontTech::Palettes:
+        return FontTech::Palettes;
+    case FFI::CssFontTech::Variations:
+        return FontTech::Variations;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 struct RustURLFunctionBuilder {
     Optional<URL::Type> function_type;
     Optional<String> url;
@@ -1312,6 +1343,88 @@ Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, S
         return {};
 
     return URL { builder.url.release_value(), builder.function_type.release_value(), move(builder.request_url_modifiers) };
+}
+
+struct RustFontSourceBuilder {
+    Optional<FFI::CssFontSourceKind> source_kind;
+    Optional<RustComponentValueParser::FamilyName> family_name;
+    Optional<URL::Type> url_function_type;
+    Optional<String> url;
+    Vector<RequestURLModifier> request_url_modifiers;
+    Optional<FlyString> format;
+    Vector<FontTech> tech;
+};
+
+Optional<RustComponentValueParser::FontSource> RustComponentValueParser::parse_a_font_source(StringView input, StringView encoding)
+{
+    RustFontSourceBuilder builder;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_font_source(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssFontSourceKind kind, u8 const* family_name_ptr, size_t family_name_len, bool family_name_is_string) {
+            auto& builder = *static_cast<RustFontSourceBuilder*>(raw_builder);
+            builder.source_kind = kind;
+            if (kind == FFI::CssFontSourceKind::Local) {
+                builder.family_name = FamilyName {
+                    .name = fly_string_from_ffi_bytes(family_name_ptr, family_name_len),
+                    .is_string = family_name_is_string,
+                };
+            }
+        },
+        [](void* raw_builder, FFI::CssUrlFunction const* rust_url_function) {
+            auto& builder = *static_cast<RustFontSourceBuilder*>(raw_builder);
+            builder.url_function_type = url_function_type_from_rust(rust_url_function->function_type);
+            builder.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
+        },
+        [](void* raw_builder, FFI::CssUrlModifier const* rust_modifier) {
+            auto& builder = *static_cast<RustFontSourceBuilder*>(raw_builder);
+            switch (rust_modifier->kind) {
+            case FFI::CssUrlModifierKind::CrossOrigin:
+                builder.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
+                break;
+            case FFI::CssUrlModifierKind::Integrity:
+                builder.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
+                break;
+            case FFI::CssUrlModifierKind::ReferrerPolicy:
+                builder.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
+                break;
+            }
+        },
+        [](void* raw_builder, u8 const* format_ptr, size_t format_len) {
+            auto& builder = *static_cast<RustFontSourceBuilder*>(raw_builder);
+            builder.format = fly_string_from_ffi_bytes(format_ptr, format_len);
+        },
+        [](void* raw_builder, FFI::CssFontTech rust_font_tech) {
+            auto& builder = *static_cast<RustFontSourceBuilder*>(raw_builder);
+            builder.tech.append(font_tech_from_rust(rust_font_tech));
+        });
+
+    if (!parsed || !builder.source_kind.has_value())
+        return {};
+
+    switch (*builder.source_kind) {
+    case FFI::CssFontSourceKind::Local:
+        if (!builder.family_name.has_value())
+            return {};
+        return FontSource {
+            .source = builder.family_name.release_value(),
+            .format = {},
+            .tech = {},
+        };
+    case FFI::CssFontSourceKind::Url:
+        if (!builder.url_function_type.has_value() || !builder.url.has_value())
+            return {};
+        return FontSource {
+            .source = URL { builder.url.release_value(), builder.url_function_type.release_value(), move(builder.request_url_modifiers) },
+            .format = builder.format,
+            .tech = move(builder.tech),
+        };
+    }
+    VERIFY_NOT_REACHED();
 }
 
 Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)

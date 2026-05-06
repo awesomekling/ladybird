@@ -23,12 +23,12 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
-    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssPagePseudoClassKind,
-    CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode, CssSyntaxNodeKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssBooleanExpressionEventKind, CssComponentValue, CssComponentValueKind, CssDeclaration, CssFontSourceKind,
+    CssFontTech, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind,
+    CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
+    CssPagePseudoClassKind, CssPageSelector, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssSyntaxNode,
+    CssSyntaxNodeKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType,
+    CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -508,6 +508,59 @@ pub unsafe extern "C" fn rust_css_parse_url_function(
                 },
                 |modifier| {
                     modifier_callback(ctx, &raw const modifier);
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_source(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    source_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontSourceKind,
+        family_name_ptr: *const u8,
+        family_name_len: usize,
+        family_name_is_string: bool,
+    ),
+    url_callback: unsafe extern "C" fn(ctx: *mut c_void, url_function: *const CssUrlFunction),
+    modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
+    format_callback: unsafe extern "C" fn(ctx: *mut c_void, format_ptr: *const u8, format_len: usize),
+    tech_callback: unsafe extern "C" fn(ctx: *mut c_void, tech: CssFontTech),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_a_font_source(
+                input,
+                |kind, family_name| {
+                    let (family_name_ptr, family_name_len, family_name_is_string) = family_name
+                        .map_or((std::ptr::null(), 0, false), |family_name| {
+                            (family_name.name.as_ptr(), family_name.name.len(), family_name.is_string)
+                        });
+                    source_callback(ctx, kind, family_name_ptr, family_name_len, family_name_is_string);
+                },
+                |url_function| {
+                    url_callback(ctx, &raw const url_function);
+                },
+                |modifier| {
+                    modifier_callback(ctx, &raw const modifier);
+                },
+                |format| {
+                    format_callback(ctx, format.as_ptr(), format.len());
+                },
+                |tech| {
+                    tech_callback(ctx, tech);
                 },
             )
         })

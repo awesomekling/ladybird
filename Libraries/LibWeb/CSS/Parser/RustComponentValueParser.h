@@ -10,9 +10,11 @@
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/StringView.h>
+#include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibGfx/Font/UnicodeRange.h>
 #include <LibWeb/CSS/BooleanExpression.h>
+#include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/PageSelector.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
@@ -60,6 +62,12 @@ public:
         bool is_string { false };
     };
 
+    struct FontSource {
+        Variant<FamilyName, URL> source;
+        Optional<FlyString> format;
+        Vector<FontTech> tech;
+    };
+
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -89,6 +97,7 @@ public:
     static Optional<Gfx::UnicodeRange> parse_a_unicode_range(StringView input, StringView encoding);
     static Optional<Vector<Gfx::UnicodeRange>> parse_a_unicode_range_list(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
+    static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);

@@ -4986,177 +4986,48 @@ RefPtr<FontSourceStyleValue const> Parser::parse_font_source_value(TokenStream<C
 {
     // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-    tokens.discard_whitespace();
-
-    // local(<family-name>)
-    if (tokens.next_token().is_function("local"sv)) {
-        auto const& function = tokens.consume_a_token().function();
-        TokenStream function_tokens { function.value };
-        if (auto family_name = parse_family_name_value(function_tokens)) {
-            transaction.commit();
-            return FontSourceStyleValue::create(FontSourceStyleValue::Local { family_name.release_nonnull() }, {}, {});
-        }
-        return nullptr;
-    }
-
-    // <url> [ format(<font-format>)]? [ tech( <font-tech>#)]?
-
-    // <url>
-    auto url = parse_url_function(tokens);
-    if (!url.has_value())
+    auto serialized_font_source = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    auto font_source = RustComponentValueParser::parse_a_font_source(serialized_font_source.bytes_as_string_view(), "utf-8"sv);
+    if (!font_source.has_value())
         return nullptr;
 
-    Optional<FlyString> format;
-    Vector<FontTech> tech;
-
-    tokens.discard_whitespace();
-
-    // [ format(<font-format>)]?
-    if (tokens.next_token().is_function("format"sv)) {
-        auto const& function = tokens.consume_a_token().function();
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
-
-        TokenStream format_tokens { function.value };
-        format_tokens.discard_whitespace();
-        auto const& format_name_token = format_tokens.consume_a_token();
-        FlyString format_name;
-        if (format_name_token.is(Token::Type::Ident)) {
-            format_name = format_name_token.token().ident();
-        } else if (format_name_token.is(Token::Type::String)) {
-            auto& name_string = format_name_token.token().string();
-            // There's a fixed set of strings allowed here, which we'll assume are case-insensitive:
-            // format("woff2")                 -> format(woff2)
-            // format("woff")                  -> format(woff)
-            // format("truetype")              -> format(truetype)
-            // format("opentype")              -> format(opentype)
-            // format("collection")            -> format(collection)
-            // format("woff2-variations")      -> format(woff2) tech(variations)
-            // format("woff-variations")       -> format(woff) tech(variations)
-            // format("truetype-variations")   -> format(truetype) tech(variations)
-            // format("opentype-variations")   -> format(opentype) tech(variations)
-            if (name_string.equals_ignoring_ascii_case("woff2"sv)) {
-                format_name = "woff2"_fly_string;
-            } else if (name_string.equals_ignoring_ascii_case("woff"sv)) {
-                format_name = "woff"_fly_string;
-            } else if (name_string.equals_ignoring_ascii_case("truetype"sv)) {
-                format_name = "truetype"_fly_string;
-            } else if (name_string.equals_ignoring_ascii_case("opentype"sv)) {
-                format_name = "opentype"_fly_string;
-            } else if (name_string.equals_ignoring_ascii_case("collection"sv)) {
-                format_name = "collection"_fly_string;
-            } else if (name_string.equals_ignoring_ascii_case("woff2-variations"sv)) {
-                format_name = "woff2"_fly_string;
-                tech.append(FontTech::Variations);
-            } else if (name_string.equals_ignoring_ascii_case("woff-variations"sv)) {
-                format_name = "woff"_fly_string;
-                tech.append(FontTech::Variations);
-            } else if (name_string.equals_ignoring_ascii_case("truetype-variations"sv)) {
-                format_name = "truetype"_fly_string;
-                tech.append(FontTech::Variations);
-            } else if (name_string.equals_ignoring_ascii_case("opentype-variations"sv)) {
-                format_name = "opentype"_fly_string;
-                tech.append(FontTech::Variations);
-            } else {
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "<font-src>"_fly_string,
-                    .value_string = tokens.dump_string(),
-                    .description = MUST(String::formatted("format() parameter \"{}\" is not in the set of valid strings.", name_string)),
-                });
-                return nullptr;
-            }
-        } else {
+    if (font_source->format.has_value()) {
+        if (!font_format_is_supported(*font_source->format)) {
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = "<font-src>"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("format() parameter is not an ident or string; is: {}", format_name_token.to_debug_string())),
+                .value_string = serialized_font_source,
+                .description = MUST(String::formatted("format({}) is not supported.", *font_source->format)),
             });
             return nullptr;
         }
-
-        if (!font_format_is_supported(format_name)) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<font-src>"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("format({}) is not supported.", format_name)),
-            });
-            return nullptr;
-        }
-
-        format_tokens.discard_whitespace();
-        if (format_tokens.has_next_token()) {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<font-src>"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "format() has trailing tokens."_string,
-            });
-            return nullptr;
-        }
-
-        format = move(format_name);
     }
 
-    tokens.discard_whitespace();
-
-    // [ tech( <font-tech>#)]?
-    if (tokens.next_token().is_function("tech"sv)) {
-        auto const& function = tokens.consume_a_token().function();
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
-
-        TokenStream function_tokens { function.value };
-        auto tech_items = parse_a_comma_separated_list_of_component_values(function_tokens);
-        if (tech_items.is_empty()) {
+    for (auto font_tech : font_source->tech) {
+        if (!font_tech_is_supported(font_tech)) {
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = "<font-src>"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = "tech() has no arguments."_string,
-            });
-            return nullptr;
-        }
-
-        for (auto const& tech_item : tech_items) {
-            TokenStream tech_tokens { tech_item };
-            tech_tokens.discard_whitespace();
-            auto& ident_token = tech_tokens.consume_a_token();
-            if (!ident_token.is(Token::Type::Ident)) {
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "<font-src>"_fly_string,
-                    .value_string = tokens.dump_string(),
-                    .description = MUST(String::formatted("tech() parameters must be idents, got: {}", ident_token.to_debug_string())),
-                });
-                return nullptr;
-            }
-            tech_tokens.discard_whitespace();
-            if (tech_tokens.has_next_token()) {
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "<font-src>"_fly_string,
-                    .value_string = tokens.dump_string(),
-                    .description = "tech() has trailing tokens."_string,
-                });
-                return nullptr;
-            }
-
-            auto& font_tech_name = ident_token.token().ident();
-            if (auto keyword = keyword_from_string(font_tech_name); keyword.has_value()) {
-                if (auto font_tech = keyword_to_font_tech(*keyword); font_tech.has_value()) {
-                    if (font_tech_is_supported(*font_tech)) {
-                        tech.append(font_tech.release_value());
-                        continue;
-                    }
-                }
-            }
-
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<font-src>"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("tech({}) is not supported.", font_tech_name)),
+                .value_string = serialized_font_source,
+                .description = MUST(String::formatted("tech({}) is not supported.", to_string(font_tech))),
             });
             return nullptr;
         }
     }
 
     transaction.commit();
-    return FontSourceStyleValue::create(url.release_value(), move(format), move(tech));
+    auto source = font_source->source.visit(
+        [](RustComponentValueParser::FamilyName const& family_name) -> FontSourceStyleValue::Source {
+            if (family_name.is_string)
+                return FontSourceStyleValue::Local { StringStyleValue::create(family_name.name) };
+            return FontSourceStyleValue::Local { CustomIdentStyleValue::create(family_name.name) };
+        },
+        [](URL const& url) -> FontSourceStyleValue::Source {
+            return url;
+        });
+    return FontSourceStyleValue::create(move(source), move(font_source->format), move(font_source->tech));
 }
 
 NonnullRefPtr<StyleValue const> Parser::resolve_unresolved_style_value(ParsingParams const& context, DOM::AbstractElement abstract_element, PropertyNameAndID const& property, UnresolvedStyleValue const& unresolved, Optional<GuardedSubstitutionContexts&> existing_guarded_contexts)
