@@ -1867,50 +1867,51 @@ RefPtr<StyleValue const> Parser::parse_light_dark_color_value(TokenStream<Compon
 // https://www.w3.org/TR/css-color-4/#color-syntax
 RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& tokens)
 {
-
-    // Keywords: <system-color> | <deprecated-color> | currentColor
-    {
-        auto transaction = tokens.begin_transaction();
-        if (auto keyword = parse_keyword_value(tokens); keyword && keyword->has_color()) {
-            transaction.commit();
-            return keyword;
-        }
-    }
-
-    // Functions
     auto start = tokens.current_index();
-    auto validate_parsed_color_function = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
+    auto validate_parsed_color = [&](RefPtr<StyleValue const> value, bool allow_quirky_color = false) -> RefPtr<StyleValue const> {
         if (!value)
             return nullptr;
 
-        auto serialized_color_function = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        if (RustComponentValueParser::parse_color_function(serialized_color_function.bytes_as_string_view(), "utf-8"sv) == FFI::CssColorFunctionValueKind::Invalid)
+        auto serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        if (RustComponentValueParser::parse_color(serialized_color.bytes_as_string_view(), "utf-8"sv, allow_quirky_color) == FFI::CssColorValueKind::Invalid)
             return nullptr;
 
         return value;
     };
 
-    if (auto color = validate_parsed_color_function(parse_color_function(tokens)))
+    // Keywords: <system-color> | <deprecated-color> | currentColor
+    {
+        auto transaction = tokens.begin_transaction();
+        if (auto keyword = parse_keyword_value(tokens); keyword && keyword->has_color()) {
+            if (auto color = validate_parsed_color(keyword)) {
+                transaction.commit();
+                return color;
+            }
+        }
+    }
+
+    // Functions
+    if (auto color = validate_parsed_color(parse_color_function(tokens)))
         return color;
 
-    if (auto color = validate_parsed_color_function(parse_color_mix_function(tokens)))
+    if (auto color = validate_parsed_color(parse_color_mix_function(tokens)))
         return color;
 
-    if (auto rgb = validate_parsed_color_function(parse_rgb_color_value(tokens)))
+    if (auto rgb = validate_parsed_color(parse_rgb_color_value(tokens)))
         return rgb;
-    if (auto hsl = validate_parsed_color_function(parse_hsl_color_value(tokens)))
+    if (auto hsl = validate_parsed_color(parse_hsl_color_value(tokens)))
         return hsl;
-    if (auto hwb = validate_parsed_color_function(parse_hwb_color_value(tokens)))
+    if (auto hwb = validate_parsed_color(parse_hwb_color_value(tokens)))
         return hwb;
-    if (auto lab = validate_parsed_color_function(parse_lab_color_value(tokens)))
+    if (auto lab = validate_parsed_color(parse_lab_color_value(tokens)))
         return lab;
-    if (auto lch = validate_parsed_color_function(parse_lch_color_value(tokens)))
+    if (auto lch = validate_parsed_color(parse_lch_color_value(tokens)))
         return lch;
-    if (auto oklab = validate_parsed_color_function(parse_oklab_color_value(tokens)))
+    if (auto oklab = validate_parsed_color(parse_oklab_color_value(tokens)))
         return oklab;
-    if (auto oklch = validate_parsed_color_function(parse_oklch_color_value(tokens)))
+    if (auto oklch = validate_parsed_color(parse_oklch_color_value(tokens)))
         return oklch;
-    if (auto light_dark = validate_parsed_color_function(parse_light_dark_color_value(tokens)))
+    if (auto light_dark = validate_parsed_color(parse_light_dark_color_value(tokens)))
         return light_dark;
 
     auto transaction = tokens.begin_transaction();
@@ -1922,8 +1923,10 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
 
         auto color = Color::from_string(ident);
         if (color.has_value()) {
-            transaction.commit();
-            return ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy, ident);
+            if (auto color_value = validate_parsed_color(ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy, ident))) {
+                transaction.commit();
+                return color_value;
+            }
         }
         // Otherwise, fall through to the hashless-hex-color case
     }
@@ -1931,8 +1934,10 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
     if (component_value.is(Token::Type::Hash)) {
         auto color = Color::from_string(MUST(String::formatted("#{}", component_value.token().hash_value())));
         if (color.has_value()) {
-            transaction.commit();
-            return ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy);
+            if (auto color_value = validate_parsed_color(ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy))) {
+                transaction.commit();
+                return color_value;
+            }
         }
         return {};
     }
@@ -2015,8 +2020,10 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
             // 6. Return the concatenation of "#" (U+0023) and serialization.
             auto color = Color::from_string(MUST(String::formatted("#{}", serialization)));
             if (color.has_value()) {
-                transaction.commit();
-                return ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy);
+                if (auto color_value = validate_parsed_color(ColorStyleValue::create_from_color(color.release_value(), ColorSyntax::Legacy), true)) {
+                    transaction.commit();
+                    return color_value;
+                }
             }
         }
     }

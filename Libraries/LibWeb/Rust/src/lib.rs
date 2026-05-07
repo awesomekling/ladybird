@@ -39,8 +39,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssAttributeCaseType,
     CssAttributeMatchType, CssBackgroundSizeValueKind, CssBasicShapeValueKind, CssBooleanExpressionEventKind,
-    CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssComponentValue, CssComponentValueKind,
-    CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
+    CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssComponentValue,
+    CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
     CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
     CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssEasingValueKind, CssFitContentValueKind,
     CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech,
@@ -1529,6 +1529,25 @@ pub unsafe extern "C" fn rust_css_parse_color_function(
             };
 
             css_parser::parse_color_function_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_color(
+    input: *const u8,
+    input_len: usize,
+    allow_quirky_color: bool,
+) -> CssColorValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssColorValueKind::Invalid;
+            };
+
+            css_parser::parse_color_value(input, allow_quirky_color)
         })
     }
 }

@@ -1142,6 +1142,13 @@ pub enum CssColorFunctionValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssColorValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -5408,6 +5415,24 @@ pub(crate) fn parse_color_function_value(filtered_input: &[u8]) -> CssColorFunct
     }
 }
 
+pub(crate) fn parse_color_value(filtered_input: &[u8], allow_quirky_color: bool) -> CssColorValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [component_value] = component_values else {
+        return CssColorValueKind::Invalid;
+    };
+
+    if component_value_parse_as_color_value(component_value)
+        || component_value_parse_as_quirky_color(component_value, allow_quirky_color)
+    {
+        CssColorValueKind::Valid
+    } else {
+        CssColorValueKind::Invalid
+    }
+}
+
 fn component_value_parse_as_color_function(function: &Function) -> bool {
     match function.name.to_ascii_lowercase().as_str() {
         "rgb" | "rgba" => component_values_parse_as_rgb_color_function(&function.value),
@@ -5776,14 +5801,322 @@ fn component_value_parse_as_color_value(component_value: &ComponentValue) -> boo
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { .. },
             ..
-        }) => {
-            // AD-HOC: Named colors and system colors are still materialized by C++.
-            // Accept identifier-shaped colors here so recursive color functions
-            // do not reject values that the C++ side already accepted.
-            true
-        }
+        }) => component_value_parse_as_color_identifier(component_value),
         _ => false,
     }
+}
+
+fn component_value_parse_as_color_identifier(component_value: &ComponentValue) -> bool {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    else {
+        return false;
+    };
+
+    // https://www.w3.org/TR/css-color-4/#typedef-named-color
+    // <named-color> = <ident>
+    is_named_color(value)
+        // https://www.w3.org/TR/css-color-4/#css-system-colors
+        // <system-color> = AccentColor | AccentColorText | ActiveText | ButtonBorder | ButtonFace |
+        //                  ButtonText | Canvas | CanvasText | Field | FieldText | GrayText |
+        //                  Highlight | HighlightText | LinkText | Mark | MarkText | SelectedItem |
+        //                  SelectedItemText | VisitedText
+        || is_system_color(value)
+        // https://www.w3.org/TR/css-color-4/#transparent-color
+        // transparent
+        || value.eq_ignore_ascii_case("transparent")
+        // https://www.w3.org/TR/css-color-4/#currentcolor-color
+        // currentcolor
+        || value.eq_ignore_ascii_case("currentcolor")
+}
+
+fn component_value_parse_as_quirky_color(component_value: &ComponentValue, allow_quirky_color: bool) -> bool {
+    if !allow_quirky_color {
+        return false;
+    }
+
+    // https://drafts.csswg.org/css-color-4/#quirky-color
+    // "When CSS is being parsed in quirks mode, <quirky-color> is a type of
+    // <color> that is only valid in certain properties:"
+    // AD-HOC: The exact hashless-hex conversion still happens in C++.
+    // Rust accepts the token shapes here only after C++ has materialized a
+    // color value for the same consumed token slice.
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { .. },
+            ..
+        }) => true,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() >= 0.0 && number_is_integer(*number),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, .. },
+            ..
+        }) => number.value() >= 0.0 && number_is_integer(*number),
+        _ => false,
+    }
+}
+
+fn is_named_color(input: &str) -> bool {
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "aliceblue"
+            | "antiquewhite"
+            | "aqua"
+            | "aquamarine"
+            | "azure"
+            | "beige"
+            | "bisque"
+            | "black"
+            | "blanchedalmond"
+            | "blue"
+            | "blueviolet"
+            | "brown"
+            | "burlywood"
+            | "cadetblue"
+            | "chartreuse"
+            | "chocolate"
+            | "coral"
+            | "cornflowerblue"
+            | "cornsilk"
+            | "crimson"
+            | "cyan"
+            | "darkblue"
+            | "darkcyan"
+            | "darkgoldenrod"
+            | "darkgray"
+            | "darkgreen"
+            | "darkgrey"
+            | "darkkhaki"
+            | "darkmagenta"
+            | "darkolivegreen"
+            | "darkorange"
+            | "darkorchid"
+            | "darkred"
+            | "darksalmon"
+            | "darkseagreen"
+            | "darkslateblue"
+            | "darkslategray"
+            | "darkslategrey"
+            | "darkturquoise"
+            | "darkviolet"
+            | "deeppink"
+            | "deepskyblue"
+            | "dimgray"
+            | "dimgrey"
+            | "dodgerblue"
+            | "firebrick"
+            | "floralwhite"
+            | "forestgreen"
+            | "fuchsia"
+            | "gainsboro"
+            | "ghostwhite"
+            | "gold"
+            | "goldenrod"
+            | "gray"
+            | "green"
+            | "greenyellow"
+            | "grey"
+            | "honeydew"
+            | "hotpink"
+            | "indianred"
+            | "indigo"
+            | "ivory"
+            | "khaki"
+            | "lavender"
+            | "lavenderblush"
+            | "lawngreen"
+            | "lemonchiffon"
+            | "lightblue"
+            | "lightcoral"
+            | "lightcyan"
+            | "lightgoldenrodyellow"
+            | "lightgray"
+            | "lightgreen"
+            | "lightgrey"
+            | "lightpink"
+            | "lightsalmon"
+            | "lightseagreen"
+            | "lightskyblue"
+            | "lightslategray"
+            | "lightslategrey"
+            | "lightsteelblue"
+            | "lightyellow"
+            | "lime"
+            | "limegreen"
+            | "linen"
+            | "magenta"
+            | "maroon"
+            | "mediumaquamarine"
+            | "mediumblue"
+            | "mediumorchid"
+            | "mediumpurple"
+            | "mediumseagreen"
+            | "mediumslateblue"
+            | "mediumspringgreen"
+            | "mediumturquoise"
+            | "mediumvioletred"
+            | "midnightblue"
+            | "mintcream"
+            | "mistyrose"
+            | "moccasin"
+            | "navajowhite"
+            | "navy"
+            | "oldlace"
+            | "olive"
+            | "olivedrab"
+            | "orange"
+            | "orangered"
+            | "orchid"
+            | "palegoldenrod"
+            | "palegreen"
+            | "paleturquoise"
+            | "palevioletred"
+            | "papayawhip"
+            | "peachpuff"
+            | "peru"
+            | "pink"
+            | "plum"
+            | "powderblue"
+            | "purple"
+            | "rebeccapurple"
+            | "red"
+            | "rosybrown"
+            | "royalblue"
+            | "saddlebrown"
+            | "salmon"
+            | "sandybrown"
+            | "seagreen"
+            | "seashell"
+            | "sienna"
+            | "silver"
+            | "skyblue"
+            | "slateblue"
+            | "slategray"
+            | "slategrey"
+            | "snow"
+            | "springgreen"
+            | "steelblue"
+            | "tan"
+            | "teal"
+            | "thistle"
+            | "tomato"
+            | "turquoise"
+            | "violet"
+            | "wheat"
+            | "white"
+            | "whitesmoke"
+            | "yellow"
+            | "yellowgreen"
+    )
+}
+
+fn is_system_color(input: &str) -> bool {
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "accentcolor"
+            | "accentcolortext"
+            | "activeborder"
+            | "activecaption"
+            | "activetext"
+            | "appworkspace"
+            | "background"
+            | "buttonborder"
+            | "buttonface"
+            | "buttonhighlight"
+            | "buttonshadow"
+            | "buttontext"
+            | "canvas"
+            | "canvastext"
+            | "captiontext"
+            | "field"
+            | "fieldtext"
+            | "graytext"
+            | "highlight"
+            | "highlighttext"
+            | "inactiveborder"
+            | "inactivecaption"
+            | "inactivecaptiontext"
+            | "infobackground"
+            | "infotext"
+            | "linktext"
+            | "mark"
+            | "marktext"
+            | "menu"
+            | "menutext"
+            | "scrollbar"
+            | "selecteditem"
+            | "selecteditemtext"
+            | "threeddarkshadow"
+            | "threedface"
+            | "threedhighlight"
+            | "threedlightshadow"
+            | "threedshadow"
+            | "visitedtext"
+            | "window"
+            | "windowframe"
+            | "windowtext"
+            | "-libweb-buttonfacedisabled"
+            | "-libweb-buttonfacehover"
+            | "-libweb-link"
+            | "-libweb-palette-active-link"
+            | "-libweb-palette-active-window-border1"
+            | "-libweb-palette-active-window-border2"
+            | "-libweb-palette-active-window-title"
+            | "-libweb-palette-base"
+            | "-libweb-palette-base-text"
+            | "-libweb-palette-button"
+            | "-libweb-palette-button-text"
+            | "-libweb-palette-desktop-background"
+            | "-libweb-palette-focus-outline"
+            | "-libweb-palette-highlight-window-border1"
+            | "-libweb-palette-highlight-window-border2"
+            | "-libweb-palette-highlight-window-title"
+            | "-libweb-palette-hover-highlight"
+            | "-libweb-palette-inactive-selection"
+            | "-libweb-palette-inactive-selection-text"
+            | "-libweb-palette-inactive-window-border1"
+            | "-libweb-palette-inactive-window-border2"
+            | "-libweb-palette-inactive-window-title"
+            | "-libweb-palette-link"
+            | "-libweb-palette-menu-base"
+            | "-libweb-palette-menu-base-text"
+            | "-libweb-palette-menu-selection"
+            | "-libweb-palette-menu-selection-text"
+            | "-libweb-palette-menu-stripe"
+            | "-libweb-palette-moving-window-border1"
+            | "-libweb-palette-moving-window-border2"
+            | "-libweb-palette-moving-window-title"
+            | "-libweb-palette-rubber-band-border"
+            | "-libweb-palette-rubber-band-fill"
+            | "-libweb-palette-ruler"
+            | "-libweb-palette-ruler-active-text"
+            | "-libweb-palette-ruler-border"
+            | "-libweb-palette-ruler-inactive-text"
+            | "-libweb-palette-selection"
+            | "-libweb-palette-selection-text"
+            | "-libweb-palette-syntax-comment"
+            | "-libweb-palette-syntax-control-keyword"
+            | "-libweb-palette-syntax-identifier"
+            | "-libweb-palette-syntax-keyword"
+            | "-libweb-palette-syntax-number"
+            | "-libweb-palette-syntax-operator"
+            | "-libweb-palette-syntax-preprocessor-statement"
+            | "-libweb-palette-syntax-preprocessor-value"
+            | "-libweb-palette-syntax-punctuation"
+            | "-libweb-palette-syntax-string"
+            | "-libweb-palette-syntax-type"
+            | "-libweb-palette-text-cursor"
+            | "-libweb-palette-threed-highlight"
+            | "-libweb-palette-threed-shadow1"
+            | "-libweb-palette-threed-shadow2"
+            | "-libweb-palette-visited-link"
+            | "-libweb-palette-window"
+            | "-libweb-palette-window-text"
+    )
 }
 
 fn consume_number_percentage_none_component_value(parser: &mut ComponentValueParser) -> bool {
@@ -15095,7 +15428,7 @@ mod tests {
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
         CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValueKind,
-        CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
+        CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
         CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
         CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind, CssFitContentValueKind,
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
@@ -15136,7 +15469,7 @@ mod tests {
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
         parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
         parse_background_size_value, parse_basic_shape_value, parse_color_function_value, parse_color_scheme_value,
-        parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
+        parse_color_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
         parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
         parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
         parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
@@ -15784,6 +16117,14 @@ mod tests {
 
     fn parse_color_function(input: &str) -> CssColorFunctionValueKind {
         parse_color_function_value(input.as_bytes())
+    }
+
+    fn parse_color(input: &str) -> CssColorValueKind {
+        parse_color_value(input.as_bytes(), false)
+    }
+
+    fn parse_quirky_color(input: &str) -> CssColorValueKind {
+        parse_color_value(input.as_bytes(), true)
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -18982,6 +19323,33 @@ mod tests {
             parse_color_function("light-dark(red blue)"),
             CssColorFunctionValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_color_values() {
+        assert_eq!(parse_color("red"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("transparent"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("currentColor"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("CanvasText"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("-libweb-palette-window-text"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("#abc"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("#abcd"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("#aabbcc"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("#aabbccdd"), CssColorValueKind::Valid);
+        assert_eq!(parse_color("rgb(1 2 3)"), CssColorValueKind::Valid);
+        assert_eq!(parse_quirky_color("000000"), CssColorValueKind::Valid);
+        assert_eq!(parse_quirky_color("123abc"), CssColorValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_color_values() {
+        assert_eq!(parse_color(""), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("not-a-color"), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("-libweb-unknown"), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("#ab"), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("#xyz"), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("rgb(1 2)"), CssColorValueKind::Invalid);
+        assert_eq!(parse_color("000000"), CssColorValueKind::Invalid);
     }
 
     #[test]
