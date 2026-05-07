@@ -956,6 +956,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
+                value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
+                value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_green);
+            } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
+                value.view_timeline_inset_count = color_red;
+            } else if (kind == FFI::CssStyleValueKind::ViewFunction) {
+                value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_red);
+                value.view_function_inset = static_cast<FFI::CssViewFunctionInsetKind>(color_green);
+                value.view_function_inset_position = static_cast<FFI::CssViewFunctionInsetPosition>(color_blue);
             } else if (kind == FFI::CssStyleValueKind::Primitive || kind == FFI::CssStyleValueKind::ValueType) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())

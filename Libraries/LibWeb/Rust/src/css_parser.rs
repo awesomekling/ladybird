@@ -1755,6 +1755,9 @@ pub enum CssStyleValueKind {
     Color,
     Url,
     CounterStyleName,
+    ScrollFunction,
+    ViewTimelineInset,
+    ViewFunction,
     ValueType,
 }
 
@@ -2218,6 +2221,72 @@ where
                     property_value_type_name(*value_type),
                 );
                 return true;
+            }
+
+            if *value_type == PropertyValueType::ScrollFunction {
+                let scroll_function = parse_scroll_function_value(filtered_input);
+                if scroll_function.kind == CssScrollFunctionValueKind::Valid {
+                    callback(
+                        CssStyleValueKind::ScrollFunction,
+                        property_id as u16,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        scroll_function.scroller as u8,
+                        scroll_function.axis as u8,
+                        0,
+                        0,
+                        &[],
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
+            }
+
+            if *value_type == PropertyValueType::ViewTimelineInset {
+                let view_timeline_inset = parse_view_timeline_inset_value(filtered_input);
+                if view_timeline_inset.kind == CssViewTimelineInsetValueKind::Valid {
+                    callback(
+                        CssStyleValueKind::ViewTimelineInset,
+                        property_id as u16,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        view_timeline_inset.count as u8,
+                        0,
+                        0,
+                        0,
+                        &[],
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
+            }
+
+            if *value_type == PropertyValueType::ViewFunction {
+                let view_function = parse_view_function_value(filtered_input);
+                if view_function.kind == CssViewFunctionValueKind::Valid {
+                    callback(
+                        CssStyleValueKind::ViewFunction,
+                        property_id as u16,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        view_function.axis as u8,
+                        view_function.inset as u8,
+                        view_function.inset_position as u8,
+                        0,
+                        &[],
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
             }
 
             let generated_style_value =
@@ -18650,6 +18719,45 @@ mod tests {
                 color: None,
                 value: "url(image.png)".to_string(),
                 value_type: "Url".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnimationTimeline], "scroll(root y)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ScrollFunction,
+                property_id: PropertyId::AnimationTimeline,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "ScrollFunction".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ViewTimelineInset], "1px 2px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ViewTimelineInset,
+                property_id: PropertyId::ViewTimelineInset,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "ViewTimelineInset".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnimationTimeline], "view(y 1px 2px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ViewFunction,
+                property_id: PropertyId::AnimationTimeline,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "ViewFunction".to_string(),
             })
         );
         assert_eq!(

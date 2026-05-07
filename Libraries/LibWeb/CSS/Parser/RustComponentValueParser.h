@@ -90,6 +90,11 @@ public:
         u8 color_alpha { 0 };
         Optional<FlyString> dimension_unit;
         Optional<FlyString> string;
+        FFI::CssScrollFunctionScrollerKind scroll_function_scroller { FFI::CssScrollFunctionScrollerKind::None };
+        FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
+        size_t view_timeline_inset_count { 0 };
+        FFI::CssViewFunctionInsetKind view_function_inset { FFI::CssViewFunctionInsetKind::None };
+        FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };
     };
 
     struct SimpleColor {

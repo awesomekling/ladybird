@@ -345,6 +345,85 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     NumberStyleValue::create(*rust_style_value->numeric_value),
                     NumberStyleValue::create(*rust_style_value->secondary_numeric_value));
             };
+            auto materialize_rust_scroll_function_value = [&]() -> RefPtr<StyleValue const> {
+                StyleValueTuple tuple;
+                tuple.resize_with_default_value(2, nullptr);
+
+                switch (rust_style_value->scroll_function_scroller) {
+                case FFI::CssScrollFunctionScrollerKind::None:
+                case FFI::CssScrollFunctionScrollerKind::Nearest:
+                    break;
+                case FFI::CssScrollFunctionScrollerKind::Root:
+                    tuple[TupleStyleValue::Indices::ScrollFunction::Scroller] = KeywordStyleValue::create(Keyword::Root);
+                    break;
+                case FFI::CssScrollFunctionScrollerKind::Self_:
+                    tuple[TupleStyleValue::Indices::ScrollFunction::Scroller] = KeywordStyleValue::create(Keyword::Self);
+                    break;
+                }
+
+                switch (rust_style_value->scroll_function_axis) {
+                case FFI::CssScrollFunctionAxisKind::None:
+                case FFI::CssScrollFunctionAxisKind::Block:
+                    break;
+                case FFI::CssScrollFunctionAxisKind::Inline:
+                    tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::Inline);
+                    break;
+                case FFI::CssScrollFunctionAxisKind::X:
+                    tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::X);
+                    break;
+                case FFI::CssScrollFunctionAxisKind::Y:
+                    tuple[TupleStyleValue::Indices::ScrollFunction::Axis] = KeywordStyleValue::create(Keyword::Y);
+                    break;
+                }
+
+                return FunctionStyleValue::create("scroll"_fly_string, TupleStyleValue::create(move(tuple)));
+            };
+            auto materialize_rust_view_function_value = [&]() -> RefPtr<StyleValue const> {
+                if (!tokens.next_token().is_function("view"sv))
+                    return nullptr;
+
+                auto context_guard = push_temporary_value_parsing_context(FunctionContext { "view"sv });
+
+                StyleValueTuple tuple;
+                tuple.resize_with_default_value(2, nullptr);
+
+                switch (rust_style_value->scroll_function_axis) {
+                case FFI::CssScrollFunctionAxisKind::None:
+                case FFI::CssScrollFunctionAxisKind::Block:
+                    break;
+                case FFI::CssScrollFunctionAxisKind::Inline:
+                    tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::Inline);
+                    break;
+                case FFI::CssScrollFunctionAxisKind::X:
+                    tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::X);
+                    break;
+                case FFI::CssScrollFunctionAxisKind::Y:
+                    tuple[TupleStyleValue::Indices::ViewFunction::Axis] = KeywordStyleValue::create(Keyword::Y);
+                    break;
+                }
+
+                switch (rust_style_value->view_function_inset) {
+                case FFI::CssViewFunctionInsetKind::None:
+                case FFI::CssViewFunctionInsetKind::Default:
+                    break;
+                case FFI::CssViewFunctionInsetKind::NonDefault: {
+                    auto argument_tokens = TokenStream { tokens.next_token().function().value };
+                    if (rust_style_value->view_function_inset_position == FFI::CssViewFunctionInsetPosition::AfterAxis) {
+                        argument_tokens.discard_whitespace();
+                        argument_tokens.discard_a_token();
+                    }
+
+                    auto inset_value = parse_view_timeline_inset_value(argument_tokens);
+                    if (!inset_value)
+                        return nullptr;
+
+                    tuple[TupleStyleValue::Indices::ViewFunction::Inset] = inset_value.release_nonnull();
+                    break;
+                }
+                }
+
+                return FunctionStyleValue::create("view"_fly_string, TupleStyleValue::create(move(tuple)));
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -400,6 +479,29 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     tokens.discard_a_token();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, CounterStyleStyleValue::create(counter_style_name) };
+                }
+                break;
+            case FFI::CssStyleValueKind::ScrollFunction:
+                if (auto value = materialize_rust_scroll_function_value()) {
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::ViewTimelineInset:
+                if (rust_style_value->view_timeline_inset_count > 0) {
+                    auto value = parse_view_timeline_inset_value(tokens);
+                    if (value) {
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+                }
+                break;
+            case FFI::CssStyleValueKind::ViewFunction:
+                if (auto value = materialize_rust_view_function_value()) {
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::Primitive:
