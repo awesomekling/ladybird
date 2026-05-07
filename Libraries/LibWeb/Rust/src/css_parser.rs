@@ -1886,7 +1886,7 @@ pub(crate) struct RustOwnedStyleValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStyleValueKind {
-    Anchor(RustOwnedSourceBackedStyleValue),
+    Anchor(RustOwnedAnchorFunction),
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
@@ -1895,7 +1895,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ColorScheme(RustOwnedColorScheme),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
-    Counter(RustOwnedSourceBackedStyleValue),
+    Counter(RustOwnedCounterFunction),
     CounterStyle {
         value: CounterStyle,
         source: String,
@@ -2060,6 +2060,29 @@ pub(crate) struct RustOwnedMathFunction {
 pub(crate) struct RustOwnedSourceBackedStyleValue {
     value_type: Option<PropertyValueType>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAnchorFunction {
+    anchor_name: Option<String>,
+    anchor_side: String,
+    fallback: Option<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCounterFunction {
+    function: RustOwnedCounterFunctionKind,
+    counter_name: String,
+    join_string: Option<String>,
+    counter_style: Option<CounterStyle>,
+    source: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedCounterFunctionKind {
+    Counter,
+    Counters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2777,6 +2800,17 @@ fn parse_rust_owned_property_specific_longhand_value(
     match property_id {
         PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
         PropertyId::AnchorScope => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, true),
+        PropertyId::Inset
+        | PropertyId::Top
+        | PropertyId::Right
+        | PropertyId::Bottom
+        | PropertyId::Left
+        | PropertyId::InsetBlock
+        | PropertyId::InsetBlockStart
+        | PropertyId::InsetBlockEnd
+        | PropertyId::InsetInline
+        | PropertyId::InsetInlineStart
+        | PropertyId::InsetInlineEnd => rust_owned_anchor_function_style_value_kind(filtered_input),
         PropertyId::BackgroundSize | PropertyId::MaskSize => {
             rust_owned_background_size_style_value_kind(filtered_input)
         }
@@ -2909,9 +2943,21 @@ fn parse_rust_owned_generated_longhand_value(
         };
     }
 
+    if value_type == PropertyValueType::Counter
+        && let Some(value) = rust_owned_counter_function_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
     if value_type == PropertyValueType::Image
         && let Some(value) =
             rust_owned_image_set_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Anchor
+        && let Some(value) = rust_owned_anchor_function_style_value_kind(filtered_input)
     {
         return RustOwnedStyleValue { property_id, value };
     }
@@ -3101,6 +3147,12 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
     };
 
     match value_type {
+        PropertyValueType::Anchor => {
+            rust_owned_anchor_function_style_value_kind(value.source.as_bytes()).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::Counter => {
+            rust_owned_counter_function_style_value_kind(value.source.as_bytes()).unwrap_or_else(|| unreachable!())
+        }
         PropertyValueType::FontStyle => {
             rust_owned_font_style_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
         }
@@ -3172,6 +3224,235 @@ fn rust_owned_transform_list_style_value_kind(
         value_type: Some(PropertyValueType::TransformList),
         source: Some(filtered_input_string.to_string()),
     }))
+}
+
+fn rust_owned_anchor_function_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return None;
+    };
+
+    rust_owned_anchor_function_from_function(function, filtered_input_string)
+}
+
+fn rust_owned_anchor_function_from_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-anchor-position-1/#funcdef-anchor
+    // <anchor()> = anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )
+    if !function.name.eq_ignore_ascii_case("anchor") {
+        return None;
+    }
+
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() || groups.len() > 2 {
+        return None;
+    }
+
+    let mut anchor_name = None;
+    let mut anchor_side = None;
+    for component_value in strip_whitespace(groups[0])
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        if let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = component_value
+            && value.starts_with("--")
+            && is_valid_custom_ident(value, &[])
+        {
+            if anchor_name.is_some() {
+                return None;
+            }
+            anchor_name = Some(value.clone());
+            continue;
+        }
+
+        if anchor_side.is_some() || !component_value_parse_as_anchor_side(component_value) {
+            return None;
+        }
+        anchor_side = Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            filtered_input_string,
+        )?);
+    }
+
+    let anchor_side = anchor_side?;
+    let fallback = if groups.len() == 2 {
+        let fallback = strip_whitespace(groups[1]);
+        if !component_values_parse_as_anchor_fallback(fallback, filtered_input_string) {
+            return None;
+        }
+        Some(serialize_component_values_for_reparsing(
+            fallback,
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::Anchor(RustOwnedAnchorFunction {
+        anchor_name,
+        anchor_side,
+        fallback,
+        source: serialize_component_values_for_reparsing(
+            &[ComponentValue::Function(function.clone())],
+            filtered_input_string,
+        )?,
+    }))
+}
+
+fn component_value_parse_as_anchor_side(component_value: &ComponentValue) -> bool {
+    // <anchor-side> = inside | outside
+    //               | top | left | right | bottom
+    //               | start | end | self-start | self-end
+    //               | <percentage> | center
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "inside"
+                | "outside"
+                | "top"
+                | "left"
+                | "right"
+                | "bottom"
+                | "start"
+                | "end"
+                | "self-start"
+                | "self-end"
+                | "center"
+        ),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => true,
+        // AD-HOC: Match the existing C++ parser's calc handling for
+        // anchor-side. It parses a length-percentage here to allow math
+        // functions, then materializes and range-checks the value in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_anchor_fallback(component_values: &[ComponentValue], filtered_input_string: &str) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    component_value_parse_as_length_percentage(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::Function(function)
+                if rust_owned_anchor_function_from_function(function, filtered_input_string).is_some()
+        )
+}
+
+fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-lists-3/#counter-functions
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return None;
+    };
+
+    if function.name.eq_ignore_ascii_case("counter") {
+        // counter() = counter( <counter-name>, <counter-style>? )
+        return rust_owned_counter_function_value(function, filtered_input, filtered_input_string);
+    }
+
+    if function.name.eq_ignore_ascii_case("counters") {
+        // counters() = counters( <counter-name>, <string>, <counter-style>? )
+        return rust_owned_counters_function_value(function, filtered_input, filtered_input_string);
+    }
+
+    None
+}
+
+fn rust_owned_counter_function_value(
+    function: &Function,
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() || groups.len() > 2 {
+        return None;
+    }
+
+    let counter_name = component_values_counter_name(strip_whitespace(groups[0]))?;
+    let counter_style = if groups.len() == 2 {
+        Some(component_values_counter_style(
+            strip_whitespace(groups[1]),
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+        function: RustOwnedCounterFunctionKind::Counter,
+        counter_name,
+        join_string: None,
+        counter_style,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_counters_function_value(
+    function: &Function,
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.len() < 2 || groups.len() > 3 {
+        return None;
+    }
+
+    let counter_name = component_values_counter_name(strip_whitespace(groups[0]))?;
+    let join_string = component_values_string_value(strip_whitespace(groups[1]))?.to_string();
+    let counter_style = if groups.len() == 3 {
+        Some(component_values_counter_style(
+            strip_whitespace(groups[2]),
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+        function: RustOwnedCounterFunctionKind::Counters,
+        counter_name,
+        join_string: Some(join_string),
+        counter_style,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn component_values_counter_name(component_values: &[ComponentValue]) -> Option<String> {
+    // https://drafts.csswg.org/css-lists-3/#typedef-counter-name
+    // Counters are referred to in CSS syntax using the <counter-name> type, which represents
+    // their name as a <custom-ident>. A <counter-name> name cannot match the keyword none;
+    // such an identifier is invalid as a <counter-name>.
+    let name = component_values_custom_ident_value(component_values)?;
+    if name.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn component_values_counter_style(
+    component_values: &[ComponentValue],
+    filtered_input_string: &str,
+) -> Option<CounterStyle> {
+    let serialized_counter_style = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+    parse_all_component_values(
+        serialized_counter_style.as_bytes(),
+        ComponentValueParser::parse_a_counter_style,
+    )
 }
 
 fn rust_owned_basic_shape_style_value_kind(
@@ -4577,6 +4858,25 @@ fn filtered_input_to_string(filtered_input: &[u8]) -> String {
     String::from_utf8_lossy(filtered_input).to_string()
 }
 
+fn split_component_values_on_comma(component_values: &[ComponentValue]) -> Vec<&[ComponentValue]> {
+    let mut groups = Vec::new();
+    let mut start = 0;
+    for (index, component_value) in component_values.iter().enumerate() {
+        if matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            groups.push(&component_values[start..index]);
+            start = index + 1;
+        }
+    }
+    groups.push(&component_values[start..]);
+    groups
+}
+
 pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -4597,12 +4897,26 @@ where
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
-        RustOwnedStyleValueKind::Anchor(value)
-        | RustOwnedStyleValueKind::Counter(value)
-        | RustOwnedStyleValueKind::Image(value) => {
+        RustOwnedStyleValueKind::Image(value) => {
             if let Some(value_type) = value.value_type {
                 callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
             }
+        }
+        RustOwnedStyleValueKind::Anchor(_) => {
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::Anchor,
+            );
+        }
+        RustOwnedStyleValueKind::Counter(_) => {
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::Counter,
+            );
         }
         RustOwnedStyleValueKind::ImageSet(_) => {
             callback_style_value_type(
@@ -5701,6 +6015,7 @@ fn generated_property_value_type_order() -> &'static [PropertyValueType] {
     // <length> so a unitless zero is not captured as a length when both are
     // accepted.
     &[
+        PropertyValueType::Anchor,
         PropertyValueType::Color,
         PropertyValueType::CornerShape,
         PropertyValueType::Counter,
@@ -5740,13 +6055,14 @@ fn generated_property_value_type_order() -> &'static [PropertyValueType] {
         PropertyValueType::Time,
         PropertyValueType::Percentage,
         PropertyValueType::Paint,
-        PropertyValueType::Anchor,
     ]
 }
 
 fn component_values_parse_as_property_value_type(value_type: PropertyValueType, filtered_input: &[u8]) -> bool {
     match value_type {
+        PropertyValueType::Anchor => rust_owned_anchor_function_style_value_kind(filtered_input).is_some(),
         PropertyValueType::Color => parse_color_value(filtered_input, false) == CssColorValueKind::Valid,
+        PropertyValueType::Counter => rust_owned_counter_function_style_value_kind(filtered_input).is_some(),
         PropertyValueType::DashedIdent => parse_a_dashed_ident(filtered_input, |_| {}),
         PropertyValueType::EasingFunction => parse_easing_value(filtered_input) == CssEasingValueKind::Valid,
         PropertyValueType::FitContent => parse_fit_content_value(filtered_input) == CssFitContentValueKind::Valid,
@@ -20377,21 +20693,22 @@ mod tests {
         FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedBackgroundSize,
-        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
-        RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay,
-        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition,
-        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
+        RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
+        RustOwnedBasicShapeKind, RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterFunctionKind, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -22003,6 +22320,38 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Content,
+                value: RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+                    function: RustOwnedCounterFunctionKind::Counter,
+                    counter_name: "section".to_string(),
+                    join_string: None,
+                    counter_style: Some(CounterStyle::Name("upper-roman".to_string())),
+                    source: "counter(section, upper-roman)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::Content],
+                "counters(section, \".\", symbols(\"*\" \"**\"))"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Content,
+                value: RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+                    function: RustOwnedCounterFunctionKind::Counters,
+                    counter_name: "section".to_string(),
+                    join_string: Some(".".to_string()),
+                    counter_style: Some(CounterStyle::SymbolsFunction {
+                        symbols_type: CssCounterStyleSymbolsType::Symbolic,
+                        symbols: vec!["*".to_string(), "**".to_string()],
+                    }),
+                    source: "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundImage,
@@ -22038,6 +22387,18 @@ mod tests {
                     ],
                     source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
                         .to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Top], "anchor(--target bottom, calc(1px + 2%))"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Top,
+                value: RustOwnedStyleValueKind::Anchor(RustOwnedAnchorFunction {
+                    anchor_name: Some("--target".to_string()),
+                    anchor_side: "bottom".to_string(),
+                    fallback: Some("calc(1px + 2%)".to_string()),
+                    source: "anchor(--target bottom, calc(1px + 2%))".to_string(),
                 }),
             })
         );
