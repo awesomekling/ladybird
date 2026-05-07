@@ -3098,21 +3098,20 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         // This also keeps `animation-name`, which accepts arbitrary custom
         // identifiers, from stealing keywords such as `ease-in` from the other
         // animation longhands while parsing the `animation` shorthand.
-        if is_coordinating_shorthand_item
-            && matches!(
-                property_id,
-                PropertyId::AnimationName
-                    | PropertyId::ScrollTimelineName
-                    | PropertyId::TransitionBehavior
-                    | PropertyId::TransitionProperty
-                    | PropertyId::ViewTimelineName
-            )
-        {
+        if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
             continue;
         }
         if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
         }
+    }
+
+    if property_ids.len() == 1
+        && let Some(property_id) = property_id_from_u16(property_ids[0])
+        && property_uses_rust_owned_whole_grammar(property_id)
+        && !(is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id))
+    {
+        return RustOwnedStyleValueParseResult::Invalid;
     }
 
     if let [
@@ -3140,6 +3139,9 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         let Some(property_id) = property_id_from_u16(*property_id) else {
             continue;
         };
+        if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
+            continue;
+        }
         if !property_accepts_value_type(property_id, PropertyValueType::CustomIdent) {
             continue;
         }
@@ -3194,7 +3196,78 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         }
     }
 
+    if is_coordinating_shorthand_item {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if !property_parses_as_coordinating_shorthand_item(property_id)
+                || !property_accepts_value_type(property_id, PropertyValueType::CustomIdent)
+            {
+                continue;
+            }
+
+            let mut parser = ComponentValueParser::new(component_values.to_vec());
+            if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
+                return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::CustomIdent {
+                        value: name,
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                });
+            }
+        }
+    }
+
     RustOwnedStyleValueParseResult::Invalid
+}
+
+fn property_parses_as_coordinating_shorthand_item(property_id: PropertyId) -> bool {
+    matches!(
+        property_id,
+        PropertyId::AnimationName
+            | PropertyId::ScrollTimelineName
+            | PropertyId::TransitionBehavior
+            | PropertyId::TransitionProperty
+            | PropertyId::ViewTimelineName
+    )
+}
+
+fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
+    matches!(
+        property_id,
+        PropertyId::AnimationName
+            | PropertyId::Contain
+            | PropertyId::ContainerType
+            | PropertyId::MathDepth
+            | PropertyId::PaintOrder
+            | PropertyId::PositionTryOrder
+            | PropertyId::PositionVisibility
+            | PropertyId::Quotes
+            | PropertyId::Rotate
+            | PropertyId::Scale
+            | PropertyId::ScrollTimelineName
+            | PropertyId::ScrollbarGutter
+            | PropertyId::StrokeDasharray
+            | PropertyId::TextDecoration
+            | PropertyId::TextDecorationLine
+            | PropertyId::TextIndent
+            | PropertyId::TextUnderlinePosition
+            | PropertyId::TextWrap
+            | PropertyId::TextWrapMode
+            | PropertyId::TextWrapStyle
+            | PropertyId::TimelineScope
+            | PropertyId::TouchAction
+            | PropertyId::TransformOrigin
+            | PropertyId::TransitionBehavior
+            | PropertyId::TransitionProperty
+            | PropertyId::Translate
+            | PropertyId::ViewTimelineName
+            | PropertyId::ViewTransitionName
+            | PropertyId::WhiteSpaceTrim
+            | PropertyId::WillChange
+    )
 }
 
 fn parse_rust_owned_property_specific_longhand_value(
@@ -15591,9 +15664,6 @@ fn parse_rust_owned_scale_value(filtered_input: &[u8]) -> Option<RustOwnedTransf
         arguments.push(argument);
         parser.discard_whitespace();
         if !parser.has_next_component_value() {
-            if arguments.len() == 1 {
-                arguments.push(arguments[0].clone());
-            }
             return Some(RustOwnedTransformLonghand::Function {
                 function_name: if arguments.len() == 3 { "scale3d" } else { "scale" }.to_string(),
                 arguments,
@@ -29596,6 +29666,16 @@ mod tests {
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                     function_name: "scale3d".to_string(),
                     arguments: vec!["1".to_string(), "50%".to_string(), "2".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Scale], "random(0, 10, 5)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Scale,
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
+                    function_name: "scale".to_string(),
+                    arguments: vec!["random(0, 10, 5)".to_string()],
                 }),
             })
         );

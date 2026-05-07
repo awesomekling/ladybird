@@ -361,8 +361,6 @@ private:
     };
     RefPtr<PositionStyleValue const> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
     RefPtr<StyleValue const> parse_filter_value_list_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_contain_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_container_type_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_opacity_value_value(TokenStream<ComponentValue>&);
 
@@ -397,7 +395,6 @@ private:
 
     RefPtr<StyleValue const> parse_anchor_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_anchor_scope_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_animation_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_aspect_ratio_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_animation_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);
@@ -432,7 +429,6 @@ private:
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_list_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_mask_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_math_depth_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_shorthand(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_content_value(TokenStream<ComponentValue>&);
@@ -448,19 +444,11 @@ private:
     RefPtr<StyleValue const> parse_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_single_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_shape_outside_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_rotate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_timeline_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transform_origin_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transition_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transition_behavior_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transition_property_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_translate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_try_tactic_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_scale_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_view_transition_name_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_track_size_list(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_auto_track_sizes(TokenStream<ComponentValue>&);
     RefPtr<GridAutoFlowStyleValue const> parse_grid_auto_flow_value(TokenStream<ComponentValue>&);

@@ -527,41 +527,6 @@ public:
         Vector<FlyString> names;
     };
 
-    struct TimelineNameItem {
-        FFI::CssTimelineNameItemKind kind;
-        FlyString name;
-    };
-
-    struct TimelineName {
-        FFI::CssTimelineNameValueKind kind;
-        Vector<TimelineNameItem> names;
-    };
-
-    struct TransitionProperty {
-        FFI::CssTransitionPropertyValueKind kind;
-        Vector<FlyString> properties;
-    };
-
-    struct TransitionBehavior {
-        FFI::CssTransitionBehaviorValueKind kind;
-        Vector<FFI::CssTransitionBehaviorItemKind> behaviors;
-    };
-
-    struct AnimationNameItem {
-        FFI::CssAnimationNameItemKind kind;
-        FlyString value;
-    };
-
-    struct AnimationName {
-        FFI::CssAnimationNameValueKind kind;
-        Vector<AnimationNameItem> names;
-    };
-
-    struct ViewTransitionName {
-        FFI::CssViewTransitionNameValueKind kind;
-        FlyString name;
-    };
-
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -663,12 +628,6 @@ public:
     static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
-    static TimelineName parse_timeline_name(StringView input, StringView encoding);
-    static TransitionProperty parse_transition_property(StringView input, StringView encoding);
-    static TransitionBehavior parse_transition_behavior(StringView input, StringView encoding);
-    static AnimationName parse_animation_name(StringView input, StringView encoding);
-    static ViewTransitionName parse_view_transition_name(StringView input, StringView encoding);
-    static FFI::CssContainValue parse_contain(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
@@ -692,11 +651,6 @@ public:
     static FFI::CssColorFunctionValueKind parse_color_function(StringView input, StringView encoding);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static FFI::CssImageSetValueKind parse_image_set(StringView input, StringView encoding);
-    static FFI::CssTransformLonghandValueKind parse_translate(StringView input, StringView encoding);
-    static FFI::CssTransformLonghandValueKind parse_scale(StringView input, StringView encoding);
-    static FFI::CssTransformLonghandValueKind parse_rotate(StringView input, StringView encoding);
-    static FFI::CssTransformLonghandValueKind parse_transform_origin(StringView input, StringView encoding);
-    static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);
     static bool parse_string_descriptor(StringView input, StringView encoding);
     static bool parse_length_descriptor(StringView input, StringView encoding);
