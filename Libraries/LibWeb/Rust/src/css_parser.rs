@@ -1908,6 +1908,7 @@ pub enum CssStyleValueKind {
     TransitionBehavior,
     TransitionProperty,
     ViewTimelineInset,
+    ViewTimeline,
     ViewFunction,
     ViewTransitionName,
     WhiteSpaceTrim,
@@ -2045,6 +2046,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
+    ViewTimeline(RustOwnedViewTimeline),
     Tuple(RustOwnedStyleValueList),
     ValueList(RustOwnedStyleValueList),
     Primitive {
@@ -2723,6 +2725,13 @@ pub(crate) struct RustOwnedScrollTimeline {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedViewTimeline {
+    names: Vec<RustOwnedTimelineNameItem>,
+    axes: Vec<CssScrollFunctionAxisKind>,
+    insets: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineScope {
     kind: CssTimelineScopeValueKind,
     names: Vec<String>,
@@ -3293,6 +3302,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::TransitionBehavior => rust_owned_transition_behavior_style_value_kind(filtered_input),
         PropertyId::TransitionProperty => rust_owned_transition_property_style_value_kind(filtered_input),
+        PropertyId::ViewTimeline => rust_owned_view_timeline_style_value_kind(filtered_input),
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
         PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
@@ -5513,6 +5523,76 @@ fn consume_scroll_timeline_name_item(parser: &mut ComponentValueParser) -> Optio
         kind: CssTimelineNameItemKind::DashedIdent,
         name,
     })
+}
+
+fn rust_owned_view_timeline_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut names = Vec::new();
+    let mut axes = Vec::new();
+    let mut insets = Vec::new();
+
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-shorthand
+    // <'view-timeline'> = [ <'view-timeline-name'> [ <'view-timeline-axis'> || <'view-timeline-inset'> ]? ]#
+    loop {
+        parser.discard_whitespace();
+        names.push(consume_view_timeline_name_item(&mut parser)?);
+        parser.discard_whitespace();
+
+        let mut axis = None;
+        let mut inset = None;
+        while parser.has_next_component_value() && !component_value_is_comma(parser.next_component_value()) {
+            if axis.is_none()
+                && let Some(parsed_axis) = parse_view_function_axis(&mut parser)
+            {
+                axis = Some(parsed_axis);
+                continue;
+            }
+
+            if inset.is_none()
+                && let Some(parsed_inset) = parse_view_timeline_inset_prefix(&mut parser, Some(&filtered_input_string))
+            {
+                inset = Some(parsed_inset.sources);
+                continue;
+            }
+
+            return None;
+        }
+
+        axes.push(axis.unwrap_or(CssScrollFunctionAxisKind::Block));
+        insets.push(inset.unwrap_or_else(|| vec!["auto".to_string()]));
+
+        if parser.consume_a_comma() {
+            parser.discard_whitespace();
+            if !parser.has_next_component_value() {
+                return None;
+            }
+            continue;
+        }
+
+        if parser.has_next_component_value() {
+            return None;
+        }
+        break;
+    }
+
+    if names.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ViewTimeline(RustOwnedViewTimeline {
+        names,
+        axes,
+        insets,
+    }))
+}
+
+fn consume_view_timeline_name_item(parser: &mut ComponentValueParser) -> Option<RustOwnedTimelineNameItem> {
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-name
+    // <'view-timeline-name'> = [ none | <dashed-ident> ]#
+    consume_scroll_timeline_name_item(parser)
 }
 
 fn rust_owned_timeline_scope_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -7783,6 +7863,33 @@ where
             &[],
             property_value_type_name(PropertyValueType::ScrollFunction),
         ),
+        RustOwnedStyleValueKind::ViewTimeline(value) => {
+            let name_bytes = null_terminated_timeline_name_item_bytes(&value.names);
+            let mut value_type_bytes = Vec::new();
+            value_type_bytes.extend(value.axes.iter().map(|axis| *axis as u8));
+            for inset in &value.insets {
+                value_type_bytes.push(inset.len() as u8);
+                for source in inset {
+                    value_type_bytes.extend_from_slice(source.as_bytes());
+                    value_type_bytes.push(0);
+                }
+            }
+            callback(
+                CssStyleValueKind::ViewTimeline,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                0,
+                0,
+                0,
+                0,
+                &name_bytes,
+                &String::from_utf8(value_type_bytes).unwrap(),
+            );
+        }
         RustOwnedStyleValueKind::ViewTimelineInset { sources } => {
             let source_bytes = null_separated_string_list_bytes(sources);
             callback(
@@ -26315,8 +26422,8 @@ mod tests {
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
         RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
@@ -28983,6 +29090,26 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ViewTimeline], "--view 1px inline, none"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ViewTimeline,
+                value: RustOwnedStyleValueKind::ViewTimeline(RustOwnedViewTimeline {
+                    names: vec![
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::DashedIdent,
+                            name: "--view".to_string(),
+                        },
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::None,
+                            name: String::new(),
+                        },
+                    ],
+                    axes: vec![CssScrollFunctionAxisKind::Inline, CssScrollFunctionAxisKind::Block],
+                    insets: vec![vec!["1px".to_string()], vec!["auto".to_string()]],
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TransitionBehavior], "normal, allow-discrete"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TransitionBehavior,
@@ -29457,6 +29584,19 @@ mod tests {
                 color: None,
                 value: "\u{1}--track\0\u{0}\0".to_string(),
                 value_type: "\u{2}\u{1}".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ViewTimeline], "--view 1px inline, none"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ViewTimeline,
+                property_id: PropertyId::ViewTimeline,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "\u{1}--view\0\u{0}\0".to_string(),
+                value_type: "\u{2}\u{1}\u{1}1px\0\u{1}auto\0".to_string(),
             })
         );
         assert_eq!(

@@ -402,6 +402,7 @@ public:
         Vector<FFI::CssTransitionBehaviorItemKind> transition_behaviors;
         FFI::CssTransitionPropertyValueKind transition_property_kind { FFI::CssTransitionPropertyValueKind::Invalid };
         Vector<FlyString> transition_properties;
+        Vector<u8> view_timeline_inset_source_counts;
         Vector<String> view_timeline_inset_sources;
         FFI::CssViewFunctionInsetKind view_function_inset { FFI::CssViewFunctionInsetKind::None };
         FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };
