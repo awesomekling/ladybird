@@ -175,6 +175,9 @@ public:
         Optional<String> list_style_image_source;
         Optional<String> list_style_type_source;
         Optional<String> math_depth_integer_source;
+        bool aspect_ratio_has_auto { false };
+        Optional<String> aspect_ratio_numerator_source;
+        Optional<String> aspect_ratio_denominator_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

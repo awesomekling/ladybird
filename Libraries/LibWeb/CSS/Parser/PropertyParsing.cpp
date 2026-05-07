@@ -815,6 +815,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_number_value(value_tokens, non_negative_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -979,9 +988,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::AspectRatio:
-                if (auto value = parse_aspect_ratio_value(tokens)) {
+                if (rust_style_value->aspect_ratio_numerator_source.has_value()) {
+                    auto numerator = parse_rust_source_as_non_negative_number(*rust_style_value->aspect_ratio_numerator_source);
+                    auto denominator = rust_style_value->aspect_ratio_denominator_source.has_value()
+                        ? parse_rust_source_as_non_negative_number(*rust_style_value->aspect_ratio_denominator_source)
+                        : NumberStyleValue::create(1);
+                    if (!numerator || !denominator)
+                        break;
+                    auto ratio = RatioStyleValue::create(numerator.release_nonnull(), denominator.release_nonnull());
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    if (rust_style_value->aspect_ratio_has_auto) {
+                        return PropertyAndValue { rust_style_value->property_id,
+                            StyleValueList::create(
+                                StyleValueVector { KeywordStyleValue::create(Keyword::Auto), ratio },
+                                StyleValueList::Separator::Space) };
+                    }
+                    return PropertyAndValue { rust_style_value->property_id, ratio };
+                }
+                if (rust_style_value->aspect_ratio_has_auto) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
                 }
                 break;
             case FFI::CssStyleValueKind::ColorScheme:

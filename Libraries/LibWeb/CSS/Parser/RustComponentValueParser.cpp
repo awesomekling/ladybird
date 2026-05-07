@@ -1171,8 +1171,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.color_red = color_red;
                 if (color_red != 0)
                     value.math_depth_integer_source = string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::AspectRatio) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::AspectRatio);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_green != 0)
+                    style_value->aspect_ratio_has_auto = true;
+                if (color_red == 0)
+                    style_value->aspect_ratio_numerator_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1)
+                    style_value->aspect_ratio_denominator_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
-                           FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,

@@ -1926,9 +1926,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
-    AspectRatio {
-        source: String,
-    },
+    AspectRatio(RustOwnedAspectRatio),
     BackgroundSize(RustOwnedBackgroundSizeList),
     Calculated(RustOwnedMathFunction),
     ColorScheme(RustOwnedColorScheme),
@@ -2313,6 +2311,13 @@ pub(crate) struct RustOwnedAnimationNameItem {
 pub(crate) struct RustOwnedAnimationName {
     kind: CssAnimationNameValueKind,
     names: Vec<RustOwnedAnimationNameItem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAspectRatio {
+    has_auto: bool,
+    numerator_source: Option<String>,
+    denominator_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4636,13 +4641,67 @@ fn rust_owned_background_size_component_from_component_value(
 }
 
 fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_aspect_ratio_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    if component_values.is_empty() {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::AspectRatio {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let mut has_auto = false;
+    let ratio_component_values = match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "auto") => {
+            return Some(RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
+                has_auto: true,
+                numerator_source: None,
+                denominator_source: None,
+            }));
+        }
+        [first, rest @ ..] if component_value_is_ident(Some(first), "auto") => {
+            has_auto = true;
+            rest
+        }
+        [rest @ .., last] if component_value_is_ident(Some(last), "auto") => {
+            has_auto = true;
+            rest
+        }
+        _ => component_values.as_slice(),
+    };
+
+    // https://www.w3.org/TR/css-sizing-4/#aspect-ratio
+    // auto || <ratio>
+    //
+    // https://drafts.csswg.org/css-values-4/#ratios
+    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
+    let (numerator, denominator) = match ratio_component_values {
+        [numerator] => (numerator, None),
+        [numerator, slash, denominator] if component_value_is_delim(Some(slash), '/') => (numerator, Some(denominator)),
+        _ => return None,
+    };
+
+    if !component_value_parse_as_non_negative_number(numerator) {
+        return None;
+    }
+    let numerator_source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(numerator), filtered_input_string)?;
+
+    let denominator_source = if let Some(denominator) = denominator {
+        if !component_value_parse_as_non_negative_number(denominator) {
+            return None;
+        }
+        Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(denominator),
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
+        has_auto,
+        numerator_source: Some(numerator_source),
+        denominator_source,
+    }))
 }
 
 fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5957,8 +6016,55 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::AspectRatio { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::AspectRatio, property_id, source);
+        RustOwnedStyleValueKind::AspectRatio(value) => {
+            if value.numerator_source.is_none() {
+                callback(
+                    CssStyleValueKind::AspectRatio,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    2,
+                    value.has_auto as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::AspectRatio,
+                property_id,
+                0,
+                value.numerator_source.as_ref(),
+            );
+            if value.has_auto && value.numerator_source.is_some() {
+                callback(
+                    CssStyleValueKind::AspectRatio,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    2,
+                    1,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::AspectRatio,
+                property_id,
+                1,
+                value.denominator_source.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::BackgroundSize(_) => callback(
             CssStyleValueKind::Invalid,
@@ -24021,34 +24127,34 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
-        RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent,
-        RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind, RustOwnedColumns, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList,
-        RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize,
+        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
+        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay,
+        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexFlow, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -25770,6 +25876,39 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AspectRatio], "auto"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AspectRatio,
+                value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
+                    has_auto: true,
+                    numerator_source: None,
+                    denominator_source: None,
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AspectRatio], "16 / 9"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AspectRatio,
+                value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
+                    has_auto: false,
+                    numerator_source: Some("16".to_string()),
+                    denominator_source: Some("9".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AspectRatio], "auto calc(16 / 9)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AspectRatio,
+                value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
+                    has_auto: true,
+                    numerator_source: Some("calc(16 / 9)".to_string()),
+                    denominator_source: None,
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
@@ -27187,7 +27326,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "16 / 9".to_string(),
+                value: "9".to_string(),
                 value_type: String::new(),
             })
         );
