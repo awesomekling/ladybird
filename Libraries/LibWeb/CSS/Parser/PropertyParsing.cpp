@@ -902,6 +902,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::Content:
+                if (auto value = parse_content_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::Cursor:
                 if (auto value = parse_cursor_value(tokens)) {
                     generated_transaction.commit();
@@ -3528,6 +3534,54 @@ RefPtr<StyleValue const> Parser::parse_content_value(TokenStream<ComponentValue>
         }
     };
 
+    auto parse_quote_value = [this](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+        auto transaction = tokens.begin_transaction();
+        auto keyword_value = parse_keyword_value(tokens);
+        if (!keyword_value)
+            return nullptr;
+
+        switch (keyword_value->to_keyword()) {
+        case Keyword::OpenQuote:
+        case Keyword::CloseQuote:
+        case Keyword::NoOpenQuote:
+        case Keyword::NoCloseQuote:
+            transaction.commit();
+            return keyword_value;
+        default:
+            return nullptr;
+        }
+    };
+
+    auto parse_content_item = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+        // https://drafts.csswg.org/css-content-3/#typedef-content-list
+        // <content-list> = [ <string> | contents | <image> | <quote> | <target> | <leader()> ]+
+        //
+        // https://drafts.csswg.org/css-content-3/#typedef-quote
+        // <quote> = open-quote | close-quote | no-open-quote | no-close-quote
+        if (auto quote_value = parse_quote_value(tokens))
+            return quote_value;
+        if (auto string_value = parse_string_value(tokens))
+            return string_value;
+        if (auto image_value = parse_image_value(tokens))
+            return image_value;
+        if (auto counter_value = parse_counter_value(tokens))
+            return counter_value;
+
+        return nullptr;
+    };
+
+    auto parse_alt_text_item = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+        // https://drafts.csswg.org/css-content-3/#content-property
+        // / [ <string> | <counter> | <attr()> ]+
+        // NB: <attr()> is handled as an arbitrary substitution function and does not reach this code path.
+        if (auto string_value = parse_string_value(tokens))
+            return string_value;
+        if (auto counter_value = parse_counter_value(tokens))
+            return counter_value;
+
+        return nullptr;
+    };
+
     if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
         return none.release_nonnull();
     if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
@@ -3551,20 +3605,14 @@ RefPtr<StyleValue const> Parser::parse_content_value(TokenStream<ComponentValue>
             continue;
         }
 
-        if (auto style_value = parse_css_value_for_property(PropertyID::Content, tokens)) {
+        if (auto style_value = in_alt_text ? parse_alt_text_item(tokens) : parse_content_item(tokens)) {
             if (is_single_value_keyword(style_value->to_keyword()))
                 return nullptr;
 
-            if (in_alt_text) {
-                // https://drafts.csswg.org/css-content-3/#content-property
-                // / [ <string> | <counter> | <attr()> ]+
-                // NB: <attr()> is handled as an arbitrary substitution function and does not reach this code path.
-                if (!style_value->is_string() && !style_value->is_counter())
-                    return nullptr;
+            if (in_alt_text)
                 alt_text_values.append(style_value.release_nonnull());
-            } else {
+            else
                 content_values.append(style_value.release_nonnull());
-            }
             tokens.discard_whitespace();
             continue;
         }

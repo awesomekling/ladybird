@@ -1858,6 +1858,7 @@ pub enum CssStyleValueKind {
     CounterDefinitions,
     BorderRadius,
     Columns,
+    Content,
     Cursor,
     Display,
     GridAutoFlow,
@@ -1933,6 +1934,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     Columns {
+        source: String,
+    },
+    Content {
         source: String,
     },
     Cursor {
@@ -2973,6 +2977,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
         PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
+        PropertyId::Content => rust_owned_content_style_value_kind(filtered_input),
         PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
@@ -4387,6 +4392,16 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
     })
 }
 
+fn rust_owned_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_content_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Content {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_cursor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     if !parse_cursor_value(filtered_input) {
         return None;
@@ -5488,6 +5503,9 @@ where
         }
         RustOwnedStyleValueKind::Columns { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::Columns, property_id, source);
+        }
+        RustOwnedStyleValueKind::Content { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Content, property_id, source);
         }
         RustOwnedStyleValueKind::ColorScheme(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
@@ -13075,6 +13093,104 @@ fn component_value_parse_as_non_negative_number_percentage(component_value: &Com
         ComponentValue::Function(function) => is_math_function_name(&function.name),
         _ => false,
     }
+}
+
+pub(crate) fn parse_content_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "normal") => return true,
+        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
+        [] => return false,
+        _ => {}
+    }
+
+    let mut content_values = Vec::new();
+    let mut alt_text_values = Vec::new();
+    let mut in_alt_text = false;
+
+    for component_value in &component_values {
+        if component_value_is_delim(Some(component_value), '/') {
+            if in_alt_text || content_values.is_empty() {
+                return false;
+            }
+            in_alt_text = true;
+            continue;
+        }
+
+        if in_alt_text {
+            if !component_value_parse_as_content_alt_text(component_value, filtered_input_string) {
+                return false;
+            }
+            alt_text_values.push(component_value);
+            continue;
+        }
+
+        if !component_value_parse_as_content_item(component_value, filtered_input_string) {
+            return false;
+        }
+        content_values.push(component_value);
+    }
+
+    !content_values.is_empty() && (!in_alt_text || !alt_text_values.is_empty())
+}
+
+fn component_value_parse_as_content_item(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+    // https://drafts.csswg.org/css-content-3/#content-property
+    // content: normal | none | [ <content-replacement> | <content-list> ] [/ [ <string> | <counter> | <attr()> ]+ ]?
+    //
+    // https://drafts.csswg.org/css-content-3/#typedef-content-list
+    // <content-list> = [ <string> | contents | <image> | <quote> | <target> | <leader()> ]+
+    //
+    // https://drafts.csswg.org/css-content-3/#typedef-quote
+    // <quote> = open-quote | close-quote | no-open-quote | no-close-quote
+    component_value_parse_as_content_quote(component_value)
+        || parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String
+        || component_value_parse_as_content_image(component_value)
+        || component_value_parse_as_content_counter(component_value, filtered_input_string)
+}
+
+fn component_value_parse_as_content_alt_text(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+    // https://drafts.csswg.org/css-content-3/#content-property
+    // / [ <string> | <counter> | <attr()> ]+
+    //
+    // NB: <attr()> is handled as an arbitrary substitution function before
+    // property-specific Rust-owned value parsing.
+    parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String
+        || component_value_parse_as_content_counter(component_value, filtered_input_string)
+}
+
+fn component_value_parse_as_content_quote(component_value: &ComponentValue) -> bool {
+    ["open-quote", "close-quote", "no-open-quote", "no-close-quote"]
+        .iter()
+        .any(|quote| component_value_is_ident(Some(component_value), quote))
+}
+
+fn component_value_parse_as_content_image(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_image_url(component_value)
+        || component_value_parse_as_image_gradient(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::Function(function) if component_value_parse_as_image_set_function(function)
+        )
+}
+
+fn component_value_parse_as_content_counter(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+    let ComponentValue::Function(function) = component_value else {
+        return false;
+    };
+
+    if function.name.eq_ignore_ascii_case("counter") {
+        return rust_owned_counter_function_value(function, &[], filtered_input_string).is_some();
+    }
+
+    if function.name.eq_ignore_ascii_case("counters") {
+        return rust_owned_counters_function_value(function, &[], filtered_input_string).is_some();
+    }
+
+    false
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
@@ -22471,29 +22587,29 @@ mod tests {
         RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent,
         RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind, RustOwnedContain,
         RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
-        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
-        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -22501,10 +22617,10 @@ mod tests {
         parse_background_position_longhand_value, parse_background_size_value, parse_basic_shape_value,
         parse_border_radius_shorthand_value, parse_border_radius_value, parse_color_function_value,
         parse_color_scheme_value, parse_color_value, parse_columns_value, parse_contain_value,
-        parse_container_rule_prelude, parse_container_type_value, parse_coordinating_value_list_shorthand,
-        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
+        parse_container_rule_prelude, parse_container_type_value, parse_content_value,
+        parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
+        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
+        parse_crop_or_cross, parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
         parse_filter_value_list_value, parse_fit_content_value, parse_font_feature_values_family_name_list,
         parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_generated_property_value,
         parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value, parse_grid_track_placement_value,
@@ -23265,6 +23381,10 @@ mod tests {
 
     fn parse_list_style(input: &str) -> bool {
         parse_list_style_value(input.as_bytes())
+    }
+
+    fn parse_content(input: &str) -> bool {
+        parse_content_value(input.as_bytes())
     }
 
     fn parse_filter_value_list(input: &str) -> bool {
@@ -24182,13 +24302,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
-                value: RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
-                    function: RustOwnedCounterFunctionKind::Counter,
-                    counter_name: "section".to_string(),
-                    join_string: None,
-                    counter_style: Some(CounterStyle::Name("upper-roman".to_string())),
+                value: RustOwnedStyleValueKind::Content {
                     source: "counter(section, upper-roman)".to_string(),
-                }),
+                },
             })
         );
         assert_eq!(
@@ -24243,16 +24359,9 @@ mod tests {
             ),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
-                value: RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
-                    function: RustOwnedCounterFunctionKind::Counters,
-                    counter_name: "section".to_string(),
-                    join_string: Some(".".to_string()),
-                    counter_style: Some(CounterStyle::SymbolsFunction {
-                        symbols_type: CssCounterStyleSymbolsType::Symbolic,
-                        symbols: vec!["*".to_string(), "**".to_string()],
-                    }),
+                value: RustOwnedStyleValueKind::Content {
                     source: "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
-                }),
+                },
             })
         );
         assert_eq!(
@@ -25639,6 +25748,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "blur(10px) opacity(50%)".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Content], "\"(\" counter(item) \")\""),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Content,
+                property_id: PropertyId::Content,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "\"(\" counter(item) \")\"".to_string(),
                 value_type: String::new(),
             })
         );
@@ -29068,6 +29190,46 @@ mod tests {
         assert!(!parse_list_style("url(marker.png) linear-gradient(red, blue)"));
         assert!(!parse_list_style("none disc none"));
         assert!(!parse_list_style("symbols(numeric \"1\")"));
+    }
+
+    #[test]
+    fn parses_content_values() {
+        assert!(parse_content("none"));
+        assert!(parse_content("normal"));
+        assert!(parse_content("open-quote"));
+        assert!(parse_content("close-quote"));
+        assert!(parse_content("no-open-quote"));
+        assert!(parse_content("no-close-quote"));
+        assert!(parse_content("counter(counter-name)"));
+        assert!(parse_content("counter(counter-name, counter-style)"));
+        assert!(parse_content("counters(counter-name, \".\")"));
+        assert!(parse_content("counters(counter-name, \".\", counter-style)"));
+        assert!(parse_content("url(\"picture.svg\")"));
+        assert!(parse_content("\"hello\""));
+        assert!(parse_content("\"hello\" \"world\""));
+        assert!(parse_content("counter(counter-name) \"potato\""));
+        assert!(parse_content(
+            "\"(\" counters(counter-name, \".\", counter-style) \")\""
+        ));
+        assert!(parse_content("open-quote \"hello\" \"world\" close-quote"));
+        assert!(parse_content("url(\"picture.svg\") \"hello\""));
+        assert!(parse_content("open-quote / \"alt text\""));
+        assert!(parse_content("counter(counter-name) / \"alt\" counter(other)"));
+    }
+
+    #[test]
+    fn rejects_invalid_content_values() {
+        assert!(!parse_content(""));
+        assert!(!parse_content("none normal"));
+        assert!(!parse_content("normal \"hello\""));
+        assert!(!parse_content("/ \"alt\""));
+        assert!(!parse_content("\"hello\" /"));
+        assert!(!parse_content("\"hello\" / no-open-quote"));
+        assert!(!parse_content("\"hello\" / url(\"picture.svg\")"));
+        assert!(!parse_content("\"hello\" / \"hi\" no-close-quote"));
+        assert!(!parse_content("counters(counter-name)"));
+        assert!(!parse_content("counter()"));
+        assert!(!parse_content("attr()"));
     }
 
     #[test]
