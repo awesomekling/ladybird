@@ -1185,9 +1185,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecorationLine:
-                if (auto value = parse_text_decoration_line_value(tokens)) {
+                if (rust_style_value->color_red == (1 << 0)) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (rust_style_value->color_red != 0) {
+                    StyleValueVector style_values;
+                    auto append_line = [&](u8 bit, TextDecorationLine line) {
+                        if (rust_style_value->color_red & bit)
+                            style_values.append(KeywordStyleValue::create(to_keyword(line)));
+                    };
+                    append_line(1 << 1, TextDecorationLine::Underline);
+                    append_line(1 << 2, TextDecorationLine::Overline);
+                    append_line(1 << 3, TextDecorationLine::LineThrough);
+                    append_line(1 << 4, TextDecorationLine::Blink);
+                    append_line(1 << 5, TextDecorationLine::SpellingError);
+                    append_line(1 << 6, TextDecorationLine::GrammarError);
+                    if (!style_values.is_empty()) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(style_values), StyleValueList::Separator::Space) };
+                    }
                 }
                 break;
             case FFI::CssStyleValueKind::TimelineName:

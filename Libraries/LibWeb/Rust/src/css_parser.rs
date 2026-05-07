@@ -2053,9 +2053,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextDecoration {
         source: String,
     },
-    TextDecorationLine {
-        source: String,
-    },
+    TextDecorationLine(RustOwnedTextDecorationLine),
     ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
     Shorthand(RustOwnedStyleValueList),
@@ -2469,6 +2467,11 @@ pub(crate) struct RustOwnedScrollbarGutter {
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
     source: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RustOwnedTextDecorationLine {
+    bits: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4544,13 +4547,10 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
 }
 
 fn rust_owned_text_decoration_line_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_text_decoration_line_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::TextDecorationLine {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let bits = parse_text_decoration_line_bits(filtered_input)?;
+    Some(RustOwnedStyleValueKind::TextDecorationLine(
+        RustOwnedTextDecorationLine { bits },
+    ))
 }
 
 fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5840,9 +5840,21 @@ where
         RustOwnedStyleValueKind::TextDecoration { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::TextDecoration, property_id, source);
         }
-        RustOwnedStyleValueKind::TextDecorationLine { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::TextDecorationLine, property_id, source);
-        }
+        RustOwnedStyleValueKind::TextDecorationLine(value) => callback(
+            CssStyleValueKind::TextDecorationLine,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.bits,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
         RustOwnedStyleValueKind::TimelineName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
         }
@@ -12878,10 +12890,14 @@ pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
 
     // https://drafts.csswg.org/css-text-decor-4/#text-decoration-property
     // <'text-decoration-line'> || <'text-decoration-thickness'> || <'text-decoration-style'> || <'text-decoration-color'>
-    text_decoration_line.is_empty() || component_values_parse_as_text_decoration_line(&text_decoration_line)
+    text_decoration_line.is_empty() || component_values_parse_as_text_decoration_line(&text_decoration_line).is_some()
 }
 
 pub(crate) fn parse_text_decoration_line_value(filtered_input: &[u8]) -> bool {
+    parse_text_decoration_line_bits(filtered_input).is_some()
+}
+
+fn parse_text_decoration_line_bits(filtered_input: &[u8]) -> Option<u8> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = remove_whitespace_component_values(&component_values);
@@ -12993,14 +13009,28 @@ fn component_value_is_shape_box(component_value: &ComponentValue) -> bool {
     first_is_one_of(value, &["content-box", "padding-box", "border-box", "margin-box"])
 }
 
-fn component_values_parse_as_text_decoration_line(component_values: &[ComponentValue]) -> bool {
+const TEXT_DECORATION_LINE_NONE: u8 = 1 << 0;
+const TEXT_DECORATION_LINE_UNDERLINE: u8 = 1 << 1;
+const TEXT_DECORATION_LINE_OVERLINE: u8 = 1 << 2;
+const TEXT_DECORATION_LINE_LINE_THROUGH: u8 = 1 << 3;
+const TEXT_DECORATION_LINE_BLINK: u8 = 1 << 4;
+const TEXT_DECORATION_LINE_SPELLING_ERROR: u8 = 1 << 5;
+const TEXT_DECORATION_LINE_GRAMMAR_ERROR: u8 = 1 << 6;
+
+fn component_values_parse_as_text_decoration_line(component_values: &[ComponentValue]) -> Option<u8> {
     // https://drafts.csswg.org/css-text-decor-4/#text-decoration-line-property
     // none | [ underline || overline || line-through || blink ] | spelling-error | grammar-error
     match component_values {
-        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
-        [component_value] if component_value_is_ident(Some(component_value), "spelling-error") => return true,
-        [component_value] if component_value_is_ident(Some(component_value), "grammar-error") => return true,
-        [] => return false,
+        [component_value] if component_value_is_ident(Some(component_value), "none") => {
+            return Some(TEXT_DECORATION_LINE_NONE);
+        }
+        [component_value] if component_value_is_ident(Some(component_value), "spelling-error") => {
+            return Some(TEXT_DECORATION_LINE_SPELLING_ERROR);
+        }
+        [component_value] if component_value_is_ident(Some(component_value), "grammar-error") => {
+            return Some(TEXT_DECORATION_LINE_GRAMMAR_ERROR);
+        }
+        [] => return None,
         _ => {}
     }
 
@@ -13012,7 +13042,7 @@ fn component_values_parse_as_text_decoration_line(component_values: &[ComponentV
     for component_value in component_values {
         if component_value_is_ident(Some(component_value), "underline") {
             if has_underline {
-                return false;
+                return None;
             }
             has_underline = true;
             continue;
@@ -13020,7 +13050,7 @@ fn component_values_parse_as_text_decoration_line(component_values: &[ComponentV
 
         if component_value_is_ident(Some(component_value), "overline") {
             if has_overline {
-                return false;
+                return None;
             }
             has_overline = true;
             continue;
@@ -13028,7 +13058,7 @@ fn component_values_parse_as_text_decoration_line(component_values: &[ComponentV
 
         if component_value_is_ident(Some(component_value), "line-through") {
             if has_line_through {
-                return false;
+                return None;
             }
             has_line_through = true;
             continue;
@@ -13036,16 +13066,30 @@ fn component_values_parse_as_text_decoration_line(component_values: &[ComponentV
 
         if component_value_is_ident(Some(component_value), "blink") {
             if has_blink {
-                return false;
+                return None;
             }
             has_blink = true;
             continue;
         }
 
-        return false;
+        return None;
     }
 
-    has_underline || has_overline || has_line_through || has_blink
+    let mut bits = 0;
+    if has_underline {
+        bits |= TEXT_DECORATION_LINE_UNDERLINE;
+    }
+    if has_overline {
+        bits |= TEXT_DECORATION_LINE_OVERLINE;
+    }
+    if has_line_through {
+        bits |= TEXT_DECORATION_LINE_LINE_THROUGH;
+    }
+    if has_blink {
+        bits |= TEXT_DECORATION_LINE_BLINK;
+    }
+
+    (bits != 0).then_some(bits)
 }
 
 fn component_value_is_text_decoration_line(component_value: &ComponentValue) -> bool {
@@ -23031,12 +23075,13 @@ mod tests {
         RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
         RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
         RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -25547,6 +25592,15 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextDecorationLine], "overline underline"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextDecorationLine,
+                value: RustOwnedStyleValueKind::TextDecorationLine(RustOwnedTextDecorationLine {
+                    bits: TEXT_DECORATION_LINE_UNDERLINE | TEXT_DECORATION_LINE_OVERLINE,
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TextIndent], "hanging 2em each-line"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextIndent,
@@ -26223,7 +26277,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "overline underline".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
