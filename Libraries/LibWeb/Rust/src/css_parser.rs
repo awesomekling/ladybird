@@ -1810,7 +1810,10 @@ pub(crate) enum RustOwnedStyleValueKind {
         inset: CssViewFunctionInsetKind,
         inset_position: CssViewFunctionInsetPosition,
     },
-    ValueType(PropertyValueType),
+    UnresolvedValueType {
+        value_type: PropertyValueType,
+        source: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2222,7 +2225,7 @@ fn parse_rust_owned_generated_longhand_value(
     if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
         return RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::Url(String::from_utf8_lossy(filtered_input).to_string()),
+            value: RustOwnedStyleValueKind::Url(filtered_input_to_string(filtered_input)),
         };
     }
 
@@ -2338,7 +2341,10 @@ fn parse_rust_owned_generated_longhand_value(
     if primitive_kind == CssPrimitiveValueKind::Invalid {
         RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::ValueType(value_type),
+            value: RustOwnedStyleValueKind::UnresolvedValueType {
+                value_type,
+                source: filtered_input_to_string(filtered_input),
+            },
         }
     } else {
         RustOwnedStyleValue {
@@ -2352,6 +2358,10 @@ fn parse_rust_owned_generated_longhand_value(
             },
         }
     }
+}
+
+fn filtered_input_to_string(filtered_input: &[u8]) -> String {
+    String::from_utf8_lossy(filtered_input).to_string()
 }
 
 pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
@@ -2546,7 +2556,7 @@ where
             &[],
             property_value_type_name(PropertyValueType::ViewFunction),
         ),
-        RustOwnedStyleValueKind::ValueType(value_type) => {
+        RustOwnedStyleValueKind::UnresolvedValueType { value_type, .. } => {
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
         }
     }
@@ -18896,6 +18906,56 @@ mod tests {
                     secondary_numeric_value: None,
                     value: "px".to_string(),
                     value_type: PropertyValueType::Length,
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ObjectPosition,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::Position,
+                    source: "left 10px top 20%".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundPosition], "left 10px top"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundPosition,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::BackgroundPosition,
+                    source: "left 10px top".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Transform], "translateX(10px) scale(2)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Transform,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::TransformList,
+                    source: "translateX(10px) scale(2)".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontStyle], "oblique 10deg"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontStyle,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::FontStyle,
+                    source: "oblique 10deg".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontVariantNumeric], "tabular-nums slashed-zero"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontVariantNumeric,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::FontVariantNumeric,
+                    source: "tabular-nums slashed-zero".to_string(),
                 },
             })
         );
