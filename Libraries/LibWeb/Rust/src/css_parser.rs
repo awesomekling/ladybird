@@ -1943,9 +1943,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Content {
         source: String,
     },
-    Cursor {
-        source: String,
-    },
+    Cursor(RustOwnedCursor),
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
     FlexShorthand(RustOwnedFlexShorthand),
@@ -2386,6 +2384,19 @@ pub(crate) enum RustOwnedGridTrackPlacement {
         line_number_source: Option<String>,
         name: Option<String>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCursor {
+    images: Vec<RustOwnedCursorImage>,
+    predefined: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCursorImage {
+    image_source: String,
+    x_source: Option<String>,
+    y_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5089,13 +5100,7 @@ fn rust_owned_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
 }
 
 fn rust_owned_cursor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_cursor_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::Cursor {
-        source: filtered_input_to_string(filtered_input),
-    })
+    parse_rust_owned_cursor_value(filtered_input).map(RustOwnedStyleValueKind::Cursor)
 }
 
 fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6546,9 +6551,7 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::Cursor { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Cursor, property_id, source);
-        }
+        RustOwnedStyleValueKind::Cursor(value) => callback_cursor_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::Display(value) => callback(
             CssStyleValueKind::Display,
             property_id,
@@ -8033,6 +8036,52 @@ where
         0,
         line_number_source.unwrap_or("").as_bytes(),
         name.unwrap_or(""),
+    );
+}
+
+const CURSOR_CALLBACK_IMAGE: u8 = 0;
+const CURSOR_CALLBACK_PREDEFINED: u8 = 1;
+
+fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    for image in &value.images {
+        callback(
+            CssStyleValueKind::Cursor,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            CURSOR_CALLBACK_IMAGE,
+            u8::from(image.x_source.is_some()),
+            0,
+            0,
+            image.image_source.as_bytes(),
+            &format!(
+                "{}\0{}",
+                image.x_source.as_deref().unwrap_or(""),
+                image.y_source.as_deref().unwrap_or("")
+            ),
+        );
+    }
+
+    callback(
+        CssStyleValueKind::Cursor,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        CURSOR_CALLBACK_PREDEFINED,
+        0,
+        0,
+        0,
+        value.predefined.as_bytes(),
+        "",
     );
 }
 
@@ -15027,25 +15076,24 @@ pub(crate) fn parse_columns_value(filtered_input: &[u8]) -> bool {
 }
 
 pub(crate) fn parse_cursor_value(filtered_input: &[u8]) -> bool {
+    parse_rust_owned_cursor_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_cursor_value(filtered_input: &[u8]) -> Option<RustOwnedCursor> {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let Some(groups) = parse_comma_separated_component_values(component_values, Some) else {
-        return false;
-    };
+    let groups = parse_comma_separated_component_values(component_values, Some)?;
 
     // https://drafts.csswg.org/css-ui-4/#cursor
     // [ [ <url> | <url-set> ] [ <number> <number> ]? , ]* <cursor-predefined>
-    let Some((last, cursor_images)) = groups.split_last() else {
-        return false;
-    };
-
-    if !parse_cursor_predefined(last) {
-        return false;
-    }
-
-    cursor_images
+    let (last, cursor_images) = groups.split_last()?;
+    let predefined = parse_cursor_predefined(last)?;
+    let images = cursor_images
         .iter()
-        .all(|component_values| parse_cursor_image(component_values, filtered_input_string))
+        .map(|component_values| parse_cursor_image(component_values, filtered_input_string))
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(RustOwnedCursor { images, predefined })
 }
 
 pub(crate) fn parse_shadow_value(property_id: PropertyId, filtered_input: &[u8]) -> bool {
@@ -15722,7 +15770,7 @@ fn component_value_parse_as_content_counter(component_value: &ComponentValue, fi
     false
 }
 
-fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
+fn parse_cursor_predefined(component_values: &[ComponentValue]) -> Option<String> {
     let component_values = remove_whitespace_component_values(component_values);
     let [
         ComponentValue::PreservedToken(Token {
@@ -15731,29 +15779,35 @@ fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
         }),
     ] = component_values.as_slice()
     else {
-        return false;
+        return None;
     };
 
-    property_accepts_keyword(PropertyId::Cursor, value)
+    property_accepts_keyword(PropertyId::Cursor, value).then(|| value.to_string())
 }
 
-fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> bool {
+fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> Option<RustOwnedCursorImage> {
     let component_values = remove_whitespace_component_values(component_values);
-    let Some((image, coordinates)) = component_values.split_first() else {
-        return false;
-    };
+    let (image, coordinates) = component_values.split_first()?;
 
-    let Some(image_source) = serialize_component_values_for_reparsing(std::slice::from_ref(image), source) else {
-        return false;
-    };
-    if rust_owned_image_style_value_kind(image_source.as_bytes(), &image_source).is_none() {
-        return false;
-    }
+    let image_source = serialize_component_values_for_reparsing(std::slice::from_ref(image), source)?;
+    rust_owned_image_style_value_kind(image_source.as_bytes(), &image_source)?;
 
     match coordinates {
-        [] => true,
-        [x, y] => component_value_parse_as_number_prefix(x) && component_value_parse_as_number_prefix(y),
-        _ => false,
+        [] => Some(RustOwnedCursorImage {
+            image_source,
+            x_source: None,
+            y_source: None,
+        }),
+        [x, y] if component_value_parse_as_number_prefix(x) && component_value_parse_as_number_prefix(y) => {
+            let x_source = serialize_component_values_for_reparsing(std::slice::from_ref(x), source)?;
+            let y_source = serialize_component_values_for_reparsing(std::slice::from_ref(y), source)?;
+            Some(RustOwnedCursorImage {
+                image_source,
+                x_source: Some(x_source),
+                y_source: Some(y_source),
+            })
+        }
+        _ => None,
     }
 }
 
@@ -25455,9 +25509,9 @@ mod tests {
         RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
         RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
-        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-        RustOwnedExplicitGridTrack, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
         RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -27528,9 +27582,14 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Cursor], "url(cursor.png) 1 2, pointer"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Cursor,
-                value: RustOwnedStyleValueKind::Cursor {
-                    source: "url(cursor.png) 1 2, pointer".to_string(),
-                },
+                value: RustOwnedStyleValueKind::Cursor(RustOwnedCursor {
+                    images: vec![RustOwnedCursorImage {
+                        image_source: "url(cursor.png)".to_string(),
+                        x_source: Some("1".to_string()),
+                        y_source: Some("2".to_string()),
+                    }],
+                    predefined: "pointer".to_string(),
+                }),
             })
         );
         assert_eq!(

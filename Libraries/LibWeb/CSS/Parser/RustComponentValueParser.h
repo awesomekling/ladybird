@@ -207,6 +207,12 @@ public:
         String secondary_source;
     };
 
+    struct RustCursorImage {
+        String image_source;
+        Optional<String> x_source;
+        Optional<String> y_source;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -298,6 +304,8 @@ public:
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
         bool shadow_is_none { false };
         Vector<RustShadow> shadows;
+        Vector<RustCursorImage> cursor_images;
+        Optional<FlyString> cursor_predefined;
         bool position_area_is_none { false };
         Optional<RustPositionArea> position_area;
         bool position_try_fallbacks_is_none { false };

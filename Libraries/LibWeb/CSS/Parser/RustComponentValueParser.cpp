@@ -1297,11 +1297,40 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
-                           FFI::CssStyleValueKind::Cursor,
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Cursor) {
+                enum : u8 {
+                    Image,
+                    Predefined,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Cursor);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == Predefined) {
+                    style_value->cursor_predefined = fly_string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
+                VERIFY(color_red == Image);
+                RustCursorImage image {
+                    .image_source = string_from_ffi_bytes(value_ptr, value_len),
+                };
+                auto coordinate_sources = StringView { value_type_ptr, value_type_len }.split_view('\0');
+                if (color_green != 0) {
+                    VERIFY(coordinate_sources.size() == 2);
+                    image.x_source = String::from_utf8_without_validation(coordinate_sources[0].bytes());
+                    image.y_source = String::from_utf8_without_validation(coordinate_sources[1].bytes());
+                }
+                style_value->cursor_images.append(move(image));
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackSizeList)) {

@@ -824,6 +824,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_image_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1659,9 +1668,42 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Cursor:
-                if (auto value = parse_cursor_value(tokens)) {
+                if (rust_style_value->cursor_predefined.has_value()) {
+                    StyleValueVector cursors;
+                    cursors.ensure_capacity(rust_style_value->cursor_images.size() + 1);
+                    for (auto const& cursor_image : rust_style_value->cursor_images) {
+                        auto image = parse_rust_source_as_image(cursor_image.image_source);
+                        if (!image)
+                            break;
+
+                        RefPtr<StyleValue const> x;
+                        RefPtr<StyleValue const> y;
+                        if (cursor_image.x_source.has_value() && cursor_image.y_source.has_value()) {
+                            x = parse_rust_source_as_number(*cursor_image.x_source);
+                            y = parse_rust_source_as_number(*cursor_image.y_source);
+                            if (!x || !y)
+                                break;
+                        } else if (cursor_image.x_source.has_value() || cursor_image.y_source.has_value()) {
+                            break;
+                        }
+
+                        cursors.unchecked_append(CursorStyleValue::create(image.release_nonnull(), move(x), move(y)));
+                    }
+
+                    if (cursors.size() != rust_style_value->cursor_images.size())
+                        break;
+
+                    auto keyword = keyword_from_string(rust_style_value->cursor_predefined->bytes_as_string_view());
+                    if (!keyword.has_value() || !keyword_to_cursor_predefined(*keyword).has_value())
+                        break;
+
+                    cursors.unchecked_append(KeywordStyleValue::create(*keyword));
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    if (cursors.size() == 1)
+                        return PropertyAndValue { rust_style_value->property_id, *cursors.first() };
+
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(cursors), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::Flex:
