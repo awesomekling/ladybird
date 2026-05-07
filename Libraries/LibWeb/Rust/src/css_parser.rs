@@ -6350,19 +6350,19 @@ where
                 PropertyValueType::Image,
             );
         }
-        RustOwnedStyleValueKind::Anchor(_) => {
-            callback_style_value_type(
+        RustOwnedStyleValueKind::Anchor(value) => {
+            callback_source_backed_value_type_style_value(
                 callback,
-                CssStyleValueKind::ValueType,
                 property_id,
+                &value.source,
                 PropertyValueType::Anchor,
             );
         }
-        RustOwnedStyleValueKind::Counter(_) => {
-            callback_style_value_type(
+        RustOwnedStyleValueKind::Counter(value) => {
+            callback_source_backed_value_type_style_value(
                 callback,
-                CssStyleValueKind::ValueType,
                 property_id,
+                &value.source,
                 PropertyValueType::Counter,
             );
         }
@@ -7384,12 +7384,14 @@ where
         RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             let _ = function;
         }
-        RustOwnedStyleValueKind::CounterStyle { .. } => callback_style_value_type(
-            callback,
-            CssStyleValueKind::ValueType,
-            property_id,
-            PropertyValueType::CounterStyle,
-        ),
+        RustOwnedStyleValueKind::CounterStyle { source, .. } => {
+            callback_source_backed_value_type_style_value(
+                callback,
+                property_id,
+                source,
+                PropertyValueType::CounterStyle,
+            );
+        }
         RustOwnedStyleValueKind::FontVariantAlternates { values } => {
             for value in values {
                 let feature_value_names = null_separated_string_list_bytes(&value.feature_value_names);
@@ -7471,7 +7473,11 @@ where
         | RustOwnedStyleValueKind::Tuple(value_list)
         | RustOwnedStyleValueKind::ValueList(value_list) => {
             if let Some(value_type) = value_list.value_type {
-                callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
+                if let Some(source) = value_list.source.as_ref() {
+                    callback_source_backed_value_type_style_value(callback, property_id, source, value_type);
+                } else {
+                    callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
+                }
             }
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
@@ -29573,6 +29579,19 @@ mod tests {
                 color: None,
                 value: "10em".to_string(),
                 value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Transform], "translateX(10px) scale(2)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ValueType,
+                property_id: PropertyId::Transform,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "translateX(10px) scale(2)".to_string(),
+                value_type: "TransformList".to_string(),
             })
         );
         assert_eq!(
