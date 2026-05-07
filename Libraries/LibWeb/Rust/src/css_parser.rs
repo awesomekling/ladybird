@@ -1951,6 +1951,8 @@ pub(crate) struct RustOwnedFunctionStyleValue {
 pub(crate) struct RustOwnedStyleValueList {
     values: Vec<RustOwnedStyleValueKind>,
     separator: RustOwnedStyleValueListSeparator,
+    value_type: Option<PropertyValueType>,
+    source: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2486,10 +2488,7 @@ fn parse_rust_owned_generated_longhand_value(
     if primitive_kind == CssPrimitiveValueKind::Invalid {
         RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::UnresolvedValueType {
-                value_type,
-                source: filtered_input_to_string(filtered_input),
-            },
+            value: rust_owned_source_backed_style_value_kind(value_type, filtered_input_to_string(filtered_input)),
         }
     } else {
         RustOwnedStyleValue {
@@ -2502,6 +2501,37 @@ fn parse_rust_owned_generated_longhand_value(
                 value,
             ),
         }
+    }
+}
+
+fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, source: String) -> RustOwnedStyleValueKind {
+    let value = RustOwnedSourceBackedStyleValue {
+        value_type: Some(value_type),
+        source,
+    };
+
+    match value_type {
+        PropertyValueType::FontStyle => RustOwnedStyleValueKind::FontStyle(value),
+        PropertyValueType::Position | PropertyValueType::BackgroundPosition => RustOwnedStyleValueKind::Position(value),
+        PropertyValueType::TransformList => RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+            values: Vec::new(),
+            separator: RustOwnedStyleValueListSeparator::Space,
+            value_type: Some(value_type),
+            source: Some(value.source),
+        }),
+        PropertyValueType::FontVariantAlternates
+        | PropertyValueType::FontVariantEastAsian
+        | PropertyValueType::FontVariantLigatures
+        | PropertyValueType::FontVariantNumeric => RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+            values: Vec::new(),
+            separator: RustOwnedStyleValueListSeparator::Space,
+            value_type: Some(value_type),
+            source: Some(value.source),
+        }),
+        _ => RustOwnedStyleValueKind::UnresolvedValueType {
+            value_type,
+            source: value.source,
+        },
     }
 }
 
@@ -2814,7 +2844,9 @@ where
         RustOwnedStyleValueKind::Shorthand(value_list)
         | RustOwnedStyleValueKind::Tuple(value_list)
         | RustOwnedStyleValueKind::ValueList(value_list) => {
-            let _ = value_list;
+            if let Some(value_type) = value_list.value_type {
+                callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
+            }
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
         RustOwnedStyleValueKind::Keyword(value) => callback(
@@ -17788,7 +17820,8 @@ mod tests {
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedMathFunction,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
@@ -19462,50 +19495,54 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ObjectPosition,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::Position,
+                value: RustOwnedStyleValueKind::Position(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::Position),
                     source: "left 10px top 20%".to_string(),
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BackgroundPosition], "left 10px top"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundPosition,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::BackgroundPosition,
+                value: RustOwnedStyleValueKind::Position(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::BackgroundPosition),
                     source: "left 10px top".to_string(),
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Transform], "translateX(10px) scale(2)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Transform,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::TransformList,
-                    source: "translateX(10px) scale(2)".to_string(),
-                },
+                value: RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+                    values: Vec::new(),
+                    separator: RustOwnedStyleValueListSeparator::Space,
+                    value_type: Some(PropertyValueType::TransformList),
+                    source: Some("translateX(10px) scale(2)".to_string()),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontStyle], "oblique 10deg"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontStyle,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::FontStyle,
+                value: RustOwnedStyleValueKind::FontStyle(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::FontStyle),
                     source: "oblique 10deg".to_string(),
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontVariantNumeric], "tabular-nums slashed-zero"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariantNumeric,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::FontVariantNumeric,
-                    source: "tabular-nums slashed-zero".to_string(),
-                },
+                value: RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+                    values: Vec::new(),
+                    separator: RustOwnedStyleValueListSeparator::Space,
+                    value_type: Some(PropertyValueType::FontVariantNumeric),
+                    source: Some("tabular-nums slashed-zero".to_string()),
+                }),
             })
         );
 
