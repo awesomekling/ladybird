@@ -5176,9 +5176,8 @@ fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Op
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::UnresolvedValueType {
-        value_type: PropertyValueType::Length,
-        source: filtered_input_to_string(filtered_input),
+    Some(RustOwnedStyleValueKind::OverflowClipMargin {
+        length_source: filtered_input_to_string(filtered_input),
     })
 }
 
@@ -28319,9 +28318,8 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::OverflowClipMarginTop], "2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMarginTop,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type: PropertyValueType::Length,
-                    source: "2px".to_string(),
+                value: RustOwnedStyleValueKind::OverflowClipMargin {
+                    length_source: "2px".to_string(),
                 },
             })
         );
@@ -29559,6 +29557,19 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::OverflowClipMargin,
                 property_id: PropertyId::OverflowClipMargin,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "2px".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::OverflowClipMarginTop], "2px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::OverflowClipMargin,
+                property_id: PropertyId::OverflowClipMarginTop,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,

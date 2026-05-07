@@ -2568,6 +2568,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         break;
 
                     auto const& longhands = longhands_for_shorthand(rust_style_value->property_id);
+                    if (longhands.is_empty()) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+
                     Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
                     longhand_values.resize_with_default_value(longhands.size(), value.release_nonnull());
 
