@@ -5345,7 +5345,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::EasingFunction:
         return parse_easing_value(tokens);
     case ValueType::FilterValueList:
-        return parse_filter_value_list_value(tokens);
+        return parse_css_value_for_property(PropertyID::Filter, tokens);
     case ValueType::FitContent:
         return parse_fit_content_value(tokens);
     case ValueType::Flex:

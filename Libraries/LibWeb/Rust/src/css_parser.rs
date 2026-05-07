@@ -3252,6 +3252,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
             | PropertyId::BoxShadow
+            | PropertyId::BackdropFilter
             | PropertyId::ColorScheme
             | PropertyId::Columns
             | PropertyId::Contain
@@ -3259,6 +3260,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Content
             | PropertyId::Cursor
             | PropertyId::Display
+            | PropertyId::Filter
             | PropertyId::Flex
             | PropertyId::FlexFlow
             | PropertyId::FontFamily
@@ -3266,8 +3268,28 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontLanguageOverride
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
+            | PropertyId::GridAutoColumns
+            | PropertyId::GridAutoFlow
+            | PropertyId::GridAutoRows
+            | PropertyId::GridColumnEnd
+            | PropertyId::GridColumnStart
+            | PropertyId::GridRowEnd
+            | PropertyId::GridRowStart
+            | PropertyId::GridTemplateColumns
+            | PropertyId::GridTemplateRows
             | PropertyId::ListStyle
             | PropertyId::MathDepth
+            | PropertyId::OverflowClipMargin
+            | PropertyId::OverflowClipMarginBlock
+            | PropertyId::OverflowClipMarginBlockEnd
+            | PropertyId::OverflowClipMarginBlockStart
+            | PropertyId::OverflowClipMarginBottom
+            | PropertyId::OverflowClipMarginInline
+            | PropertyId::OverflowClipMarginInlineEnd
+            | PropertyId::OverflowClipMarginInlineStart
+            | PropertyId::OverflowClipMarginLeft
+            | PropertyId::OverflowClipMarginRight
+            | PropertyId::OverflowClipMarginTop
             | PropertyId::PaintOrder
             | PropertyId::PlaceContent
             | PropertyId::PlaceItems
@@ -8910,8 +8932,8 @@ where
                         let secondary_source = format!(
                             "{}\0{}\0{}",
                             offset_y_source,
-                            radius_source.as_deref().unwrap_or(""),
-                            color_source.as_deref().unwrap_or("")
+                            radius_source.as_deref().unwrap_or(" "),
+                            color_source.as_deref().unwrap_or(" ")
                         );
                         callback(
                             CssStyleValueKind::FilterValueList,
@@ -8922,9 +8944,9 @@ where
                             false,
                             0.0,
                             FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW,
+                            0,
                             u8::from(radius_source.is_some()),
                             u8::from(color_source.is_some()),
-                            0,
                             offset_x_source.as_bytes(),
                             &secondary_source,
                         );
@@ -13223,11 +13245,19 @@ fn parse_grid_auto_track_list(
     // <auto-track-list> = [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>? <auto-repeat>
     //                     [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>?
     let start = parser.index;
-    let mut items = parse_track_list_impl(parser, filtered_input_string, |parser, filtered_input_string| {
-        parse_grid_fixed_repeat(parser, filtered_input_string)
-            .or_else(|| parse_grid_fixed_size(parser, filtered_input_string).map(RustOwnedExplicitGridTrack::Size))
-    })
-    .unwrap_or_default();
+    let mut items = if let Some(items) =
+        parse_track_list_impl(parser, filtered_input_string, |parser, filtered_input_string| {
+            parse_grid_fixed_repeat(parser, filtered_input_string)
+                .or_else(|| parse_grid_fixed_size(parser, filtered_input_string).map(RustOwnedExplicitGridTrack::Size))
+        }) {
+        items
+    } else {
+        let mut items = Vec::new();
+        if let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
+            items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
+        }
+        items
+    };
     let Some(auto_repeat) = parse_grid_auto_repeat(parser, filtered_input_string) else {
         parser.index = start;
         return None;
@@ -13240,6 +13270,8 @@ fn parse_grid_auto_track_list(
         })
     {
         items.append(&mut trailing_items);
+    } else if let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
+        items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
     }
     Some(items)
 }
@@ -13253,6 +13285,7 @@ where
     F: FnMut(&mut ComponentValueParser, &str) -> Option<RustOwnedExplicitGridTrack>,
 {
     let mut items = Vec::new();
+    let mut has_track = false;
     loop {
         let before_track = parser.index;
         let line_names = parse_grid_line_names(parser);
@@ -13264,16 +13297,14 @@ where
             items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
         }
         items.push(RustOwnedGridTrackSizeListItem::Track(track));
-        if let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
-            items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
-        }
+        has_track = true;
     }
 
-    if let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
+    if has_track && let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
         items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
     }
 
-    (!items.is_empty()).then_some(items)
+    has_track.then_some(items)
 }
 
 fn parse_grid_line_names(parser: &mut ComponentValueParser) -> Option<Vec<String>> {
@@ -16825,7 +16856,7 @@ fn component_values_parse_as_simple_filter_function(
             function,
             amount_source: None,
         }),
-        [component_value] if component_value_parse_as_non_negative_number_percentage(component_value) => {
+        [component_value] if component_value_parse_as_filter_amount(component_value) => {
             Some(RustOwnedFilterValue::Simple {
                 function,
                 amount_source: Some(serialize_component_values_for_reparsing(
@@ -16835,6 +16866,13 @@ fn component_values_parse_as_simple_filter_function(
             })
         }
         _ => None,
+    }
+}
+
+fn component_value_parse_as_filter_amount(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::Function(_) => true,
+        _ => component_value_parse_as_non_negative_number_percentage(component_value),
     }
 }
 
@@ -26841,17 +26879,17 @@ mod tests {
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
         parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
-        parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
-        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
-        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_rust_owned_filter_value_list_value, parse_rust_owned_positional_value_list_shorthand,
+        parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
+        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
+        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -34061,6 +34099,7 @@ mod tests {
         assert!(parse_filter_value_list("blur(10px)"));
         assert!(parse_filter_value_list("brightness()"));
         assert!(parse_filter_value_list("brightness(0.5)"));
+        assert!(parse_filter_value_list("brightness(sibling-count())"));
         assert!(parse_filter_value_list("contrast(150%)"));
         assert!(parse_filter_value_list("drop-shadow(1px 2px)"));
         assert!(parse_filter_value_list("drop-shadow(red 1px 2px 3px)"));
@@ -34069,6 +34108,32 @@ mod tests {
         assert!(parse_filter_value_list("hue-rotate(0)"));
         assert!(parse_filter_value_list("hue-rotate(90deg)"));
         assert!(parse_filter_value_list("sepia(1) saturate(120%) opacity(0.2)"));
+    }
+
+    #[test]
+    fn parses_rust_owned_drop_shadow_filter_sources() {
+        let Some(RustOwnedFilterValueList::Filters(filters)) =
+            parse_rust_owned_filter_value_list_value(b"drop-shadow(1px 2px 3px red)")
+        else {
+            panic!("Expected filter list");
+        };
+
+        let [
+            RustOwnedFilterValue::DropShadow {
+                color_source,
+                offset_x_source,
+                offset_y_source,
+                radius_source,
+            },
+        ] = filters.as_slice()
+        else {
+            panic!("Expected drop-shadow filter");
+        };
+
+        assert_eq!(color_source.as_deref(), Some("red"));
+        assert_eq!(offset_x_source, "1px");
+        assert_eq!(offset_y_source, "2px");
+        assert_eq!(radius_source.as_deref(), Some("3px"));
     }
 
     #[test]
@@ -34225,6 +34290,10 @@ mod tests {
             parse_grid_track_size_list("10px repeat(auto-fit, minmax(10px, 1fr)) 20px"),
             CssGridTrackSizeListValueKind::Valid
         );
+        assert_eq!(
+            parse_grid_track_size_list("[start] repeat(auto-fill, minmax(100px, 1fr)) [end]"),
+            CssGridTrackSizeListValueKind::Valid
+        );
     }
 
     #[test]
@@ -34243,6 +34312,14 @@ mod tests {
         );
         assert_eq!(
             parse_grid_track_size_list("minmax(1fr, 10px)"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("[one]"),
+            CssGridTrackSizeListValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_size_list("[one] 10px [two] [three]"),
             CssGridTrackSizeListValueKind::Invalid
         );
         assert_eq!(

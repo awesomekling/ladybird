@@ -359,7 +359,6 @@ private:
         BackgroundPosition,
     };
     RefPtr<PositionStyleValue const> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
-    RefPtr<StyleValue const> parse_filter_value_list_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_opacity_value_value(TokenStream<ComponentValue>&);
 
@@ -412,8 +411,6 @@ private:
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_mask_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_overflow_clip_margin_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_overflow_clip_margin_shorthand(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_repeat_style_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);

@@ -277,6 +277,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::BorderTopLeftRadius:
         case PropertyID::BorderTopRightRadius:
         case PropertyID::BoxShadow:
+        case PropertyID::BackdropFilter:
         case PropertyID::ColorScheme:
         case PropertyID::Columns:
         case PropertyID::Contain:
@@ -284,6 +285,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::Content:
         case PropertyID::Cursor:
         case PropertyID::Display:
+        case PropertyID::Filter:
         case PropertyID::Flex:
         case PropertyID::FlexFlow:
         case PropertyID::FontFamily:
@@ -291,8 +293,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::FontLanguageOverride:
         case PropertyID::FontVariant:
         case PropertyID::FontVariationSettings:
+        case PropertyID::GridAutoColumns:
+        case PropertyID::GridAutoFlow:
+        case PropertyID::GridAutoRows:
+        case PropertyID::GridColumnEnd:
+        case PropertyID::GridColumnStart:
+        case PropertyID::GridRowEnd:
+        case PropertyID::GridRowStart:
+        case PropertyID::GridTemplateColumns:
+        case PropertyID::GridTemplateRows:
         case PropertyID::ListStyle:
         case PropertyID::MathDepth:
+        case PropertyID::OverflowClipMargin:
+        case PropertyID::OverflowClipMarginBlock:
+        case PropertyID::OverflowClipMarginBlockEnd:
+        case PropertyID::OverflowClipMarginBlockStart:
+        case PropertyID::OverflowClipMarginBottom:
+        case PropertyID::OverflowClipMarginInline:
+        case PropertyID::OverflowClipMarginInlineEnd:
+        case PropertyID::OverflowClipMarginInlineStart:
+        case PropertyID::OverflowClipMarginLeft:
+        case PropertyID::OverflowClipMarginRight:
+        case PropertyID::OverflowClipMarginTop:
         case PropertyID::PaintOrder:
         case PropertyID::PlaceContent:
         case PropertyID::PlaceItems:
@@ -1275,6 +1297,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_non_negative_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_number_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_color = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -2244,7 +2275,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::DropShadow: {
-                            auto secondary_sources = event.secondary_source.bytes_as_string_view().split_view('\0');
+                            auto secondary_sources = event.secondary_source.bytes_as_string_view().split_view('\0', SplitBehavior::KeepEmpty);
                             if (secondary_sources.size() != 3)
                                 break;
 
@@ -2281,7 +2312,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::Simple: {
                             auto amount = event.has_value
-                                ? parse_rust_source_as_number_percentage(event.source)
+                                ? parse_rust_source_as_non_negative_number_percentage(event.source)
                                 : NumberStyleValue::create(1);
                             if (!amount)
                                 break;
@@ -3592,7 +3623,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_animation_value(tokens); });
     case PropertyID::BackdropFilter:
     case PropertyID::Filter:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_filter_value_list_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Background:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_background_value(tokens); });
     case PropertyID::BackgroundPosition:
@@ -3661,18 +3692,18 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::GridArea:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_area_shorthand_value(tokens); });
     case PropertyID::GridAutoFlow:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_auto_flow_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridColumn:
     case PropertyID::GridRow:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_grid_track_placement_shorthand_value(property_id, tokens); });
     case PropertyID::GridColumnEnd:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_placement(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridColumnStart:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_placement(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridRowEnd:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_placement(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridRowStart:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_placement(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Grid:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_shorthand_value(tokens); });
     case PropertyID::GridTemplate:
@@ -3680,13 +3711,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::GridTemplateAreas:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_template_areas_value(tokens); });
     case PropertyID::GridTemplateColumns:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_size_list(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridTemplateRows:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_size_list(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridAutoColumns:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_auto_track_sizes(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridAutoRows:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_auto_track_sizes(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::ListStyle:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Mask:
@@ -3717,11 +3748,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::OverflowClipMarginLeft:
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_overflow_clip_margin_value(tokens); });
     case PropertyID::OverflowClipMargin:
     case PropertyID::OverflowClipMarginBlock:
     case PropertyID::OverflowClipMarginInline:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_overflow_clip_margin_shorthand(property_id, tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::PlaceContent:
     case PropertyID::PlaceItems:
     case PropertyID::PlaceSelf:
@@ -5102,35 +5132,6 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
         mask_mode.release_nonnull());
 }
 
-// https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin
-RefPtr<StyleValue const> Parser::parse_overflow_clip_margin_value(TokenStream<ComponentValue>& tokens)
-{
-    // <visual-box> || <length [0,∞]>
-    // FIXME: Implement the <visual-box> part of this.
-
-    if (auto length = parse_length_value(tokens, non_negative_range)) {
-        return length.release_nonnull();
-    }
-
-    return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_overflow_clip_margin_shorthand(PropertyID property_id, TokenStream<ComponentValue>& tokens)
-{
-    // <visual-box> || <length [0,∞]>
-    // FIXME: Implement the <visual-box> part of this.
-
-    if (auto value = parse_overflow_clip_margin_value(tokens)) {
-        auto const& longhands = longhands_for_shorthand(property_id);
-        Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
-        longhand_values.resize_with_default_value(longhands.size(), value.release_nonnull());
-
-        return ShorthandStyleValue::create(property_id, longhands, longhand_values);
-    }
-
-    return nullptr;
-}
-
 RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -5858,223 +5859,6 @@ RefPtr<StyleValue const> Parser::parse_grid_track_size_list(TokenStream<Componen
     }
 
     return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_filter_value_list_value(TokenStream<ComponentValue>& tokens)
-{
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    auto transaction = tokens.begin_transaction();
-
-    // https://drafts.csswg.org/filter-effects-1/#typedef-filter-value-list
-    // <filter-value-list> = [ <filter-function> | <url> ]+
-    // FIXME: <url>s are ignored for now
-
-    enum class FilterToken {
-        // Color filters:
-        Brightness,
-        Contrast,
-        Grayscale,
-        Invert,
-        Opacity,
-        Saturate,
-        Sepia,
-        // Special filters:
-        Blur,
-        DropShadow,
-        HueRotate
-    };
-
-    auto filter_token_to_operation = [&](auto filter) {
-        VERIFY(to_underlying(filter) < to_underlying(FilterToken::Blur));
-        return static_cast<Gfx::ColorFilterType>(filter);
-    };
-
-    auto parse_filter_function_name = [&](auto name) -> Optional<FilterToken> {
-        if (name.equals_ignoring_ascii_case("blur"sv))
-            return FilterToken::Blur;
-        if (name.equals_ignoring_ascii_case("brightness"sv))
-            return FilterToken::Brightness;
-        if (name.equals_ignoring_ascii_case("contrast"sv))
-            return FilterToken::Contrast;
-        if (name.equals_ignoring_ascii_case("drop-shadow"sv))
-            return FilterToken::DropShadow;
-        if (name.equals_ignoring_ascii_case("grayscale"sv))
-            return FilterToken::Grayscale;
-        if (name.equals_ignoring_ascii_case("hue-rotate"sv))
-            return FilterToken::HueRotate;
-        if (name.equals_ignoring_ascii_case("invert"sv))
-            return FilterToken::Invert;
-        if (name.equals_ignoring_ascii_case("opacity"sv))
-            return FilterToken::Opacity;
-        if (name.equals_ignoring_ascii_case("saturate"sv))
-            return FilterToken::Saturate;
-        if (name.equals_ignoring_ascii_case("sepia"sv))
-            return FilterToken::Sepia;
-        return {};
-    };
-
-    // https://drafts.csswg.org/filter-effects-1/#typedef-filter-function
-    // <blur()> | <brightness()> | <contrast()> | <drop-shadow()> | <grayscale()> | <hue-rotate()> | <invert()> | <opacity()> | <sepia()> | <saturate()>
-    auto parse_filter_function = [&](auto filter_token, auto const& function_values) -> Optional<FilterValue> {
-        TokenStream tokens { function_values };
-        tokens.discard_whitespace();
-
-        auto if_no_more_tokens_return = [&](auto filter) -> Optional<FilterValue> {
-            tokens.discard_whitespace();
-            if (tokens.has_next_token())
-                return {};
-            return filter;
-        };
-
-        if (filter_token == FilterToken::Blur) {
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-blur
-            // blur( <length>? )
-
-            // Default value when omitted is 0px.
-            if (!tokens.has_next_token())
-                return FilterOperation::Blur { LengthStyleValue::create(Length::make_px(0)) };
-
-            // Negative values are not allowed.
-            auto blur_radius = parse_length_value(tokens, non_negative_range);
-            tokens.discard_whitespace();
-            if (!blur_radius)
-                return {};
-            return if_no_more_tokens_return(FilterOperation::Blur { blur_radius.release_nonnull() });
-        } else if (filter_token == FilterToken::DropShadow) {
-            if (!tokens.has_next_token())
-                return {};
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-drop-shadow
-            // drop-shadow( [ <color>? && <length>{2,3} ] )
-
-            // Note: The following code is a little awkward to allow the color to be before or after the lengths.
-            RefPtr<StyleValue const> maybe_radius;
-            auto maybe_color = parse_color_value(tokens);
-            tokens.discard_whitespace();
-            auto x_offset = parse_length_value(tokens, infinite_range);
-            tokens.discard_whitespace();
-            if (!x_offset || !tokens.has_next_token())
-                return {};
-
-            auto y_offset = parse_length_value(tokens, infinite_range);
-            tokens.discard_whitespace();
-            if (!y_offset)
-                return {};
-
-            if (tokens.has_next_token()) {
-                maybe_radius = parse_length_value(tokens, infinite_range);
-                tokens.discard_whitespace();
-                if (!maybe_color && (!maybe_radius || tokens.has_next_token())) {
-                    maybe_color = parse_color_value(tokens);
-                    if (!maybe_color)
-                        return {};
-                } else if (!maybe_radius) {
-                    return {};
-                }
-            }
-
-            return if_no_more_tokens_return(FilterOperation::DropShadow { x_offset.release_nonnull(), y_offset.release_nonnull(), maybe_radius, maybe_color });
-        } else if (filter_token == FilterToken::HueRotate) {
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-hue-rotate
-            // hue-rotate( [ <angle> | <zero> ]? )
-
-            // Default value when omitted is 0deg.
-            if (!tokens.has_next_token())
-                return FilterOperation::HueRotate { AngleStyleValue::create(Angle::make_degrees(0)) };
-
-            // The unit identifier may be omitted if the <angle> is zero.
-            if (tokens.next_token().is(Token::Type::Number)) {
-                // hue-rotate(0)
-                auto token = tokens.consume_a_token().token();
-                if (token.is_integer() && token.to_integer() == 0)
-                    return if_no_more_tokens_return(FilterOperation::HueRotate { AngleStyleValue::create(Angle::make_degrees(0)) });
-                return {};
-            }
-
-            if (auto angle = parse_angle_value(tokens, infinite_range))
-                return if_no_more_tokens_return(FilterOperation::HueRotate { angle.release_nonnull() });
-
-            return {};
-        } else {
-            // Simple filters:
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-brightness
-            // brightness( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-contrast
-            // contrast( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-grayscale
-            // grayscale( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-invert
-            // invert( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-opacity
-            // opacity( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-sepia
-            // sepia( [ <number> | <percentage> ]? )
-
-            // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-saturate
-            // saturate( [ <number> | <percentage> ]? )
-
-            // Default value when omitted is 1.
-            if (!tokens.has_next_token())
-                return FilterOperation::Color { filter_token_to_operation(filter_token), NumberStyleValue::create(1) };
-
-            // Negative values are not allowed.
-            auto amount = parse_number_percentage_value(tokens, non_negative_range, non_negative_range);
-
-            if (!amount)
-                return {};
-
-            // Values of amount over 100% are allowed but UAs must clamp the values to 1.
-            // NB: Only for grayscale(), invert(), opacity() and sepia() functions
-            if (first_is_one_of(filter_token, FilterToken::Grayscale, FilterToken::Invert, FilterToken::Opacity, FilterToken::Sepia)) {
-                if (amount->is_percentage() && amount->as_percentage().percentage().value() > 100)
-                    amount = PercentageStyleValue::create(Percentage { 100 });
-                if (amount->is_number() && amount->as_number().number() > 1)
-                    amount = NumberStyleValue::create(1);
-            }
-
-            return if_no_more_tokens_return(FilterOperation::Color { filter_token_to_operation(filter_token), amount.release_nonnull() });
-        }
-    };
-
-    Vector<FilterValue> filter_value_list {};
-
-    while (tokens.has_next_token()) {
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-
-        auto url_function = parse_url_function(tokens);
-        if (url_function.has_value()) {
-            filter_value_list.append(*url_function);
-            continue;
-        }
-
-        auto& token = tokens.consume_a_token();
-        if (!token.is_function())
-            return nullptr;
-        auto filter_token = parse_filter_function_name(token.function().name);
-        if (!filter_token.has_value())
-            return nullptr;
-
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { token.function().name });
-        auto filter_function = parse_filter_function(*filter_token, token.function().value);
-        if (!filter_function.has_value())
-            return nullptr;
-        filter_value_list.append(*filter_function);
-    }
-
-    if (filter_value_list.is_empty())
-        return nullptr;
-
-    transaction.commit();
-    return FilterValueListStyleValue::create(move(filter_value_list));
 }
 
 }
