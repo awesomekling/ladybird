@@ -952,10 +952,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.value_type = value_type.release_value();
                 if (has_numeric_value)
                     value.numeric_value = numeric_value;
-                if (primitive_kind == FFI::CssPrimitiveValueKind::String)
+                if (primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    value.keyword = keyword.release_value();
+                } else if (primitive_kind == FFI::CssPrimitiveValueKind::CustomIdent) {
+                    value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+                } else if (primitive_kind == FFI::CssPrimitiveValueKind::String) {
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
-                else if (primitive_kind == FFI::CssPrimitiveValueKind::Length || primitive_kind == FFI::CssPrimitiveValueKind::Time)
+                } else if (primitive_kind == FFI::CssPrimitiveValueKind::Length || primitive_kind == FFI::CssPrimitiveValueKind::Time) {
                     value.dimension_unit = fly_string_from_ffi_bytes(value_ptr, value_len);
+                }
             }
 
             style_value = move(value);

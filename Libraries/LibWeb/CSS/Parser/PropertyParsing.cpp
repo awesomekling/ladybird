@@ -296,9 +296,20 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);
 
                     RefPtr<StyleValue const> maybe_parsed_value;
-                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::String && rust_style_value->string.has_value()) {
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Keyword && rust_style_value->keyword.has_value()) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = KeywordStyleValue::create(*rust_style_value->keyword);
+                    } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::CustomIdent && rust_style_value->custom_ident.has_value()) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = CustomIdentStyleValue::create(*rust_style_value->custom_ident);
+                    } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::String && rust_style_value->string.has_value()) {
                         tokens.discard_a_token();
                         maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
+                    } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Number
+                        && rust_style_value->numeric_value.has_value()
+                        && !first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = NumberStyleValue::create(*rust_style_value->numeric_value);
                     } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();

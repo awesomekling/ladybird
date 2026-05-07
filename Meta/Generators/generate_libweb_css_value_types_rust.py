@@ -64,6 +64,65 @@ def write_syntax_check(out: TextIO, syntax: dict) -> None:
     raise RuntimeError(f"unsupported Rust value type branch syntax type: {syntax_type}")
 
 
+def write_style_value_payload(out: TextIO, syntax: dict) -> None:
+    syntax_type = syntax["type"]
+
+    if syntax_type == "ident":
+        out.write(
+            f"""crate::generated_value_types::GeneratedValueTypeStyleValue {{
+            kind: crate::generated_value_types::GeneratedValueTypeStyleValueKind::Keyword,
+            value: Some({rust_string_literal(syntax["value"])}),
+            numeric_value: None,
+        }}"""
+        )
+        return
+
+    if syntax_type == "number":
+        out.write(
+            f"""match crate::css_parser::component_values_number_value(
+            component_values,
+            {syntax["min"]},
+            {syntax["max"]},
+        ) {{
+            Some(numeric_value) => crate::generated_value_types::GeneratedValueTypeStyleValue {{
+                kind: crate::generated_value_types::GeneratedValueTypeStyleValueKind::Number,
+                value: None,
+                numeric_value: Some(numeric_value),
+            }},
+            None => crate::generated_value_types::GeneratedValueTypeStyleValue::invalid(),
+        }}"""
+        )
+        return
+
+    if syntax_type == "string":
+        out.write(
+            """match crate::css_parser::component_values_string_value(component_values) {
+            Some(value) => crate::generated_value_types::GeneratedValueTypeStyleValue {
+                kind: crate::generated_value_types::GeneratedValueTypeStyleValueKind::String,
+                value: Some(value),
+                numeric_value: None,
+            },
+            None => crate::generated_value_types::GeneratedValueTypeStyleValue::invalid(),
+        }"""
+        )
+        return
+
+    if syntax_type == "custom-ident":
+        out.write(
+            """match crate::css_parser::component_values_custom_ident_value(component_values) {
+            Some(value) => crate::generated_value_types::GeneratedValueTypeStyleValue {
+                kind: crate::generated_value_types::GeneratedValueTypeStyleValueKind::CustomIdent,
+                value: Some(value),
+                numeric_value: None,
+            },
+            None => crate::generated_value_types::GeneratedValueTypeStyleValue::invalid(),
+        }"""
+        )
+        return
+
+    raise RuntimeError(f"unsupported Rust value type branch syntax type: {syntax_type}")
+
+
 def write_generated_parser(out: TextIO, value_type_data: dict) -> None:
     out.write("""
 pub(crate) fn component_values_parse_as_generated_value_type(
@@ -77,6 +136,53 @@ pub(crate) fn component_values_parse_as_generated_value_type(
         ValueTypeId::{value_type_title(name)} => component_values_parse_as_{value_type_function_name(name)}(component_values),""")
 
     out.write("""
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GeneratedValueTypeStyleValueKind {
+    Invalid,
+    Keyword,
+    Number,
+    String,
+    CustomIdent,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GeneratedValueTypeStyleValue<'a> {
+    pub(crate) kind: GeneratedValueTypeStyleValueKind,
+    pub(crate) value: Option<&'a str>,
+    pub(crate) numeric_value: Option<f64>,
+}
+
+impl GeneratedValueTypeStyleValue<'_> {
+    pub(crate) fn invalid() -> Self {
+        Self {
+            kind: GeneratedValueTypeStyleValueKind::Invalid,
+            value: None,
+            numeric_value: None,
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn generated_value_type_style_value(
+    syntax_kind: crate::css_parser::CssValueTypeSyntaxKind,
+    component_values: &[crate::css_parser::ComponentValue],
+) -> GeneratedValueTypeStyleValue<'_> {
+    match syntax_kind {""")
+
+    for name, value_type in value_type_data.items():
+        for branch in value_type["branches"]:
+            out.write(f"""
+        crate::css_parser::CssValueTypeSyntaxKind::{value_type_title(name)}{branch["name"]} => """)
+            write_style_value_payload(out, branch["syntax"])
+            out.write(",")
+
+    out.write("""
+        crate::css_parser::CssValueTypeSyntaxKind::Invalid => GeneratedValueTypeStyleValue::invalid(),
     }
 }
 

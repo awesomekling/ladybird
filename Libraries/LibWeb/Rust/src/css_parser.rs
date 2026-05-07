@@ -29,7 +29,8 @@ use crate::generated_pseudo_elements::{
 use crate::generated_transform_functions::{TransformFunctionParameterType, transform_function_parameters_from_name};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
-    ValueTypeId, component_values_parse_as_generated_value_type, value_type_id_from_u8,
+    GeneratedValueTypeStyleValueKind, ValueTypeId, component_values_parse_as_generated_value_type,
+    generated_value_type_style_value, value_type_id_from_u8,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1046,6 +1047,8 @@ pub enum CssPrimitiveValueKind {
     String,
     Time,
     Opacity,
+    Keyword,
+    CustomIdent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2035,9 +2038,35 @@ where
                 continue;
             }
 
-            let primitive_kind = style_value_primitive_kind(*value_type, component_values);
-            let numeric_value = style_value_numeric_value(*value_type, component_values);
-            let value = if primitive_kind == CssPrimitiveValueKind::String {
+            let generated_style_value =
+                generated_value_type_id_for_property_value_type(*value_type).and_then(|value_type_id| {
+                    let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
+                    let style_value = generated_value_type_style_value(syntax_kind, component_values);
+                    if style_value.kind == GeneratedValueTypeStyleValueKind::Invalid {
+                        None
+                    } else {
+                        Some(style_value)
+                    }
+                });
+            let primitive_kind = if let Some(generated_style_value) = generated_style_value {
+                match generated_style_value.kind {
+                    GeneratedValueTypeStyleValueKind::Invalid => CssPrimitiveValueKind::Invalid,
+                    GeneratedValueTypeStyleValueKind::Keyword => CssPrimitiveValueKind::Keyword,
+                    GeneratedValueTypeStyleValueKind::Number => CssPrimitiveValueKind::Number,
+                    GeneratedValueTypeStyleValueKind::String => CssPrimitiveValueKind::String,
+                    GeneratedValueTypeStyleValueKind::CustomIdent => CssPrimitiveValueKind::CustomIdent,
+                }
+            } else {
+                style_value_primitive_kind(*value_type, component_values)
+            };
+            let numeric_value = generated_style_value
+                .and_then(|style_value| style_value.numeric_value)
+                .or_else(|| style_value_numeric_value(*value_type, component_values));
+            let value = if let Some(generated_style_value) = generated_style_value
+                && let Some(value) = generated_style_value.value
+            {
+                value.as_bytes()
+            } else if primitive_kind == CssPrimitiveValueKind::String {
                 string_token_value(component_values).unwrap_or("").as_bytes()
             } else if first_is_one_of(property_value_type_name(*value_type), &["Length", "Time"]) {
                 style_value_dimension_unit(*value_type, component_values)
@@ -2291,6 +2320,19 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
             filtered_input,
         ),
         _ => false,
+    }
+}
+
+fn generated_value_type_id_for_property_value_type(value_type: PropertyValueType) -> Option<ValueTypeId> {
+    match value_type {
+        PropertyValueType::FontKerningValue => Some(ValueTypeId::FontKerningValue),
+        PropertyValueType::FontOpticalSizingValue => Some(ValueTypeId::FontOpticalSizingValue),
+        PropertyValueType::FontWeightAbsolute => Some(ValueTypeId::FontWeightAbsolute),
+        PropertyValueType::FontWidthCss3 => Some(ValueTypeId::FontWidthCss3),
+        PropertyValueType::FontVariantCapsValue => Some(ValueTypeId::FontVariantCapsValue),
+        PropertyValueType::FontVariantEmojiValue => Some(ValueTypeId::FontVariantEmojiValue),
+        PropertyValueType::FontVariantPositionValue => Some(ValueTypeId::FontVariantPositionValue),
+        _ => None,
     }
 }
 
@@ -14176,6 +14218,24 @@ pub(crate) fn component_values_parse_as_number(component_values: &[ComponentValu
     }
 }
 
+pub(crate) fn component_values_number_value(component_values: &[ComponentValue], min: f64, max: f64) -> Option<f64> {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }),
+    ] = component_values
+    else {
+        return None;
+    };
+
+    if number.value() < min || number.value() > max {
+        return None;
+    }
+
+    Some(number.value())
+}
+
 fn component_value_parse_as_angle(component_value: &ComponentValue) -> bool {
     match component_value {
         ComponentValue::PreservedToken(Token {
@@ -14199,6 +14259,20 @@ pub(crate) fn component_values_parse_as_string(component_values: &[ComponentValu
     )
 }
 
+pub(crate) fn component_values_string_value(component_values: &[ComponentValue]) -> Option<&str> {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        }),
+    ] = component_values
+    else {
+        return None;
+    };
+
+    Some(value)
+}
+
 pub(crate) fn component_values_parse_as_custom_ident(component_values: &[ComponentValue]) -> bool {
     let [
         ComponentValue::PreservedToken(Token {
@@ -14214,6 +14288,24 @@ pub(crate) fn component_values_parse_as_custom_ident(component_values: &[Compone
     !matches_css_wide_keyword(value)
         // The default keyword is reserved and is also not a valid <custom-ident>.
         && !value.eq_ignore_ascii_case("default")
+}
+
+pub(crate) fn component_values_custom_ident_value(component_values: &[ComponentValue]) -> Option<&str> {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+    else {
+        return None;
+    };
+
+    if component_values_parse_as_custom_ident(component_values) {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 fn is_valid_custom_ident(value: &str, blacklist: &[&str]) -> bool {
@@ -17640,12 +17732,34 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::FontWeight], "bold"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::ValueType,
+                kind: CssStyleValueKind::Primitive,
                 property_id: PropertyId::FontWeight,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
+                primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
+                value: "bold".to_string(),
+                value_type: "FontWeightAbsolute".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FontWeight], "700"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::FontWeight,
+                primitive_kind: CssPrimitiveValueKind::Number,
+                numeric_value: Some(700.0),
                 value: String::new(),
                 value_type: "FontWeightAbsolute".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FontKerning], "normal"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::FontKerning,
+                primitive_kind: CssPrimitiveValueKind::Keyword,
+                numeric_value: None,
+                value: "normal".to_string(),
+                value_type: "FontKerningValue".to_string(),
             })
         );
         assert_eq!(
