@@ -2037,7 +2037,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     RepeatStyle(RustOwnedRepeatStyle),
     Resolution(RustOwnedDimensionStyleValue),
     OverflowClipMargin {
-        source: String,
+        length_source: String,
     },
     Shadow {
         source: String,
@@ -4554,7 +4554,7 @@ fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
     }
 
     Some(RustOwnedStyleValueKind::OverflowClipMargin {
-        source: filtered_input_to_string(filtered_input),
+        length_source: filtered_input_to_string(filtered_input),
     })
 }
 
@@ -5933,8 +5933,13 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::OverflowClipMargin { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::OverflowClipMargin, property_id, source);
+        RustOwnedStyleValueKind::OverflowClipMargin { length_source } => {
+            callback_source_backed_style_value(
+                callback,
+                CssStyleValueKind::OverflowClipMargin,
+                property_id,
+                length_source,
+            );
         }
         RustOwnedStyleValueKind::ScrollbarColor(value) => callback(
             CssStyleValueKind::ScrollbarColor,
@@ -25568,6 +25573,15 @@ mod tests {
                 value: RustOwnedStyleValueKind::UnresolvedValueType {
                     value_type: PropertyValueType::Length,
                     source: "2px".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::OverflowClipMargin], "2px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::OverflowClipMargin,
+                value: RustOwnedStyleValueKind::OverflowClipMargin {
+                    length_source: "2px".to_string(),
                 },
             })
         );

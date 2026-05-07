@@ -1515,9 +1515,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::OverflowClipMargin:
-                if (auto value = parse_overflow_clip_margin_shorthand(rust_style_value->property_id, tokens)) {
+                if (!rust_style_value->overflow_clip_margin_source.is_empty()) {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->overflow_clip_margin_source, "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    auto value = parse_length_value(value_tokens, non_negative_range);
+                    value_tokens.discard_whitespace();
+                    if (!value || value_tokens.has_next_token())
+                        break;
+
+                    auto const& longhands = longhands_for_shorthand(rust_style_value->property_id);
+                    Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+                    longhand_values.resize_with_default_value(longhands.size(), value.release_nonnull());
+
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(rust_style_value->property_id, longhands, longhand_values) };
                 }
                 break;
             case FFI::CssStyleValueKind::RepeatStyle:

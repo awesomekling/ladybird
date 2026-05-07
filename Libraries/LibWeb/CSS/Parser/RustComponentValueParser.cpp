@@ -1105,6 +1105,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->place_justify_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::OverflowClipMargin) {
+                value.overflow_clip_margin_source = string_from_ffi_bytes(value_ptr, value_len);
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1122,7 +1124,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::MathDepth,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
-                           FFI::CssStyleValueKind::OverflowClipMargin,
                            FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside,
                            FFI::CssStyleValueKind::TextDecoration,

@@ -161,6 +161,7 @@ public:
         Vector<String> stroke_dasharray_values;
         String place_align_source;
         String place_justify_source;
+        String overflow_clip_margin_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;
