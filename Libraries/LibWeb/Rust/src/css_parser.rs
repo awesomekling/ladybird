@@ -1844,6 +1844,10 @@ pub enum CssStyleValueKind {
     FontFeatureSettings,
     FontLanguageOverride,
     FontVariant,
+    FontVariantAlternates,
+    FontVariantEastAsian,
+    FontVariantLigatures,
+    FontVariantNumeric,
     FontVariationSettings,
     FilterValueList,
     BasicShape,
@@ -1961,19 +1965,15 @@ pub(crate) enum RustOwnedStyleValueKind {
     FontStyle(RustOwnedFontStyle),
     FontVariantAlternates {
         values: Vec<FontVariantAlternatesValue>,
-        source: String,
     },
     FontVariantEastAsian {
         values: Vec<FontVariantEastAsianValue>,
-        source: String,
     },
     FontVariantLigatures {
         values: Vec<FontVariantLigaturesValue>,
-        source: String,
     },
     FontVariantNumeric {
         values: Vec<FontVariantNumericValue>,
-        source: String,
     },
     PlaceContent {
         source: String,
@@ -4796,22 +4796,22 @@ fn rust_owned_will_change_style_value_kind(filtered_input: &[u8]) -> Option<Rust
 
 fn rust_owned_font_variant_alternates_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_alternates)?;
-    Some(RustOwnedStyleValueKind::FontVariantAlternates { values, source })
+    Some(RustOwnedStyleValueKind::FontVariantAlternates { values })
 }
 
 fn rust_owned_font_variant_east_asian_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_east_asian)?;
-    Some(RustOwnedStyleValueKind::FontVariantEastAsian { values, source })
+    Some(RustOwnedStyleValueKind::FontVariantEastAsian { values })
 }
 
 fn rust_owned_font_variant_ligatures_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_ligatures)?;
-    Some(RustOwnedStyleValueKind::FontVariantLigatures { values, source })
+    Some(RustOwnedStyleValueKind::FontVariantLigatures { values })
 }
 
 fn rust_owned_font_variant_numeric_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_numeric)?;
-    Some(RustOwnedStyleValueKind::FontVariantNumeric { values, source })
+    Some(RustOwnedStyleValueKind::FontVariantNumeric { values })
 }
 
 fn rust_owned_image_style_value_kind(
@@ -6177,30 +6177,83 @@ where
             property_id,
             PropertyValueType::CounterStyle,
         ),
-        RustOwnedStyleValueKind::FontVariantAlternates { .. } => callback_style_value_type(
-            callback,
-            CssStyleValueKind::ValueType,
-            property_id,
-            PropertyValueType::FontVariantAlternates,
-        ),
-        RustOwnedStyleValueKind::FontVariantEastAsian { .. } => callback_style_value_type(
-            callback,
-            CssStyleValueKind::ValueType,
-            property_id,
-            PropertyValueType::FontVariantEastAsian,
-        ),
-        RustOwnedStyleValueKind::FontVariantLigatures { .. } => callback_style_value_type(
-            callback,
-            CssStyleValueKind::ValueType,
-            property_id,
-            PropertyValueType::FontVariantLigatures,
-        ),
-        RustOwnedStyleValueKind::FontVariantNumeric { .. } => callback_style_value_type(
-            callback,
-            CssStyleValueKind::ValueType,
-            property_id,
-            PropertyValueType::FontVariantNumeric,
-        ),
+        RustOwnedStyleValueKind::FontVariantAlternates { values } => {
+            for value in values {
+                let feature_value_names = null_separated_string_list_bytes(&value.feature_value_names);
+                callback(
+                    CssStyleValueKind::FontVariantAlternates,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    &feature_value_names,
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::FontVariantEastAsian { values } => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantEastAsian,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::FontVariantLigatures { values } => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantLigatures,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::FontVariantNumeric { values } => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantNumeric,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::Shorthand(value_list)
         | RustOwnedStyleValueKind::Tuple(value_list)
         | RustOwnedStyleValueKind::ValueList(value_list) => {
@@ -25843,7 +25896,6 @@ mod tests {
                             value: "slashed-zero".to_string(),
                         },
                     ],
-                    source: "tabular-nums slashed-zero".to_string(),
                 },
             })
         );
@@ -25862,7 +25914,6 @@ mod tests {
                             feature_value_names: Vec::new(),
                         },
                     ],
-                    source: "stylistic(foo) historical-forms".to_string(),
                 },
             })
         );
@@ -25885,7 +25936,6 @@ mod tests {
                             value: "ruby".to_string(),
                         },
                     ],
-                    source: "jis78 proportional-width ruby".to_string(),
                 },
             })
         );
@@ -25907,7 +25957,6 @@ mod tests {
                             value: "no-discretionary-ligatures".to_string(),
                         },
                     ],
-                    source: "common-ligatures no-discretionary-ligatures".to_string(),
                 },
             })
         );

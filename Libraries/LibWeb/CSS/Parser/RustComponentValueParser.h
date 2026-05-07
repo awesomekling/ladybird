@@ -97,6 +97,26 @@ public:
         Yes,
     };
 
+    struct FontVariantAlternatesValue {
+        FFI::CssFontVariantAlternatesValueKind kind;
+        Vector<FlyString> feature_value_names;
+    };
+
+    struct FontVariantEastAsianValue {
+        FFI::CssFontVariantEastAsianValueKind kind;
+        FlyString value;
+    };
+
+    struct FontVariantNumericValue {
+        FFI::CssFontVariantNumericValueKind kind;
+        FlyString value;
+    };
+
+    struct FontVariantLigaturesValue {
+        FFI::CssFontVariantLigaturesValueKind kind;
+        FlyString value;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -130,6 +150,10 @@ public:
         FFI::CssColorSchemeValueKind color_scheme_kind { FFI::CssColorSchemeValueKind::Invalid };
         bool color_scheme_only { false };
         Vector<String> color_scheme_schemes;
+        Vector<FontVariantAlternatesValue> font_variant_alternates;
+        Vector<FontVariantEastAsianValue> font_variant_east_asian;
+        Vector<FontVariantLigaturesValue> font_variant_ligatures;
+        Vector<FontVariantNumericValue> font_variant_numeric;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
@@ -239,26 +263,6 @@ public:
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
-    };
-
-    struct FontVariantAlternatesValue {
-        FFI::CssFontVariantAlternatesValueKind kind;
-        Vector<FlyString> feature_value_names;
-    };
-
-    struct FontVariantEastAsianValue {
-        FFI::CssFontVariantEastAsianValueKind kind;
-        FlyString value;
-    };
-
-    struct FontVariantNumericValue {
-        FFI::CssFontVariantNumericValueKind kind;
-        FlyString value;
-    };
-
-    struct FontVariantLigaturesValue {
-        FFI::CssFontVariantLigaturesValueKind kind;
-        FlyString value;
     };
 
     struct FontVariant {

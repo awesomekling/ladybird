@@ -978,6 +978,60 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.color_scheme_only = color_green != 0;
                 for (auto scheme : StringView { value_ptr, value_len }.split_view('\0'))
                     value.color_scheme_schemes.append(String::from_utf8_without_validation(scheme.bytes()));
+            } else if (kind == FFI::CssStyleValueKind::FontVariantAlternates) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontVariantAlternates);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                FontVariantAlternatesValue font_variant_alternates_value {
+                    .kind = static_cast<FFI::CssFontVariantAlternatesValueKind>(color_red),
+                };
+                for (auto feature_value_name : StringView { value_ptr, value_len }.split_view('\0'))
+                    font_variant_alternates_value.feature_value_names.append(fly_string_from_ffi_bytes(feature_value_name.bytes().data(), feature_value_name.bytes().size()));
+                style_value->font_variant_alternates.append(move(font_variant_alternates_value));
+                return;
+            } else if (kind == FFI::CssStyleValueKind::FontVariantEastAsian) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontVariantEastAsian);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->font_variant_east_asian.append(FontVariantEastAsianValue {
+                    .kind = static_cast<FFI::CssFontVariantEastAsianValueKind>(color_red),
+                    .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::FontVariantLigatures) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontVariantLigatures);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->font_variant_ligatures.append(FontVariantLigaturesValue {
+                    .kind = static_cast<FFI::CssFontVariantLigaturesValueKind>(color_red),
+                    .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::FontVariantNumeric) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontVariantNumeric);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->font_variant_numeric.append(FontVariantNumericValue {
+                    .kind = static_cast<FFI::CssFontVariantNumericValueKind>(color_red),
+                    .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,

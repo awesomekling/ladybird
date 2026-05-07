@@ -655,6 +655,131 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_rust_font_variant_alternates_value = [&]() -> RefPtr<StyleValue const> {
+                StyleValueVector values;
+                values.ensure_capacity(rust_style_value->font_variant_alternates.size());
+
+                for (auto const& value : rust_style_value->font_variant_alternates) {
+                    if (value.kind == FFI::CssFontVariantAlternatesValueKind::HistoricalForms) {
+                        values.append(KeywordStyleValue::create(Keyword::HistoricalForms));
+                        continue;
+                    }
+
+                    StyleValueVector feature_value_names;
+                    feature_value_names.ensure_capacity(value.feature_value_names.size());
+                    for (auto const& feature_value_name : value.feature_value_names)
+                        feature_value_names.append(CustomIdentStyleValue::create(feature_value_name));
+
+                    FlyString function_name;
+                    switch (value.kind) {
+                    case FFI::CssFontVariantAlternatesValueKind::Stylistic:
+                        function_name = "stylistic"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::Styleset:
+                        function_name = "styleset"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::CharacterVariant:
+                        function_name = "character-variant"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::Swash:
+                        function_name = "swash"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::Ornaments:
+                        function_name = "ornaments"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::Annotation:
+                        function_name = "annotation"_fly_string;
+                        break;
+                    case FFI::CssFontVariantAlternatesValueKind::HistoricalForms:
+                        VERIFY_NOT_REACHED();
+                    }
+
+                    values.append(FunctionStyleValue::create(move(function_name), StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma)));
+                }
+
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+            };
+            auto materialize_rust_font_variant_east_asian_value = [&]() -> RefPtr<StyleValue const> {
+                StyleValueTuple tuple;
+                tuple.resize_with_default_value(3, nullptr);
+
+                for (auto const& value : rust_style_value->font_variant_east_asian) {
+                    auto maybe_keyword = keyword_from_string(value.value);
+                    if (!maybe_keyword.has_value())
+                        return nullptr;
+                    auto style_value = KeywordStyleValue::create(*maybe_keyword);
+                    switch (value.kind) {
+                    case FFI::CssFontVariantEastAsianValueKind::Variant:
+                        tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant] = style_value;
+                        break;
+                    case FFI::CssFontVariantEastAsianValueKind::Width:
+                        tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width] = style_value;
+                        break;
+                    case FFI::CssFontVariantEastAsianValueKind::Ruby:
+                        tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby] = style_value;
+                        break;
+                    }
+                }
+
+                return TupleStyleValue::create(tuple);
+            };
+            auto materialize_rust_font_variant_ligatures_value = [&]() -> RefPtr<StyleValue const> {
+                StyleValueTuple tuple;
+                tuple.resize_with_default_value(4, nullptr);
+
+                for (auto const& value : rust_style_value->font_variant_ligatures) {
+                    auto maybe_keyword = keyword_from_string(value.value);
+                    if (!maybe_keyword.has_value())
+                        return nullptr;
+                    auto style_value = KeywordStyleValue::create(*maybe_keyword);
+                    switch (value.kind) {
+                    case FFI::CssFontVariantLigaturesValueKind::Common:
+                        tuple[TupleStyleValue::Indices::FontVariantLigatures::Common] = style_value;
+                        break;
+                    case FFI::CssFontVariantLigaturesValueKind::Discretionary:
+                        tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary] = style_value;
+                        break;
+                    case FFI::CssFontVariantLigaturesValueKind::Historical:
+                        tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical] = style_value;
+                        break;
+                    case FFI::CssFontVariantLigaturesValueKind::Contextual:
+                        tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual] = style_value;
+                        break;
+                    }
+                }
+
+                return TupleStyleValue::create(tuple);
+            };
+            auto materialize_rust_font_variant_numeric_value = [&]() -> RefPtr<StyleValue const> {
+                StyleValueTuple tuple;
+                tuple.resize_with_default_value(5, nullptr);
+
+                for (auto const& value : rust_style_value->font_variant_numeric) {
+                    auto maybe_keyword = keyword_from_string(value.value);
+                    if (!maybe_keyword.has_value())
+                        return nullptr;
+                    auto style_value = KeywordStyleValue::create(*maybe_keyword);
+                    switch (value.kind) {
+                    case FFI::CssFontVariantNumericValueKind::Figure:
+                        tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure] = style_value;
+                        break;
+                    case FFI::CssFontVariantNumericValueKind::Spacing:
+                        tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing] = style_value;
+                        break;
+                    case FFI::CssFontVariantNumericValueKind::Fraction:
+                        tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction] = style_value;
+                        break;
+                    case FFI::CssFontVariantNumericValueKind::Ordinal:
+                        tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal] = style_value;
+                        break;
+                    case FFI::CssFontVariantNumericValueKind::SlashedZero:
+                        tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero] = style_value;
+                        break;
+                    }
+                }
+
+                return TupleStyleValue::create(tuple);
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -712,6 +837,34 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     tokens.discard_a_token();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, CounterStyleStyleValue::create(counter_style_name) };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontVariantAlternates:
+                if (!rust_style_value->font_variant_alternates.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, materialize_rust_font_variant_alternates_value().release_nonnull() };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontVariantEastAsian:
+                if (!rust_style_value->font_variant_east_asian.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, materialize_rust_font_variant_east_asian_value().release_nonnull() };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontVariantLigatures:
+                if (!rust_style_value->font_variant_ligatures.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, materialize_rust_font_variant_ligatures_value().release_nonnull() };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontVariantNumeric:
+                if (!rust_style_value->font_variant_numeric.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, materialize_rust_font_variant_numeric_value().release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::EasingFunction:
