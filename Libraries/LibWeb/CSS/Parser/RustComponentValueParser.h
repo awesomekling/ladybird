@@ -242,6 +242,22 @@ public:
         LigaturesValue,
     };
 
+    enum class RustContentEventKind : u8 {
+        Normal,
+        None,
+        ItemQuote,
+        ItemString,
+        ItemImage,
+        ItemCounter,
+        AltTextString,
+        AltTextCounter,
+    };
+
+    struct RustContentEvent {
+        RustContentEventKind kind { RustContentEventKind::Normal };
+        String source;
+    };
+
     struct RustFilterValueListEvent {
         RustFilterValueListEventKind kind { RustFilterValueListEventKind::None };
         RustSimpleFilterFunction simple_function { RustSimpleFilterFunction::Brightness };
@@ -326,6 +342,8 @@ public:
         Optional<FlyString> font_variant_emoji;
         Optional<FlyString> font_variant_position;
         bool font_variant_ligatures_none { false };
+        Optional<Keyword> content_keyword;
+        Vector<RustContentEvent> content_events;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};

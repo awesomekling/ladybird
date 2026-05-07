@@ -1940,9 +1940,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     CounterDefinitions(RustOwnedCounterDefinitions),
     BorderRadius(RustOwnedBorderRadius),
     Columns(RustOwnedColumns),
-    Content {
-        source: String,
-    },
+    Content(RustOwnedContent),
     Cursor(RustOwnedCursor),
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
@@ -2397,6 +2395,30 @@ pub(crate) struct RustOwnedCursorImage {
     image_source: String,
     x_source: Option<String>,
     y_source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedContent {
+    Normal,
+    None,
+    Items {
+        items: Vec<RustOwnedContentItem>,
+        alt_text: Vec<RustOwnedContentAltTextItem>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedContentItem {
+    Quote(String),
+    String(String),
+    Image(String),
+    Counter(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedContentAltTextItem {
+    String(String),
+    Counter(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5128,13 +5150,7 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
 }
 
 fn rust_owned_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_content_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::Content {
-        source: filtered_input_to_string(filtered_input),
-    })
+    parse_rust_owned_content_value(filtered_input).map(RustOwnedStyleValueKind::Content)
 }
 
 fn rust_owned_cursor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6515,8 +6531,8 @@ where
                 value.column_height_source.as_ref(),
             );
         }
-        RustOwnedStyleValueKind::Content { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Content, property_id, source);
+        RustOwnedStyleValueKind::Content(value) => {
+            callback_content_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::ColorScheme(value) => {
             let scheme_bytes = null_separated_string_list_bytes(&value.schemes);
@@ -8079,6 +8095,14 @@ where
 
 const CURSOR_CALLBACK_IMAGE: u8 = 0;
 const CURSOR_CALLBACK_PREDEFINED: u8 = 1;
+const CONTENT_CALLBACK_NORMAL: u8 = 0;
+const CONTENT_CALLBACK_NONE: u8 = 1;
+const CONTENT_CALLBACK_ITEM_QUOTE: u8 = 2;
+const CONTENT_CALLBACK_ITEM_STRING: u8 = 3;
+const CONTENT_CALLBACK_ITEM_IMAGE: u8 = 4;
+const CONTENT_CALLBACK_ITEM_COUNTER: u8 = 5;
+const CONTENT_CALLBACK_ALT_TEXT_STRING: u8 = 6;
+const CONTENT_CALLBACK_ALT_TEXT_COUNTER: u8 = 7;
 const FILTER_VALUE_LIST_CALLBACK_NONE: u8 = 0;
 const FILTER_VALUE_LIST_CALLBACK_URL: u8 = 1;
 const FILTER_VALUE_LIST_CALLBACK_BLUR: u8 = 2;
@@ -8140,6 +8164,65 @@ where
         0,
         0,
         value.predefined.as_bytes(),
+        "",
+    );
+}
+
+fn callback_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedContent)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedContent::Normal => callback_content_event(callback, property_id, CONTENT_CALLBACK_NORMAL, ""),
+        RustOwnedContent::None => callback_content_event(callback, property_id, CONTENT_CALLBACK_NONE, ""),
+        RustOwnedContent::Items { items, alt_text } => {
+            for item in items {
+                match item {
+                    RustOwnedContentItem::Quote(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_QUOTE, source);
+                    }
+                    RustOwnedContentItem::String(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_STRING, source);
+                    }
+                    RustOwnedContentItem::Image(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_IMAGE, source);
+                    }
+                    RustOwnedContentItem::Counter(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_COUNTER, source);
+                    }
+                }
+            }
+            for item in alt_text {
+                match item {
+                    RustOwnedContentAltTextItem::String(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ALT_TEXT_STRING, source);
+                    }
+                    RustOwnedContentAltTextItem::Counter(source) => {
+                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ALT_TEXT_COUNTER, source);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn callback_content_event<C>(callback: &mut C, property_id: u16, kind: u8, source: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Content,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        source.as_bytes(),
         "",
     );
 }
@@ -16078,14 +16161,22 @@ fn component_value_parse_as_non_negative_number_percentage(component_value: &Com
 }
 
 pub(crate) fn parse_content_value(filtered_input: &[u8]) -> bool {
+    parse_rust_owned_content_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_content_value(filtered_input: &[u8]) -> Option<RustOwnedContent> {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = remove_whitespace_component_values(&component_values);
 
     match component_values.as_slice() {
-        [component_value] if component_value_is_ident(Some(component_value), "normal") => return true,
-        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
-        [] => return false,
+        [component_value] if component_value_is_ident(Some(component_value), "normal") => {
+            return Some(RustOwnedContent::Normal);
+        }
+        [component_value] if component_value_is_ident(Some(component_value), "none") => {
+            return Some(RustOwnedContent::None);
+        }
+        [] => return None,
         _ => {}
     }
 
@@ -16096,30 +16187,40 @@ pub(crate) fn parse_content_value(filtered_input: &[u8]) -> bool {
     for component_value in &component_values {
         if component_value_is_delim(Some(component_value), '/') {
             if in_alt_text || content_values.is_empty() {
-                return false;
+                return None;
             }
             in_alt_text = true;
             continue;
         }
 
         if in_alt_text {
-            if !component_value_parse_as_content_alt_text(component_value, filtered_input_string) {
-                return false;
-            }
-            alt_text_values.push(component_value);
+            alt_text_values.push(component_value_parse_as_content_alt_text(
+                component_value,
+                filtered_input_string,
+            )?);
             continue;
         }
 
-        if !component_value_parse_as_content_item(component_value, filtered_input_string) {
-            return false;
-        }
-        content_values.push(component_value);
+        content_values.push(component_value_parse_as_content_item(
+            component_value,
+            filtered_input_string,
+        )?);
     }
 
-    !content_values.is_empty() && (!in_alt_text || !alt_text_values.is_empty())
+    if content_values.is_empty() || (in_alt_text && alt_text_values.is_empty()) {
+        return None;
+    }
+
+    Some(RustOwnedContent::Items {
+        items: content_values,
+        alt_text: alt_text_values,
+    })
 }
 
-fn component_value_parse_as_content_item(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+fn component_value_parse_as_content_item(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedContentItem> {
     // https://drafts.csswg.org/css-content-3/#content-property
     // content: normal | none | [ <content-replacement> | <content-list> ] [/ [ <string> | <counter> | <attr()> ]+ ]?
     //
@@ -16128,20 +16229,49 @@ fn component_value_parse_as_content_item(component_value: &ComponentValue, filte
     //
     // https://drafts.csswg.org/css-content-3/#typedef-quote
     // <quote> = open-quote | close-quote | no-open-quote | no-close-quote
-    component_value_parse_as_content_quote(component_value)
-        || parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String
-        || component_value_parse_as_content_image(component_value)
-        || component_value_parse_as_content_counter(component_value, filtered_input_string)
+    if component_value_parse_as_content_quote(component_value) {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentItem::Quote);
+    }
+
+    if parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentItem::String);
+    }
+
+    if component_value_parse_as_content_image(component_value) {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentItem::Image);
+    }
+
+    if component_value_parse_as_content_counter(component_value, filtered_input_string) {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentItem::Counter);
+    }
+
+    None
 }
 
-fn component_value_parse_as_content_alt_text(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+fn component_value_parse_as_content_alt_text(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedContentAltTextItem> {
     // https://drafts.csswg.org/css-content-3/#content-property
     // / [ <string> | <counter> | <attr()> ]+
     //
     // NB: <attr()> is handled as an arbitrary substitution function before
     // property-specific Rust-owned value parsing.
-    parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String
-        || component_value_parse_as_content_counter(component_value, filtered_input_string)
+    if parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentAltTextItem::String);
+    }
+
+    if component_value_parse_as_content_counter(component_value, filtered_input_string) {
+        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+            .map(RustOwnedContentAltTextItem::Counter);
+    }
+
+    None
 }
 
 fn component_value_parse_as_content_quote(component_value: &ComponentValue) -> bool {
@@ -25912,21 +26042,21 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize,
         RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
-        RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
-        RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
-        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
+        RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
@@ -27700,9 +27830,12 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
-                value: RustOwnedStyleValueKind::Content {
-                    source: "counter(section, upper-roman)".to_string(),
-                },
+                value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
+                    items: vec![RustOwnedContentItem::Counter(
+                        "counter(section, upper-roman)".to_string(),
+                    )],
+                    alt_text: vec![],
+                }),
             })
         );
         assert_eq!(
@@ -27864,9 +27997,12 @@ mod tests {
             ),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
-                value: RustOwnedStyleValueKind::Content {
-                    source: "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
-                },
+                value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
+                    items: vec![RustOwnedContentItem::Counter(
+                        "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
+                    )],
+                    alt_text: vec![],
+                }),
             })
         );
         assert_eq!(
@@ -29327,7 +29463,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "\"(\" counter(item) \")\"".to_string(),
+                value: "\")\"".to_string(),
                 value_type: String::new(),
             })
         );

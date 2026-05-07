@@ -1295,10 +1295,36 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else if (color_red == SpreadDistance)
                     shadow.spread_distance_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
-            } else if (first_is_one_of(kind,
-                           FFI::CssStyleValueKind::Content,
-                           FFI::CssStyleValueKind::ShapeOutside)) {
+            } else if (kind == FFI::CssStyleValueKind::ShapeOutside) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Content) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Content);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                switch (static_cast<RustContentEventKind>(color_red)) {
+                case RustContentEventKind::Normal:
+                    style_value->content_keyword = Keyword::Normal;
+                    break;
+                case RustContentEventKind::None:
+                    style_value->content_keyword = Keyword::None;
+                    break;
+                case RustContentEventKind::ItemQuote:
+                case RustContentEventKind::ItemString:
+                case RustContentEventKind::ItemImage:
+                case RustContentEventKind::ItemCounter:
+                case RustContentEventKind::AltTextString:
+                case RustContentEventKind::AltTextCounter:
+                    style_value->content_events.append({
+                        .kind = static_cast<RustContentEventKind>(color_red),
+                        .source = string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::FontVariant) {
                 if (!style_value.has_value())
                     style_value = move(value);

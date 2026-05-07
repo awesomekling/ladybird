@@ -909,6 +909,89 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_string = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_string_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_counter = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_counter_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto materialize_rust_content_value = [&]() -> RefPtr<StyleValue const> {
+                if (rust_style_value->content_keyword.has_value())
+                    return KeywordStyleValue::create(*rust_style_value->content_keyword);
+
+                StyleValueVector content_values;
+                StyleValueVector alt_text_values;
+                content_values.ensure_capacity(rust_style_value->content_events.size());
+                alt_text_values.ensure_capacity(rust_style_value->content_events.size());
+
+                for (auto const& event : rust_style_value->content_events) {
+                    RefPtr<StyleValue const> value;
+                    switch (event.kind) {
+                    case RustComponentValueParser::RustContentEventKind::Normal:
+                    case RustComponentValueParser::RustContentEventKind::None:
+                        return nullptr;
+                    case RustComponentValueParser::RustContentEventKind::ItemQuote: {
+                        auto keyword = keyword_from_string(event.source);
+                        if (!keyword.has_value())
+                            return nullptr;
+                        value = KeywordStyleValue::create(*keyword);
+                        content_values.append(value.release_nonnull());
+                        break;
+                    }
+                    case RustComponentValueParser::RustContentEventKind::ItemString:
+                        value = parse_rust_source_as_string(event.source);
+                        if (!value)
+                            return nullptr;
+                        content_values.append(value.release_nonnull());
+                        break;
+                    case RustComponentValueParser::RustContentEventKind::ItemImage:
+                        value = parse_rust_source_as_image(event.source);
+                        if (!value)
+                            return nullptr;
+                        content_values.append(value.release_nonnull());
+                        break;
+                    case RustComponentValueParser::RustContentEventKind::ItemCounter:
+                        value = parse_rust_source_as_counter(event.source);
+                        if (!value)
+                            return nullptr;
+                        content_values.append(value.release_nonnull());
+                        break;
+                    case RustComponentValueParser::RustContentEventKind::AltTextString:
+                        value = parse_rust_source_as_string(event.source);
+                        if (!value)
+                            return nullptr;
+                        alt_text_values.append(value.release_nonnull());
+                        break;
+                    case RustComponentValueParser::RustContentEventKind::AltTextCounter:
+                        value = parse_rust_source_as_counter(event.source);
+                        if (!value)
+                            return nullptr;
+                        alt_text_values.append(value.release_nonnull());
+                        break;
+                    }
+                }
+
+                if (content_values.is_empty())
+                    return nullptr;
+
+                RefPtr<StyleValueList> alt_text;
+                if (!alt_text_values.is_empty())
+                    alt_text = StyleValueList::create(move(alt_text_values), StyleValueList::Separator::Space);
+
+                return ContentStyleValue::create(StyleValueList::create(move(content_values), StyleValueList::Separator::Space), move(alt_text));
+            };
             auto parse_rust_source_as_url = [&](String const& source) -> Optional<URL> {
                 return RustComponentValueParser::parse_a_url_function(source.bytes_as_string_view(), "utf-8"sv);
             };
@@ -1760,7 +1843,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         { PropertyID::ColumnCount, PropertyID::ColumnWidth, PropertyID::ColumnHeight },
                         { property_initial_value(PropertyID::ColumnCount), property_initial_value(PropertyID::ColumnWidth), property_initial_value(PropertyID::ColumnHeight) }) };
             case FFI::CssStyleValueKind::Content:
-                if (auto value = parse_content_value(tokens)) {
+                if (auto value = materialize_rust_content_value()) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
