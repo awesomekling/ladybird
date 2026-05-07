@@ -253,6 +253,13 @@ public:
         AltTextCounter,
     };
 
+    enum class RustShapeOutsideEventKind : u8 {
+        None,
+        Image,
+        BasicShape,
+        ShapeBox,
+    };
+
     struct RustContentEvent {
         RustContentEventKind kind { RustContentEventKind::Normal };
         String source;
@@ -344,6 +351,10 @@ public:
         bool font_variant_ligatures_none { false };
         Optional<Keyword> content_keyword;
         Vector<RustContentEvent> content_events;
+        bool shape_outside_is_none { false };
+        Optional<String> shape_outside_image_source;
+        Optional<String> shape_outside_basic_shape_source;
+        Optional<String> shape_outside_shape_box_source;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};

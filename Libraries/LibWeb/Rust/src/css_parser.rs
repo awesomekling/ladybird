@@ -2018,9 +2018,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         length_source: String,
     },
     Shadow(RustOwnedShadow),
-    ShapeOutside {
-        source: String,
-    },
+    ShapeOutside(RustOwnedShapeOutside),
     TextDecoration(RustOwnedTextDecoration),
     TextDecorationLine(RustOwnedTextDecorationLine),
     ScrollbarColor(RustOwnedScrollbarColor),
@@ -2419,6 +2417,16 @@ pub(crate) enum RustOwnedContentItem {
 pub(crate) enum RustOwnedContentAltTextItem {
     String(String),
     Counter(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedShapeOutside {
+    None,
+    Image(String),
+    Shape {
+        basic_shape_source: Option<String>,
+        shape_box_source: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5191,13 +5199,7 @@ fn rust_owned_shadow_style_value_kind(
 }
 
 fn rust_owned_shape_outside_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_shape_outside_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::ShapeOutside {
-        source: filtered_input_to_string(filtered_input),
-    })
+    parse_rust_owned_shape_outside_value(filtered_input).map(RustOwnedStyleValueKind::ShapeOutside)
 }
 
 fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6948,8 +6950,8 @@ where
         RustOwnedStyleValueKind::Shadow(value) => {
             callback_shadow_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::ShapeOutside { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::ShapeOutside, property_id, source);
+        RustOwnedStyleValueKind::ShapeOutside(value) => {
+            callback_shape_outside_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::TextDecoration(value) => {
             callback_optional_longhand_source(
@@ -8124,6 +8126,10 @@ const FONT_VARIANT_CALLBACK_ALTERNATES_FEATURE_VALUE_NAME: u8 = 3;
 const FONT_VARIANT_CALLBACK_EAST_ASIAN_VALUE: u8 = 4;
 const FONT_VARIANT_CALLBACK_NUMERIC_VALUE: u8 = 5;
 const FONT_VARIANT_CALLBACK_LIGATURES_VALUE: u8 = 6;
+const SHAPE_OUTSIDE_CALLBACK_NONE: u8 = 0;
+const SHAPE_OUTSIDE_CALLBACK_IMAGE: u8 = 1;
+const SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE: u8 = 2;
+const SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX: u8 = 3;
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
 where
@@ -8212,6 +8218,52 @@ where
 {
     callback(
         CssStyleValueKind::Content,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        source.as_bytes(),
+        "",
+    );
+}
+
+fn callback_shape_outside_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedShapeOutside)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedShapeOutside::None => {
+            callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_NONE, "");
+        }
+        RustOwnedShapeOutside::Image(source) => {
+            callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_IMAGE, source);
+        }
+        RustOwnedShapeOutside::Shape {
+            basic_shape_source,
+            shape_box_source,
+        } => {
+            if let Some(source) = basic_shape_source {
+                callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE, source);
+            }
+            if let Some(source) = shape_box_source {
+                callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX, source);
+            }
+        }
+    }
+}
+
+fn callback_shape_outside_event<C>(callback: &mut C, property_id: u16, kind: u8, source: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::ShapeOutside,
         property_id,
         CssPrimitiveValueKind::Invalid,
         false,
@@ -15570,6 +15622,10 @@ pub(crate) fn parse_overflow_clip_margin_value(filtered_input: &[u8]) -> bool {
 }
 
 pub(crate) fn parse_shape_outside_value(filtered_input: &[u8]) -> bool {
+    parse_rust_owned_shape_outside_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwnedShapeOutside> {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = remove_whitespace_component_values(&component_values);
@@ -15577,36 +15633,48 @@ pub(crate) fn parse_shape_outside_value(filtered_input: &[u8]) -> bool {
     // https://drafts.csswg.org/css-shapes-1/#shape-outside-property
     // none | [ <basic-shape> || <shape-box> ] | <image>
     match component_values.as_slice() {
-        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
-        [] => return false,
+        [component_value] if component_value_is_ident(Some(component_value), "none") => {
+            return Some(RustOwnedShapeOutside::None);
+        }
+        [] => return None,
         _ => {}
     }
 
     if rust_owned_image_style_value_kind(filtered_input, filtered_input_string).is_some() {
-        return true;
+        return Some(RustOwnedShapeOutside::Image(filtered_input_to_string(filtered_input)));
     }
 
-    let mut has_basic_shape = false;
-    let mut has_shape_box = false;
+    let mut basic_shape_source = None;
+    let mut shape_box_source = None;
     for component_value in &component_values {
         let component_values = std::slice::from_ref(component_value);
-        if !has_basic_shape
+        if basic_shape_source.is_none()
             && let Some(source) = serialize_component_values_for_reparsing(component_values, filtered_input_string)
             && parse_basic_shape_value(source.as_bytes()) == CssBasicShapeValueKind::Valid
         {
-            has_basic_shape = true;
+            basic_shape_source = Some(source.to_string());
             continue;
         }
 
-        if !has_shape_box && component_value_is_shape_box(component_value) {
-            has_shape_box = true;
+        if shape_box_source.is_none()
+            && component_value_is_shape_box(component_value)
+            && let Some(source) = serialize_component_values_for_reparsing(component_values, filtered_input_string)
+        {
+            shape_box_source = Some(source.to_string());
             continue;
         }
 
-        return false;
+        return None;
     }
 
-    has_basic_shape || has_shape_box
+    if basic_shape_source.is_none() && shape_box_source.is_none() {
+        return None;
+    }
+
+    Some(RustOwnedShapeOutside::Shape {
+        basic_shape_source,
+        shape_box_source,
+    })
 }
 
 pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
@@ -26055,12 +26123,13 @@ mod tests {
         RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
         RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
         RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
@@ -27839,6 +27908,16 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ShapeOutside], "circle(10px) border-box"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ShapeOutside,
+                value: RustOwnedStyleValueKind::ShapeOutside(RustOwnedShapeOutside::Shape {
+                    basic_shape_source: Some("circle(10px)".to_string()),
+                    shape_box_source: Some("border-box".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Flex], "1 1 10em"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Flex,
@@ -29398,7 +29477,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "circle(10px) border-box".to_string(),
+                value: "border-box".to_string(),
                 value_type: String::new(),
             })
         );

@@ -909,6 +909,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_basic_shape = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_basic_shape_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_string = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -991,6 +1000,38 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     alt_text = StyleValueList::create(move(alt_text_values), StyleValueList::Separator::Space);
 
                 return ContentStyleValue::create(StyleValueList::create(move(content_values), StyleValueList::Separator::Space), move(alt_text));
+            };
+            auto materialize_rust_shape_outside_value = [&]() -> RefPtr<StyleValue const> {
+                if (rust_style_value->shape_outside_is_none)
+                    return KeywordStyleValue::create(Keyword::None);
+
+                if (rust_style_value->shape_outside_image_source.has_value())
+                    return parse_rust_source_as_image(*rust_style_value->shape_outside_image_source);
+
+                RefPtr<StyleValue const> basic_shape_value;
+                RefPtr<StyleValue const> shape_box_value;
+                if (rust_style_value->shape_outside_basic_shape_source.has_value()) {
+                    basic_shape_value = parse_rust_source_as_basic_shape(*rust_style_value->shape_outside_basic_shape_source);
+                    if (!basic_shape_value)
+                        return nullptr;
+                }
+                if (rust_style_value->shape_outside_shape_box_source.has_value()) {
+                    auto maybe_keyword = keyword_from_string(*rust_style_value->shape_outside_shape_box_source);
+                    if (!maybe_keyword.has_value() || !keyword_to_shape_box(*maybe_keyword).has_value())
+                        return nullptr;
+                    shape_box_value = KeywordStyleValue::create(*maybe_keyword);
+                }
+
+                if (basic_shape_value && !shape_box_value)
+                    return basic_shape_value;
+
+                if (!basic_shape_value && shape_box_value)
+                    return shape_box_value;
+
+                if (basic_shape_value && shape_box_value)
+                    return StyleValueList::create({ basic_shape_value.release_nonnull(), shape_box_value.release_nonnull() }, StyleValueList::Separator::Space);
+
+                return nullptr;
             };
             auto parse_rust_source_as_url = [&](String const& source) -> Optional<URL> {
                 return RustComponentValueParser::parse_a_url_function(source.bytes_as_string_view(), "utf-8"sv);
@@ -2574,7 +2615,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             }
             case FFI::CssStyleValueKind::ShapeOutside:
-                if (auto value = parse_shape_outside_value(tokens)) {
+                if (auto value = materialize_rust_shape_outside_value()) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
