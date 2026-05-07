@@ -629,6 +629,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::AnchorNameOrScope:
+                if (auto value = rust_style_value->property_id == PropertyID::AnchorScope ? parse_anchor_scope_value(tokens) : parse_anchor_name_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::AnimationName:
+                if (auto value = parse_animation_name_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::ColorScheme:
+                if (auto value = parse_color_scheme_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::Contain: {
                 auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
                     values.append(KeywordStyleValue::create(keyword));
@@ -737,6 +755,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::Separator::Space) };
                 }
                 break;
+            case FFI::CssStyleValueKind::PositionAnchor:
+                if (auto value = parse_position_anchor_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::PositionTryOrder:
                 if (auto keyword = position_try_order_keyword_from_rust(rust_style_value->position_try_order); keyword.has_value()) {
                     discard_rust_owned_property_value_tokens();
@@ -764,6 +788,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
                 }
+                }
+                break;
+            case FFI::CssStyleValueKind::Quotes:
+                if (auto value = parse_quotes_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::RepeatStyle:
@@ -798,6 +828,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges) };
+                }
+                break;
+            case FFI::CssStyleValueKind::TimelineName:
+                if (auto value = parse_timeline_name_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::TimelineScope:
+                if (auto value = parse_timeline_scope_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::TextWrap: {
@@ -876,6 +918,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 }
                 break;
+            case FFI::CssStyleValueKind::TransitionBehavior:
+                if (auto value = parse_transition_behavior_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::TransitionProperty:
+                if (auto value = parse_transition_property_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::ViewTimelineInset:
                 if (rust_style_value->view_timeline_inset_count > 0) {
                     auto value = parse_view_timeline_inset_value(tokens);
@@ -888,6 +942,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::ViewFunction:
                 if (auto value = materialize_rust_view_function_value()) {
                     tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::ViewTransitionName:
+                if (auto value = parse_view_transition_name_value(tokens)) {
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
@@ -912,6 +972,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
                 }
+                }
+                break;
+            case FFI::CssStyleValueKind::WillChange:
+                if (auto value = parse_will_change_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::Primitive:

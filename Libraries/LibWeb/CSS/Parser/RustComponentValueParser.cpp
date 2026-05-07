@@ -956,6 +956,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (first_is_one_of(kind,
+                           FFI::CssStyleValueKind::AnchorNameOrScope,
+                           FFI::CssStyleValueKind::AnimationName,
+                           FFI::CssStyleValueKind::ColorScheme,
+                           FFI::CssStyleValueKind::PositionAnchor,
+                           FFI::CssStyleValueKind::Quotes,
+                           FFI::CssStyleValueKind::TimelineName,
+                           FFI::CssStyleValueKind::TimelineScope,
+                           FFI::CssStyleValueKind::TransitionBehavior,
+                           FFI::CssStyleValueKind::TransitionProperty,
+                           FFI::CssStyleValueKind::ViewTransitionName,
+                           FFI::CssStyleValueKind::WillChange)) {
+                value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_green);

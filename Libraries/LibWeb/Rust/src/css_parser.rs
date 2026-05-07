@@ -1782,23 +1782,34 @@ pub enum CssStyleValueKind {
     FitContent,
     BasicShape,
     Rect,
+    AnimationName,
+    AnchorNameOrScope,
+    ColorScheme,
     Contain,
     ContainerType,
     GridAutoFlow,
     PaintOrder,
+    PositionAnchor,
     PositionTryOrder,
     PositionVisibility,
+    Quotes,
     RepeatStyle,
     ScrollFunction,
     ScrollbarGutter,
+    TimelineName,
+    TimelineScope,
     TextWrap,
     TextWrapMode,
     TextWrapStyle,
     TextUnderlinePosition,
     TouchAction,
+    TransitionBehavior,
+    TransitionProperty,
     ViewTimelineInset,
     ViewFunction,
+    ViewTransitionName,
     WhiteSpaceTrim,
+    WillChange,
     ValueType,
 }
 
@@ -1811,15 +1822,17 @@ pub(crate) struct RustOwnedStyleValue {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStyleValueKind {
     Anchor(RustOwnedSourceBackedStyleValue),
+    AnchorNameOrScope(RustOwnedAnchorNameOrScope),
     AnchorSize(RustOwnedSourceBackedStyleValue),
     Angle(RustOwnedDimensionStyleValue),
+    AnimationName(RustOwnedAnimationName),
     BackgroundSize(RustOwnedSourceBackedStyleValue),
     BorderImageSlice(RustOwnedSourceBackedStyleValue),
     BorderRadius(RustOwnedSourceBackedStyleValue),
     BorderRadiusRect(RustOwnedSourceBackedStyleValue),
     Calculated(RustOwnedMathFunction),
     ColorInterpolationMethod(RustOwnedSourceBackedStyleValue),
-    ColorScheme(RustOwnedSourceBackedStyleValue),
+    ColorScheme(RustOwnedColorScheme),
     ConicGradient(RustOwnedSourceBackedStyleValue),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
@@ -1890,11 +1903,13 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Position(RustOwnedSourceBackedStyleValue),
+    PositionAnchor(RustOwnedPositionAnchor),
     PositionTryOrder(RustOwnedPositionTryOrder),
     PositionVisibility(RustOwnedPositionVisibility),
     RadialGradient(RustOwnedSourceBackedStyleValue),
     RadialSize(RustOwnedSourceBackedStyleValue),
     RandomValueSharing(RustOwnedSourceBackedStyleValue),
+    Quotes(RustOwnedQuotes),
     Ratio {
         numerator: f64,
         denominator: f64,
@@ -1912,6 +1927,8 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Superellipse(RustOwnedSourceBackedStyleValue),
+    TimelineName(RustOwnedTimelineName),
+    TimelineScope(RustOwnedTimelineScope),
     TextWrap(RustOwnedTextWrap),
     TextWrapMode(RustOwnedTextWrapMode),
     TextWrapStyle(RustOwnedTextWrapStyle),
@@ -1921,6 +1938,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     TouchAction(RustOwnedTouchAction),
     Transformation(RustOwnedSourceBackedStyleValue),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
+    TransitionBehavior(RustOwnedTransitionBehavior),
+    TransitionProperty(RustOwnedTransitionProperty),
     Tuple(RustOwnedStyleValueList),
     UnicodeRange(RustOwnedSourceBackedStyleValue),
     ValueList(RustOwnedStyleValueList),
@@ -1957,6 +1976,8 @@ pub(crate) enum RustOwnedStyleValueKind {
         inset: CssViewFunctionInsetKind,
         inset_position: CssViewFunctionInsetPosition,
     },
+    ViewTransitionName(RustOwnedViewTransitionName),
+    WillChange(RustOwnedWillChange),
     MathFunction {
         value_type: PropertyValueType,
         function: RustOwnedMathFunction,
@@ -2071,6 +2092,33 @@ pub(crate) struct RustOwnedFontStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAnchorNameOrScope {
+    kind: CssAnchorNameOrScopeValueKind,
+    names: Vec<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAnimationNameItem {
+    kind: CssAnimationNameItemKind,
+    value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAnimationName {
+    kind: CssAnimationNameValueKind,
+    names: Vec<RustOwnedAnimationNameItem>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedColorScheme {
+    value: CssColorSchemeValue,
+    schemes: Vec<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridAutoFlow {
     axis: CssGridAutoFlowAxis,
     dense: CssGridAutoFlowDense,
@@ -2096,6 +2144,13 @@ pub(crate) struct RustOwnedPaintOrder {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionAnchor {
+    kind: CssPositionAnchorValueKind,
+    name: Option<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionTryOrder {
     value: CssPositionTryOrderValue,
     source: String,
@@ -2104,6 +2159,13 @@ pub(crate) struct RustOwnedPositionTryOrder {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionVisibility {
     value: CssPositionVisibilityValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedQuotes {
+    kind: CssQuotesValueKind,
+    strings: Vec<String>,
     source: String,
 }
 
@@ -2123,6 +2185,26 @@ pub(crate) struct RustOwnedScrollbarGutter {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTimelineNameItem {
+    kind: CssTimelineNameItemKind,
+    name: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTimelineName {
+    kind: CssTimelineNameValueKind,
+    names: Vec<RustOwnedTimelineNameItem>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTimelineScope {
+    kind: CssTimelineScopeValueKind,
+    names: Vec<String>,
     source: String,
 }
 
@@ -2151,8 +2233,42 @@ pub(crate) struct RustOwnedTouchAction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransitionBehavior {
+    kind: CssTransitionBehaviorValueKind,
+    behaviors: Vec<CssTransitionBehaviorItemKind>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransitionProperty {
+    kind: CssTransitionPropertyValueKind,
+    properties: Vec<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedViewTransitionName {
+    kind: CssViewTransitionNameValueKind,
+    name: Option<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWhiteSpaceTrim {
     value: CssWhiteSpaceTrimValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedWillChangeFeature {
+    kind: CssWillChangeFeatureKind,
+    value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedWillChange {
+    kind: CssWillChangeValueKind,
+    features: Vec<RustOwnedWillChangeFeature>,
     source: String,
 }
 
@@ -2502,22 +2618,30 @@ fn parse_rust_owned_property_specific_longhand_value(
     filtered_input: &[u8],
 ) -> Option<RustOwnedStyleValueKind> {
     match property_id {
+        PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
+        PropertyId::AnchorScope => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, true),
+        PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
         PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
         PropertyId::PositionTryOrder => rust_owned_position_try_order_style_value_kind(filtered_input),
         PropertyId::PositionVisibility => rust_owned_position_visibility_style_value_kind(filtered_input),
+        PropertyId::Quotes => rust_owned_quotes_style_value_kind(filtered_input),
         PropertyId::BackgroundRepeat | PropertyId::MaskRepeat => {
             rust_owned_repeat_style_style_value_kind(filtered_input)
         }
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::TimelineScope => rust_owned_timeline_scope_style_value_kind(filtered_input),
         PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
         PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
         PropertyId::TextWrapStyle => rust_owned_text_wrap_style_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
         PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
+        PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
         _ => None,
     }
 }
@@ -2906,6 +3030,56 @@ fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedSty
     Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
 }
 
+fn rust_owned_anchor_name_or_scope_style_value_kind(
+    filtered_input: &[u8],
+    allow_all: bool,
+) -> Option<RustOwnedStyleValueKind> {
+    let mut names = Vec::new();
+    let kind = parse_anchor_name_or_scope_value(filtered_input, allow_all, |name| names.push(name.to_string()));
+    if kind == CssAnchorNameOrScopeValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::AnchorNameOrScope(RustOwnedAnchorNameOrScope {
+        kind,
+        names,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_animation_name_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut names = Vec::new();
+    let kind = parse_animation_name_value(filtered_input, |kind, value| {
+        names.push(RustOwnedAnimationNameItem {
+            kind,
+            value: value.to_string(),
+        });
+    });
+    if kind == CssAnimationNameValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::AnimationName(RustOwnedAnimationName {
+        kind,
+        names,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_color_scheme_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut schemes = Vec::new();
+    let value = parse_color_scheme_value(filtered_input, |scheme| schemes.push(scheme.to_string()));
+    if value.kind == CssColorSchemeValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ColorScheme(RustOwnedColorScheme {
+        value,
+        schemes,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
 fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_contain_value(filtered_input);
     if value.kind == CssContainValueKind::Invalid {
@@ -2987,6 +3161,20 @@ fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<Rust
     }))
 }
 
+fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut name = None;
+    let kind = parse_position_anchor_value(filtered_input, |value| name = Some(value.to_string()));
+    if kind == CssPositionAnchorValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionAnchor(RustOwnedPositionAnchor {
+        kind,
+        name,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
 fn rust_owned_position_try_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_position_try_order_value(filtered_input);
     if value == CssPositionTryOrderValue::Invalid {
@@ -3011,6 +3199,20 @@ fn rust_owned_position_visibility_style_value_kind(filtered_input: &[u8]) -> Opt
             source: filtered_input_to_string(filtered_input),
         },
     ))
+}
+
+fn rust_owned_quotes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut strings = Vec::new();
+    let kind = parse_quotes_value(filtered_input, |string| strings.push(string.to_string()));
+    if kind == CssQuotesValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Quotes(RustOwnedQuotes {
+        kind,
+        strings,
+        source: filtered_input_to_string(filtered_input),
+    }))
 }
 
 fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -3098,6 +3300,39 @@ fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) ->
     ))
 }
 
+fn rust_owned_timeline_name_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut names = Vec::new();
+    let kind = parse_timeline_name_value(filtered_input, |kind, name| {
+        names.push(RustOwnedTimelineNameItem {
+            kind,
+            name: name.to_string(),
+        });
+    });
+    if kind == CssTimelineNameValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TimelineName(RustOwnedTimelineName {
+        kind,
+        names,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_timeline_scope_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut names = Vec::new();
+    let kind = parse_timeline_scope_value(filtered_input, |name| names.push(name.to_string()));
+    if kind == CssTimelineScopeValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TimelineScope(RustOwnedTimelineScope {
+        kind,
+        names,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
 fn rust_owned_text_wrap_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_text_wrap_value(filtered_input);
     if value.kind == CssTextWrapValueKind::Invalid {
@@ -3146,6 +3381,54 @@ fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<Rus
     }))
 }
 
+fn rust_owned_transition_behavior_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut behaviors = Vec::new();
+    let kind = parse_transition_behavior_value(filtered_input, |behavior| behaviors.push(behavior));
+    if kind == CssTransitionBehaviorValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TransitionBehavior(
+        RustOwnedTransitionBehavior {
+            kind,
+            behaviors,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
+}
+
+fn rust_owned_transition_property_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut properties = Vec::new();
+    let kind = parse_transition_property_value(filtered_input, |property| properties.push(property.to_string()));
+    if kind == CssTransitionPropertyValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TransitionProperty(
+        RustOwnedTransitionProperty {
+            kind,
+            properties,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
+}
+
+fn rust_owned_view_transition_name_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut name = None;
+    let kind = parse_view_transition_name_value(filtered_input, |value| name = Some(value.to_string()));
+    if kind == CssViewTransitionNameValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ViewTransitionName(
+        RustOwnedViewTransitionName {
+            kind,
+            name,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
+}
+
 fn rust_owned_white_space_trim_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_white_space_trim_value(filtered_input);
     if value.kind == CssWhiteSpaceTrimValueKind::Invalid {
@@ -3154,6 +3437,25 @@ fn rust_owned_white_space_trim_style_value_kind(filtered_input: &[u8]) -> Option
 
     Some(RustOwnedStyleValueKind::WhiteSpaceTrim(RustOwnedWhiteSpaceTrim {
         value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_will_change_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let mut features = Vec::new();
+    let kind = parse_will_change_value(filtered_input, |kind, value| {
+        features.push(RustOwnedWillChangeFeature {
+            kind,
+            value: value.to_string(),
+        });
+    });
+    if kind == CssWillChangeValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::WillChange(RustOwnedWillChange {
+        kind,
+        features,
         source: filtered_input_to_string(filtered_input),
     }))
 }
@@ -3728,7 +4030,6 @@ where
         | RustOwnedStyleValueKind::BorderRadius(value)
         | RustOwnedStyleValueKind::BorderRadiusRect(value)
         | RustOwnedStyleValueKind::ColorInterpolationMethod(value)
-        | RustOwnedStyleValueKind::ColorScheme(value)
         | RustOwnedStyleValueKind::ConicGradient(value)
         | RustOwnedStyleValueKind::Content(value)
         | RustOwnedStyleValueKind::Counter(value)
@@ -3775,6 +4076,18 @@ where
                 property_id,
                 PropertyValueType::FontStyle,
             );
+        }
+        RustOwnedStyleValueKind::AnchorNameOrScope(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::AnchorNameOrScope,
+            property_id,
+            &value.source,
+        ),
+        RustOwnedStyleValueKind::AnimationName(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::AnimationName, property_id, &value.source);
+        }
+        RustOwnedStyleValueKind::ColorScheme(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
         }
         RustOwnedStyleValueKind::Contain(value) => callback(
             CssStyleValueKind::Contain,
@@ -3840,6 +4153,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::PositionAnchor(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PositionAnchor, property_id, &value.source);
+        }
         RustOwnedStyleValueKind::PositionTryOrder(value) => callback(
             CssStyleValueKind::PositionTryOrder,
             property_id,
@@ -3872,6 +4188,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::Quotes(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Quotes, property_id, &value.source);
+        }
         RustOwnedStyleValueKind::RepeatStyle(value) => callback(
             CssStyleValueKind::RepeatStyle,
             property_id,
@@ -3902,6 +4221,12 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::TimelineName(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
+        }
+        RustOwnedStyleValueKind::TimelineScope(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::TimelineScope, property_id, &value.source);
+        }
         RustOwnedStyleValueKind::TextWrap(value) => callback(
             CssStyleValueKind::TextWrap,
             property_id,
@@ -3977,6 +4302,24 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::TransitionBehavior(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::TransitionBehavior,
+            property_id,
+            &value.source,
+        ),
+        RustOwnedStyleValueKind::TransitionProperty(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::TransitionProperty,
+            property_id,
+            &value.source,
+        ),
+        RustOwnedStyleValueKind::ViewTransitionName(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::ViewTransitionName,
+            property_id,
+            &value.source,
+        ),
         RustOwnedStyleValueKind::WhiteSpaceTrim(value) => callback(
             CssStyleValueKind::WhiteSpaceTrim,
             property_id,
@@ -3994,6 +4337,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::WillChange(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::WillChange, property_id, &value.source);
+        }
         RustOwnedStyleValueKind::Angle(value)
         | RustOwnedStyleValueKind::Flex(value)
         | RustOwnedStyleValueKind::Frequency(value)
@@ -4364,6 +4710,27 @@ fn callback_style_value_type<C>(
         0,
         &[],
         property_value_type_name(value_type),
+    );
+}
+
+fn callback_source_backed_style_value<C>(callback: &mut C, kind: CssStyleValueKind, property_id: u16, source: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        source.as_bytes(),
+        "",
     );
 }
 
@@ -21277,14 +21644,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::AnchorName], "--anchor"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::AnchorNameOrScope,
                 property_id: PropertyId::AnchorName,
-                primitive_kind: CssPrimitiveValueKind::CustomIdent,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
                 value: "--anchor".to_string(),
-                value_type: "DashedIdent".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
