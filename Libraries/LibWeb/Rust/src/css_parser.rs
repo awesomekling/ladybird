@@ -1751,6 +1751,7 @@ pub enum CssStyleValueKind {
     Keyword,
     CustomIdent,
     Primitive,
+    Color,
     ValueType,
 }
 
@@ -1981,7 +1982,7 @@ where
 
 pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
 where
-    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, &[u8], &str),
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -2008,6 +2009,10 @@ where
                     0.0,
                     false,
                     0.0,
+                    0,
+                    0,
+                    0,
+                    0,
                     resolved_keyword.as_bytes(),
                     "",
                 );
@@ -2034,6 +2039,10 @@ where
                 0.0,
                 false,
                 0.0,
+                0,
+                0,
+                0,
+                0,
                 name.as_bytes(),
                 property_value_type_name(PropertyValueType::CustomIdent),
             );
@@ -2051,6 +2060,56 @@ where
             }
             if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
                 continue;
+            }
+
+            if *value_type == PropertyValueType::Color
+                && let [component_value] = component_values
+                && let Some(color) = simple_color_from_component_value(component_value, false)
+            {
+                match color {
+                    ParsedSimpleColor::Rgba {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                        name,
+                    } => {
+                        callback(
+                            CssStyleValueKind::Color,
+                            property_id as u16,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            red,
+                            green,
+                            blue,
+                            alpha,
+                            name.unwrap_or("").as_bytes(),
+                            "",
+                        );
+                        return true;
+                    }
+                    ParsedSimpleColor::Keyword { name } => {
+                        callback(
+                            CssStyleValueKind::Primitive,
+                            property_id as u16,
+                            CssPrimitiveValueKind::Keyword,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            name.as_bytes(),
+                            property_value_type_name(*value_type),
+                        );
+                        return true;
+                    }
+                }
             }
 
             let generated_style_value =
@@ -2110,6 +2169,10 @@ where
                 numeric_value.unwrap_or(0.0),
                 secondary_numeric_value.is_some(),
                 secondary_numeric_value.unwrap_or(0.0),
+                0,
+                0,
+                0,
+                0,
                 value,
                 property_value_type_name(*value_type),
             );
@@ -2177,7 +2240,7 @@ where
             if !parse_style_value_for_property(
                 &remaining_property_ids,
                 serialized_value.as_bytes(),
-                |_, property_id, _, _, _, _, _, _, _| {
+                |_, property_id, _, _, _, _, _, _, _, _, _, _, _| {
                     matched_property_id = Some(property_id);
                 },
             ) {
@@ -2251,7 +2314,7 @@ where
         if !parse_style_value_for_property(
             &property_ids,
             serialized_value.as_bytes(),
-            |_, _, _, _, _, _, _, _, _| {},
+            |_, _, _, _, _, _, _, _, _, _, _, _, _| {},
         ) {
             return false;
         }
@@ -17805,6 +17868,7 @@ mod tests {
         primitive_kind: CssPrimitiveValueKind,
         numeric_value: Option<f64>,
         secondary_numeric_value: Option<f64>,
+        color: Option<(u8, u8, u8, u8)>,
         value: String,
         value_type: String,
     }
@@ -17822,6 +17886,10 @@ mod tests {
              numeric_value,
              has_secondary_numeric_value,
              secondary_numeric_value,
+             color_red,
+             color_green,
+             color_blue,
+             color_alpha,
              value,
              value_type| {
                 parsed_value = Some(ParsedStyleValue {
@@ -17830,6 +17898,12 @@ mod tests {
                     primitive_kind,
                     numeric_value: has_numeric_value.then_some(numeric_value),
                     secondary_numeric_value: has_secondary_numeric_value.then_some(secondary_numeric_value),
+                    color: (kind == CssStyleValueKind::Color).then_some((
+                        color_red,
+                        color_green,
+                        color_blue,
+                        color_alpha,
+                    )),
                     value: String::from_utf8(value.to_vec()).unwrap(),
                     value_type: value_type.to_string(),
                 });
@@ -18380,6 +18454,45 @@ mod tests {
     #[test]
     fn parses_style_values_with_rust_owned_ast() {
         assert_eq!(
+            parse_style_value(&[PropertyId::Color], "red"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Color,
+                property_id: PropertyId::Color,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: Some((255, 0, 0, 255)),
+                value: "red".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BorderTopColor], "#336699cc"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Color,
+                property_id: PropertyId::BorderTopColor,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: Some((0x33, 0x66, 0x99, 0xcc)),
+                value: String::new(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Color], "currentColor"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::Color,
+                primitive_kind: CssPrimitiveValueKind::Keyword,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "currentColor".to_string(),
+                value_type: "Color".to_string(),
+            })
+        );
+        assert_eq!(
             parse_style_value(&[PropertyId::Color, PropertyId::Display], "block"),
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::Keyword,
@@ -18387,6 +18500,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
+                color: None,
                 value: "block".to_string(),
                 value_type: String::new(),
             })
@@ -18399,6 +18513,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
+                color: None,
                 value: "slide".to_string(),
                 value_type: "CustomIdent".to_string(),
             })
@@ -18411,6 +18526,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
                 secondary_numeric_value: None,
+                color: None,
                 value: "bold".to_string(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
@@ -18423,6 +18539,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Number,
                 numeric_value: Some(700.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: String::new(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
@@ -18435,6 +18552,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
                 secondary_numeric_value: None,
+                color: None,
                 value: "normal".to_string(),
                 value_type: "FontKerningValue".to_string(),
             })
@@ -18447,6 +18565,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Integer,
                 numeric_value: Some(12.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: String::new(),
                 value_type: "Integer".to_string(),
             })
@@ -18459,6 +18578,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Percentage,
                 numeric_value: Some(50.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: String::new(),
                 value_type: "OpacityValue".to_string(),
             })
@@ -18471,6 +18591,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Percentage,
                 numeric_value: Some(50.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: String::new(),
                 value_type: "Percentage".to_string(),
             })
@@ -18483,6 +18604,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(12.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: "px".to_string(),
                 value_type: "Length".to_string(),
             })
@@ -18495,6 +18617,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(0.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: "px".to_string(),
                 value_type: "Length".to_string(),
             })
@@ -18507,6 +18630,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Time,
                 numeric_value: Some(250.0),
                 secondary_numeric_value: None,
+                color: None,
                 value: "ms".to_string(),
                 value_type: "Time".to_string(),
             })
@@ -18519,6 +18643,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::String,
                 numeric_value: None,
                 secondary_numeric_value: None,
+                color: None,
                 value: "slide".to_string(),
                 value_type: "String".to_string(),
             })
@@ -18531,6 +18656,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Ratio,
                 numeric_value: Some(16.0),
                 secondary_numeric_value: Some(9.0),
+                color: None,
                 value: "has-denominator".to_string(),
                 value_type: "Ratio".to_string(),
             })
@@ -18543,6 +18669,7 @@ mod tests {
                 primitive_kind: CssPrimitiveValueKind::Ratio,
                 numeric_value: Some(1.0),
                 secondary_numeric_value: Some(1.0),
+                color: None,
                 value: String::new(),
                 value_type: "Ratio".to_string(),
             })

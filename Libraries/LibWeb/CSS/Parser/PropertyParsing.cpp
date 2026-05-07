@@ -362,6 +362,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, CustomIdentStyleValue::create(*rust_style_value->custom_ident) };
                 }
                 break;
+            case FFI::CssStyleValueKind::Color:
+                tokens.discard_a_token();
+                generated_transaction.commit();
+                return PropertyAndValue {
+                    rust_style_value->property_id,
+                    ColorStyleValue::create_from_color(
+                        { rust_style_value->color_red, rust_style_value->color_green, rust_style_value->color_blue, rust_style_value->color_alpha },
+                        ColorSyntax::Legacy,
+                        rust_style_value->string)
+                };
             case FFI::CssStyleValueKind::Primitive:
             case FFI::CssStyleValueKind::ValueType:
                 if (rust_style_value->value_type.has_value()) {

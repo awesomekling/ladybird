@@ -84,6 +84,10 @@ public:
         Optional<double> numeric_value;
         Optional<double> secondary_numeric_value;
         bool ratio_has_denominator { false };
+        u8 color_red { 0 };
+        u8 color_green { 0 };
+        u8 color_blue { 0 };
+        u8 color_alpha { 0 };
         Optional<FlyString> dimension_unit;
         Optional<FlyString> string;
     };

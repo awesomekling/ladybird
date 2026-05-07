@@ -930,12 +930,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         input_bytes.data(),
         input_bytes.size(),
         &style_value,
-        [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, bool has_secondary_numeric_value, double secondary_numeric_value, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
+        [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, bool has_secondary_numeric_value, double secondary_numeric_value, u8 color_red, u8 color_green, u8 color_blue, u8 color_alpha, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
             auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
             RustStyleValue value {
                 .kind = kind,
                 .property_id = static_cast<PropertyID>(property_id),
                 .primitive_kind = primitive_kind,
+                .color_red = color_red,
+                .color_green = color_green,
+                .color_blue = color_blue,
+                .color_alpha = color_alpha,
             };
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
@@ -945,6 +949,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.keyword = keyword.release_value();
             } else if (kind == FFI::CssStyleValueKind::CustomIdent) {
                 value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Color) {
+                if (value_len > 0)
+                    value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::Primitive || kind == FFI::CssStyleValueKind::ValueType) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())
