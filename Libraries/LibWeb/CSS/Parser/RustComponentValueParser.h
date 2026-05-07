@@ -537,21 +537,6 @@ public:
         Vector<TimelineNameItem> names;
     };
 
-    struct Quotes {
-        FFI::CssQuotesValueKind kind;
-        Vector<FlyString> strings;
-    };
-
-    struct WillChangeFeature {
-        FFI::CssWillChangeFeatureKind kind;
-        FlyString value;
-    };
-
-    struct WillChange {
-        FFI::CssWillChangeValueKind kind;
-        Vector<WillChangeFeature> features;
-    };
-
     struct TransitionProperty {
         FFI::CssTransitionPropertyValueKind kind;
         Vector<FlyString> properties;
@@ -679,12 +664,6 @@ public:
     static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static TimelineName parse_timeline_name(StringView input, StringView encoding);
-    static FFI::CssPositionTryOrderValue parse_position_try_order(StringView input, StringView encoding);
-    static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
-    static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
-    static FFI::CssScrollbarGutterValueKind parse_scrollbar_gutter(StringView input, StringView encoding);
-    static Quotes parse_quotes(StringView input, StringView encoding);
-    static WillChange parse_will_change(StringView input, StringView encoding);
     static TransitionProperty parse_transition_property(StringView input, StringView encoding);
     static TransitionBehavior parse_transition_behavior(StringView input, StringView encoding);
     static AnimationName parse_animation_name(StringView input, StringView encoding);

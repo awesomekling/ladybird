@@ -435,7 +435,6 @@ private:
     RefPtr<StyleValue const> parse_math_depth_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_shorthand(PropertyID, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_paint_order_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_content_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_items_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_self_value(TokenStream<ComponentValue>&);
@@ -444,20 +443,14 @@ private:
     RefPtr<StyleValue const> parse_position_area_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_position_try_fallbacks_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_position_try_fallbacks_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_position_try_order_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_position_visibility_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_quotes_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_repeat_style_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_scrollbar_color_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_scrollbar_gutter_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_single_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_shape_outside_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_rotate_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_stroke_dasharray_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_timeline_name_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_timeline_scope_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_origin_value(TokenStream<ComponentValue>&);
@@ -477,7 +470,6 @@ private:
     RefPtr<StyleValue const> parse_grid_template_areas_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_area_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_shorthand_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_will_change_value(TokenStream<ComponentValue>&);
 
 #define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name, name_title, name_string) \
     RefPtr<StyleValue const> parse_##value_type_name##_value(TokenStream<ComponentValue>& tokens);

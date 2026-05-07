@@ -256,6 +256,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         if (property_ids.size() != 1)
             return false;
         switch (property_ids[0]) {
+        case PropertyID::PaintOrder:
+        case PropertyID::PositionTryOrder:
+        case PropertyID::PositionVisibility:
+        case PropertyID::Quotes:
+        case PropertyID::ScrollbarGutter:
+        case PropertyID::StrokeDasharray:
         case PropertyID::TextDecoration:
         case PropertyID::TextDecorationLine:
         case PropertyID::TextIndent:
@@ -263,8 +269,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::TextWrap:
         case PropertyID::TextWrapMode:
         case PropertyID::TextWrapStyle:
+        case PropertyID::TimelineScope:
         case PropertyID::TouchAction:
         case PropertyID::WhiteSpaceTrim:
+        case PropertyID::WillChange:
             return true;
         default:
             return false;
@@ -3666,8 +3674,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::OverflowClipMarginBlock:
     case PropertyID::OverflowClipMarginInline:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_overflow_clip_margin_shorthand(property_id, tokens); });
-    case PropertyID::PaintOrder:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_paint_order_value(tokens); });
     case PropertyID::PlaceContent:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_place_content_value(tokens); });
     case PropertyID::PlaceItems:
@@ -3680,28 +3686,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_area_value(tokens); });
     case PropertyID::PositionTryFallbacks:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_try_fallbacks_value(tokens); });
-    case PropertyID::PositionTryOrder:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_position_try_order_value(tokens); });
-    case PropertyID::PositionVisibility:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_position_visibility_value(tokens); });
-    case PropertyID::Quotes:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_quotes_value(tokens); });
     case PropertyID::Rotate:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_rotate_value(tokens); });
     case PropertyID::ScrollbarColor:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_scrollbar_color_value(tokens); });
-    case PropertyID::ScrollbarGutter:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_scrollbar_gutter_value(tokens); });
     case PropertyID::ShapeOutside:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shape_outside_value(tokens); });
     case PropertyID::ScrollTimelineName:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
-    case PropertyID::StrokeDasharray:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_stroke_dasharray_value(tokens); });
     case PropertyID::TextShadow:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Text); });
-    case PropertyID::TimelineScope:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_scope_value(tokens); });
     case PropertyID::TransformOrigin:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transform_origin_value(tokens); });
     case PropertyID::Transition:
@@ -3718,9 +3712,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::ViewTransitionName:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_view_transition_name_value(tokens); });
-    case PropertyID::WillChange:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_will_change_value(tokens); });
-
     default:
         break;
     }
@@ -4199,42 +4190,6 @@ RefPtr<StyleValue const> Parser::parse_timeline_name_value(TokenStream<Component
     }
 
     VERIFY_NOT_REACHED();
-}
-
-// https://drafts.csswg.org/css-anchor-position-1/#position-try-order-property
-RefPtr<StyleValue const> Parser::parse_position_try_order_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_position_try_order = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_position_try_order = RustComponentValueParser::parse_position_try_order(serialized_position_try_order.bytes_as_string_view(), "utf-8"sv);
-
-    auto keyword = [](FFI::CssPositionTryOrderValue value) -> Optional<Keyword> {
-        switch (value) {
-        case FFI::CssPositionTryOrderValue::Invalid:
-            return {};
-        case FFI::CssPositionTryOrderValue::Normal:
-            return Keyword::Normal;
-        case FFI::CssPositionTryOrderValue::MostWidth:
-            return Keyword::MostWidth;
-        case FFI::CssPositionTryOrderValue::MostHeight:
-            return Keyword::MostHeight;
-        case FFI::CssPositionTryOrderValue::MostBlockSize:
-            return Keyword::MostBlockSize;
-        case FFI::CssPositionTryOrderValue::MostInlineSize:
-            return Keyword::MostInlineSize;
-        }
-        VERIFY_NOT_REACHED();
-    }(parsed_position_try_order);
-
-    if (!keyword.has_value())
-        return {};
-
-    transaction.commit();
-    return KeywordStyleValue::create(keyword.release_value());
 }
 
 // https://drafts.csswg.org/css-transitions-2/#transition-behavior-property
@@ -5353,41 +5308,6 @@ RefPtr<StyleValue const> Parser::parse_rotate_value(TokenStream<ComponentValue>&
     }
 
     return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_stroke_dasharray_value(TokenStream<ComponentValue>& tokens)
-{
-    // https://svgwg.org/svg2-draft/painting.html#StrokeDashing
-    // Value: none | <dasharray>
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    // https://svgwg.org/svg2-draft/painting.html#DataTypeDasharray
-    // <dasharray> = [ [ <length-percentage> | <number> ]+ ]#
-    Vector<ValueComparingNonnullRefPtr<StyleValue const>> dashes;
-    while (tokens.has_next_token()) {
-        tokens.discard_whitespace();
-
-        // A <dasharray> is a list of comma and/or white space separated <number> or <length-percentage> values. A <number> value represents a value in user units.
-        // If any value in the list is negative, the <dasharray> value is invalid.
-        auto value = parse_number_value(tokens, non_negative_range);
-
-        if (value) {
-            dashes.append(value.release_nonnull());
-        } else {
-            auto value = parse_length_percentage_value(tokens, non_negative_range, non_negative_range);
-            if (!value)
-                return {};
-
-            dashes.append(value.release_nonnull());
-        }
-
-        tokens.discard_whitespace();
-        if (tokens.has_next_token() && tokens.next_token().is(Token::Type::Comma))
-            tokens.discard_a_token();
-    }
-
-    return StyleValueList::create(move(dashes), StyleValueList::Separator::Comma);
 }
 
 RefPtr<StyleValue const> Parser::parse_content_value(TokenStream<ComponentValue>& tokens)
@@ -6726,51 +6646,6 @@ RefPtr<StyleValue const> Parser::parse_overflow_clip_margin_shorthand(PropertyID
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_paint_order_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto keyword_from_paint_order_keyword = [](FFI::CssPaintOrderKeyword keyword) {
-        switch (keyword) {
-        case FFI::CssPaintOrderKeyword::Invalid:
-            break;
-        case FFI::CssPaintOrderKeyword::Fill:
-            return Keyword::Fill;
-        case FFI::CssPaintOrderKeyword::Stroke:
-            return Keyword::Stroke;
-        case FFI::CssPaintOrderKeyword::Markers:
-            return Keyword::Markers;
-        }
-
-        VERIFY_NOT_REACHED();
-    };
-
-    auto serialized_paint_order = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_paint_order = RustComponentValueParser::parse_paint_order(serialized_paint_order.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_paint_order.kind) {
-    case FFI::CssPaintOrderValueKind::Invalid:
-        return {};
-    case FFI::CssPaintOrderValueKind::Normal:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Normal);
-    case FFI::CssPaintOrderValueKind::Keyword:
-        transaction.commit();
-        return KeywordStyleValue::create(keyword_from_paint_order_keyword(parsed_paint_order.first));
-    case FFI::CssPaintOrderValueKind::Pair:
-        transaction.commit();
-        return StyleValueList::create({
-                                          KeywordStyleValue::create(keyword_from_paint_order_keyword(parsed_paint_order.first)),
-                                          KeywordStyleValue::create(keyword_from_paint_order_keyword(parsed_paint_order.second)),
-                                      },
-            StyleValueList::Separator::Space);
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
 RefPtr<StyleValue const> Parser::parse_place_content_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -7227,71 +7102,6 @@ RefPtr<StyleValue const> Parser::parse_position_area_value(TokenStream<Component
     return parse_position_area(tokens);
 }
 
-// https://drafts.csswg.org/css-anchor-position/#position-visibility
-RefPtr<StyleValue const> Parser::parse_position_visibility_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_position_visibility = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_position_visibility = RustComponentValueParser::parse_position_visibility(serialized_position_visibility.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_position_visibility.kind) {
-    case FFI::CssPositionVisibilityValueKind::Invalid:
-        return {};
-    case FFI::CssPositionVisibilityValueKind::Always:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Always);
-    case FFI::CssPositionVisibilityValueKind::List: {
-        StyleValueVector values;
-        if (parsed_position_visibility.has_anchors_valid)
-            values.append(KeywordStyleValue::create(Keyword::AnchorsValid));
-        if (parsed_position_visibility.has_anchors_visible)
-            values.append(KeywordStyleValue::create(Keyword::AnchorsVisible));
-        if (parsed_position_visibility.has_no_overflow)
-            values.append(KeywordStyleValue::create(Keyword::NoOverflow));
-
-        transaction.commit();
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
-RefPtr<StyleValue const> Parser::parse_quotes_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_quotes = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_quotes = RustComponentValueParser::parse_quotes(serialized_quotes.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_quotes.kind) {
-    case FFI::CssQuotesValueKind::Invalid:
-        return {};
-    case FFI::CssQuotesValueKind::Auto:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Auto);
-    case FFI::CssQuotesValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssQuotesValueKind::List: {
-        StyleValueVector string_values;
-        string_values.ensure_capacity(parsed_quotes.strings.size());
-        for (auto const& string : parsed_quotes.strings)
-            string_values.unchecked_append(StringStyleValue::create(string));
-
-        transaction.commit();
-        return StyleValueList::create(move(string_values), StyleValueList::Separator::Space);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
 RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -7385,39 +7195,6 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
         return nullptr;
 
     return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value()));
-}
-
-// https://drafts.csswg.org/scroll-animations-1/#propdef-timeline-scope
-RefPtr<StyleValue const> Parser::parse_timeline_scope_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_timeline_scope = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_timeline_scope = RustComponentValueParser::parse_timeline_scope(serialized_timeline_scope.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_timeline_scope.kind) {
-    case FFI::CssTimelineScopeValueKind::Invalid:
-        return {};
-    case FFI::CssTimelineScopeValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssTimelineScopeValueKind::All:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::All);
-    case FFI::CssTimelineScopeValueKind::List: {
-        StyleValueVector names;
-        names.ensure_capacity(parsed_timeline_scope.names.size());
-        for (auto const& name : parsed_timeline_scope.names)
-            names.unchecked_append(CustomIdentStyleValue::create(name));
-
-        transaction.commit();
-        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 // https://www.w3.org/TR/css-transforms-1/#propdef-transform-origin
@@ -7745,34 +7522,6 @@ RefPtr<StyleValue const> Parser::parse_scrollbar_color_value(TokenStream<Compone
     transaction.commit();
 
     return ScrollbarColorStyleValue::create(thumb_color.release_nonnull(), track_color.release_nonnull());
-}
-
-// https://drafts.csswg.org/css-overflow/#propdef-scrollbar-gutter
-RefPtr<StyleValue const> Parser::parse_scrollbar_gutter_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_scrollbar_gutter = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_scrollbar_gutter = RustComponentValueParser::parse_scrollbar_gutter(serialized_scrollbar_gutter.bytes_as_string_view(), "utf-8"sv);
-
-    switch (parsed_scrollbar_gutter) {
-    case FFI::CssScrollbarGutterValueKind::Invalid:
-        return {};
-    case FFI::CssScrollbarGutterValueKind::Auto:
-        transaction.commit();
-        return ScrollbarGutterStyleValue::create(ScrollbarGutter::Auto);
-    case FFI::CssScrollbarGutterValueKind::Stable:
-        transaction.commit();
-        return ScrollbarGutterStyleValue::create(ScrollbarGutter::Stable);
-    case FFI::CssScrollbarGutterValueKind::BothEdges:
-        transaction.commit();
-        return ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges);
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
@@ -8687,47 +8436,6 @@ RefPtr<StyleValue const> Parser::parse_container_type_value(TokenStream<Componen
 
     transaction.commit();
     return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-}
-
-// https://drafts.csswg.org/css-will-change/#will-change
-RefPtr<StyleValue const> Parser::parse_will_change_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_will_change = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_will_change = RustComponentValueParser::parse_will_change(serialized_will_change.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_will_change.kind) {
-    case FFI::CssWillChangeValueKind::Invalid:
-        return {};
-    case FFI::CssWillChangeValueKind::Auto:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Auto);
-    case FFI::CssWillChangeValueKind::List: {
-        StyleValueVector features;
-        features.ensure_capacity(parsed_will_change.features.size());
-        for (auto const& feature : parsed_will_change.features) {
-            switch (feature.kind) {
-            case FFI::CssWillChangeFeatureKind::ScrollPosition:
-                features.unchecked_append(KeywordStyleValue::create(Keyword::ScrollPosition));
-                break;
-            case FFI::CssWillChangeFeatureKind::Contents:
-                features.unchecked_append(KeywordStyleValue::create(Keyword::Contents));
-                break;
-            case FFI::CssWillChangeFeatureKind::CustomIdent:
-                features.unchecked_append(CustomIdentStyleValue::create(feature.value));
-                break;
-            }
-        }
-
-        transaction.commit();
-        return StyleValueList::create(move(features), StyleValueList::Separator::Comma);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 }
