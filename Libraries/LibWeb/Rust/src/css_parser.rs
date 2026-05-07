@@ -1967,7 +1967,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: f64,
         value_type: PropertyValueType,
     },
-    Position(RustOwnedSourceBackedStyleValue),
+    Position(RustOwnedPosition),
     PositionAnchor(RustOwnedPositionAnchor),
     PositionTryOrder(RustOwnedPositionTryOrder),
     PositionVisibility(RustOwnedPositionVisibility),
@@ -2275,6 +2275,19 @@ pub(crate) struct RustOwnedPositionTryOrder {
 pub(crate) struct RustOwnedPositionVisibility {
     value: CssPositionVisibilityValue,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPosition {
+    value_type: PropertyValueType,
+    components: Vec<RustOwnedPositionComponent>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPositionComponent {
+    Edge { edge: PositionEdge, source: String },
+    LengthPercentage { source: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3078,7 +3091,10 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
         PropertyValueType::FontStyle => {
             rust_owned_font_style_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
         }
-        PropertyValueType::Position | PropertyValueType::BackgroundPosition => RustOwnedStyleValueKind::Position(value),
+        PropertyValueType::Position | PropertyValueType::BackgroundPosition => {
+            rust_owned_position_style_value_kind(value.value_type.unwrap(), value.source)
+                .unwrap_or_else(|| unreachable!())
+        }
         PropertyValueType::TransformList => {
             let source = value.source;
             if let Some(value) = rust_owned_transform_list_style_value_kind(source.as_bytes(), &source) {
@@ -3415,6 +3431,72 @@ fn rust_owned_position_visibility_style_value_kind(filtered_input: &[u8]) -> Opt
             source: filtered_input_to_string(filtered_input),
         },
     ))
+}
+
+fn rust_owned_position_style_value_kind(
+    value_type: PropertyValueType,
+    source: String,
+) -> Option<RustOwnedStyleValueKind> {
+    let allow_background_position_3_value_syntax = value_type == PropertyValueType::BackgroundPosition;
+    if parse_position_value(source.as_bytes(), allow_background_position_3_value_syntax)
+        == CssPositionValueKind::Invalid
+    {
+        return None;
+    }
+
+    let (mut parser, _) = parser_from_filtered_input(source.as_bytes());
+    let component_values = parser.parse_a_list_of_component_values();
+    let components = strip_whitespace(&component_values)
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .map(|component_value| rust_owned_position_component_from_component_value(component_value, &source))
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(RustOwnedStyleValueKind::Position(RustOwnedPosition {
+        value_type,
+        components,
+        source,
+    }))
+}
+
+fn rust_owned_position_component_from_component_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedPositionComponent> {
+    let component_source = serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?;
+
+    if let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    {
+        let edge = if value.eq_ignore_ascii_case("left") {
+            PositionEdge::Left
+        } else if value.eq_ignore_ascii_case("right") {
+            PositionEdge::Right
+        } else if value.eq_ignore_ascii_case("top") {
+            PositionEdge::Top
+        } else if value.eq_ignore_ascii_case("bottom") {
+            PositionEdge::Bottom
+        } else if value.eq_ignore_ascii_case("center") {
+            PositionEdge::Center
+        } else {
+            return None;
+        };
+
+        return Some(RustOwnedPositionComponent::Edge {
+            edge,
+            source: component_source,
+        });
+    }
+
+    if component_value_parse_as_length_percentage(component_value) {
+        return Some(RustOwnedPositionComponent::LengthPercentage {
+            source: component_source,
+        });
+    }
+
+    None
 }
 
 fn rust_owned_quotes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4449,7 +4531,6 @@ where
         | RustOwnedStyleValueKind::LinearGradient(value)
         | RustOwnedStyleValueKind::OpenTypeTagged(value)
         | RustOwnedStyleValueKind::PendingSubstitution(value)
-        | RustOwnedStyleValueKind::Position(value)
         | RustOwnedStyleValueKind::RadialGradient(value)
         | RustOwnedStyleValueKind::RadialSize(value)
         | RustOwnedStyleValueKind::RandomValueSharing(value)
@@ -4609,6 +4690,9 @@ where
         ),
         RustOwnedStyleValueKind::PositionAnchor(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::PositionAnchor, property_id, &value.source);
+        }
+        RustOwnedStyleValueKind::Position(value) => {
+            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value.value_type);
         }
         RustOwnedStyleValueKind::PositionTryOrder(value) => callback(
             CssStyleValueKind::PositionTryOrder,
@@ -9179,7 +9263,7 @@ fn parse_positive_integer_component_values(component_values: &[ComponentValue]) 
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PositionEdge {
+pub(crate) enum PositionEdge {
     Left,
     Right,
     Top,
@@ -20229,17 +20313,17 @@ mod tests {
         CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
         FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedBackgroundSize,
         RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedContain, RustOwnedContainerType,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
         RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
         RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet,
         RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
-        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
         SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
@@ -22076,8 +22160,24 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ObjectPosition,
-                value: RustOwnedStyleValueKind::Position(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::Position),
+                value: RustOwnedStyleValueKind::Position(RustOwnedPosition {
+                    value_type: PropertyValueType::Position,
+                    components: vec![
+                        RustOwnedPositionComponent::Edge {
+                            edge: PositionEdge::Left,
+                            source: "left".to_string(),
+                        },
+                        RustOwnedPositionComponent::LengthPercentage {
+                            source: "10px".to_string(),
+                        },
+                        RustOwnedPositionComponent::Edge {
+                            edge: PositionEdge::Top,
+                            source: "top".to_string(),
+                        },
+                        RustOwnedPositionComponent::LengthPercentage {
+                            source: "20%".to_string(),
+                        },
+                    ],
                     source: "left 10px top 20%".to_string(),
                 }),
             })
@@ -22086,8 +22186,21 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BackgroundPosition], "left 10px top"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundPosition,
-                value: RustOwnedStyleValueKind::Position(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::BackgroundPosition),
+                value: RustOwnedStyleValueKind::Position(RustOwnedPosition {
+                    value_type: PropertyValueType::BackgroundPosition,
+                    components: vec![
+                        RustOwnedPositionComponent::Edge {
+                            edge: PositionEdge::Left,
+                            source: "left".to_string(),
+                        },
+                        RustOwnedPositionComponent::LengthPercentage {
+                            source: "10px".to_string(),
+                        },
+                        RustOwnedPositionComponent::Edge {
+                            edge: PositionEdge::Top,
+                            source: "top".to_string(),
+                        },
+                    ],
                     source: "left 10px top".to_string(),
                 }),
             })
