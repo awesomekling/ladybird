@@ -139,6 +139,7 @@ public:
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
         FFI::CssTouchActionValue touch_action {};
+        Vector<FFI::CssTransitionBehaviorItemKind> transition_behaviors;
         size_t view_timeline_inset_count { 0 };
         FFI::CssViewFunctionInsetKind view_function_inset { FFI::CssViewFunctionInsetKind::None };
         FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };

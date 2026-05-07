@@ -2556,7 +2556,6 @@ pub(crate) struct RustOwnedTouchAction {
 pub(crate) struct RustOwnedTransitionBehavior {
     kind: CssTransitionBehaviorValueKind,
     behaviors: Vec<CssTransitionBehaviorItemKind>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4812,11 +4811,7 @@ fn rust_owned_transition_behavior_style_value_kind(filtered_input: &[u8]) -> Opt
     }
 
     Some(RustOwnedStyleValueKind::TransitionBehavior(
-        RustOwnedTransitionBehavior {
-            kind,
-            behaviors,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedTransitionBehavior { kind, behaviors },
     ))
 }
 
@@ -5961,12 +5956,28 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::TransitionBehavior(value) => callback_source_backed_style_value(
-            callback,
-            CssStyleValueKind::TransitionBehavior,
-            property_id,
-            &value.source,
-        ),
+        RustOwnedStyleValueKind::TransitionBehavior(value) => {
+            let behavior_bytes = value
+                .behaviors
+                .iter()
+                .map(|behavior| *behavior as u8)
+                .collect::<Vec<_>>();
+            callback(
+                CssStyleValueKind::TransitionBehavior,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &behavior_bytes,
+                "",
+            );
+        }
         RustOwnedStyleValueKind::TransitionProperty(value) => callback_source_backed_style_value(
             callback,
             CssStyleValueKind::TransitionProperty,
@@ -25542,7 +25553,6 @@ mod tests {
                         CssTransitionBehaviorItemKind::Normal,
                         CssTransitionBehaviorItemKind::AllowDiscrete,
                     ],
-                    source: "normal, allow-discrete".to_string(),
                 }),
             })
         );

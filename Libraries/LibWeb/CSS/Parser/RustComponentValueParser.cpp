@@ -995,7 +995,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::TimelineScope,
                            FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransformOrigin,
-                           FFI::CssStyleValueKind::TransitionBehavior,
                            FFI::CssStyleValueKind::TransitionProperty,
                            FFI::CssStyleValueKind::ViewTransitionName,
                            FFI::CssStyleValueKind::WillChange)) {
@@ -1088,6 +1087,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .first = static_cast<FFI::CssTouchActionKeyword>(color_green),
                     .second = static_cast<FFI::CssTouchActionKeyword>(color_blue),
                 };
+            } else if (kind == FFI::CssStyleValueKind::TransitionBehavior) {
+                value.transition_behaviors.ensure_capacity(value_len);
+                for (size_t i = 0; i < value_len; ++i)
+                    value.transition_behaviors.unchecked_append(static_cast<FFI::CssTransitionBehaviorItemKind>(value_ptr[i]));
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
                 value.view_timeline_inset_count = color_red;
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {

@@ -1316,9 +1316,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TransitionBehavior:
-                if (auto value = parse_transition_behavior_value(tokens)) {
+                if (!rust_style_value->transition_behaviors.is_empty()) {
+                    StyleValueVector behaviors;
+                    behaviors.ensure_capacity(rust_style_value->transition_behaviors.size());
+                    for (auto behavior : rust_style_value->transition_behaviors) {
+                        switch (behavior) {
+                        case FFI::CssTransitionBehaviorItemKind::Normal:
+                            behaviors.unchecked_append(KeywordStyleValue::create(Keyword::Normal));
+                            break;
+                        case FFI::CssTransitionBehaviorItemKind::AllowDiscrete:
+                            behaviors.unchecked_append(KeywordStyleValue::create(Keyword::AllowDiscrete));
+                            break;
+                        }
+                    }
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(behaviors), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::TransitionProperty:
