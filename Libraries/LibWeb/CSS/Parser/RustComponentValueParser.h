@@ -467,12 +467,6 @@ public:
         Vector<FontTech> tech;
     };
 
-    struct ColorScheme {
-        FFI::CssColorSchemeValueKind kind;
-        bool only { false };
-        Vector<String> schemes;
-    };
-
     struct ScrollFunction {
         FFI::CssScrollFunctionValueKind kind;
         FFI::CssScrollFunctionScrollerKind scroller;
@@ -489,16 +483,6 @@ public:
         FFI::CssScrollFunctionAxisKind axis;
         FFI::CssViewFunctionInsetKind inset;
         FFI::CssViewFunctionInsetPosition inset_position;
-    };
-
-    struct AnchorNameOrScope {
-        FFI::CssAnchorNameOrScopeValueKind kind;
-        Vector<FlyString> names;
-    };
-
-    struct PositionAnchor {
-        FFI::CssPositionAnchorValueKind kind;
-        FlyString name;
     };
 
     struct TimelineScope {
@@ -599,9 +583,6 @@ public:
     static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
-    static ColorScheme parse_color_scheme(StringView input, StringView encoding);
-    static AnchorNameOrScope parse_anchor_name_or_scope(StringView input, StringView encoding, bool allow_all);
-    static PositionAnchor parse_position_anchor(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);

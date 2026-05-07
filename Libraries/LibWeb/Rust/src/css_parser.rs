@@ -3237,7 +3237,10 @@ fn property_parses_as_coordinating_shorthand_item(property_id: PropertyId) -> bo
 fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
     matches!(
         property_id,
-        PropertyId::AnimationName
+        PropertyId::AnchorName
+            | PropertyId::AnchorScope
+            | PropertyId::AnimationName
+            | PropertyId::ColorScheme
             | PropertyId::Contain
             | PropertyId::ContainerType
             | PropertyId::FontFamily
@@ -3247,6 +3250,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontVariationSettings
             | PropertyId::MathDepth
             | PropertyId::PaintOrder
+            | PropertyId::PositionAnchor
             | PropertyId::PositionTryOrder
             | PropertyId::PositionVisibility
             | PropertyId::Quotes
@@ -26682,9 +26686,9 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CounterStyle,
         CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
-        CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValueKind,
-        CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
-        CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+        CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValue,
+        CssColorSchemeValueKind, CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
+        CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
         CssCounterStyleSystemKind, CssCropOrCrossKind, CssDisplayBox, CssDisplayInside, CssDisplayInternal,
         CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind,
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
@@ -26712,28 +26716,29 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
-        RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize,
-        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
-        RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
-        RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
+        RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
+        RustOwnedBasicShapeKind, RustOwnedBorderRadius, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCursor, RustOwnedCursorImage,
+        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+        RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow,
+        RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+        RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind,
+        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth,
+        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
         RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
@@ -28599,6 +28604,49 @@ mod tests {
                         },
                     ]),
                 },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AnchorName], "--foo, --bar"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AnchorName,
+                value: RustOwnedStyleValueKind::AnchorNameOrScope(RustOwnedAnchorNameOrScope {
+                    kind: CssAnchorNameOrScopeValueKind::List,
+                    names: vec!["--foo".to_string(), "--bar".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AnchorScope], "all"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AnchorScope,
+                value: RustOwnedStyleValueKind::AnchorNameOrScope(RustOwnedAnchorNameOrScope {
+                    kind: CssAnchorNameOrScopeValueKind::All,
+                    names: vec![],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ColorScheme], "only dark"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ColorScheme,
+                value: RustOwnedStyleValueKind::ColorScheme(RustOwnedColorScheme {
+                    value: CssColorSchemeValue {
+                        kind: CssColorSchemeValueKind::List,
+                        only: true,
+                    },
+                    schemes: vec!["dark".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PositionAnchor], "--foo"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PositionAnchor,
+                value: RustOwnedStyleValueKind::PositionAnchor(RustOwnedPositionAnchor {
+                    kind: CssPositionAnchorValueKind::AnchorName,
+                    name: Some("--foo".to_string()),
+                }),
             })
         );
         assert_eq!(

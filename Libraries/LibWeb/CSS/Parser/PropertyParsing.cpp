@@ -263,7 +263,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         if (property_ids.size() != 1)
             return false;
         switch (property_ids[0]) {
+        case PropertyID::AnchorName:
+        case PropertyID::AnchorScope:
         case PropertyID::AnimationName:
+        case PropertyID::ColorScheme:
         case PropertyID::Contain:
         case PropertyID::ContainerType:
         case PropertyID::FontFamily:
@@ -273,6 +276,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::FontVariationSettings:
         case PropertyID::MathDepth:
         case PropertyID::PaintOrder:
+        case PropertyID::PositionAnchor:
         case PropertyID::PositionTryOrder:
         case PropertyID::PositionVisibility:
         case PropertyID::Quotes:
@@ -3547,9 +3551,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         //       is an invalid value which is a syntax error.
         return ParseError::SyntaxError;
     case PropertyID::AnchorName:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_anchor_name_value(tokens); });
     case PropertyID::AnchorScope:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_anchor_scope_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::AspectRatio:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_aspect_ratio_value(tokens); });
     case PropertyID::Animation:
@@ -3596,7 +3599,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BoxShadow:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Normal); });
     case PropertyID::ColorScheme:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_color_scheme_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Columns:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_columns_value(tokens); });
     case PropertyID::Content:
@@ -3694,7 +3697,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::PlaceSelf:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_place_self_value(tokens); });
     case PropertyID::PositionAnchor:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_position_anchor_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::PositionArea:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_position_area_value(tokens); });
     case PropertyID::PositionTryFallbacks:
@@ -3878,29 +3881,6 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
     return create_shorthand_value(parsed_values);
 }
 
-RefPtr<StyleValue const> Parser::parse_color_scheme_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_color_scheme = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_color_scheme = RustComponentValueParser::parse_color_scheme(serialized_color_scheme.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_color_scheme.kind) {
-    case FFI::CssColorSchemeValueKind::Invalid:
-        return {};
-    case FFI::CssColorSchemeValueKind::Normal:
-        transaction.commit();
-        return ColorSchemeStyleValue::normal();
-    case FFI::CssColorSchemeValueKind::List:
-        transaction.commit();
-        return ColorSchemeStyleValue::create(move(parsed_color_scheme.schemes), parsed_color_scheme.only);
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
 RefPtr<StyleValue const> Parser::parse_counter_definitions_value(TokenStream<ComponentValue>& tokens, AllowReversed allow_reversed, i32 default_value_if_not_reversed)
 {
     // If AllowReversed is Yes, parses:
@@ -4056,68 +4036,6 @@ RefPtr<StyleValue const> Parser::parse_cursor_value(TokenStream<ComponentValue>&
         return *cursors.first();
 
     return StyleValueList::create(move(cursors), StyleValueList::Separator::Comma);
-}
-
-// https://drafts.csswg.org/css-anchor-position/#name
-RefPtr<StyleValue const> Parser::parse_anchor_name_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_anchor_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_anchor_name = RustComponentValueParser::parse_anchor_name_or_scope(serialized_anchor_name.bytes_as_string_view(), "utf-8"sv, false);
-    switch (parsed_anchor_name.kind) {
-    case FFI::CssAnchorNameOrScopeValueKind::Invalid:
-    case FFI::CssAnchorNameOrScopeValueKind::All:
-        return {};
-    case FFI::CssAnchorNameOrScopeValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssAnchorNameOrScopeValueKind::List: {
-        StyleValueVector names;
-        names.ensure_capacity(parsed_anchor_name.names.size());
-        for (auto& name : parsed_anchor_name.names)
-            names.unchecked_append(CustomIdentStyleValue::create(name));
-        transaction.commit();
-        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
-// https://drafts.csswg.org/css-anchor-position/#anchor-scope
-RefPtr<StyleValue const> Parser::parse_anchor_scope_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_anchor_scope = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_anchor_scope = RustComponentValueParser::parse_anchor_name_or_scope(serialized_anchor_scope.bytes_as_string_view(), "utf-8"sv, true);
-    switch (parsed_anchor_scope.kind) {
-    case FFI::CssAnchorNameOrScopeValueKind::Invalid:
-        return {};
-    case FFI::CssAnchorNameOrScopeValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssAnchorNameOrScopeValueKind::All:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::All);
-    case FFI::CssAnchorNameOrScopeValueKind::List: {
-        StyleValueVector names;
-        names.ensure_capacity(parsed_anchor_scope.names.size());
-        for (auto& name : parsed_anchor_scope.names)
-            names.unchecked_append(CustomIdentStyleValue::create(name));
-        transaction.commit();
-        return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 // https://www.w3.org/TR/css-sizing-4/#aspect-ratio
@@ -6133,36 +6051,6 @@ RefPtr<StyleValue const> Parser::parse_place_self_value(TokenStream<ComponentVal
     return ShorthandStyleValue::create(PropertyID::PlaceSelf,
         { PropertyID::AlignSelf, PropertyID::JustifySelf },
         { *maybe_align_self_value, *maybe_justify_self_value });
-}
-
-// https://drafts.csswg.org/css-anchor-position/#position-anchor
-RefPtr<StyleValue const> Parser::parse_position_anchor_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_position_anchor = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_position_anchor = RustComponentValueParser::parse_position_anchor(serialized_position_anchor.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_position_anchor.kind) {
-    case FFI::CssPositionAnchorValueKind::Invalid:
-        return {};
-    case FFI::CssPositionAnchorValueKind::Normal:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Normal);
-    case FFI::CssPositionAnchorValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssPositionAnchorValueKind::Auto:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Auto);
-    case FFI::CssPositionAnchorValueKind::AnchorName:
-        transaction.commit();
-        return CustomIdentStyleValue::create(parsed_position_anchor.name);
-    }
-
-    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-anchor-position/#position-try-fallbacks
