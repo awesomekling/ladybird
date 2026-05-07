@@ -852,6 +852,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 generated_transaction.commit();
                 return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
             }
+            case FFI::CssStyleValueKind::GridAutoTrackSizes:
+                if (auto value = parse_grid_auto_track_sizes(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::GridTrackPlacement:
+                if (auto value = parse_grid_track_placement(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::GridTrackSizeList:
+                if (auto value = parse_grid_track_size_list(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::PaintOrder:
                 switch (rust_style_value->paint_order.kind) {
                 case FFI::CssPaintOrderValueKind::Invalid:

@@ -1851,6 +1851,9 @@ pub enum CssStyleValueKind {
     CounterDefinitions,
     Display,
     GridAutoFlow,
+    GridAutoTrackSizes,
+    GridTrackPlacement,
+    GridTrackSizeList,
     PaintOrder,
     PositionAnchor,
     PositionTryOrder,
@@ -1923,6 +1926,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     Frequency(RustOwnedDimensionStyleValue),
     Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
+    GridAutoTrackSizes(RustOwnedGridTrackSizeList),
+    GridTrackPlacement(RustOwnedGridTrackPlacement),
+    GridTrackSizeList(RustOwnedGridTrackSizeList),
     GuaranteedInvalid,
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
@@ -2260,6 +2266,16 @@ pub(crate) struct RustOwnedDisplay {
 pub(crate) struct RustOwnedGridAutoFlow {
     axis: CssGridAutoFlowAxis,
     dense: CssGridAutoFlowDense,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGridTrackPlacement {
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGridTrackSizeList {
     source: String,
 }
 
@@ -2827,7 +2843,16 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
         PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
+        PropertyId::GridAutoColumns | PropertyId::GridAutoRows => {
+            rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input)
+        }
         PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
+        PropertyId::GridColumnEnd | PropertyId::GridColumnStart | PropertyId::GridRowEnd | PropertyId::GridRowStart => {
+            rust_owned_grid_track_placement_style_value_kind(filtered_input)
+        }
+        PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
+            rust_owned_grid_track_size_list_style_value_kind(filtered_input)
+        }
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
         PropertyId::PositionTryOrder => rust_owned_position_try_order_style_value_kind(filtered_input),
@@ -3746,6 +3771,40 @@ fn consume_optional_grid_auto_flow_axis_value(parser: &mut ComponentValueParser)
         return Some(CssGridAutoFlowAxis::Column);
     }
     None
+}
+
+fn rust_owned_grid_track_placement_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if parse_grid_track_placement_value(filtered_input) == CssGridTrackPlacementValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::GridTrackPlacement(
+        RustOwnedGridTrackPlacement {
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
+}
+
+fn rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if parse_grid_auto_track_sizes_value(filtered_input) == CssGridTrackSizeListValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::GridAutoTrackSizes(
+        RustOwnedGridTrackSizeList {
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
+}
+
+fn rust_owned_grid_track_size_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if parse_grid_track_size_list_value(filtered_input) == CssGridTrackSizeListValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::GridTrackSizeList(RustOwnedGridTrackSizeList {
+        source: filtered_input_to_string(filtered_input),
+    }))
 }
 
 fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5091,6 +5150,24 @@ where
             0,
             &[],
             "",
+        ),
+        RustOwnedStyleValueKind::GridAutoTrackSizes(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::GridAutoTrackSizes,
+            property_id,
+            &value.source,
+        ),
+        RustOwnedStyleValueKind::GridTrackPlacement(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::GridTrackPlacement,
+            property_id,
+            &value.source,
+        ),
+        RustOwnedStyleValueKind::GridTrackSizeList(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::GridTrackSizeList,
+            property_id,
+            &value.source,
         ),
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
@@ -20760,16 +20837,17 @@ mod tests {
         RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition,
-        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -22793,6 +22871,33 @@ mod tests {
                     axis: CssGridAutoFlowAxis::Column,
                     dense: CssGridAutoFlowDense::Yes,
                     source: "dense column".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span 2 main"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::GridColumnStart,
+                value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement {
+                    source: "span 2 main".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::GridAutoRows], "10px minmax(1px, 1fr)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::GridAutoRows,
+                value: RustOwnedStyleValueKind::GridAutoTrackSizes(RustOwnedGridTrackSizeList {
+                    source: "10px minmax(1px, 1fr)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::GridTemplateColumns], "[a] 10px [b] repeat(2, 1fr)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::GridTemplateColumns,
+                value: RustOwnedStyleValueKind::GridTrackSizeList(RustOwnedGridTrackSizeList {
+                    source: "[a] 10px [b] repeat(2, 1fr)".to_string(),
                 }),
             })
         );
