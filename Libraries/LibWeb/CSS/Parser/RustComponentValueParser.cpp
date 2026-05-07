@@ -973,6 +973,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackPlacement,
                            FFI::CssStyleValueKind::GridTrackSizeList,
+                           FFI::CssStyleValueKind::ListStyle,
                            FFI::CssStyleValueKind::MathDepth,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionAnchor,

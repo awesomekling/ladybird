@@ -1863,6 +1863,7 @@ pub enum CssStyleValueKind {
     GridAutoTrackSizes,
     GridTrackPlacement,
     GridTrackSizeList,
+    ListStyle,
     MathDepth,
     PaintOrder,
     PositionArea,
@@ -1974,6 +1975,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Length(RustOwnedDimensionStyleValue),
+    ListStyle {
+        source: String,
+    },
     Number {
         value: f64,
         value_type: PropertyValueType,
@@ -2984,6 +2988,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
+        PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
         PropertyId::Cursor => rust_owned_cursor_style_value_kind(filtered_input),
         PropertyId::MathDepth => rust_owned_math_depth_style_value_kind(filtered_input),
         PropertyId::OverflowClipMarginBlockEnd
@@ -4009,6 +4014,16 @@ fn rust_owned_grid_track_size_list_style_value_kind(filtered_input: &[u8]) -> Op
     Some(RustOwnedStyleValueKind::GridTrackSizeList(RustOwnedGridTrackSizeList {
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_list_style_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ListStyle {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5569,6 +5584,9 @@ where
             property_id,
             &value.source,
         ),
+        RustOwnedStyleValueKind::ListStyle { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::ListStyle, property_id, source);
+        }
         RustOwnedStyleValueKind::MathDepth { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::MathDepth, property_id, source);
         }
@@ -12635,6 +12653,60 @@ pub(crate) fn parse_text_decoration_line_value(filtered_input: &[u8]) -> bool {
     component_values_parse_as_text_decoration_line(&component_values)
 }
 
+pub(crate) fn parse_list_style_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    if component_values.is_empty() {
+        return false;
+    }
+
+    let mut has_list_style_position = false;
+    let mut has_list_style_image = false;
+    let mut has_list_style_type = false;
+    let mut found_nones = 0;
+
+    for component_value in &component_values {
+        if component_value_is_ident(Some(component_value), "none") {
+            found_nones += 1;
+            continue;
+        }
+
+        if !has_list_style_image && component_value_parse_as_list_style_image(component_value) {
+            has_list_style_image = true;
+            continue;
+        }
+
+        if !has_list_style_position && component_value_is_list_style_position(component_value) {
+            has_list_style_position = true;
+            continue;
+        }
+
+        if !has_list_style_type && component_value_parse_as_list_style_type(component_value) {
+            has_list_style_type = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    if found_nones > 2 {
+        return false;
+    }
+
+    // https://drafts.csswg.org/css-lists-3/#propdef-list-style
+    // <'list-style-position'> || <'list-style-image'> || <'list-style-type'>
+    //
+    // Since `none` is valid for both list-style-image and list-style-type, the
+    // shorthand needs to defer assigning it until the unambiguous components are
+    // known.
+    if found_nones == 2 {
+        return !has_list_style_image && !has_list_style_type;
+    }
+
+    found_nones == 0 || !has_list_style_image || !has_list_style_type
+}
+
 fn component_values_parse_as_exact_ratio(component_values: &[ComponentValue]) -> bool {
     // https://drafts.csswg.org/css-values-4/#ratios
     // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
@@ -12767,6 +12839,27 @@ fn component_value_parse_as_text_decoration_thickness(component_value: &Componen
         || component_value_is_ident(Some(component_value), "from-font")
         || component_value_parse_as_length(component_value)
         || parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
+}
+
+fn component_value_is_list_style_position(component_value: &ComponentValue) -> bool {
+    component_value_is_ident(Some(component_value), "inside")
+        || component_value_is_ident(Some(component_value), "outside")
+}
+
+fn component_value_parse_as_list_style_image(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_image_set_image(component_value)
+        || component_value_parse_as_image_gradient(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::Function(function) if component_value_parse_as_image_set_function(function)
+        )
+}
+
+fn component_value_parse_as_list_style_type(component_value: &ComponentValue) -> bool {
+    parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String || {
+        let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+        parser.parse_a_counter_style().is_some()
+    }
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
@@ -22200,7 +22293,7 @@ mod tests {
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_length_descriptor, parse_math_depth_value,
+        parse_image_set_value, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
         parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
         parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
         parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
@@ -22953,6 +23046,10 @@ mod tests {
 
     fn parse_text_decoration_line(input: &str) -> bool {
         parse_text_decoration_line_value(input.as_bytes())
+    }
+
+    fn parse_list_style(input: &str) -> bool {
+        parse_list_style_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -25297,6 +25394,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "overline underline".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ListStyle], "inside url(marker.png) square"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ListStyle,
+                property_id: PropertyId::ListStyle,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "inside url(marker.png) square".to_string(),
                 value_type: String::new(),
             })
         );
@@ -28701,6 +28811,31 @@ mod tests {
         assert!(!parse_text_decoration("auto from-font"));
         assert!(!parse_text_decoration("none underline"));
         assert!(!parse_text_decoration("spelling-error underline"));
+    }
+
+    #[test]
+    fn parses_list_style_values() {
+        assert!(parse_list_style("none"));
+        assert!(parse_list_style("inside"));
+        assert!(parse_list_style("inside disc"));
+        assert!(parse_list_style("inside none"));
+        assert!(parse_list_style("none inside none"));
+        assert!(parse_list_style("url(\"https://example.com/\")"));
+        assert!(parse_list_style("url(\"https://example.com/\") disc outside"));
+        assert!(parse_list_style("square linear-gradient(red, blue) inside"));
+        assert!(parse_list_style("symbols(cyclic \"*\" \"**\") inside"));
+        assert!(parse_list_style("\"marker string\" outside"));
+        assert!(parse_list_style("inside outside"));
+    }
+
+    #[test]
+    fn rejects_invalid_list_style_values() {
+        assert!(!parse_list_style(""));
+        assert!(!parse_list_style("none none none"));
+        assert!(!parse_list_style("disc square"));
+        assert!(!parse_list_style("url(marker.png) linear-gradient(red, blue)"));
+        assert!(!parse_list_style("none disc none"));
+        assert!(!parse_list_style("symbols(numeric \"1\")"));
     }
 
     #[test]

@@ -937,6 +937,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::ListStyle:
+                if (auto value = parse_list_style_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::MathDepth:
                 if (auto value = parse_math_depth_value(tokens)) {
                     generated_transaction.commit();
