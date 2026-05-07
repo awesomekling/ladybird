@@ -383,6 +383,7 @@ public:
     static FFI::CssRepeatStyleValueKind parse_repeat_style(StringView input, StringView encoding);
     static FFI::CssColorFunctionValueKind parse_color_function(StringView input, StringView encoding);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
+    static FFI::CssImageSetValueKind parse_image_set(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_translate(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_scale(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_rotate(StringView input, StringView encoding);

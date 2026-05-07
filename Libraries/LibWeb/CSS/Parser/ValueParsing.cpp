@@ -2460,6 +2460,7 @@ RefPtr<ImageSetStyleValue const> Parser::parse_image_set_function(TokenStream<Co
     if (!function_token.is_function("image-set"sv) && !function_token.is_function("-webkit-image-set"sv))
         return nullptr;
 
+    auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     auto const& function = tokens.consume_a_token().function();
     TokenStream function_tokens { function.value };
@@ -2528,6 +2529,10 @@ RefPtr<ImageSetStyleValue const> Parser::parse_image_set_function(TokenStream<Co
     }
 
     if (options.is_empty())
+        return nullptr;
+
+    auto serialized_image_set = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+    if (RustComponentValueParser::parse_image_set(serialized_image_set.bytes_as_string_view(), "utf-8"sv) == FFI::CssImageSetValueKind::Invalid)
         return nullptr;
 
     transaction.commit();

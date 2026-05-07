@@ -46,27 +46,27 @@ pub use css_parser::{
     CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech,
     CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
     CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
-    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaFeature, CssMediaFeatureComparison,
-    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
-    CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-    CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
-    CssPrimitiveValueOptions, CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue,
-    CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
-    CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-    CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace,
-    CssSelectorNamespaceType, CssSimpleSelectorKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
-    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-    CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
-    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
-    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind,
+    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
+    CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+    CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind,
+    CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
+    CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType, CssPseudoElementValueKind,
+    CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext,
+    CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
+    CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent,
+    CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind,
+    CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
+    CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+    CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+    CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+    CssTransformFunctionValueKind, CssTransformLonghandValueKind, CssTransitionBehaviorItemKind,
+    CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue,
+    CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue,
+    CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
+    CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
+    CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -1568,6 +1568,21 @@ pub unsafe extern "C" fn rust_css_parse_color(
             };
 
             css_parser::parse_color_value(input, allow_quirky_color)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_image_set(input: *const u8, input_len: usize) -> CssImageSetValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssImageSetValueKind::Invalid;
+            };
+
+            css_parser::parse_image_set_value(input)
         })
     }
 }

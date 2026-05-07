@@ -3402,6 +3402,16 @@ FFI::CssColorValueKind RustComponentValueParser::parse_color(StringView input, S
         allow_quirky_color);
 }
 
+FFI::CssImageSetValueKind RustComponentValueParser::parse_image_set(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_image_set(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_translate(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

@@ -1149,6 +1149,13 @@ pub enum CssColorValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssImageSetValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -5459,6 +5466,155 @@ pub(crate) fn parse_color_value(filtered_input: &[u8], allow_quirky_color: bool)
     } else {
         CssColorValueKind::Invalid
     }
+}
+
+pub(crate) fn parse_image_set_value(filtered_input: &[u8]) -> CssImageSetValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [ComponentValue::Function(function)] = component_values else {
+        return CssImageSetValueKind::Invalid;
+    };
+
+    if component_value_parse_as_image_set_function(function) {
+        CssImageSetValueKind::Valid
+    } else {
+        CssImageSetValueKind::Invalid
+    }
+}
+
+fn component_value_parse_as_image_set_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-images-4/#image-set-notation
+    // image-set() = image-set( <image-set-option># )
+    // <image-set-option> = [ <image> | <string> ] [ <resolution> || type(<string>) ]
+    // https://compat.spec.whatwg.org/#css-%27-webkit-image-set%27-alias
+    // Implementations must accept -webkit-image-set() as a parse-time alias of image-set().
+    if !function.name.eq_ignore_ascii_case("image-set") && !function.name.eq_ignore_ascii_case("-webkit-image-set") {
+        return false;
+    }
+
+    let Some(options) = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        component_values_parse_as_image_set_option(&component_values).then_some(())
+    }) else {
+        return false;
+    };
+
+    !options.is_empty()
+}
+
+fn component_values_parse_as_image_set_option(component_values: &[ComponentValue]) -> bool {
+    let component_values = strip_whitespace(component_values);
+    if component_values.is_empty() {
+        return false;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+
+    let Some(image) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_image_set_string(image)
+        || component_value_parse_as_image_set_image(image)
+        || component_value_parse_as_image_set_gradient(image)
+    {
+        parser.index += 1;
+    } else {
+        return false;
+    }
+
+    let mut has_resolution = false;
+    let mut has_type = false;
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        if !has_resolution && component_value_parse_as_image_set_resolution(component_value) {
+            has_resolution = true;
+            parser.index += 1;
+            continue;
+        }
+
+        if !has_type && component_value_parse_as_image_set_type(component_value) {
+            has_type = true;
+            parser.index += 1;
+            continue;
+        }
+
+        return false;
+    }
+
+    true
+}
+
+fn component_value_parse_as_image_set_resolution(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-images-4/#typedef-image-set-option
+    // <image-set-option> = [ <image> | <string> ] [ <resolution> || type(<string>) ]
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Resolution)),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn component_value_parse_as_image_set_string(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-images-4/#image-set-notation
+    // "For legacy reasons, <string> can be used instead of <url>, and is
+    // treated identically to url(<string>)."
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { .. },
+            ..
+        })
+    )
+}
+
+fn component_value_parse_as_image_set_image(component_value: &ComponentValue) -> bool {
+    let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+    parser.parse_a_url_function().is_some()
+}
+
+fn component_value_parse_as_image_set_gradient(component_value: &ComponentValue) -> bool {
+    let ComponentValue::Function(function) = component_value else {
+        return false;
+    };
+
+    // AD-HOC: Gradient materialization still happens in C++.
+    // Rust accepts the gradient function shapes here only after C++ has
+    // materialized an image-set value for the same consumed token slice.
+    matches!(
+        function.name.to_ascii_lowercase().as_str(),
+        "linear-gradient"
+            | "-webkit-linear-gradient"
+            | "repeating-linear-gradient"
+            | "-webkit-repeating-linear-gradient"
+            | "radial-gradient"
+            | "repeating-radial-gradient"
+            | "conic-gradient"
+            | "repeating-conic-gradient"
+    )
+}
+
+fn component_value_parse_as_image_set_type(component_value: &ComponentValue) -> bool {
+    let ComponentValue::Function(function) = component_value else {
+        return false;
+    };
+
+    if !function.name.eq_ignore_ascii_case("type") {
+        return false;
+    }
+
+    component_values_parse_as_string(strip_whitespace(&function.value))
 }
 
 fn component_value_parse_as_color_function(function: &Function) -> bool {
@@ -15462,36 +15618,37 @@ mod tests {
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
-        CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
-        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-        CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
-        CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
-        CssRectValueKind, CssRepeatStyleValueKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind,
-        CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
-        CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
-        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransformFunctionValueKind, CssTransformLonghandValueKind, CssTransitionBehaviorItemKind,
-        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
-        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
-        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
-        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaQuery, CssMediaTypeKind,
+        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
+        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
+        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
+        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
+        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
+        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
+        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
+        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -15503,18 +15660,18 @@ mod tests {
         parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
         parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
-        parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
+        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
+        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -16166,6 +16323,10 @@ mod tests {
 
     fn parse_quirky_color(input: &str) -> CssColorValueKind {
         parse_color_value(input.as_bytes(), true)
+    }
+
+    fn parse_image_set(input: &str) -> CssImageSetValueKind {
+        parse_image_set_value(input.as_bytes())
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -19391,6 +19552,62 @@ mod tests {
         assert_eq!(parse_color("#xyz"), CssColorValueKind::Invalid);
         assert_eq!(parse_color("rgb(1 2)"), CssColorValueKind::Invalid);
         assert_eq!(parse_color("000000"), CssColorValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_image_set_values() {
+        assert_eq!(
+            parse_image_set("image-set(url(example.png))"),
+            CssImageSetValueKind::Valid
+        );
+        assert_eq!(
+            parse_image_set("image-set(\"example.png\" 2x)"),
+            CssImageSetValueKind::Valid
+        );
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) type(\"image/png\"))"),
+            CssImageSetValueKind::Valid
+        );
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) type(\"image/png\") 2x)"),
+            CssImageSetValueKind::Valid
+        );
+        assert_eq!(
+            parse_image_set("-webkit-image-set(url(example.png) 1dppx)"),
+            CssImageSetValueKind::Valid
+        );
+        assert_eq!(
+            parse_image_set("image-set(linear-gradient(black, white) 1x)"),
+            CssImageSetValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_image_set_values() {
+        assert_eq!(parse_image_set(""), CssImageSetValueKind::Invalid);
+        assert_eq!(parse_image_set("url(example.png)"), CssImageSetValueKind::Invalid);
+        assert_eq!(parse_image_set("image-set()"), CssImageSetValueKind::Invalid);
+        assert_eq!(parse_image_set("image-set(none)"), CssImageSetValueKind::Invalid);
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) -1x)"),
+            CssImageSetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) 1x 2x)"),
+            CssImageSetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) type(\"image/png\") type(\"image/jpeg\"))"),
+            CssImageSetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_image_set("image-set(url(example.png) type(image/png))"),
+            CssImageSetValueKind::Invalid
+        );
+        assert_eq!(
+            parse_image_set("image-set(image-set(url(example.png)) 2x)"),
+            CssImageSetValueKind::Invalid
+        );
     }
 
     #[test]
