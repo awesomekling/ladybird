@@ -1875,6 +1875,8 @@ pub enum CssStyleValueKind {
     OverflowClipMargin,
     Shadow,
     ShapeOutside,
+    TextDecoration,
+    TextDecorationLine,
     ScrollFunction,
     ScrollbarColor,
     ScrollbarGutter,
@@ -2014,6 +2016,12 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     ShapeOutside {
+        source: String,
+    },
+    TextDecoration {
+        source: String,
+    },
+    TextDecorationLine {
         source: String,
     },
     ScrollbarColor(RustOwnedScrollbarColor),
@@ -3002,6 +3010,8 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
         PropertyId::ShapeOutside => rust_owned_shape_outside_style_value_kind(filtered_input),
+        PropertyId::TextDecoration => rust_owned_text_decoration_style_value_kind(filtered_input),
+        PropertyId::TextDecorationLine => rust_owned_text_decoration_line_style_value_kind(filtered_input),
         PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
         PropertyId::ScrollTimelineName | PropertyId::ViewTimelineName => {
             rust_owned_timeline_name_style_value_kind(filtered_input)
@@ -4401,6 +4411,26 @@ fn rust_owned_shape_outside_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     })
 }
 
+fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_text_decoration_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextDecoration {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_text_decoration_line_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_text_decoration_line_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextDecorationLine {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -5660,6 +5690,12 @@ where
         }
         RustOwnedStyleValueKind::ShapeOutside { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ShapeOutside, property_id, source);
+        }
+        RustOwnedStyleValueKind::TextDecoration { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::TextDecoration, property_id, source);
+        }
+        RustOwnedStyleValueKind::TextDecorationLine { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::TextDecorationLine, property_id, source);
         }
         RustOwnedStyleValueKind::TimelineName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
@@ -12549,6 +12585,56 @@ pub(crate) fn parse_shape_outside_value(filtered_input: &[u8]) -> bool {
     has_basic_shape || has_shape_box
 }
 
+pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    if component_values.is_empty() {
+        return false;
+    }
+
+    let mut text_decoration_line = Vec::new();
+    let mut has_text_decoration_style = false;
+    let mut has_text_decoration_color = false;
+    let mut has_text_decoration_thickness = false;
+
+    for component_value in &component_values {
+        if component_value_is_text_decoration_line(component_value) {
+            text_decoration_line.push(component_value.clone());
+            continue;
+        }
+
+        if !has_text_decoration_style && component_value_is_text_decoration_style(component_value) {
+            has_text_decoration_style = true;
+            continue;
+        }
+
+        if !has_text_decoration_thickness && component_value_parse_as_text_decoration_thickness(component_value) {
+            has_text_decoration_thickness = true;
+            continue;
+        }
+
+        if !has_text_decoration_color && component_value_parse_as_color_value(component_value) {
+            has_text_decoration_color = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    // https://drafts.csswg.org/css-text-decor-4/#text-decoration-property
+    // <'text-decoration-line'> || <'text-decoration-thickness'> || <'text-decoration-style'> || <'text-decoration-color'>
+    text_decoration_line.is_empty() || component_values_parse_as_text_decoration_line(&text_decoration_line)
+}
+
+pub(crate) fn parse_text_decoration_line_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    component_values_parse_as_text_decoration_line(&component_values)
+}
+
 fn component_values_parse_as_exact_ratio(component_values: &[ComponentValue]) -> bool {
     // https://drafts.csswg.org/css-values-4/#ratios
     // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
@@ -12597,6 +12683,90 @@ fn component_value_is_shape_box(component_value: &ComponentValue) -> bool {
     // https://drafts.csswg.org/css-shapes-1/#typedef-shape-box
     // <shape-box> = <box> | margin-box
     first_is_one_of(value, &["content-box", "padding-box", "border-box", "margin-box"])
+}
+
+fn component_values_parse_as_text_decoration_line(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-text-decor-4/#text-decoration-line-property
+    // none | [ underline || overline || line-through || blink ] | spelling-error | grammar-error
+    match component_values {
+        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
+        [component_value] if component_value_is_ident(Some(component_value), "spelling-error") => return true,
+        [component_value] if component_value_is_ident(Some(component_value), "grammar-error") => return true,
+        [] => return false,
+        _ => {}
+    }
+
+    let mut has_underline = false;
+    let mut has_overline = false;
+    let mut has_line_through = false;
+    let mut has_blink = false;
+
+    for component_value in component_values {
+        if component_value_is_ident(Some(component_value), "underline") {
+            if has_underline {
+                return false;
+            }
+            has_underline = true;
+            continue;
+        }
+
+        if component_value_is_ident(Some(component_value), "overline") {
+            if has_overline {
+                return false;
+            }
+            has_overline = true;
+            continue;
+        }
+
+        if component_value_is_ident(Some(component_value), "line-through") {
+            if has_line_through {
+                return false;
+            }
+            has_line_through = true;
+            continue;
+        }
+
+        if component_value_is_ident(Some(component_value), "blink") {
+            if has_blink {
+                return false;
+            }
+            has_blink = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    has_underline || has_overline || has_line_through || has_blink
+}
+
+fn component_value_is_text_decoration_line(component_value: &ComponentValue) -> bool {
+    [
+        "none",
+        "underline",
+        "overline",
+        "line-through",
+        "blink",
+        "spelling-error",
+        "grammar-error",
+    ]
+    .iter()
+    .any(|line| component_value_is_ident(Some(component_value), line))
+}
+
+fn component_value_is_text_decoration_style(component_value: &ComponentValue) -> bool {
+    ["solid", "double", "dotted", "dashed", "wavy"]
+        .iter()
+        .any(|style| component_value_is_ident(Some(component_value), style))
+}
+
+fn component_value_parse_as_text_decoration_thickness(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-text-decor-4/#text-decoration-thickness-property
+    // auto | from-font | <length> | <percentage>
+    component_value_is_ident(Some(component_value), "auto")
+        || component_value_is_ident(Some(component_value), "from-font")
+        || component_value_parse_as_length(component_value)
+        || parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
@@ -22041,12 +22211,13 @@ mod tests {
         parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
         parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
         parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -22774,6 +22945,14 @@ mod tests {
 
     fn parse_shape_outside(input: &str) -> bool {
         parse_shape_outside_value(input.as_bytes())
+    }
+
+    fn parse_text_decoration(input: &str) -> bool {
+        parse_text_decoration_value(input.as_bytes())
+    }
+
+    fn parse_text_decoration_line(input: &str) -> bool {
+        parse_text_decoration_line_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -25092,6 +25271,32 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "circle(10px) border-box".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::TextDecoration], "underline red 2px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::TextDecoration,
+                property_id: PropertyId::TextDecoration,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "underline red 2px".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::TextDecorationLine], "overline underline"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::TextDecorationLine,
+                property_id: PropertyId::TextDecorationLine,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "overline underline".to_string(),
                 value_type: String::new(),
             })
         );
@@ -28452,6 +28657,50 @@ mod tests {
         assert!(!parse_shape_outside("border-box margin-box"));
         assert!(!parse_shape_outside("inset(10px) circle(10px)"));
         assert!(!parse_shape_outside("url(shape.png) border-box"));
+    }
+
+    #[test]
+    fn parses_text_decoration_line_values() {
+        assert!(parse_text_decoration_line("none"));
+        assert!(parse_text_decoration_line("underline"));
+        assert!(parse_text_decoration_line("overline underline blink"));
+        assert!(parse_text_decoration_line("underline overline line-through blink"));
+        assert!(parse_text_decoration_line("spelling-error"));
+        assert!(parse_text_decoration_line("grammar-error"));
+    }
+
+    #[test]
+    fn rejects_invalid_text_decoration_line_values() {
+        assert!(!parse_text_decoration_line(""));
+        assert!(!parse_text_decoration_line("auto"));
+        assert!(!parse_text_decoration_line("none underline"));
+        assert!(!parse_text_decoration_line("underline underline"));
+        assert!(!parse_text_decoration_line("spelling-error underline"));
+        assert!(!parse_text_decoration_line("spelling-error grammar-error"));
+    }
+
+    #[test]
+    fn parses_text_decoration_values() {
+        assert!(parse_text_decoration("none"));
+        assert!(parse_text_decoration("solid"));
+        assert!(parse_text_decoration("currentcolor"));
+        assert!(parse_text_decoration("auto"));
+        assert!(parse_text_decoration("from-font"));
+        assert!(parse_text_decoration("10px"));
+        assert!(parse_text_decoration("underline overline line-through blink red"));
+        assert!(parse_text_decoration("rgba(10, 20, 30, 0.4) dotted"));
+        assert!(parse_text_decoration("overline green from-font"));
+        assert!(parse_text_decoration("underline dashed green 2px"));
+    }
+
+    #[test]
+    fn rejects_invalid_text_decoration_values() {
+        assert!(!parse_text_decoration(""));
+        assert!(!parse_text_decoration("solid double"));
+        assert!(!parse_text_decoration("red green"));
+        assert!(!parse_text_decoration("auto from-font"));
+        assert!(!parse_text_decoration("none underline"));
+        assert!(!parse_text_decoration("spelling-error underline"));
     }
 
     #[test]

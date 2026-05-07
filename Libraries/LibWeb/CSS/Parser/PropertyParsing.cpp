@@ -1130,6 +1130,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::TextDecoration:
+                if (auto value = parse_text_decoration_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::TextDecorationLine:
+                if (auto value = parse_text_decoration_line_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::TimelineName:
                 if (auto value = parse_timeline_name_value(tokens)) {
                     generated_transaction.commit();
@@ -5454,52 +5466,48 @@ RefPtr<StyleValue const> Parser::parse_text_decoration_value(TokenStream<Compone
     RefPtr<StyleValue const> decoration_style;
     RefPtr<StyleValue const> decoration_color;
 
-    auto remaining_longhands = Vector { PropertyID::TextDecorationColor, PropertyID::TextDecorationLine, PropertyID::TextDecorationStyle, PropertyID::TextDecorationThickness };
+    auto remaining_longhands = Vector { PropertyID::TextDecorationColor, PropertyID::TextDecorationStyle, PropertyID::TextDecorationThickness };
 
     auto transaction = tokens.begin_transaction();
     while (tokens.has_next_token()) {
-        Optional<PropertyAndValue> property_and_value;
-        {
+        if (!remaining_longhands.is_empty()) {
             auto value_transaction = tokens.begin_transaction();
-            property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-            if (!property_and_value.has_value())
-                return nullptr;
-            // FIXME: text-decoration-line can't be parsed fully with parse_css_value_for_properties(), so don't commit
-            //        the transaction, and then parse it manually below.
-            if (property_and_value->property != PropertyID::TextDecorationLine)
+            auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
+            if (property_and_value.has_value()) {
                 value_transaction.commit();
-        }
-        auto& [property, value] = *property_and_value;
-        remove_property(remaining_longhands, property);
 
-        switch (property) {
-        case PropertyID::TextDecorationColor: {
-            VERIFY(!decoration_color);
-            decoration_color = value.release_nonnull();
-            continue;
+                auto& [property, value] = *property_and_value;
+                remove_property(remaining_longhands, property);
+
+                switch (property) {
+                case PropertyID::TextDecorationColor:
+                    VERIFY(!decoration_color);
+                    decoration_color = value.release_nonnull();
+                    continue;
+                case PropertyID::TextDecorationThickness:
+                    VERIFY(!decoration_thickness);
+                    decoration_thickness = value.release_nonnull();
+                    continue;
+                case PropertyID::TextDecorationStyle:
+                    VERIFY(!decoration_style);
+                    decoration_style = value.release_nonnull();
+                    continue;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+            }
         }
-        case PropertyID::TextDecorationLine: {
-            VERIFY(!decoration_line);
-            // NB: The tokens for this didn't get consumed, see above. So we parse it fully now.
-            auto parsed_decoration_line = parse_text_decoration_line_value(tokens);
-            if (!parsed_decoration_line)
-                return nullptr;
-            decoration_line = parsed_decoration_line.release_nonnull();
-            continue;
+
+        if (!decoration_line) {
+            auto value_transaction = tokens.begin_transaction();
+            if (auto parsed_decoration_line = parse_text_decoration_line_value(tokens)) {
+                value_transaction.commit();
+                decoration_line = parsed_decoration_line.release_nonnull();
+                continue;
+            }
         }
-        case PropertyID::TextDecorationThickness: {
-            VERIFY(!decoration_thickness);
-            decoration_thickness = value.release_nonnull();
-            continue;
-        }
-        case PropertyID::TextDecorationStyle: {
-            VERIFY(!decoration_style);
-            decoration_style = value.release_nonnull();
-            continue;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
+
+        return nullptr;
     }
 
     if (!decoration_line)
@@ -5524,10 +5532,23 @@ RefPtr<StyleValue const> Parser::parse_text_decoration_line_value(TokenStream<Co
     bool includes_spelling_or_grammar_error_value = false;
 
     while (tokens.has_next_token()) {
-        auto maybe_value = parse_css_value_for_property(PropertyID::TextDecorationLine, tokens);
-        if (!maybe_value)
+        auto transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
             break;
-        auto value = maybe_value.release_nonnull();
+
+        auto& next_token = tokens.next_token();
+        if (!next_token.is(Token::Type::Ident))
+            break;
+
+        auto keyword = keyword_from_string(next_token.token().ident());
+        if (!keyword.has_value() || !keyword_to_text_decoration_line(keyword.value()).has_value())
+            break;
+
+        tokens.discard_a_token();
+        transaction.commit();
+
+        auto value = KeywordStyleValue::create(keyword.release_value());
 
         if (auto maybe_line = keyword_to_text_decoration_line(value->to_keyword()); maybe_line.has_value()) {
             if (maybe_line == TextDecorationLine::None) {
