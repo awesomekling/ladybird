@@ -1854,6 +1854,8 @@ pub enum CssStyleValueKind {
     Contain,
     ContainerType,
     CounterDefinitions,
+    BorderRadius,
+    Cursor,
     Display,
     GridAutoFlow,
     GridAutoTrackSizes,
@@ -1868,6 +1870,7 @@ pub enum CssStyleValueKind {
     PositionVisibility,
     Quotes,
     RepeatStyle,
+    Shadow,
     ScrollFunction,
     ScrollbarColor,
     ScrollbarGutter,
@@ -1915,6 +1918,12 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     CounterDefinitions(RustOwnedCounterDefinitions),
+    BorderRadius {
+        source: String,
+    },
+    Cursor {
+        source: String,
+    },
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
     FontStyle(RustOwnedFontStyle),
@@ -1988,6 +1997,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     RepeatStyle(RustOwnedRepeatStyle),
     Resolution(RustOwnedDimensionStyleValue),
+    Shadow {
+        source: String,
+    },
     ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
     Shorthand(RustOwnedStyleValueList),
@@ -2912,6 +2924,17 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_background_size_style_value_kind(filtered_input)
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
+        PropertyId::BorderBottomLeftRadius
+        | PropertyId::BorderBottomRightRadius
+        | PropertyId::BorderEndEndRadius
+        | PropertyId::BorderEndStartRadius
+        | PropertyId::BorderStartEndRadius
+        | PropertyId::BorderStartStartRadius
+        | PropertyId::BorderTopLeftRadius
+        | PropertyId::BorderTopRightRadius => rust_owned_border_radius_style_value_kind(filtered_input),
+        PropertyId::BoxShadow | PropertyId::TextShadow => {
+            rust_owned_shadow_style_value_kind(property_id, filtered_input)
+        }
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
@@ -2934,7 +2957,16 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
+        PropertyId::Cursor => rust_owned_cursor_style_value_kind(filtered_input),
         PropertyId::MathDepth => rust_owned_math_depth_style_value_kind(filtered_input),
+        PropertyId::OverflowClipMarginBlockEnd
+        | PropertyId::OverflowClipMarginBlockStart
+        | PropertyId::OverflowClipMarginBottom
+        | PropertyId::OverflowClipMarginInlineEnd
+        | PropertyId::OverflowClipMarginInlineStart
+        | PropertyId::OverflowClipMarginLeft
+        | PropertyId::OverflowClipMarginRight
+        | PropertyId::OverflowClipMarginTop => rust_owned_overflow_clip_margin_style_value_kind(filtered_input),
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
         PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
@@ -4250,6 +4282,50 @@ fn rust_owned_background_size_component_from_component_value(
     None
 }
 
+fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_border_radius_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::BorderRadius {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_cursor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_cursor_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Cursor {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_overflow_clip_margin_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::UnresolvedValueType {
+        value_type: PropertyValueType::Length,
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_shadow_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    if !parse_shadow_value(property_id, filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Shadow {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -5267,6 +5343,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::BorderRadius { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::BorderRadius, property_id, source);
+        }
         RustOwnedStyleValueKind::ColorScheme(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
         }
@@ -5322,6 +5401,9 @@ where
                     "",
                 );
             }
+        }
+        RustOwnedStyleValueKind::Cursor { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Cursor, property_id, source);
         }
         RustOwnedStyleValueKind::Display(value) => callback(
             CssStyleValueKind::Display,
@@ -5489,6 +5571,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::Shadow { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Shadow, property_id, source);
+        }
         RustOwnedStyleValueKind::TimelineName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
         }
@@ -9977,6 +10062,25 @@ fn component_value_parse_as_non_negative_length_percentage(component_value: &Com
     }
 }
 
+fn component_value_parse_as_non_negative_length(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
 fn consume_grid_flex_component_value(parser: &mut ComponentValueParser) -> bool {
     parser.discard_whitespace();
     let Some(component_value) = parser.next_component_value() else {
@@ -12125,6 +12229,159 @@ pub(crate) fn parse_math_depth_value(filtered_input: &[u8]) -> bool {
     component_values_parse_as_property_value_type(PropertyValueType::Integer, source.as_bytes())
 }
 
+pub(crate) fn parse_border_radius_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-borders-4/#typedef-border-radius
+    // <border-radius> = <slash-separated-border-radius-syntax> | <legacy-border-radius-syntax>
+    // <slash-separated-border-radius-syntax> = <length-percentage [0,∞]> [ / <length-percentage [0,∞]> ]?
+    // <legacy-border-radius-syntax> = <length-percentage [0,∞]>{1,2}
+    match component_values.as_slice() {
+        [horizontal] => component_value_parse_as_non_negative_length_percentage(horizontal),
+        [horizontal, vertical] => {
+            component_value_parse_as_non_negative_length_percentage(horizontal)
+                && component_value_parse_as_non_negative_length_percentage(vertical)
+        }
+        [horizontal, slash, vertical] => {
+            component_value_parse_as_non_negative_length_percentage(horizontal)
+                && component_value_is_delim(Some(slash), '/')
+                && component_value_parse_as_non_negative_length_percentage(vertical)
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn parse_cursor_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let Some(groups) = parse_comma_separated_component_values(component_values, Some) else {
+        return false;
+    };
+
+    // https://drafts.csswg.org/css-ui-4/#cursor
+    // [ [ <url> | <url-set> ] [ <number> <number> ]? , ]* <cursor-predefined>
+    let Some((last, cursor_images)) = groups.split_last() else {
+        return false;
+    };
+
+    if !parse_cursor_predefined(last) {
+        return false;
+    }
+
+    cursor_images
+        .iter()
+        .all(|component_values| parse_cursor_image(component_values, filtered_input_string))
+}
+
+pub(crate) fn parse_shadow_value(property_id: PropertyId, filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/css-backgrounds-3/#typedef-shadow
+    // <shadow> = <color>? && [<length>{2} <length [0,∞]>? <length>?] && inset?
+    let component_values_without_whitespace = strip_whitespace(&component_values);
+    if matches!(&component_values_without_whitespace, [component_value] if component_value_is_ident(Some(component_value), "none"))
+    {
+        return true;
+    }
+
+    let is_box_shadow = property_id == PropertyId::BoxShadow;
+    let Some(shadows) = parse_comma_separated_component_values(component_values, |component_values| {
+        parse_single_shadow_value(component_values, is_box_shadow).then_some(())
+    }) else {
+        return false;
+    };
+
+    !shadows.is_empty()
+}
+
+pub(crate) fn parse_overflow_clip_margin_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin
+    // <visual-box> || <length [0,∞]>
+    // FIXME: Implement the <visual-box> part of this.
+    matches!(component_values, [component_value] if component_value_parse_as_non_negative_length(component_value))
+}
+
+fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values.as_slice()
+    else {
+        return false;
+    };
+
+    property_accepts_keyword(PropertyId::Cursor, value)
+}
+
+fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let Some((image, coordinates)) = component_values.split_first() else {
+        return false;
+    };
+
+    let Some(image_source) = serialize_component_values_for_reparsing(std::slice::from_ref(image), source) else {
+        return false;
+    };
+    if rust_owned_image_style_value_kind(image_source.as_bytes(), &image_source).is_none() {
+        return false;
+    }
+
+    match coordinates {
+        [] => true,
+        [x, y] => component_value_parse_as_number_prefix(x) && component_value_parse_as_number_prefix(y),
+        _ => false,
+    }
+}
+
+fn parse_single_shadow_value(component_values: Vec<ComponentValue>, is_box_shadow: bool) -> bool {
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    let mut has_color = false;
+    let mut has_offsets = false;
+    let mut has_placement = false;
+
+    while parser.has_next_component_value() {
+        if !has_color && component_value_parse_as_color_value(parser.next_component_value().unwrap()) {
+            parser.index += 1;
+            has_color = true;
+            continue;
+        }
+
+        if !has_offsets && consume_length_component_value(&mut parser) {
+            if !consume_length_component_value(&mut parser) {
+                return false;
+            }
+
+            if consume_non_negative_length_component_value(&mut parser) && is_box_shadow {
+                consume_length_component_value(&mut parser);
+            }
+
+            has_offsets = true;
+            continue;
+        }
+
+        if is_box_shadow && !has_placement && parser.consume_ident_matching("inset") {
+            has_placement = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    has_offsets
+}
+
 fn consume_transform_origin_component(parser: &mut ComponentValueParser) -> Option<TransformOriginComponent> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value()?;
@@ -12164,6 +12421,18 @@ fn consume_length_component_value(parser: &mut ComponentValueParser) -> bool {
         return false;
     };
     if !component_value_parse_as_length(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn consume_non_negative_length_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_non_negative_length(component_value) {
         return false;
     }
     parser.index += 1;
@@ -21460,23 +21729,25 @@ mod tests {
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
         parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
-        parse_background_size_value, parse_basic_shape_value, parse_color_function_value, parse_color_scheme_value,
-        parse_color_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
-        parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
-        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
-        parse_crop_or_cross, parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
+        parse_background_size_value, parse_basic_shape_value, parse_border_radius_value, parse_color_function_value,
+        parse_color_scheme_value, parse_color_value, parse_contain_value, parse_container_rule_prelude,
+        parse_container_type_value, parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_cursor_value,
+        parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_image_set_value, parse_length_descriptor, parse_math_depth_value,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
-        parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
-        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
-        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
+        parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
+        parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
+        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
+        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
+        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
+        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
+        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
+        parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_shadow_value, parse_simple_color_value, parse_string_descriptor,
         parse_stroke_dasharray_value, parse_style_value_for_property, parse_text_underline_position_value,
         parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
         parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
@@ -22175,6 +22446,26 @@ mod tests {
 
     fn parse_math_depth(input: &str) -> bool {
         parse_math_depth_value(input.as_bytes())
+    }
+
+    fn parse_border_radius(input: &str) -> bool {
+        parse_border_radius_value(input.as_bytes())
+    }
+
+    fn parse_cursor(input: &str) -> bool {
+        parse_cursor_value(input.as_bytes())
+    }
+
+    fn parse_box_shadow(input: &str) -> bool {
+        parse_shadow_value(PropertyId::BoxShadow, input.as_bytes())
+    }
+
+    fn parse_text_shadow(input: &str) -> bool {
+        parse_shadow_value(PropertyId::TextShadow, input.as_bytes())
+    }
+
+    fn parse_overflow_clip_margin(input: &str) -> bool {
+        parse_overflow_clip_margin_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -23264,6 +23555,43 @@ mod tests {
                     ],
                     source: "cover, auto 10px, 2% calc(3px + 4%)".to_string(),
                 }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderTopLeftRadius], "1px / 2%"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderTopLeftRadius,
+                value: RustOwnedStyleValueKind::BorderRadius {
+                    source: "1px / 2%".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BoxShadow], "inset 1px 2px 3px red"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BoxShadow,
+                value: RustOwnedStyleValueKind::Shadow {
+                    source: "inset 1px 2px 3px red".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Cursor], "url(cursor.png) 1 2, pointer"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Cursor,
+                value: RustOwnedStyleValueKind::Cursor {
+                    source: "url(cursor.png) 1 2, pointer".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::OverflowClipMarginTop], "2px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::OverflowClipMarginTop,
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type: PropertyValueType::Length,
+                    source: "2px".to_string(),
+                },
             })
         );
         assert_eq!(
@@ -27621,6 +27949,73 @@ mod tests {
         assert!(!parse_math_depth("add(1 2)"));
         assert!(!parse_math_depth("1 2"));
         assert!(!parse_math_depth("1px"));
+    }
+
+    #[test]
+    fn parses_border_radius_values() {
+        assert!(parse_border_radius("0"));
+        assert!(parse_border_radius("1px 2%"));
+        assert!(parse_border_radius("calc(1px + 2%) / 3px"));
+    }
+
+    #[test]
+    fn rejects_invalid_border_radius_values() {
+        assert!(!parse_border_radius(""));
+        assert!(!parse_border_radius("-1px"));
+        assert!(!parse_border_radius("1px /"));
+        assert!(!parse_border_radius("1px 2px 3px"));
+        assert!(!parse_border_radius("1px auto"));
+    }
+
+    #[test]
+    fn parses_cursor_values() {
+        assert!(parse_cursor("auto"));
+        assert!(parse_cursor("url(cursor.png), pointer"));
+        assert!(parse_cursor("url(cursor.png) 1 -2, grab"));
+        assert!(parse_cursor("linear-gradient(black, white), crosshair"));
+    }
+
+    #[test]
+    fn rejects_invalid_cursor_values() {
+        assert!(!parse_cursor(""));
+        assert!(!parse_cursor("url(cursor.png)"));
+        assert!(!parse_cursor("url(cursor.png) 1, pointer"));
+        assert!(!parse_cursor("url(cursor.png) 1 2 3, pointer"));
+        assert!(!parse_cursor("not-a-cursor"));
+    }
+
+    #[test]
+    fn parses_shadow_values() {
+        assert!(parse_box_shadow("none"));
+        assert!(parse_box_shadow("inset 1px 2px 3px 4px red"));
+        assert!(parse_box_shadow("red 1px 2px, 3px 4px blue"));
+        assert!(parse_text_shadow("1px 2px 3px red"));
+    }
+
+    #[test]
+    fn rejects_invalid_shadow_values() {
+        assert!(!parse_box_shadow(""));
+        assert!(!parse_box_shadow("1px"));
+        assert!(!parse_box_shadow("1px 2px -3px"));
+        assert!(!parse_box_shadow("inset inset 1px 2px"));
+        assert!(!parse_text_shadow("inset 1px 2px"));
+        assert!(!parse_text_shadow("1px 2px 3px 4px"));
+    }
+
+    #[test]
+    fn parses_overflow_clip_margin_values() {
+        assert!(parse_overflow_clip_margin("0"));
+        assert!(parse_overflow_clip_margin("1px"));
+        assert!(parse_overflow_clip_margin("calc(1px + 2px)"));
+    }
+
+    #[test]
+    fn rejects_invalid_overflow_clip_margin_values() {
+        assert!(!parse_overflow_clip_margin(""));
+        assert!(!parse_overflow_clip_margin("-1px"));
+        assert!(!parse_overflow_clip_margin("1%"));
+        assert!(!parse_overflow_clip_margin("content-box"));
+        assert!(!parse_overflow_clip_margin("1px 2px"));
     }
 
     #[test]

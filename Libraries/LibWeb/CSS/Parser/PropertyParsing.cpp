@@ -882,6 +882,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::BorderRadius:
+                if (auto value = parse_border_radius_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::Cursor:
+                if (auto value = parse_cursor_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::GridAutoFlow: {
                 auto axis = rust_style_value->grid_auto_flow_axis == 1
                     ? GridAutoFlowStyleValue::Axis::Column
@@ -1082,6 +1094,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::Shadow: {
+                auto shadow_type = rust_style_value->property_id == PropertyID::TextShadow
+                    ? ShadowStyleValue::ShadowType::Text
+                    : ShadowStyleValue::ShadowType::Normal;
+                if (auto value = parse_shadow_value(tokens, shadow_type)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            }
             case FFI::CssStyleValueKind::TimelineName:
                 if (auto value = parse_timeline_name_value(tokens)) {
                     generated_transaction.commit();
