@@ -1895,7 +1895,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Url(String),
     CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
-    FitContent(RustOwnedSourceBackedStyleValue),
+    FitContent(RustOwnedFitContent),
     BasicShape(RustOwnedSourceBackedStyleValue),
     Rect(RustOwnedSourceBackedStyleValue),
     ScrollFunction {
@@ -1993,6 +1993,18 @@ pub(crate) struct RustOwnedLinearEasingStop {
     output: String,
     first_stop_length: Option<String>,
     second_stop_length: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFitContent {
+    value: RustOwnedFitContentValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedFitContentValue {
+    Keyword,
+    Function { argument: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2455,12 +2467,18 @@ fn parse_rust_owned_generated_longhand_value(
             };
         }
         PropertyValueType::FitContent => {
+            if let Some(value) =
+                rust_owned_fit_content_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::FitContent(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(value_type),
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type,
                     source: filtered_input_to_string(filtered_input),
-                }),
+                },
             };
         }
         PropertyValueType::BasicShape => {
@@ -2976,6 +2994,47 @@ fn rust_owned_single_component_function_arguments(
         serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
         Some(component_value.clone())
     })
+}
+
+fn rust_owned_fit_content_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+
+    let value = match component_values {
+        [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }),
+        ] if value.eq_ignore_ascii_case("fit-content") => RustOwnedFitContentValue::Keyword,
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("fit-content") => {
+            // https://drafts.csswg.org/css-sizing-3/#funcdef-width-fit-content
+            // fit-content() = fit-content( <length-percentage [0,∞]> )
+            let [component_value] = strip_whitespace(&function.value) else {
+                return None;
+            };
+            if !component_value_parse_as_length_percentage(component_value) {
+                return None;
+            }
+            RustOwnedFitContentValue::Function {
+                argument: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
+        value,
+        source,
+    }))
 }
 
 fn rust_owned_primitive_style_value_kind(
@@ -18315,9 +18374,10 @@ mod tests {
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
@@ -20022,8 +20082,10 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Width], "fit-content(10px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Width,
-                value: RustOwnedStyleValueKind::FitContent(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::FitContent),
+                value: RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
+                    value: RustOwnedFitContentValue::Function {
+                        argument: "10px".to_string(),
+                    },
                     source: "fit-content(10px)".to_string(),
                 }),
             })
