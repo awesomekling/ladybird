@@ -1773,11 +1773,91 @@ pub(crate) struct RustOwnedStyleValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStyleValueKind {
+    Anchor(RustOwnedSourceBackedStyleValue),
+    AnchorSize(RustOwnedSourceBackedStyleValue),
+    Angle(RustOwnedDimensionStyleValue),
+    BackgroundSize(RustOwnedSourceBackedStyleValue),
+    BorderImageSlice(RustOwnedSourceBackedStyleValue),
+    BorderRadius(RustOwnedSourceBackedStyleValue),
+    BorderRadiusRect(RustOwnedSourceBackedStyleValue),
+    Calculated(RustOwnedMathFunction),
+    ColorInterpolationMethod(RustOwnedSourceBackedStyleValue),
+    ColorScheme(RustOwnedSourceBackedStyleValue),
+    ConicGradient(RustOwnedSourceBackedStyleValue),
+    Content(RustOwnedSourceBackedStyleValue),
+    Counter(RustOwnedSourceBackedStyleValue),
+    CounterDefinitions(RustOwnedSourceBackedStyleValue),
+    CounterStyleSystem(RustOwnedSourceBackedStyleValue),
+    Cursor(RustOwnedSourceBackedStyleValue),
+    Display(RustOwnedSourceBackedStyleValue),
+    Edge(RustOwnedSourceBackedStyleValue),
+    FilterValueList(RustOwnedSourceBackedStyleValue),
+    Flex(RustOwnedDimensionStyleValue),
+    FontSource(RustOwnedSourceBackedStyleValue),
+    FontStyle(RustOwnedSourceBackedStyleValue),
+    Frequency(RustOwnedDimensionStyleValue),
+    Function(RustOwnedFunctionStyleValue),
+    GridAutoFlow(RustOwnedSourceBackedStyleValue),
+    GridTemplateArea(RustOwnedSourceBackedStyleValue),
+    GridTrackPlacement(RustOwnedSourceBackedStyleValue),
+    GridTrackSizeList(RustOwnedSourceBackedStyleValue),
+    GuaranteedInvalid,
+    Image(RustOwnedSourceBackedStyleValue),
+    ImageSet(RustOwnedSourceBackedStyleValue),
+    Integer {
+        value: i32,
+        value_type: PropertyValueType,
+    },
     Keyword(String),
     CustomIdent {
         value: String,
         value_type: PropertyValueType,
     },
+    Length(RustOwnedDimensionStyleValue),
+    LinearGradient(RustOwnedSourceBackedStyleValue),
+    Number {
+        value: f64,
+        value_type: PropertyValueType,
+    },
+    OpacityValue {
+        primitive_kind: CssPrimitiveValueKind,
+        value: f64,
+    },
+    OpenTypeTagged(RustOwnedSourceBackedStyleValue),
+    PendingSubstitution(RustOwnedSourceBackedStyleValue),
+    Percentage {
+        value: f64,
+        value_type: PropertyValueType,
+    },
+    Position(RustOwnedSourceBackedStyleValue),
+    RadialGradient(RustOwnedSourceBackedStyleValue),
+    RadialSize(RustOwnedSourceBackedStyleValue),
+    RandomValueSharing(RustOwnedSourceBackedStyleValue),
+    Ratio {
+        numerator: f64,
+        denominator: f64,
+        has_denominator: bool,
+        value_type: PropertyValueType,
+    },
+    RepeatStyle(RustOwnedSourceBackedStyleValue),
+    Resolution(RustOwnedDimensionStyleValue),
+    ScrollbarColor(RustOwnedSourceBackedStyleValue),
+    ScrollbarGutter(RustOwnedSourceBackedStyleValue),
+    Shadow(RustOwnedSourceBackedStyleValue),
+    Shorthand(RustOwnedStyleValueList),
+    String {
+        value: String,
+        value_type: PropertyValueType,
+    },
+    Superellipse(RustOwnedSourceBackedStyleValue),
+    TextIndent(RustOwnedSourceBackedStyleValue),
+    TextUnderlinePosition(RustOwnedSourceBackedStyleValue),
+    Time(RustOwnedDimensionStyleValue),
+    Transformation(RustOwnedSourceBackedStyleValue),
+    TreeCountingFunction(RustOwnedFunctionStyleValue),
+    Tuple(RustOwnedStyleValueList),
+    UnicodeRange(RustOwnedSourceBackedStyleValue),
+    ValueList(RustOwnedStyleValueList),
     Primitive {
         primitive_kind: CssPrimitiveValueKind,
         numeric_value: Option<f64>,
@@ -1845,6 +1925,39 @@ pub(crate) struct RustOwnedMathFunction {
     name: String,
     arguments: Vec<String>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedSourceBackedStyleValue {
+    value_type: Option<PropertyValueType>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedDimensionStyleValue {
+    value: f64,
+    unit: String,
+    value_type: PropertyValueType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFunctionStyleValue {
+    name: String,
+    value: Box<RustOwnedStyleValueKind>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedStyleValueList {
+    values: Vec<RustOwnedStyleValueKind>,
+    separator: RustOwnedStyleValueListSeparator,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedStyleValueListSeparator {
+    Space,
+    Comma,
+    Slash,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2381,14 +2494,93 @@ fn parse_rust_owned_generated_longhand_value(
     } else {
         RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::Primitive {
+            value: rust_owned_primitive_style_value_kind(
+                value_type,
                 primitive_kind,
                 numeric_value,
                 secondary_numeric_value,
                 value,
-                value_type,
-            },
+            ),
         }
+    }
+}
+
+fn rust_owned_primitive_style_value_kind(
+    value_type: PropertyValueType,
+    primitive_kind: CssPrimitiveValueKind,
+    numeric_value: Option<f64>,
+    secondary_numeric_value: Option<f64>,
+    value: String,
+) -> RustOwnedStyleValueKind {
+    if numeric_value.is_none()
+        && matches!(
+            primitive_kind,
+            CssPrimitiveValueKind::Integer
+                | CssPrimitiveValueKind::Number
+                | CssPrimitiveValueKind::Percentage
+                | CssPrimitiveValueKind::Length
+                | CssPrimitiveValueKind::Time
+                | CssPrimitiveValueKind::Ratio
+        )
+    {
+        return RustOwnedStyleValueKind::Primitive {
+            primitive_kind,
+            numeric_value,
+            secondary_numeric_value,
+            value,
+            value_type,
+        };
+    }
+
+    match primitive_kind {
+        CssPrimitiveValueKind::Integer => RustOwnedStyleValueKind::Integer {
+            value: numeric_value.unwrap_or(0.0) as i32,
+            value_type,
+        },
+        CssPrimitiveValueKind::Number if value_type == PropertyValueType::OpacityValue => {
+            RustOwnedStyleValueKind::OpacityValue {
+                primitive_kind,
+                value: numeric_value.unwrap_or(0.0),
+            }
+        }
+        CssPrimitiveValueKind::Number => RustOwnedStyleValueKind::Number {
+            value: numeric_value.unwrap_or(0.0),
+            value_type,
+        },
+        CssPrimitiveValueKind::Percentage if value_type == PropertyValueType::OpacityValue => {
+            RustOwnedStyleValueKind::OpacityValue {
+                primitive_kind,
+                value: numeric_value.unwrap_or(0.0),
+            }
+        }
+        CssPrimitiveValueKind::Percentage => RustOwnedStyleValueKind::Percentage {
+            value: numeric_value.unwrap_or(0.0),
+            value_type,
+        },
+        CssPrimitiveValueKind::Length => RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
+        CssPrimitiveValueKind::Time => RustOwnedStyleValueKind::Time(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
+        CssPrimitiveValueKind::Ratio => RustOwnedStyleValueKind::Ratio {
+            numerator: numeric_value.unwrap_or(0.0),
+            denominator: secondary_numeric_value.unwrap_or(1.0),
+            has_denominator: value == "has-denominator",
+            value_type,
+        },
+        CssPrimitiveValueKind::String => RustOwnedStyleValueKind::String { value, value_type },
+        _ => RustOwnedStyleValueKind::Primitive {
+            primitive_kind,
+            numeric_value,
+            secondary_numeric_value,
+            value,
+            value_type,
+        },
     }
 }
 
@@ -2473,6 +2665,158 @@ where
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
+        RustOwnedStyleValueKind::Anchor(value)
+        | RustOwnedStyleValueKind::AnchorSize(value)
+        | RustOwnedStyleValueKind::BackgroundSize(value)
+        | RustOwnedStyleValueKind::BorderImageSlice(value)
+        | RustOwnedStyleValueKind::BorderRadius(value)
+        | RustOwnedStyleValueKind::BorderRadiusRect(value)
+        | RustOwnedStyleValueKind::ColorInterpolationMethod(value)
+        | RustOwnedStyleValueKind::ColorScheme(value)
+        | RustOwnedStyleValueKind::ConicGradient(value)
+        | RustOwnedStyleValueKind::Content(value)
+        | RustOwnedStyleValueKind::Counter(value)
+        | RustOwnedStyleValueKind::CounterDefinitions(value)
+        | RustOwnedStyleValueKind::CounterStyleSystem(value)
+        | RustOwnedStyleValueKind::Cursor(value)
+        | RustOwnedStyleValueKind::Display(value)
+        | RustOwnedStyleValueKind::Edge(value)
+        | RustOwnedStyleValueKind::FilterValueList(value)
+        | RustOwnedStyleValueKind::FontSource(value)
+        | RustOwnedStyleValueKind::FontStyle(value)
+        | RustOwnedStyleValueKind::GridAutoFlow(value)
+        | RustOwnedStyleValueKind::GridTemplateArea(value)
+        | RustOwnedStyleValueKind::GridTrackPlacement(value)
+        | RustOwnedStyleValueKind::GridTrackSizeList(value)
+        | RustOwnedStyleValueKind::Image(value)
+        | RustOwnedStyleValueKind::ImageSet(value)
+        | RustOwnedStyleValueKind::LinearGradient(value)
+        | RustOwnedStyleValueKind::OpenTypeTagged(value)
+        | RustOwnedStyleValueKind::PendingSubstitution(value)
+        | RustOwnedStyleValueKind::Position(value)
+        | RustOwnedStyleValueKind::RadialGradient(value)
+        | RustOwnedStyleValueKind::RadialSize(value)
+        | RustOwnedStyleValueKind::RandomValueSharing(value)
+        | RustOwnedStyleValueKind::RepeatStyle(value)
+        | RustOwnedStyleValueKind::ScrollbarColor(value)
+        | RustOwnedStyleValueKind::ScrollbarGutter(value)
+        | RustOwnedStyleValueKind::Shadow(value)
+        | RustOwnedStyleValueKind::Superellipse(value)
+        | RustOwnedStyleValueKind::TextIndent(value)
+        | RustOwnedStyleValueKind::TextUnderlinePosition(value)
+        | RustOwnedStyleValueKind::Transformation(value)
+        | RustOwnedStyleValueKind::UnicodeRange(value) => {
+            if let Some(value_type) = value.value_type {
+                callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
+            }
+        }
+        RustOwnedStyleValueKind::Angle(value)
+        | RustOwnedStyleValueKind::Flex(value)
+        | RustOwnedStyleValueKind::Frequency(value)
+        | RustOwnedStyleValueKind::Resolution(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Integer { value, value_type } => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Integer,
+            Some(*value as f64),
+            None,
+            &[],
+            *value_type,
+        ),
+        RustOwnedStyleValueKind::Length(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Length,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Number { value, value_type } => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Number,
+            Some(*value),
+            None,
+            &[],
+            *value_type,
+        ),
+        RustOwnedStyleValueKind::OpacityValue { primitive_kind, value } => callback_primitive_style_value(
+            callback,
+            property_id,
+            *primitive_kind,
+            Some(*value),
+            None,
+            &[],
+            PropertyValueType::OpacityValue,
+        ),
+        RustOwnedStyleValueKind::Percentage { value, value_type } => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Percentage,
+            Some(*value),
+            None,
+            &[],
+            *value_type,
+        ),
+        RustOwnedStyleValueKind::Ratio {
+            numerator,
+            denominator,
+            has_denominator,
+            value_type,
+        } => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Ratio,
+            Some(*numerator),
+            Some(*denominator),
+            if *has_denominator { b"has-denominator" } else { b"" },
+            *value_type,
+        ),
+        RustOwnedStyleValueKind::String { value, value_type } => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::String,
+            None,
+            None,
+            value.as_bytes(),
+            *value_type,
+        ),
+        RustOwnedStyleValueKind::Time(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Time,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Calculated(function) => {
+            let _ = function;
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::Number,
+            );
+        }
+        RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
+            let _ = function;
+        }
+        RustOwnedStyleValueKind::Shorthand(value_list)
+        | RustOwnedStyleValueKind::Tuple(value_list)
+        | RustOwnedStyleValueKind::ValueList(value_list) => {
+            let _ = value_list;
+        }
+        RustOwnedStyleValueKind::GuaranteedInvalid => {}
         RustOwnedStyleValueKind::Keyword(value) => callback(
             CssStyleValueKind::Keyword,
             property_id,
@@ -2652,6 +2996,34 @@ where
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
         }
     }
+}
+
+fn callback_primitive_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    primitive_kind: CssPrimitiveValueKind,
+    numeric_value: Option<f64>,
+    secondary_numeric_value: Option<f64>,
+    value: &[u8],
+    value_type: PropertyValueType,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Primitive,
+        property_id,
+        primitive_kind,
+        numeric_value.is_some(),
+        numeric_value.unwrap_or(0.0),
+        secondary_numeric_value.is_some(),
+        secondary_numeric_value.unwrap_or(0.0),
+        0,
+        0,
+        0,
+        0,
+        value,
+        property_value_type_name(value_type),
+    );
 }
 
 fn callback_style_value_type<C>(
@@ -17415,18 +17787,18 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedMathFunction,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -19037,13 +19409,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::MarginLeft], "12px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MarginLeft,
-                value: RustOwnedStyleValueKind::Primitive {
-                    primitive_kind: CssPrimitiveValueKind::Length,
-                    numeric_value: Some(12.0),
-                    secondary_numeric_value: None,
-                    value: "px".to_string(),
+                value: RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
+                    value: 12.0,
+                    unit: "px".to_string(),
                     value_type: PropertyValueType::Length,
-                },
+                }),
             })
         );
         assert_eq!(
@@ -19572,13 +19942,11 @@ mod tests {
             rust_items[1].style_value,
             RustOwnedStyleValue {
                 property_id: PropertyId::TransitionDuration,
-                value: RustOwnedStyleValueKind::Primitive {
-                    primitive_kind: CssPrimitiveValueKind::Time,
-                    numeric_value: Some(1.0),
-                    secondary_numeric_value: None,
-                    value: "s".to_string(),
+                value: RustOwnedStyleValueKind::Time(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "s".to_string(),
                     value_type: PropertyValueType::Time,
-                },
+                }),
             }
         );
         assert_eq!(
@@ -19652,13 +20020,11 @@ mod tests {
             rust_items[0].style_value,
             RustOwnedStyleValue {
                 property_id: PropertyId::Margin,
-                value: RustOwnedStyleValueKind::Primitive {
-                    primitive_kind: CssPrimitiveValueKind::Length,
-                    numeric_value: Some(1.0),
-                    secondary_numeric_value: None,
-                    value: "px".to_string(),
+                value: RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "px".to_string(),
                     value_type: PropertyValueType::Length,
-                },
+                }),
             }
         );
         assert_eq!(
