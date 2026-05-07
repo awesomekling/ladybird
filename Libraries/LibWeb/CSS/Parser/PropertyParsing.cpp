@@ -1338,9 +1338,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ListStyle:
-                if (auto value = parse_list_style_value(tokens)) {
+                if (rust_style_value->list_style_position_source.has_value() || rust_style_value->list_style_image_source.has_value() || rust_style_value->list_style_type_source.has_value()) {
+                    auto list_position = rust_style_value->list_style_position_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ListStylePosition, *rust_style_value->list_style_position_source)
+                        : property_initial_value(PropertyID::ListStylePosition);
+                    auto list_image = rust_style_value->list_style_image_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ListStyleImage, *rust_style_value->list_style_image_source)
+                        : property_initial_value(PropertyID::ListStyleImage);
+                    auto list_type = rust_style_value->list_style_type_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ListStyleType, *rust_style_value->list_style_type_source)
+                        : property_initial_value(PropertyID::ListStyleType);
+                    if (!list_position || !list_image || !list_type)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::ListStyle,
+                            { PropertyID::ListStylePosition, PropertyID::ListStyleImage, PropertyID::ListStyleType },
+                            { list_position.release_nonnull(), list_image.release_nonnull(), list_type.release_nonnull() }) };
                 }
                 break;
             case FFI::CssStyleValueKind::MathDepth:

@@ -1994,9 +1994,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Length(RustOwnedDimensionStyleValue),
-    ListStyle {
-        source: String,
-    },
+    ListStyle(RustOwnedListStyle),
     Number {
         value: f64,
         value_type: PropertyValueType,
@@ -2222,6 +2220,13 @@ pub(crate) struct RustOwnedImageSetOption {
     image_source: String,
     resolution: Option<String>,
     mime_type: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedListStyle {
+    position_source: Option<String>,
+    image_source: Option<String>,
+    type_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4152,13 +4157,84 @@ fn rust_owned_grid_track_size_list_style_value_kind(filtered_input: &[u8]) -> Op
 }
 
 fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_list_style_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    if component_values.is_empty() {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::ListStyle {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let mut position_source = None;
+    let mut image_source = None;
+    let mut type_source = None;
+    let mut found_nones = 0_u8;
+
+    for component_value in &component_values {
+        if component_value_is_ident(Some(component_value), "none") {
+            found_nones += 1;
+            continue;
+        }
+
+        if image_source.is_none() && component_value_parse_as_list_style_image(component_value) {
+            image_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if position_source.is_none() && component_value_is_list_style_position(component_value) {
+            position_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if type_source.is_none() && component_value_parse_as_list_style_type(component_value) {
+            type_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        return None;
+    }
+
+    if found_nones > 2 {
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-lists-3/#propdef-list-style
+    // <'list-style-position'> || <'list-style-image'> || <'list-style-type'>
+    //
+    // Since `none` is valid for both list-style-image and list-style-type, the
+    // shorthand needs to defer assigning it until the unambiguous components are
+    // known.
+    if found_nones == 2 {
+        if image_source.is_some() || type_source.is_some() {
+            return None;
+        }
+        image_source = Some("none".to_string());
+        type_source = Some("none".to_string());
+    } else if found_nones == 1 {
+        if image_source.is_some() && type_source.is_some() {
+            return None;
+        }
+        if image_source.is_none() {
+            image_source = Some("none".to_string());
+        }
+        if type_source.is_none() {
+            type_source = Some("none".to_string());
+        }
+    }
+
+    Some(RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
+        position_source,
+        image_source,
+        type_source,
+    }))
 }
 
 fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6044,8 +6120,28 @@ where
             property_id,
             &value.source,
         ),
-        RustOwnedStyleValueKind::ListStyle { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::ListStyle, property_id, source);
+        RustOwnedStyleValueKind::ListStyle(value) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::ListStyle,
+                property_id,
+                0,
+                value.position_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::ListStyle,
+                property_id,
+                1,
+                value.image_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::ListStyle,
+                property_id,
+                2,
+                value.type_source.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::MathDepth { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::MathDepth, property_id, source);
@@ -23855,26 +23951,27 @@ mod tests {
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow,
         RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList,
         RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
-        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedListStyle, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -25585,6 +25682,17 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ListStyle], "inside url(marker.png) square"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ListStyle,
+                value: RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
+                    position_source: Some("inside".to_string()),
+                    image_source: Some("url(marker.png)".to_string()),
+                    type_source: Some("square".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
@@ -27106,7 +27214,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "inside url(marker.png) square".to_string(),
+                value: "square".to_string(),
                 value_type: String::new(),
             })
         );

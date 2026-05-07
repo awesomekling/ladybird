@@ -171,6 +171,9 @@ public:
         Optional<String> text_decoration_thickness_source;
         Optional<String> text_decoration_style_source;
         Optional<String> text_decoration_color_source;
+        Optional<String> list_style_position_source;
+        Optional<String> list_style_image_source;
+        Optional<String> list_style_type_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

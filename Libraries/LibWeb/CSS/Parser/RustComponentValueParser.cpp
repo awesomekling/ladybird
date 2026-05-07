@@ -1152,6 +1152,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->text_decoration_color_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::ListStyle) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::ListStyle);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->list_style_position_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1)
+                    style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->list_style_type_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1163,7 +1178,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackPlacement,
                            FFI::CssStyleValueKind::GridTrackSizeList,
-                           FFI::CssStyleValueKind::ListStyle,
                            FFI::CssStyleValueKind::MathDepth,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
