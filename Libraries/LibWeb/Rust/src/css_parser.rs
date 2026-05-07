@@ -1840,6 +1840,10 @@ pub enum CssStyleValueKind {
     CounterStyleName,
     EasingFunction,
     FitContent,
+    FontFamily,
+    FontFeatureSettings,
+    FontLanguageOverride,
+    FontVariationSettings,
     BasicShape,
     Rect,
     AnimationName,
@@ -2010,6 +2014,18 @@ pub(crate) enum RustOwnedStyleValueKind {
     CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedFitContent),
+    FontFamily {
+        source: String,
+    },
+    FontFeatureSettings {
+        source: String,
+    },
+    FontLanguageOverride {
+        source: String,
+    },
+    FontVariationSettings {
+        source: String,
+    },
     BasicShape(RustOwnedBasicShape),
     Rect(RustOwnedRect),
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
@@ -2850,6 +2866,10 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
         PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
+        PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
+        PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
+        PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
+        PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
         PropertyId::GridAutoColumns | PropertyId::GridAutoRows => {
             rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input)
         }
@@ -3592,6 +3612,42 @@ fn parse_all_component_values<T>(
 fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let value = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_style)?;
     Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
+}
+
+fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_a_font_family_value(filtered_input, |_| {}) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::FontFamily {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_a_font_feature_settings(filtered_input, |_| {}, |_| {}) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::FontFeatureSettings {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_font_language_override_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_a_font_language_override(filtered_input, |_, _| {}) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::FontLanguageOverride {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_font_variation_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_a_font_variation_settings(filtered_input, |_| {}, |_| {}) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::FontVariationSettings {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_anchor_name_or_scope_style_value_kind(
@@ -5696,6 +5752,18 @@ where
             property_id,
             PropertyValueType::FitContent,
         ),
+        RustOwnedStyleValueKind::FontFamily { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FontFamily, property_id, source);
+        }
+        RustOwnedStyleValueKind::FontFeatureSettings { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FontFeatureSettings, property_id, source);
+        }
+        RustOwnedStyleValueKind::FontLanguageOverride { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FontLanguageOverride, property_id, source);
+        }
+        RustOwnedStyleValueKind::FontVariationSettings { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FontVariationSettings, property_id, source);
+        }
         RustOwnedStyleValueKind::BasicShape(_) => callback_style_value_type(
             callback,
             CssStyleValueKind::BasicShape,
@@ -22515,6 +22583,42 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif, \"Bongo Sans\""),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontFamily,
+                value: RustOwnedStyleValueKind::FontFamily {
+                    source: "serif, \"Bongo Sans\"".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontFeatureSettings], "\"kern\" on"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontFeatureSettings,
+                value: RustOwnedStyleValueKind::FontFeatureSettings {
+                    source: "\"kern\" on".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontLanguageOverride], "\"KSW\""),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontLanguageOverride,
+                value: RustOwnedStyleValueKind::FontLanguageOverride {
+                    source: "\"KSW\"".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontVariationSettings], "\"wght\" 700"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontVariationSettings,
+                value: RustOwnedStyleValueKind::FontVariationSettings {
+                    source: "\"wght\" 700".to_string(),
+                },
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(
                 &[PropertyId::Content],
                 "counters(section, \".\", symbols(\"*\" \"**\"))"
@@ -23329,14 +23433,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::FontFeatureSettings], "\"kern\""),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::FontFeatureSettings,
                 property_id: PropertyId::FontFeatureSettings,
-                primitive_kind: CssPrimitiveValueKind::String,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "kern".to_string(),
-                value_type: "OpentypeTag".to_string(),
+                value: "\"kern\"".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

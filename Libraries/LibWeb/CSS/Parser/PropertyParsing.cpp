@@ -841,6 +841,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     };
                 }
                 break;
+            case FFI::CssStyleValueKind::FontFamily:
+                if (auto value = parse_font_family_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontFeatureSettings:
+                if (auto value = parse_font_feature_settings_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontLanguageOverride:
+                if (auto value = parse_font_language_override_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::FontVariationSettings:
+                if (auto value = parse_font_variation_settings_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::GridAutoFlow: {
                 auto axis = rust_style_value->grid_auto_flow_axis == 1
                     ? GridAutoFlowStyleValue::Axis::Column
