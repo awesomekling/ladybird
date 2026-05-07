@@ -165,6 +165,7 @@ public:
         bool has_flip_block { false };
         bool has_flip_inline { false };
         bool has_flip_start { false };
+        Vector<FlyString> try_tactics;
     };
 
     enum class RustGridTrackPlacementKind : u8 {

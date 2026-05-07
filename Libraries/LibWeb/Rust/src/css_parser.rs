@@ -2584,6 +2584,7 @@ pub(crate) enum RustOwnedPositionTryFallback {
         has_flip_block: bool,
         has_flip_inline: bool,
         has_flip_start: bool,
+        try_tactics: Vec<String>,
     },
 }
 
@@ -3251,6 +3252,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MathDepth
             | PropertyId::PaintOrder
             | PropertyId::PositionAnchor
+            | PropertyId::PositionArea
+            | PropertyId::PositionTryFallbacks
             | PropertyId::PositionTryOrder
             | PropertyId::PositionVisibility
             | PropertyId::Quotes
@@ -9216,9 +9219,8 @@ fn callback_position_try_fallbacks_style_value<C>(
                     }
                     RustOwnedPositionTryFallback::TryTactic {
                         dashed_ident,
-                        has_flip_block,
-                        has_flip_inline,
-                        has_flip_start,
+                        try_tactics,
+                        ..
                     } => callback(
                         CssStyleValueKind::PositionTryFallbacks,
                         property_id,
@@ -9228,11 +9230,11 @@ fn callback_position_try_fallbacks_style_value<C>(
                         false,
                         0.0,
                         POSITION_TRY_FALLBACK_CALLBACK_TRY_TACTIC,
-                        u8::from(*has_flip_block),
-                        u8::from(*has_flip_inline),
-                        u8::from(*has_flip_start),
+                        0,
+                        0,
+                        0,
                         dashed_ident.as_ref().map_or(&[], |value| value.as_bytes()),
-                        "",
+                        &try_tactics.join(" "),
                     ),
                 }
             }
@@ -17499,6 +17501,9 @@ fn parse_single_position_try_fallbacks_component_values(
     let mut has_flip_block = false;
     let mut has_flip_inline = false;
     let mut has_flip_start = false;
+    let mut try_tactics = Vec::new();
+    let mut saw_try_tactic = false;
+    let mut dashed_ident_after_try_tactic = false;
 
     // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-try-fallbacks-try-tactic
     // <try-tactic> = flip-block || flip-inline || flip-start
@@ -17509,22 +17514,29 @@ fn parse_single_position_try_fallbacks_component_values(
             if dashed_ident.is_some() {
                 return None;
             }
+            dashed_ident_after_try_tactic = saw_try_tactic;
             dashed_ident = Some(ident);
         } else if ident.eq_ignore_ascii_case("flip-block") {
-            if has_flip_block {
+            if dashed_ident_after_try_tactic || has_flip_block {
                 return None;
             }
+            saw_try_tactic = true;
             has_flip_block = true;
+            try_tactics.push(ident);
         } else if ident.eq_ignore_ascii_case("flip-inline") {
-            if has_flip_inline {
+            if dashed_ident_after_try_tactic || has_flip_inline {
                 return None;
             }
+            saw_try_tactic = true;
             has_flip_inline = true;
+            try_tactics.push(ident);
         } else if ident.eq_ignore_ascii_case("flip-start") {
-            if has_flip_start {
+            if dashed_ident_after_try_tactic || has_flip_start {
                 return None;
             }
+            saw_try_tactic = true;
             has_flip_start = true;
+            try_tactics.push(ident);
         } else {
             return None;
         }
@@ -17538,6 +17550,7 @@ fn parse_single_position_try_fallbacks_component_values(
             has_flip_block,
             has_flip_inline,
             has_flip_start,
+            try_tactics,
         },
     )
 }
@@ -29285,6 +29298,7 @@ mod tests {
                         has_flip_block: true,
                         has_flip_inline: false,
                         has_flip_start: false,
+                        try_tactics: vec!["flip-block".to_string()],
                     },
                     RustOwnedPositionTryFallback::PositionArea(RustOwnedPositionArea::Area {
                         first_keyword: "left".to_string(),

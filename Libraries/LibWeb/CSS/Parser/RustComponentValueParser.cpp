@@ -1544,6 +1544,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .has_flip_inline = color_blue != 0,
                     .has_flip_start = color_alpha != 0,
                 });
+                if (value_type_len > 0) {
+                    for (auto try_tactic : StringView { value_type_ptr, value_type_len }.split_view(' '))
+                        style_value->position_try_fallbacks.last().try_tactics.append(fly_string_from_ffi_bytes(try_tactic.bytes().data(), try_tactic.bytes().size()));
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);

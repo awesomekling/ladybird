@@ -427,10 +427,6 @@ private:
     RefPtr<StyleValue const> parse_place_content_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_items_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_place_self_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_position_area(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_position_area_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_single_position_try_fallbacks_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_position_try_fallbacks_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_repeat_style_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_scrollbar_color_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
@@ -440,7 +436,6 @@ private:
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transition_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_try_tactic_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_track_size_list(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_auto_track_sizes(TokenStream<ComponentValue>&);
     RefPtr<GridAutoFlowStyleValue const> parse_grid_auto_flow_value(TokenStream<ComponentValue>&);
