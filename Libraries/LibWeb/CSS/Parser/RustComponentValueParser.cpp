@@ -3977,41 +3977,6 @@ FFI::CssPaintOrderValue RustComponentValueParser::parse_paint_order(StringView i
     return FFI::rust_css_parse_paint_order(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
-FFI::CssTextUnderlinePositionValue RustComponentValueParser::parse_text_underline_position(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-    return FFI::rust_css_parse_text_underline_position(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-FFI::CssTextWrapValue RustComponentValueParser::parse_text_wrap(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-    return FFI::rust_css_parse_text_wrap(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-FFI::CssTextWrapModeValue RustComponentValueParser::parse_text_wrap_mode(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-    return FFI::rust_css_parse_text_wrap_mode(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-FFI::CssTextWrapStyleValue RustComponentValueParser::parse_text_wrap_style(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-    return FFI::rust_css_parse_text_wrap_style(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-FFI::CssTouchActionValue RustComponentValueParser::parse_touch_action(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-    return FFI::rust_css_parse_touch_action(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
 FFI::CssScrollbarGutterValueKind RustComponentValueParser::parse_scrollbar_gutter(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
@@ -4483,16 +4448,6 @@ FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_transform_ori
     auto filtered_input_bytes = filtered_input.bytes();
 
     return FFI::rust_css_parse_transform_origin(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_white_space_trim(
         filtered_input_bytes.data(),
         filtered_input_bytes.size());
 }

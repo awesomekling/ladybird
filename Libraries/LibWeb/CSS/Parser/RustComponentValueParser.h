@@ -682,11 +682,6 @@ public:
     static FFI::CssPositionTryOrderValue parse_position_try_order(StringView input, StringView encoding);
     static FFI::CssPositionVisibilityValue parse_position_visibility(StringView input, StringView encoding);
     static FFI::CssPaintOrderValue parse_paint_order(StringView input, StringView encoding);
-    static FFI::CssTextUnderlinePositionValue parse_text_underline_position(StringView input, StringView encoding);
-    static FFI::CssTextWrapValue parse_text_wrap(StringView input, StringView encoding);
-    static FFI::CssTextWrapModeValue parse_text_wrap_mode(StringView input, StringView encoding);
-    static FFI::CssTextWrapStyleValue parse_text_wrap_style(StringView input, StringView encoding);
-    static FFI::CssTouchActionValue parse_touch_action(StringView input, StringView encoding);
     static FFI::CssScrollbarGutterValueKind parse_scrollbar_gutter(StringView input, StringView encoding);
     static Quotes parse_quotes(StringView input, StringView encoding);
     static WillChange parse_will_change(StringView input, StringView encoding);
@@ -722,7 +717,6 @@ public:
     static FFI::CssTransformLonghandValueKind parse_scale(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_rotate(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_transform_origin(StringView input, StringView encoding);
-    static FFI::CssWhiteSpaceTrimValue parse_white_space_trim(StringView input, StringView encoding);
     static FFI::CssContainerTypeValueKind parse_container_type(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);
     static bool parse_string_descriptor(StringView input, StringView encoding);

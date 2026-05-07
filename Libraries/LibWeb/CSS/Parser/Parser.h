@@ -453,13 +453,6 @@ private:
     RefPtr<StyleValue const> parse_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_single_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
     RefPtr<StyleValue const> parse_shape_outside_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_decoration_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_decoration_line_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_indent_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_underline_position_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_wrap_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_wrap_mode_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_text_wrap_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_rotate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_stroke_dasharray_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
@@ -484,8 +477,6 @@ private:
     RefPtr<StyleValue const> parse_grid_template_areas_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_area_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_grid_shorthand_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_touch_action_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_white_space_trim_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_will_change_value(TokenStream<ComponentValue>&);
 
 #define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name, name_title, name_string) \

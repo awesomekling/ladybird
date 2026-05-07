@@ -5248,23 +5248,23 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
     let mut thickness_source = None;
     let mut style_source = None;
     let mut color_source = None;
+    let mut saw_non_line_after_line = false;
 
     for component_value in &component_values {
         if component_value_is_text_decoration_line(component_value) {
+            if saw_non_line_after_line {
+                return None;
+            }
             line_component_values.push(component_value.clone());
             continue;
         }
 
-        if style_source.is_none() && component_value_is_text_decoration_style(component_value) {
-            style_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
-            continue;
+        if !line_component_values.is_empty() {
+            saw_non_line_after_line = true;
         }
 
-        if thickness_source.is_none() && component_value_parse_as_text_decoration_thickness(component_value) {
-            thickness_source = Some(serialize_component_values_for_reparsing(
+        if style_source.is_none() && component_value_is_text_decoration_style(component_value) {
+            style_source = Some(serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
             )?);
@@ -5279,6 +5279,14 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
             continue;
         }
 
+        if thickness_source.is_none() && component_value_parse_as_text_decoration_thickness(component_value) {
+            thickness_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
         return None;
     }
 
@@ -5287,7 +5295,7 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
     let line_source = if line_component_values.is_empty() {
         None
     } else if component_values_parse_as_text_decoration_line(&line_component_values).is_some() {
-        Some(serialize_component_values_for_reparsing(
+        Some(serialize_component_values_for_reparsing_separated_by_spaces(
             &line_component_values,
             filtered_input_string,
         )?)
@@ -16165,11 +16173,19 @@ pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
     let mut has_text_decoration_style = false;
     let mut has_text_decoration_color = false;
     let mut has_text_decoration_thickness = false;
+    let mut saw_non_line_after_line = false;
 
     for component_value in &component_values {
         if component_value_is_text_decoration_line(component_value) {
+            if saw_non_line_after_line {
+                return false;
+            }
             text_decoration_line.push(component_value.clone());
             continue;
+        }
+
+        if !text_decoration_line.is_empty() {
+            saw_non_line_after_line = true;
         }
 
         if !has_text_decoration_style && component_value_is_text_decoration_style(component_value) {
@@ -16177,13 +16193,13 @@ pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
             continue;
         }
 
-        if !has_text_decoration_thickness && component_value_parse_as_text_decoration_thickness(component_value) {
-            has_text_decoration_thickness = true;
+        if !has_text_decoration_color && component_value_parse_as_color_value(component_value) {
+            has_text_decoration_color = true;
             continue;
         }
 
-        if !has_text_decoration_color && component_value_parse_as_color_value(component_value) {
-            has_text_decoration_color = true;
+        if !has_text_decoration_thickness && component_value_parse_as_text_decoration_thickness(component_value) {
+            has_text_decoration_thickness = true;
             continue;
         }
 
@@ -25330,6 +25346,20 @@ fn serialize_component_values_for_reparsing(
     Some(output)
 }
 
+fn serialize_component_values_for_reparsing_separated_by_spaces(
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+) -> Option<String> {
+    let mut output = String::new();
+    for (index, component_value) in component_values.iter().enumerate() {
+        if index > 0 {
+            output.push(' ');
+        }
+        serialize_component_value_for_reparsing(component_value, filtered_input, &mut output)?;
+    }
+    Some(output)
+}
+
 fn serialize_component_value_for_reparsing(
     component_value: &ComponentValue,
     filtered_input: &str,
@@ -29416,6 +29446,36 @@ mod tests {
                     thickness_source: Some("from-font".to_string()),
                     style_source: None,
                     color_source: Some("green".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::TextDecoration],
+                "underline overline line-through blink red"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextDecoration,
+                value: RustOwnedStyleValueKind::TextDecoration(RustOwnedTextDecoration {
+                    line_source: Some("underline overline line-through blink".to_string()),
+                    thickness_source: None,
+                    style_source: None,
+                    color_source: Some("red".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::TextDecoration],
+                "underline overline line-through rgb(255, 0, 0)"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextDecoration,
+                value: RustOwnedStyleValueKind::TextDecoration(RustOwnedTextDecoration {
+                    line_source: Some("underline overline line-through".to_string()),
+                    thickness_source: None,
+                    style_source: None,
+                    color_source: Some("rgb(255, 0, 0)".to_string()),
                 }),
             })
         );
@@ -33671,6 +33731,7 @@ mod tests {
         assert!(!parse_text_decoration("red green"));
         assert!(!parse_text_decoration("auto from-font"));
         assert!(!parse_text_decoration("none underline"));
+        assert!(!parse_text_decoration("overline blue underline"));
         assert!(!parse_text_decoration("spelling-error underline"));
     }
 

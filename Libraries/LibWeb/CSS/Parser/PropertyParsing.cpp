@@ -252,6 +252,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     auto property_numeric_metadata = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<RustComponentValueParser::PropertyNumericMetadata> {
         return RustComponentValueParser::property_numeric_metadata(property_ids, value_type);
     };
+    auto property_uses_rust_owned_whole_grammar = [](ReadonlySpan<PropertyID> property_ids) {
+        if (property_ids.size() != 1)
+            return false;
+        switch (property_ids[0]) {
+        case PropertyID::TextDecoration:
+        case PropertyID::TextDecorationLine:
+        case PropertyID::TextIndent:
+        case PropertyID::TextUnderlinePosition:
+        case PropertyID::TextWrap:
+        case PropertyID::TextWrapMode:
+        case PropertyID::TextWrapStyle:
+        case PropertyID::TouchAction:
+        case PropertyID::WhiteSpaceTrim:
+            return true;
+        default:
+            return false;
+        }
+    };
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
 
@@ -3249,6 +3267,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
     }
 
+    if (property_uses_rust_owned_whole_grammar(property_ids))
+        return OptionalNone {};
+
     if (peek_token.is(Token::Type::Ident)) {
         // NOTE: We do not try to parse "CSS-wide keywords" here. https://www.w3.org/TR/css-values-4/#common-keywords
         //       These are only valid on their own, and so should be parsed directly in `parse_css_value()`.
@@ -3677,26 +3698,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::StrokeDasharray:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_stroke_dasharray_value(tokens); });
-    case PropertyID::TextDecoration:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_decoration_value(tokens); });
-    case PropertyID::TextDecorationLine:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_decoration_line_value(tokens); });
-    case PropertyID::TextIndent:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_indent_value(tokens); });
     case PropertyID::TextShadow:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Text); });
-    case PropertyID::TextUnderlinePosition:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_underline_position_value(tokens); });
-    case PropertyID::TextWrap:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_wrap_value(tokens); });
-    case PropertyID::TextWrapMode:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_wrap_mode_value(tokens); });
-    case PropertyID::TextWrapStyle:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_wrap_style_value(tokens); });
     case PropertyID::TimelineScope:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_scope_value(tokens); });
-    case PropertyID::TouchAction:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_touch_action_value(tokens); });
     case PropertyID::TransformOrigin:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transform_origin_value(tokens); });
     case PropertyID::Transition:
@@ -3713,8 +3718,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::ViewTransitionName:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_view_transition_name_value(tokens); });
-    case PropertyID::WhiteSpaceTrim:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_white_space_trim_value(tokens); });
     case PropertyID::WillChange:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_will_change_value(tokens); });
 
@@ -7384,319 +7387,6 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
     return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value()));
 }
 
-RefPtr<StyleValue const> Parser::parse_text_decoration_value(TokenStream<ComponentValue>& tokens)
-{
-    RefPtr<StyleValue const> decoration_line;
-    RefPtr<StyleValue const> decoration_thickness;
-    RefPtr<StyleValue const> decoration_style;
-    RefPtr<StyleValue const> decoration_color;
-
-    auto remaining_longhands = Vector { PropertyID::TextDecorationColor, PropertyID::TextDecorationStyle, PropertyID::TextDecorationThickness };
-
-    auto transaction = tokens.begin_transaction();
-    while (tokens.has_next_token()) {
-        if (!remaining_longhands.is_empty()) {
-            auto value_transaction = tokens.begin_transaction();
-            auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-            if (property_and_value.has_value()) {
-                value_transaction.commit();
-
-                auto& [property, value] = *property_and_value;
-                remove_property(remaining_longhands, property);
-
-                switch (property) {
-                case PropertyID::TextDecorationColor:
-                    VERIFY(!decoration_color);
-                    decoration_color = value.release_nonnull();
-                    continue;
-                case PropertyID::TextDecorationThickness:
-                    VERIFY(!decoration_thickness);
-                    decoration_thickness = value.release_nonnull();
-                    continue;
-                case PropertyID::TextDecorationStyle:
-                    VERIFY(!decoration_style);
-                    decoration_style = value.release_nonnull();
-                    continue;
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-            }
-        }
-
-        if (!decoration_line) {
-            auto value_transaction = tokens.begin_transaction();
-            if (auto parsed_decoration_line = parse_text_decoration_line_value(tokens)) {
-                value_transaction.commit();
-                decoration_line = parsed_decoration_line.release_nonnull();
-                continue;
-            }
-        }
-
-        return nullptr;
-    }
-
-    if (!decoration_line)
-        decoration_line = property_initial_value(PropertyID::TextDecorationLine);
-    if (!decoration_thickness)
-        decoration_thickness = property_initial_value(PropertyID::TextDecorationThickness);
-    if (!decoration_style)
-        decoration_style = property_initial_value(PropertyID::TextDecorationStyle);
-    if (!decoration_color)
-        decoration_color = property_initial_value(PropertyID::TextDecorationColor);
-
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::TextDecoration,
-        { PropertyID::TextDecorationLine, PropertyID::TextDecorationThickness, PropertyID::TextDecorationStyle, PropertyID::TextDecorationColor },
-        { decoration_line.release_nonnull(), decoration_thickness.release_nonnull(), decoration_style.release_nonnull(), decoration_color.release_nonnull() });
-}
-
-RefPtr<StyleValue const> Parser::parse_text_decoration_line_value(TokenStream<ComponentValue>& tokens)
-{
-    StyleValueVector style_values;
-
-    bool includes_spelling_or_grammar_error_value = false;
-
-    while (tokens.has_next_token()) {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-
-        auto& next_token = tokens.next_token();
-        if (!next_token.is(Token::Type::Ident))
-            break;
-
-        auto keyword = keyword_from_string(next_token.token().ident());
-        if (!keyword.has_value() || !keyword_to_text_decoration_line(keyword.value()).has_value())
-            break;
-
-        tokens.discard_a_token();
-        transaction.commit();
-
-        auto value = KeywordStyleValue::create(keyword.release_value());
-
-        if (auto maybe_line = keyword_to_text_decoration_line(value->to_keyword()); maybe_line.has_value()) {
-            if (maybe_line == TextDecorationLine::None) {
-                if (!style_values.is_empty())
-                    return nullptr;
-                return value;
-            }
-            if (first_is_one_of(*maybe_line, TextDecorationLine::SpellingError, TextDecorationLine::GrammarError)) {
-                includes_spelling_or_grammar_error_value = true;
-            }
-            if (style_values.contains_slow(value))
-                return nullptr;
-            style_values.append(move(value));
-            continue;
-        }
-
-        VERIFY_NOT_REACHED();
-    }
-
-    if (style_values.is_empty())
-        return nullptr;
-
-    // These can only appear on their own.
-    if (style_values.size() > 1 && includes_spelling_or_grammar_error_value)
-        return nullptr;
-
-    quick_sort(style_values, [](auto& left, auto& right) {
-        return *keyword_to_text_decoration_line(left->to_keyword()) < *keyword_to_text_decoration_line(right->to_keyword());
-    });
-
-    return StyleValueList::create(move(style_values), StyleValueList::Separator::Space);
-}
-
-// https://drafts.csswg.org/css-text-3/#text-indent-property
-RefPtr<StyleValue const> Parser::parse_text_indent_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <length-percentage> ] && hanging? && each-line?
-    auto transaction = tokens.begin_transaction();
-
-    RefPtr<StyleValue const> length_percentage;
-    bool has_hanging = false;
-    bool has_each_line = false;
-
-    tokens.discard_whitespace();
-
-    while (tokens.has_next_token()) {
-        if (!length_percentage) {
-            if (auto parsed = parse_length_percentage_value(tokens, infinite_range, infinite_range)) {
-                length_percentage = parsed.release_nonnull();
-                tokens.discard_whitespace();
-                continue;
-            }
-        }
-
-        if (auto keyword = parse_keyword_value(tokens)) {
-            if (!has_hanging && keyword->to_keyword() == Keyword::Hanging) {
-                has_hanging = true;
-                continue;
-            }
-            if (!has_each_line && keyword->to_keyword() == Keyword::EachLine) {
-                has_each_line = true;
-                continue;
-            }
-            return nullptr;
-        }
-
-        return nullptr;
-    }
-
-    if (!length_percentage)
-        return nullptr;
-
-    transaction.commit();
-    return TextIndentStyleValue::create(length_percentage.release_nonnull(),
-        has_hanging ? TextIndentStyleValue::Hanging::Yes : TextIndentStyleValue::Hanging::No,
-        has_each_line ? TextIndentStyleValue::EachLine::Yes : TextIndentStyleValue::EachLine::No);
-}
-
-// https://drafts.csswg.org/css-text-decor-4/#text-underline-position-property
-RefPtr<StyleValue const> Parser::parse_text_underline_position_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto horizontal_from_rust = [](FFI::CssTextUnderlinePositionHorizontal horizontal) {
-        switch (horizontal) {
-        case FFI::CssTextUnderlinePositionHorizontal::Invalid:
-            break;
-        case FFI::CssTextUnderlinePositionHorizontal::Auto:
-            return TextUnderlinePositionHorizontal::Auto;
-        case FFI::CssTextUnderlinePositionHorizontal::FromFont:
-            return TextUnderlinePositionHorizontal::FromFont;
-        case FFI::CssTextUnderlinePositionHorizontal::Under:
-            return TextUnderlinePositionHorizontal::Under;
-        }
-
-        VERIFY_NOT_REACHED();
-    };
-
-    auto vertical_from_rust = [](FFI::CssTextUnderlinePositionVertical vertical) {
-        switch (vertical) {
-        case FFI::CssTextUnderlinePositionVertical::Invalid:
-            break;
-        case FFI::CssTextUnderlinePositionVertical::Auto:
-            return TextUnderlinePositionVertical::Auto;
-        case FFI::CssTextUnderlinePositionVertical::Left:
-            return TextUnderlinePositionVertical::Left;
-        case FFI::CssTextUnderlinePositionVertical::Right:
-            return TextUnderlinePositionVertical::Right;
-        }
-
-        VERIFY_NOT_REACHED();
-    };
-
-    auto serialized_text_underline_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_text_underline_position = RustComponentValueParser::parse_text_underline_position(serialized_text_underline_position.bytes_as_string_view(), "utf-8"sv);
-    if (parsed_text_underline_position.horizontal == FFI::CssTextUnderlinePositionHorizontal::Invalid || parsed_text_underline_position.vertical == FFI::CssTextUnderlinePositionVertical::Invalid)
-        return {};
-
-    transaction.commit();
-    return TextUnderlinePositionStyleValue::create(horizontal_from_rust(parsed_text_underline_position.horizontal), vertical_from_rust(parsed_text_underline_position.vertical));
-}
-
-static Optional<Keyword> text_wrap_mode_keyword_from_rust(FFI::CssTextWrapModeValue value)
-{
-    switch (value) {
-    case FFI::CssTextWrapModeValue::Invalid:
-        return {};
-    case FFI::CssTextWrapModeValue::Wrap:
-        return Keyword::Wrap;
-    case FFI::CssTextWrapModeValue::Nowrap:
-        return Keyword::Nowrap;
-    }
-    VERIFY_NOT_REACHED();
-}
-
-static Optional<Keyword> text_wrap_style_keyword_from_rust(FFI::CssTextWrapStyleValue value)
-{
-    switch (value) {
-    case FFI::CssTextWrapStyleValue::Invalid:
-        return {};
-    case FFI::CssTextWrapStyleValue::Auto:
-        return Keyword::Auto;
-    case FFI::CssTextWrapStyleValue::Balance:
-        return Keyword::Balance;
-    case FFI::CssTextWrapStyleValue::Stable:
-        return Keyword::Stable;
-    case FFI::CssTextWrapStyleValue::Pretty:
-        return Keyword::Pretty;
-    }
-    VERIFY_NOT_REACHED();
-}
-
-// https://drafts.csswg.org/css-text-4/#text-wrap
-RefPtr<StyleValue const> Parser::parse_text_wrap_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_text_wrap = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_text_wrap = RustComponentValueParser::parse_text_wrap(serialized_text_wrap.bytes_as_string_view(), "utf-8"sv);
-    if (parsed_text_wrap.kind == FFI::CssTextWrapValueKind::Invalid)
-        return {};
-
-    auto text_wrap_mode = property_initial_value(PropertyID::TextWrapMode);
-    if (auto keyword = text_wrap_mode_keyword_from_rust(parsed_text_wrap.mode); keyword.has_value())
-        text_wrap_mode = KeywordStyleValue::create(keyword.release_value());
-
-    auto text_wrap_style = property_initial_value(PropertyID::TextWrapStyle);
-    if (auto keyword = text_wrap_style_keyword_from_rust(parsed_text_wrap.style); keyword.has_value())
-        text_wrap_style = KeywordStyleValue::create(keyword.release_value());
-
-    Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
-    longhand_values.append(text_wrap_mode);
-    longhand_values.append(text_wrap_style);
-
-    transaction.commit();
-    return ShorthandStyleValue::create(
-        PropertyID::TextWrap,
-        { PropertyID::TextWrapMode, PropertyID::TextWrapStyle },
-        move(longhand_values));
-}
-
-// https://drafts.csswg.org/css-text-4/#text-wrap-mode
-RefPtr<StyleValue const> Parser::parse_text_wrap_mode_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_text_wrap_mode = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_text_wrap_mode = RustComponentValueParser::parse_text_wrap_mode(serialized_text_wrap_mode.bytes_as_string_view(), "utf-8"sv);
-    auto keyword = text_wrap_mode_keyword_from_rust(parsed_text_wrap_mode);
-    if (!keyword.has_value())
-        return {};
-
-    transaction.commit();
-    return KeywordStyleValue::create(keyword.release_value());
-}
-
-// https://drafts.csswg.org/css-text-4/#text-wrap-style
-RefPtr<StyleValue const> Parser::parse_text_wrap_style_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_text_wrap_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_text_wrap_style = RustComponentValueParser::parse_text_wrap_style(serialized_text_wrap_style.bytes_as_string_view(), "utf-8"sv);
-    auto keyword = text_wrap_style_keyword_from_rust(parsed_text_wrap_style);
-    if (!keyword.has_value())
-        return {};
-
-    transaction.commit();
-    return KeywordStyleValue::create(keyword.release_value());
-}
-
 // https://drafts.csswg.org/scroll-animations-1/#propdef-timeline-scope
 RefPtr<StyleValue const> Parser::parse_timeline_scope_value(TokenStream<ComponentValue>& tokens)
 {
@@ -7724,63 +7414,6 @@ RefPtr<StyleValue const> Parser::parse_timeline_scope_value(TokenStream<Componen
 
         transaction.commit();
         return StyleValueList::create(move(names), StyleValueList::Separator::Comma);
-    }
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
-// https://www.w3.org/TR/pointerevents/#the-touch-action-css-property
-RefPtr<StyleValue const> Parser::parse_touch_action_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto keyword_from_touch_action_keyword = [](FFI::CssTouchActionKeyword keyword) {
-        switch (keyword) {
-        case FFI::CssTouchActionKeyword::Invalid:
-            break;
-        case FFI::CssTouchActionKeyword::PanX:
-            return Keyword::PanX;
-        case FFI::CssTouchActionKeyword::PanLeft:
-            return Keyword::PanLeft;
-        case FFI::CssTouchActionKeyword::PanRight:
-            return Keyword::PanRight;
-        case FFI::CssTouchActionKeyword::PanY:
-            return Keyword::PanY;
-        case FFI::CssTouchActionKeyword::PanUp:
-            return Keyword::PanUp;
-        case FFI::CssTouchActionKeyword::PanDown:
-            return Keyword::PanDown;
-        }
-
-        VERIFY_NOT_REACHED();
-    };
-
-    auto serialized_touch_action = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_touch_action = RustComponentValueParser::parse_touch_action(serialized_touch_action.bytes_as_string_view(), "utf-8"sv);
-    switch (parsed_touch_action.kind) {
-    case FFI::CssTouchActionValueKind::Invalid:
-        return {};
-    case FFI::CssTouchActionValueKind::Auto:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Auto);
-    case FFI::CssTouchActionValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssTouchActionValueKind::Manipulation:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::Manipulation);
-    case FFI::CssTouchActionValueKind::List: {
-        StyleValueVector values;
-        values.append(KeywordStyleValue::create(keyword_from_touch_action_keyword(parsed_touch_action.first)));
-        if (parsed_touch_action.second != FFI::CssTouchActionKeyword::Invalid)
-            values.append(KeywordStyleValue::create(keyword_from_touch_action_keyword(parsed_touch_action.second)));
-
-        transaction.commit();
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
     }
 
@@ -9053,43 +8686,6 @@ RefPtr<StyleValue const> Parser::parse_container_type_value(TokenStream<Componen
     }
 
     transaction.commit();
-    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-}
-
-// https://www.w3.org/TR/css-text-4/#white-space-trim
-RefPtr<StyleValue const> Parser::parse_white_space_trim_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_white_space_trim = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto parsed_white_space_trim = RustComponentValueParser::parse_white_space_trim(serialized_white_space_trim.bytes_as_string_view(), "utf-8"sv);
-
-    auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
-        values.append(KeywordStyleValue::create(keyword));
-    };
-
-    StyleValueVector values;
-    switch (parsed_white_space_trim.kind) {
-    case FFI::CssWhiteSpaceTrimValueKind::Invalid:
-        return {};
-    case FFI::CssWhiteSpaceTrimValueKind::None:
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::None);
-    case FFI::CssWhiteSpaceTrimValueKind::List:
-        if (parsed_white_space_trim.has_discard_before)
-            append_keyword(values, Keyword::DiscardBefore);
-        if (parsed_white_space_trim.has_discard_after)
-            append_keyword(values, Keyword::DiscardAfter);
-        if (parsed_white_space_trim.has_discard_inner)
-            append_keyword(values, Keyword::DiscardInner);
-        break;
-    }
-
-    transaction.commit();
-
     return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
