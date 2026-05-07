@@ -859,6 +859,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::FontVariant:
+                if (auto value = parse_font_variant(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::FontVariationSettings:
                 if (auto value = parse_font_variation_settings_value(tokens)) {
                     generated_transaction.commit();

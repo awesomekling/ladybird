@@ -964,6 +964,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::FontFamily,
                            FFI::CssStyleValueKind::FontFeatureSettings,
                            FFI::CssStyleValueKind::FontLanguageOverride,
+                           FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::FontVariationSettings,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackPlacement,

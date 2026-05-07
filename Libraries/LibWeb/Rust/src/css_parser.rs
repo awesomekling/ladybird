@@ -1843,6 +1843,7 @@ pub enum CssStyleValueKind {
     FontFamily,
     FontFeatureSettings,
     FontLanguageOverride,
+    FontVariant,
     FontVariationSettings,
     BasicShape,
     Rect,
@@ -2021,6 +2022,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     FontLanguageOverride {
+        source: String,
+    },
+    FontVariant {
         source: String,
     },
     FontVariationSettings {
@@ -2869,6 +2873,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
         PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
         PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
+        PropertyId::FontVariant => rust_owned_font_variant_style_value_kind(filtered_input),
         PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
         PropertyId::GridAutoColumns | PropertyId::GridAutoRows => {
             rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input)
@@ -3637,6 +3642,15 @@ fn rust_owned_font_language_override_style_value_kind(filtered_input: &[u8]) -> 
         return None;
     }
     Some(RustOwnedStyleValueKind::FontLanguageOverride {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_a_font_variant(filtered_input, |_, _| {}, |_| {}, |_| {}, |_| {}, |_| {}, |_| {}) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::FontVariant {
         source: filtered_input_to_string(filtered_input),
     })
 }
@@ -5760,6 +5774,9 @@ where
         }
         RustOwnedStyleValueKind::FontLanguageOverride { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FontLanguageOverride, property_id, source);
+        }
+        RustOwnedStyleValueKind::FontVariant { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FontVariant, property_id, source);
         }
         RustOwnedStyleValueKind::FontVariationSettings { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FontVariationSettings, property_id, source);
@@ -22606,6 +22623,15 @@ mod tests {
                 property_id: PropertyId::FontLanguageOverride,
                 value: RustOwnedStyleValueKind::FontLanguageOverride {
                     source: "\"KSW\"".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontVariant], "small-caps tabular-nums"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontVariant,
+                value: RustOwnedStyleValueKind::FontVariant {
+                    source: "small-caps tabular-nums".to_string(),
                 },
             })
         );
