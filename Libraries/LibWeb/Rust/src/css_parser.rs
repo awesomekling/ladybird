@@ -7697,11 +7697,11 @@ where
             &[],
             property_value_type_name(PropertyValueType::ViewFunction),
         ),
-        RustOwnedStyleValueKind::MathFunction { value_type, .. } => {
-            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
+        RustOwnedStyleValueKind::MathFunction { value_type, function } => {
+            callback_source_backed_value_type_style_value(callback, property_id, &function.source, *value_type);
         }
-        RustOwnedStyleValueKind::UnresolvedValueType { value_type, .. } => {
-            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
+        RustOwnedStyleValueKind::UnresolvedValueType { value_type, source } => {
+            callback_source_backed_value_type_style_value(callback, property_id, source, *value_type);
         }
     }
 }
@@ -7834,6 +7834,31 @@ where
         0,
         source.as_bytes(),
         "",
+    );
+}
+
+fn callback_source_backed_value_type_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    source: &str,
+    value_type: PropertyValueType,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::ValueType,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        source.as_bytes(),
+        property_value_type_name(value_type),
     );
 }
 
@@ -29351,7 +29376,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
+                value: "calc(1px + 2px)".to_string(),
                 value_type: "Length".to_string(),
             })
         );

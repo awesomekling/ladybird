@@ -1697,6 +1697,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (!value_type.has_value())
                     return;
                 value.value_type = value_type.release_value();
+                if (kind == FFI::CssStyleValueKind::ValueType && value_len > 0)
+                    value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
                 if (has_numeric_value)
                     value.numeric_value = numeric_value;
                 if (has_secondary_numeric_value)

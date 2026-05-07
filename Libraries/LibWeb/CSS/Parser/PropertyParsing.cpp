@@ -945,6 +945,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_value_type = [&](StringView source, ValueType value_type) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_value(value_type, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_string = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -3010,6 +3019,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         maybe_parsed_value = materialize_rust_numeric_value();
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
+                    } else if (rust_style_value->kind == FFI::CssStyleValueKind::ValueType && rust_style_value->string.has_value()) {
+                        maybe_parsed_value = parse_rust_source_as_value_type(rust_style_value->string->bytes_as_string_view(), *rust_style_value->value_type);
+                        if (maybe_parsed_value)
+                            discard_rust_owned_property_value_tokens();
                     } else {
                         maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
                     }
