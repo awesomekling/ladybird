@@ -1874,10 +1874,10 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Url(String),
     CounterStyleName(String),
-    EasingFunction,
-    FitContent,
-    BasicShape,
-    Rect,
+    EasingFunction(RustOwnedSourceBackedStyleValue),
+    FitContent(RustOwnedSourceBackedStyleValue),
+    BasicShape(RustOwnedSourceBackedStyleValue),
+    Rect(RustOwnedSourceBackedStyleValue),
     ScrollFunction {
         scroller: CssScrollFunctionScrollerKind,
         axis: CssScrollFunctionAxisKind,
@@ -2373,25 +2373,37 @@ fn parse_rust_owned_generated_longhand_value(
         PropertyValueType::EasingFunction => {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::EasingFunction,
+                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(value_type),
+                    source: filtered_input_to_string(filtered_input),
+                }),
             };
         }
         PropertyValueType::FitContent => {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::FitContent,
+                value: RustOwnedStyleValueKind::FitContent(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(value_type),
+                    source: filtered_input_to_string(filtered_input),
+                }),
             };
         }
         PropertyValueType::BasicShape => {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::BasicShape,
+                value: RustOwnedStyleValueKind::BasicShape(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(value_type),
+                    source: filtered_input_to_string(filtered_input),
+                }),
             };
         }
         PropertyValueType::Rect => {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::Rect,
+                value: RustOwnedStyleValueKind::Rect(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(value_type),
+                    source: filtered_input_to_string(filtered_input),
+                }),
             };
         }
         PropertyValueType::ScrollFunction => {
@@ -3002,25 +3014,25 @@ where
             value.as_bytes(),
             property_value_type_name(PropertyValueType::CounterStyle),
         ),
-        RustOwnedStyleValueKind::EasingFunction => callback_style_value_type(
+        RustOwnedStyleValueKind::EasingFunction(_) => callback_style_value_type(
             callback,
             CssStyleValueKind::EasingFunction,
             property_id,
             PropertyValueType::EasingFunction,
         ),
-        RustOwnedStyleValueKind::FitContent => callback_style_value_type(
+        RustOwnedStyleValueKind::FitContent(_) => callback_style_value_type(
             callback,
             CssStyleValueKind::FitContent,
             property_id,
             PropertyValueType::FitContent,
         ),
-        RustOwnedStyleValueKind::BasicShape => callback_style_value_type(
+        RustOwnedStyleValueKind::BasicShape(_) => callback_style_value_type(
             callback,
             CssStyleValueKind::BasicShape,
             property_id,
             PropertyValueType::BasicShape,
         ),
-        RustOwnedStyleValueKind::Rect => {
+        RustOwnedStyleValueKind::Rect(_) => {
             callback_style_value_type(callback, CssStyleValueKind::Rect, property_id, PropertyValueType::Rect);
         }
         RustOwnedStyleValueKind::ScrollFunction { scroller, axis } => callback(
@@ -19476,7 +19488,40 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TransitionTimingFunction,
-                value: RustOwnedStyleValueKind::EasingFunction,
+                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::EasingFunction),
+                    source: "linear(0, 1)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Width], "fit-content(10px)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Width,
+                value: RustOwnedStyleValueKind::FitContent(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::FitContent),
+                    source: "fit-content(10px)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ClipPath], "inset(10px)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ClipPath,
+                value: RustOwnedStyleValueKind::BasicShape(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::BasicShape),
+                    source: "inset(10px)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Clip], "rect(1px, auto, 2px, 3px)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Clip,
+                value: RustOwnedStyleValueKind::Rect(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::Rect),
+                    source: "rect(1px, auto, 2px, 3px)".to_string(),
+                }),
             })
         );
         assert_eq!(
