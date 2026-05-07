@@ -2354,7 +2354,6 @@ pub(crate) struct RustOwnedCounterDefinition {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCounterDefinitions {
     definitions: Vec<RustOwnedCounterDefinition>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2371,7 +2370,6 @@ pub(crate) struct RustOwnedDisplay {
 pub(crate) struct RustOwnedGridAutoFlow {
     axis: CssGridAutoFlowAxis,
     dense: CssGridAutoFlowDense,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2387,19 +2385,16 @@ pub(crate) struct RustOwnedGridTrackSizeList {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedContain {
     value: CssContainValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedContainerType {
     value: CssContainerTypeValueKind,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPaintOrder {
     value: CssPaintOrderValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2411,13 +2406,11 @@ pub(crate) struct RustOwnedPositionAnchor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionTryOrder {
     value: CssPositionTryOrderValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionVisibility {
     value: CssPositionVisibilityValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2443,7 +2436,6 @@ pub(crate) struct RustOwnedQuotes {
 pub(crate) struct RustOwnedRepeatStyle {
     repeat_x: CssRepeatStyleRepetition,
     repeat_y: CssRepeatStyleRepetition,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2455,13 +2447,11 @@ pub(crate) enum RustOwnedScrollbarColor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollbarGutter {
     value: CssScrollbarGutterValueKind,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
-    source: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2508,19 +2498,16 @@ pub(crate) struct RustOwnedTimelineScope {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrap {
     value: CssTextWrapValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrapMode {
     value: CssTextWrapModeValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrapStyle {
     value: CssTextWrapStyleValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2536,13 +2523,11 @@ pub(crate) struct RustOwnedTextIndent {
     length_percentage: RustOwnedTextIndentLengthPercentage,
     has_hanging: bool,
     has_each_line: bool,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTouchAction {
     value: CssTouchActionValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2566,7 +2551,6 @@ pub(crate) struct RustOwnedViewTransitionName {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWhiteSpaceTrim {
     value: CssWhiteSpaceTrimValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3909,10 +3893,7 @@ fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::Contain(RustOwnedContain {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::Contain(RustOwnedContain { value }))
 }
 
 fn rust_owned_container_type_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -3921,10 +3902,7 @@ fn rust_owned_container_type_style_value_kind(filtered_input: &[u8]) -> Option<R
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType { value }))
 }
 
 fn rust_owned_counter_definitions_style_value_kind(
@@ -3986,10 +3964,7 @@ fn rust_owned_counter_definitions_style_value_kind(
     }
 
     Some(RustOwnedStyleValueKind::CounterDefinitions(
-        RustOwnedCounterDefinitions {
-            definitions,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedCounterDefinitions { definitions },
     ))
 }
 
@@ -4023,7 +3998,6 @@ fn rust_owned_grid_auto_flow_style_value_kind(filtered_input: &[u8]) -> Option<R
     Some(RustOwnedStyleValueKind::GridAutoFlow(RustOwnedGridAutoFlow {
         axis,
         dense,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4098,10 +4072,7 @@ fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<Rust
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::PaintOrder(RustOwnedPaintOrder {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::PaintOrder(RustOwnedPaintOrder { value }))
 }
 
 fn rust_owned_place_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4175,7 +4146,6 @@ fn rust_owned_position_try_order_style_value_kind(filtered_input: &[u8]) -> Opti
 
     Some(RustOwnedStyleValueKind::PositionTryOrder(RustOwnedPositionTryOrder {
         value,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4186,10 +4156,7 @@ fn rust_owned_position_visibility_style_value_kind(filtered_input: &[u8]) -> Opt
     }
 
     Some(RustOwnedStyleValueKind::PositionVisibility(
-        RustOwnedPositionVisibility {
-            value,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedPositionVisibility { value },
     ))
 }
 
@@ -4281,7 +4248,6 @@ fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
             repeat_x: CssRepeatStyleRepetition::Repeat,
             repeat_y: CssRepeatStyleRepetition::NoRepeat,
-            source: filtered_input_to_string(filtered_input),
         }));
     }
 
@@ -4290,7 +4256,6 @@ fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
             repeat_x: CssRepeatStyleRepetition::NoRepeat,
             repeat_y: CssRepeatStyleRepetition::Repeat,
-            source: filtered_input_to_string(filtered_input),
         }));
     }
 
@@ -4303,7 +4268,6 @@ fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<Rus
     Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
         repeat_x,
         repeat_y,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4584,7 +4548,6 @@ fn rust_owned_scrollbar_gutter_style_value_kind(filtered_input: &[u8]) -> Option
 
     Some(RustOwnedStyleValueKind::ScrollbarGutter(RustOwnedScrollbarGutter {
         value,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4606,10 +4569,7 @@ fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) ->
     }
 
     Some(RustOwnedStyleValueKind::TextUnderlinePosition(
-        RustOwnedTextUnderlinePosition {
-            value,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedTextUnderlinePosition { value },
     ))
 }
 
@@ -4650,10 +4610,7 @@ fn rust_owned_text_wrap_style_value_kind(filtered_input: &[u8]) -> Option<RustOw
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TextWrap(RustOwnedTextWrap {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::TextWrap(RustOwnedTextWrap { value }))
 }
 
 fn rust_owned_text_wrap_mode_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4662,10 +4619,7 @@ fn rust_owned_text_wrap_mode_style_value_kind(filtered_input: &[u8]) -> Option<R
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TextWrapMode(RustOwnedTextWrapMode {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::TextWrapMode(RustOwnedTextWrapMode { value }))
 }
 
 fn rust_owned_text_wrap_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4674,14 +4628,10 @@ fn rust_owned_text_wrap_style_style_value_kind(filtered_input: &[u8]) -> Option<
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle { value }))
 }
 
 fn rust_owned_text_indent_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
@@ -4738,7 +4688,6 @@ fn rust_owned_text_indent_style_value_kind(filtered_input: &[u8]) -> Option<Rust
         length_percentage: length_percentage?,
         has_hanging,
         has_each_line,
-        source,
     }))
 }
 
@@ -4748,10 +4697,7 @@ fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TouchAction(RustOwnedTouchAction {
-        value,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::TouchAction(RustOwnedTouchAction { value }))
 }
 
 fn rust_owned_transform_origin_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4827,7 +4773,6 @@ fn rust_owned_white_space_trim_style_value_kind(filtered_input: &[u8]) -> Option
 
     Some(RustOwnedStyleValueKind::WhiteSpaceTrim(RustOwnedWhiteSpaceTrim {
         value,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -25428,7 +25373,6 @@ mod tests {
                         has_style: false,
                         has_paint: true,
                     },
-                    source: "inline-size layout paint".to_string(),
                 }),
             })
         );
@@ -25438,7 +25382,6 @@ mod tests {
                 property_id: PropertyId::ContainerType,
                 value: RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType {
                     value: CssContainerTypeValueKind::InlineSizeAndScrollState,
-                    source: "inline-size scroll-state".to_string(),
                 }),
             })
         );
@@ -25459,7 +25402,6 @@ mod tests {
                             value: 2,
                         },
                     ],
-                    source: "chapter page 2".to_string(),
                 }),
             })
         );
@@ -25473,7 +25415,6 @@ mod tests {
                         is_reversed: false,
                         value: -1,
                     }],
-                    source: "chapter -1".to_string(),
                 }),
             })
         );
@@ -25484,7 +25425,6 @@ mod tests {
                 value: RustOwnedStyleValueKind::GridAutoFlow(RustOwnedGridAutoFlow {
                     axis: CssGridAutoFlowAxis::Column,
                     dense: CssGridAutoFlowDense::Yes,
-                    source: "dense column".to_string(),
                 }),
             })
         );
@@ -25525,7 +25465,6 @@ mod tests {
                         first: CssPaintOrderKeyword::Markers,
                         second: CssPaintOrderKeyword::Stroke,
                     },
-                    source: "markers stroke".to_string(),
                 }),
             })
         );
@@ -25562,7 +25501,6 @@ mod tests {
                 property_id: PropertyId::PositionTryOrder,
                 value: RustOwnedStyleValueKind::PositionTryOrder(RustOwnedPositionTryOrder {
                     value: CssPositionTryOrderValue::MostInlineSize,
-                    source: "most-inline-size".to_string(),
                 }),
             })
         );
@@ -25577,7 +25515,6 @@ mod tests {
                         has_anchors_visible: true,
                         has_no_overflow: true,
                     },
-                    source: "no-overflow anchors-visible".to_string(),
                 }),
             })
         );
@@ -25597,7 +25534,6 @@ mod tests {
                 value: RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
                     repeat_x: CssRepeatStyleRepetition::Repeat,
                     repeat_y: CssRepeatStyleRepetition::Space,
-                    source: "repeat space".to_string(),
                 }),
             })
         );
@@ -25625,7 +25561,6 @@ mod tests {
                 property_id: PropertyId::ScrollbarGutter,
                 value: RustOwnedStyleValueKind::ScrollbarGutter(RustOwnedScrollbarGutter {
                     value: CssScrollbarGutterValueKind::BothEdges,
-                    source: "stable both-edges".to_string(),
                 }),
             })
         );
@@ -25726,7 +25661,6 @@ mod tests {
                         mode: CssTextWrapModeValue::Nowrap,
                         style: CssTextWrapStyleValue::Pretty,
                     },
-                    source: "pretty nowrap".to_string(),
                 }),
             })
         );
@@ -25736,7 +25670,6 @@ mod tests {
                 property_id: PropertyId::TextWrapMode,
                 value: RustOwnedStyleValueKind::TextWrapMode(RustOwnedTextWrapMode {
                     value: CssTextWrapModeValue::Nowrap,
-                    source: "nowrap".to_string(),
                 }),
             })
         );
@@ -25746,7 +25679,6 @@ mod tests {
                 property_id: PropertyId::TextWrapStyle,
                 value: RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle {
                     value: CssTextWrapStyleValue::Balance,
-                    source: "balance".to_string(),
                 }),
             })
         );
@@ -25772,7 +25704,6 @@ mod tests {
                     },
                     has_hanging: true,
                     has_each_line: true,
-                    source: "hanging 2em each-line".to_string(),
                 }),
             })
         );
@@ -25789,7 +25720,6 @@ mod tests {
                     },
                     has_hanging: true,
                     has_each_line: true,
-                    source: "10% each-line hanging".to_string(),
                 }),
             })
         );
@@ -25802,7 +25732,6 @@ mod tests {
                         horizontal: CssTextUnderlinePositionHorizontal::Under,
                         vertical: CssTextUnderlinePositionVertical::Right,
                     },
-                    source: "under right".to_string(),
                 }),
             })
         );
@@ -25816,7 +25745,6 @@ mod tests {
                         first: CssTouchActionKeyword::PanLeft,
                         second: CssTouchActionKeyword::PanY,
                     },
-                    source: "pan-y pan-left".to_string(),
                 }),
             })
         );
@@ -25831,7 +25759,6 @@ mod tests {
                         has_discard_after: false,
                         has_discard_inner: true,
                     },
-                    source: "discard-inner discard-before".to_string(),
                 }),
             })
         );
