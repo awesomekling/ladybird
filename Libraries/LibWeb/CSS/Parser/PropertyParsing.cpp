@@ -502,6 +502,97 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 VERIFY_NOT_REACHED();
             };
+            auto display_box_from_rust = [](u8 value) {
+                enum : u8 {
+                    Contents,
+                    None,
+                };
+                switch (value) {
+                case Contents:
+                    return DisplayBox::Contents;
+                case None:
+                    return DisplayBox::None;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto display_inside_from_rust = [](RustComponentValueParser::RustDisplayInside value) {
+                switch (value) {
+                case RustComponentValueParser::RustDisplayInside::Flow:
+                    return DisplayInside::Flow;
+                case RustComponentValueParser::RustDisplayInside::FlowRoot:
+                    return DisplayInside::FlowRoot;
+                case RustComponentValueParser::RustDisplayInside::Table:
+                    return DisplayInside::Table;
+                case RustComponentValueParser::RustDisplayInside::Flex:
+                    return DisplayInside::Flex;
+                case RustComponentValueParser::RustDisplayInside::Grid:
+                    return DisplayInside::Grid;
+                case RustComponentValueParser::RustDisplayInside::Ruby:
+                    return DisplayInside::Ruby;
+                case RustComponentValueParser::RustDisplayInside::Math:
+                    return DisplayInside::Math;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto display_internal_from_rust = [](u8 value) {
+                enum : u8 {
+                    TableRowGroup,
+                    TableHeaderGroup,
+                    TableFooterGroup,
+                    TableRow,
+                    TableCell,
+                    TableColumnGroup,
+                    TableColumn,
+                    TableCaption,
+                    RubyBase,
+                    RubyText,
+                    RubyBaseContainer,
+                    RubyTextContainer,
+                };
+                switch (value) {
+                case TableRowGroup:
+                    return DisplayInternal::TableRowGroup;
+                case TableHeaderGroup:
+                    return DisplayInternal::TableHeaderGroup;
+                case TableFooterGroup:
+                    return DisplayInternal::TableFooterGroup;
+                case TableRow:
+                    return DisplayInternal::TableRow;
+                case TableCell:
+                    return DisplayInternal::TableCell;
+                case TableColumnGroup:
+                    return DisplayInternal::TableColumnGroup;
+                case TableColumn:
+                    return DisplayInternal::TableColumn;
+                case TableCaption:
+                    return DisplayInternal::TableCaption;
+                case RubyBase:
+                    return DisplayInternal::RubyBase;
+                case RubyText:
+                    return DisplayInternal::RubyText;
+                case RubyBaseContainer:
+                    return DisplayInternal::RubyBaseContainer;
+                case RubyTextContainer:
+                    return DisplayInternal::RubyTextContainer;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto display_outside_from_rust = [](u8 value) {
+                enum : u8 {
+                    Block,
+                    Inline,
+                    RunIn,
+                };
+                switch (value) {
+                case Block:
+                    return DisplayOutside::Block;
+                case Inline:
+                    return DisplayOutside::Inline;
+                case RunIn:
+                    return DisplayOutside::RunIn;
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto text_wrap_mode_keyword_from_rust = [](FFI::CssTextWrapModeValue value) -> Optional<Keyword> {
                 switch (value) {
                 case FFI::CssTextWrapModeValue::Invalid:
@@ -721,6 +812,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             }
+            case FFI::CssStyleValueKind::Display:
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                switch (rust_style_value->display_kind) {
+                case RustComponentValueParser::RustDisplayValueKind::Invalid:
+                    break;
+                case RustComponentValueParser::RustDisplayValueKind::Box:
+                    return PropertyAndValue { rust_style_value->property_id, DisplayStyleValue::create(Display { display_box_from_rust(rust_style_value->display_value) }) };
+                case RustComponentValueParser::RustDisplayValueKind::Internal:
+                    return PropertyAndValue { rust_style_value->property_id, DisplayStyleValue::create(Display { display_internal_from_rust(rust_style_value->display_value) }) };
+                case RustComponentValueParser::RustDisplayValueKind::OutsideAndInside:
+                    return PropertyAndValue {
+                        rust_style_value->property_id,
+                        DisplayStyleValue::create(Display {
+                            display_outside_from_rust(rust_style_value->display_value),
+                            display_inside_from_rust(rust_style_value->display_inside),
+                            rust_style_value->display_list_item == RustComponentValueParser::RustDisplayListItem::Yes ? Display::ListItem::Yes : Display::ListItem::No })
+                    };
+                }
+                break;
             case FFI::CssStyleValueKind::GridAutoFlow: {
                 auto axis = rust_style_value->grid_auto_flow_axis == 1
                     ? GridAutoFlowStyleValue::Axis::Column

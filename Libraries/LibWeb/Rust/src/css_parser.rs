@@ -1128,6 +1128,66 @@ pub enum CssGridTrackSizeListValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssDisplayValueKind {
+    Invalid,
+    Box,
+    Internal,
+    OutsideAndInside,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDisplayBox {
+    Contents,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDisplayInside {
+    Flow,
+    FlowRoot,
+    Table,
+    Flex,
+    Grid,
+    Ruby,
+    Math,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDisplayInternal {
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableCell,
+    TableColumnGroup,
+    TableColumn,
+    TableCaption,
+    RubyBase,
+    RubyText,
+    RubyBaseContainer,
+    RubyTextContainer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDisplayOutside {
+    Block,
+    Inline,
+    RunIn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDisplayListItem {
+    No,
+    Yes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssTransformLonghandValueKind {
     Invalid,
     Valid,
@@ -1787,6 +1847,7 @@ pub enum CssStyleValueKind {
     ColorScheme,
     Contain,
     ContainerType,
+    Display,
     GridAutoFlow,
     PaintOrder,
     PositionAnchor,
@@ -1845,7 +1906,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     CounterDefinitions(RustOwnedSourceBackedStyleValue),
     CounterStyleSystem(RustOwnedSourceBackedStyleValue),
     Cursor(RustOwnedSourceBackedStyleValue),
-    Display(RustOwnedSourceBackedStyleValue),
+    Display(RustOwnedDisplay),
     Edge(RustOwnedSourceBackedStyleValue),
     FilterValueList(RustOwnedSourceBackedStyleValue),
     Flex(RustOwnedDimensionStyleValue),
@@ -2116,6 +2177,16 @@ pub(crate) struct RustOwnedColorScheme {
     value: CssColorSchemeValue,
     schemes: Vec<String>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedDisplay {
+    kind: CssDisplayValueKind,
+    box_: CssDisplayBox,
+    internal: CssDisplayInternal,
+    outside: CssDisplayOutside,
+    inside: CssDisplayInside,
+    list_item: CssDisplayListItem,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2623,6 +2694,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
         PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
@@ -3078,6 +3150,10 @@ fn rust_owned_color_scheme_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         schemes,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_display_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    parse_display_value(filtered_input).map(RustOwnedStyleValueKind::Display)
 }
 
 fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4036,7 +4112,6 @@ where
         | RustOwnedStyleValueKind::CounterDefinitions(value)
         | RustOwnedStyleValueKind::CounterStyleSystem(value)
         | RustOwnedStyleValueKind::Cursor(value)
-        | RustOwnedStyleValueKind::Display(value)
         | RustOwnedStyleValueKind::Edge(value)
         | RustOwnedStyleValueKind::FilterValueList(value)
         | RustOwnedStyleValueKind::FontSource(value)
@@ -4120,6 +4195,26 @@ where
             0,
             0,
             0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::Display(value) => callback(
+            CssStyleValueKind::Display,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.kind as u8,
+            match value.kind {
+                CssDisplayValueKind::Box => value.box_ as u8,
+                CssDisplayValueKind::Internal => value.internal as u8,
+                CssDisplayValueKind::OutsideAndInside => value.outside as u8,
+                CssDisplayValueKind::Invalid => 0,
+            },
+            value.inside as u8,
+            value.list_item as u8,
             &[],
             "",
         ),
@@ -6834,6 +6929,263 @@ where
         kind: CssColorSchemeValueKind::List,
         only,
     }
+}
+
+// https://drafts.csswg.org/css-display-3/#the-display-properties
+pub(crate) fn parse_display_value(filtered_input: &[u8]) -> Option<RustOwnedDisplay> {
+    fn display_box_from_ident(ident: &str) -> Option<CssDisplayBox> {
+        if ident.eq_ignore_ascii_case("contents") {
+            Some(CssDisplayBox::Contents)
+        } else if ident.eq_ignore_ascii_case("none") {
+            Some(CssDisplayBox::None)
+        } else {
+            None
+        }
+    }
+
+    fn display_inside_from_ident(ident: &str) -> Option<CssDisplayInside> {
+        if ident.eq_ignore_ascii_case("flow") {
+            Some(CssDisplayInside::Flow)
+        } else if ident.eq_ignore_ascii_case("flow-root") {
+            Some(CssDisplayInside::FlowRoot)
+        } else if ident.eq_ignore_ascii_case("table") {
+            Some(CssDisplayInside::Table)
+        } else if ident.eq_ignore_ascii_case("flex") {
+            Some(CssDisplayInside::Flex)
+        } else if ident.eq_ignore_ascii_case("grid") {
+            Some(CssDisplayInside::Grid)
+        } else if ident.eq_ignore_ascii_case("ruby") {
+            Some(CssDisplayInside::Ruby)
+        } else if ident.eq_ignore_ascii_case("math") {
+            Some(CssDisplayInside::Math)
+        } else {
+            None
+        }
+    }
+
+    fn display_internal_from_ident(ident: &str) -> Option<CssDisplayInternal> {
+        if ident.eq_ignore_ascii_case("table-row-group") {
+            Some(CssDisplayInternal::TableRowGroup)
+        } else if ident.eq_ignore_ascii_case("table-header-group") {
+            Some(CssDisplayInternal::TableHeaderGroup)
+        } else if ident.eq_ignore_ascii_case("table-footer-group") {
+            Some(CssDisplayInternal::TableFooterGroup)
+        } else if ident.eq_ignore_ascii_case("table-row") {
+            Some(CssDisplayInternal::TableRow)
+        } else if ident.eq_ignore_ascii_case("table-cell") {
+            Some(CssDisplayInternal::TableCell)
+        } else if ident.eq_ignore_ascii_case("table-column-group") {
+            Some(CssDisplayInternal::TableColumnGroup)
+        } else if ident.eq_ignore_ascii_case("table-column") {
+            Some(CssDisplayInternal::TableColumn)
+        } else if ident.eq_ignore_ascii_case("table-caption") {
+            Some(CssDisplayInternal::TableCaption)
+        } else if ident.eq_ignore_ascii_case("ruby-base") {
+            Some(CssDisplayInternal::RubyBase)
+        } else if ident.eq_ignore_ascii_case("ruby-text") {
+            Some(CssDisplayInternal::RubyText)
+        } else if ident.eq_ignore_ascii_case("ruby-base-container") {
+            Some(CssDisplayInternal::RubyBaseContainer)
+        } else if ident.eq_ignore_ascii_case("ruby-text-container") {
+            Some(CssDisplayInternal::RubyTextContainer)
+        } else {
+            None
+        }
+    }
+
+    fn display_outside_from_ident(ident: &str) -> Option<CssDisplayOutside> {
+        if ident.eq_ignore_ascii_case("block") {
+            Some(CssDisplayOutside::Block)
+        } else if ident.eq_ignore_ascii_case("inline") {
+            Some(CssDisplayOutside::Inline)
+        } else if ident.eq_ignore_ascii_case("run-in") {
+            Some(CssDisplayOutside::RunIn)
+        } else {
+            None
+        }
+    }
+
+    fn display_outside_and_inside(
+        outside: CssDisplayOutside,
+        inside: CssDisplayInside,
+        list_item: CssDisplayListItem,
+    ) -> RustOwnedDisplay {
+        RustOwnedDisplay {
+            kind: CssDisplayValueKind::OutsideAndInside,
+            box_: CssDisplayBox::Contents,
+            internal: CssDisplayInternal::TableRowGroup,
+            outside,
+            inside,
+            list_item,
+        }
+    }
+
+    fn display_box(box_: CssDisplayBox) -> RustOwnedDisplay {
+        RustOwnedDisplay {
+            kind: CssDisplayValueKind::Box,
+            box_,
+            internal: CssDisplayInternal::TableRowGroup,
+            outside: CssDisplayOutside::Block,
+            inside: CssDisplayInside::Flow,
+            list_item: CssDisplayListItem::No,
+        }
+    }
+
+    fn display_internal(internal: CssDisplayInternal) -> RustOwnedDisplay {
+        RustOwnedDisplay {
+            kind: CssDisplayValueKind::Internal,
+            box_: CssDisplayBox::Contents,
+            internal,
+            outside: CssDisplayOutside::Block,
+            inside: CssDisplayInside::Flow,
+            list_item: CssDisplayListItem::No,
+        }
+    }
+
+    fn parse_single_component_display(ident: &str) -> Option<RustOwnedDisplay> {
+        // https://drafts.csswg.org/css-display-3/#typedef-display-legacy
+        // <display-legacy> = inline-block | inline-table | inline-flex | inline-grid
+        if ident.eq_ignore_ascii_case("inline-block") {
+            return Some(display_outside_and_inside(
+                CssDisplayOutside::Inline,
+                CssDisplayInside::FlowRoot,
+                CssDisplayListItem::No,
+            ));
+        }
+        if ident.eq_ignore_ascii_case("inline-table") {
+            return Some(display_outside_and_inside(
+                CssDisplayOutside::Inline,
+                CssDisplayInside::Table,
+                CssDisplayListItem::No,
+            ));
+        }
+        if ident.eq_ignore_ascii_case("inline-flex") {
+            return Some(display_outside_and_inside(
+                CssDisplayOutside::Inline,
+                CssDisplayInside::Flex,
+                CssDisplayListItem::No,
+            ));
+        }
+        if ident.eq_ignore_ascii_case("inline-grid") {
+            return Some(display_outside_and_inside(
+                CssDisplayOutside::Inline,
+                CssDisplayInside::Grid,
+                CssDisplayListItem::No,
+            ));
+        }
+
+        // https://drafts.csswg.org/css-display-3/#typedef-display-listitem
+        // <display-listitem> = <display-outside>? && [ flow | flow-root ]? && list-item
+        if ident.eq_ignore_ascii_case("list-item") {
+            return Some(display_outside_and_inside(
+                CssDisplayOutside::Block,
+                CssDisplayInside::Flow,
+                CssDisplayListItem::Yes,
+            ));
+        }
+
+        if let Some(outside) = display_outside_from_ident(ident) {
+            return Some(display_outside_and_inside(
+                outside,
+                CssDisplayInside::Flow,
+                CssDisplayListItem::No,
+            ));
+        }
+
+        if let Some(inside) = display_inside_from_ident(ident) {
+            // NOTE: The MathML Core specification does not mention what the outside value for `display: math`
+            //       should be, but other browsers use `inline`.
+            //       https://w3c.github.io/mathml-core/#new-display-math-value
+            let outside = if inside == CssDisplayInside::Ruby || inside == CssDisplayInside::Math {
+                CssDisplayOutside::Inline
+            } else {
+                CssDisplayOutside::Block
+            };
+            return Some(display_outside_and_inside(outside, inside, CssDisplayListItem::No));
+        }
+
+        if let Some(internal) = display_internal_from_ident(ident) {
+            return Some(display_internal(internal));
+        }
+
+        if let Some(box_) = display_box_from_ident(ident) {
+            return Some(display_box(box_));
+        }
+
+        None
+    }
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut idents = Vec::new();
+    for component_value in &component_values {
+        match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) => idents.push(value.as_str()),
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            }) => {}
+            _ => return None,
+        }
+    }
+
+    if idents.is_empty() {
+        return None;
+    }
+
+    if idents.len() == 1 {
+        return parse_single_component_display(idents[0]);
+    }
+
+    let mut list_item = CssDisplayListItem::No;
+    let mut inside = None;
+    let mut outside = None;
+
+    for ident in idents {
+        if ident.eq_ignore_ascii_case("list-item") {
+            if list_item == CssDisplayListItem::Yes {
+                return None;
+            }
+            list_item = CssDisplayListItem::Yes;
+            continue;
+        }
+
+        if let Some(inside_value) = display_inside_from_ident(ident) {
+            if inside.is_some() {
+                return None;
+            }
+            inside = Some(inside_value);
+            continue;
+        }
+
+        if let Some(outside_value) = display_outside_from_ident(ident) {
+            if outside.is_some() {
+                return None;
+            }
+            outside = Some(outside_value);
+            continue;
+        }
+
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-display-3/#typedef-display-listitem
+    // <display-listitem> = <display-outside>? && [ flow | flow-root ]? && list-item
+    if list_item == CssDisplayListItem::Yes
+        && let Some(inside) = inside
+        && !matches!(inside, CssDisplayInside::Flow | CssDisplayInside::FlowRoot)
+    {
+        return None;
+    }
+
+    Some(display_outside_and_inside(
+        outside.unwrap_or(CssDisplayOutside::Block),
+        inside.unwrap_or(CssDisplayInside::Flow),
+        list_item,
+    ))
 }
 
 pub(crate) fn parse_scroll_function_value(filtered_input: &[u8]) -> CssScrollFunctionValue {
@@ -19460,7 +19812,8 @@ mod tests {
         CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValueKind,
         CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
         CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-        CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind, CssFitContentValueKind,
+        CssCounterStyleSystemKind, CssCropOrCrossKind, CssDisplayBox, CssDisplayInside, CssDisplayInternal,
+        CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind,
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
         CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis, CssGridAutoFlowDense,
@@ -19487,15 +19840,15 @@ mod tests {
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedContain,
         RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue,
-        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent,
+        RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -19512,7 +19865,7 @@ mod tests {
         parse_color_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
         parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
-        parse_crop_or_cross, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
+        parse_crop_or_cross, parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
@@ -21787,13 +22140,13 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::Color, PropertyId::Display], "block"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Keyword,
+                kind: CssStyleValueKind::Display,
                 property_id: PropertyId::Display,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "block".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
@@ -25835,6 +26188,63 @@ mod tests {
             parse_view_transition_name("12px").0,
             CssViewTransitionNameValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_display_values() {
+        assert_eq!(
+            parse_display_value("none".as_bytes()),
+            Some(RustOwnedDisplay {
+                kind: CssDisplayValueKind::Box,
+                box_: CssDisplayBox::None,
+                internal: CssDisplayInternal::TableRowGroup,
+                outside: CssDisplayOutside::Block,
+                inside: CssDisplayInside::Flow,
+                list_item: CssDisplayListItem::No,
+            })
+        );
+        assert_eq!(
+            parse_display_value("inline-flex".as_bytes()),
+            Some(RustOwnedDisplay {
+                kind: CssDisplayValueKind::OutsideAndInside,
+                box_: CssDisplayBox::Contents,
+                internal: CssDisplayInternal::TableRowGroup,
+                outside: CssDisplayOutside::Inline,
+                inside: CssDisplayInside::Flex,
+                list_item: CssDisplayListItem::No,
+            })
+        );
+        assert_eq!(
+            parse_display_value("inline flow-root list-item".as_bytes()),
+            Some(RustOwnedDisplay {
+                kind: CssDisplayValueKind::OutsideAndInside,
+                box_: CssDisplayBox::Contents,
+                internal: CssDisplayInternal::TableRowGroup,
+                outside: CssDisplayOutside::Inline,
+                inside: CssDisplayInside::FlowRoot,
+                list_item: CssDisplayListItem::Yes,
+            })
+        );
+        assert_eq!(
+            parse_display_value("table-row".as_bytes()),
+            Some(RustOwnedDisplay {
+                kind: CssDisplayValueKind::Internal,
+                box_: CssDisplayBox::Contents,
+                internal: CssDisplayInternal::TableRow,
+                outside: CssDisplayOutside::Block,
+                inside: CssDisplayInside::Flow,
+                list_item: CssDisplayListItem::No,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_display_values() {
+        assert_eq!(parse_display_value("".as_bytes()), None);
+        assert_eq!(parse_display_value("inline block".as_bytes()), None);
+        assert_eq!(parse_display_value("flex list-item".as_bytes()), None);
+        assert_eq!(parse_display_value("contents list-item".as_bytes()), None);
+        assert_eq!(parse_display_value("block, flow".as_bytes()), None);
     }
 
     #[test]

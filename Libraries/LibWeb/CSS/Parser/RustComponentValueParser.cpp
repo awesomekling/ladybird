@@ -983,6 +983,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 };
             } else if (kind == FFI::CssStyleValueKind::ContainerType) {
                 value.container_type = static_cast<FFI::CssContainerTypeValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::Display) {
+                value.display_kind = static_cast<RustDisplayValueKind>(color_red);
+                value.display_value = color_green;
+                value.display_inside = static_cast<RustDisplayInside>(color_blue);
+                value.display_list_item = static_cast<RustDisplayListItem>(color_alpha);
             } else if (kind == FFI::CssStyleValueKind::GridAutoFlow) {
                 value.grid_auto_flow_axis = color_red;
                 value.grid_auto_flow_dense = color_green;

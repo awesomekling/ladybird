@@ -74,6 +74,28 @@ public:
         Optional<ValueType> value_type;
     };
 
+    enum class RustDisplayValueKind : u8 {
+        Invalid,
+        Box,
+        Internal,
+        OutsideAndInside,
+    };
+
+    enum class RustDisplayInside : u8 {
+        Flow,
+        FlowRoot,
+        Table,
+        Flex,
+        Grid,
+        Ruby,
+        Math,
+    };
+
+    enum class RustDisplayListItem : u8 {
+        No,
+        Yes,
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -94,6 +116,10 @@ public:
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
+        RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
+        u8 display_value { 0 };
+        RustDisplayInside display_inside { RustDisplayInside::Flow };
+        RustDisplayListItem display_list_item { RustDisplayListItem::No };
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
