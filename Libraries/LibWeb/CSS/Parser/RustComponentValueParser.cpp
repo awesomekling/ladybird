@@ -1021,6 +1021,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.text_wrap_mode = static_cast<FFI::CssTextWrapModeValue>(color_red);
             } else if (kind == FFI::CssStyleValueKind::TextWrapStyle) {
                 value.text_wrap_style = static_cast<FFI::CssTextWrapStyleValue>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::TextIndent) {
+                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                if (!value_type.has_value())
+                    return;
+                value.value_type = value_type.release_value();
+                value.text_indent_has_hanging = color_red != 0;
+                value.text_indent_has_each_line = color_green != 0;
+                if (has_numeric_value)
+                    value.numeric_value = numeric_value;
+                if (primitive_kind == FFI::CssPrimitiveValueKind::Length)
+                    value.dimension_unit = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::TextUnderlinePosition) {
                 value.text_underline_position_horizontal = static_cast<FFI::CssTextUnderlinePositionHorizontal>(color_red);
                 value.text_underline_position_vertical = static_cast<FFI::CssTextUnderlinePositionVertical>(color_green);

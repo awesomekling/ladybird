@@ -1862,6 +1862,7 @@ pub enum CssStyleValueKind {
     TextWrap,
     TextWrapMode,
     TextWrapStyle,
+    TextIndent,
     TextUnderlinePosition,
     TouchAction,
     TransitionBehavior,
@@ -1993,7 +1994,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextWrap(RustOwnedTextWrap),
     TextWrapMode(RustOwnedTextWrapMode),
     TextWrapStyle(RustOwnedTextWrapStyle),
-    TextIndent(RustOwnedSourceBackedStyleValue),
+    TextIndent(RustOwnedTextIndent),
     TextUnderlinePosition(RustOwnedTextUnderlinePosition),
     Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
@@ -2294,6 +2295,22 @@ pub(crate) struct RustOwnedTextWrapMode {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrapStyle {
     value: CssTextWrapStyleValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextIndentLengthPercentage {
+    primitive_kind: CssPrimitiveValueKind,
+    numeric_value: Option<f64>,
+    unit: String,
+    value_type: PropertyValueType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextIndent {
+    length_percentage: RustOwnedTextIndentLengthPercentage,
+    has_hanging: bool,
+    has_each_line: bool,
     source: String,
 }
 
@@ -2709,6 +2726,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
         PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
         PropertyId::TextWrapStyle => rust_owned_text_wrap_style_style_value_kind(filtered_input),
+        PropertyId::TextIndent => rust_owned_text_indent_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
         PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
@@ -3445,6 +3463,68 @@ fn rust_owned_text_wrap_style_style_value_kind(filtered_input: &[u8]) -> Option<
     }))
 }
 
+fn rust_owned_text_indent_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    if component_values.is_empty() {
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-text-3/#propdef-text-indent
+    // <length-percentage> && hanging? && each-line?
+    let mut length_percentage = None;
+    let mut has_hanging = false;
+    let mut has_each_line = false;
+
+    for component_value in component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        if length_percentage.is_none() && component_value_parse_as_length_percentage(component_value) {
+            let value_type = if parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage {
+                PropertyValueType::Percentage
+            } else {
+                PropertyValueType::Length
+            };
+            let primitive_kind = style_value_primitive_kind(value_type, std::slice::from_ref(component_value));
+            length_percentage = Some(RustOwnedTextIndentLengthPercentage {
+                primitive_kind,
+                numeric_value: style_value_numeric_value(value_type, std::slice::from_ref(component_value)),
+                unit: style_value_dimension_unit(value_type, std::slice::from_ref(component_value))
+                    .unwrap_or("")
+                    .to_string(),
+                value_type,
+            });
+            continue;
+        }
+
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = component_value
+        else {
+            return None;
+        };
+
+        if !has_hanging && value.eq_ignore_ascii_case("hanging") {
+            has_hanging = true;
+        } else if !has_each_line && value.eq_ignore_ascii_case("each-line") {
+            has_each_line = true;
+        } else {
+            return None;
+        }
+    }
+
+    Some(RustOwnedStyleValueKind::TextIndent(RustOwnedTextIndent {
+        length_percentage: length_percentage?,
+        has_hanging,
+        has_each_line,
+        source,
+    }))
+}
+
 fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_touch_action_value(filtered_input);
     if value.kind == CssTouchActionValueKind::Invalid {
@@ -4129,7 +4209,6 @@ where
         | RustOwnedStyleValueKind::ScrollbarColor(value)
         | RustOwnedStyleValueKind::Shadow(value)
         | RustOwnedStyleValueKind::Superellipse(value)
-        | RustOwnedStyleValueKind::TextIndent(value)
         | RustOwnedStyleValueKind::Transformation(value)
         | RustOwnedStyleValueKind::UnicodeRange(value) => {
             if let Some(value_type) = value.value_type {
@@ -4366,6 +4445,21 @@ where
             0,
             &[],
             "",
+        ),
+        RustOwnedStyleValueKind::TextIndent(value) => callback(
+            CssStyleValueKind::TextIndent,
+            property_id,
+            value.length_percentage.primitive_kind,
+            value.length_percentage.numeric_value.is_some(),
+            value.length_percentage.numeric_value.unwrap_or(0.0),
+            false,
+            0.0,
+            u8::from(value.has_hanging),
+            u8::from(value.has_each_line),
+            0,
+            0,
+            value.length_percentage.unit.as_bytes(),
+            property_value_type_name(value.length_percentage.value_type),
         ),
         RustOwnedStyleValueKind::TextUnderlinePosition(value) => callback(
             CssStyleValueKind::TextUnderlinePosition,
@@ -19846,9 +19940,10 @@ mod tests {
         RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
         RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue,
         RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
-        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -21795,6 +21890,40 @@ mod tests {
                 value: RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle {
                     value: CssTextWrapStyleValue::Balance,
                     source: "balance".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextIndent], "hanging 2em each-line"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextIndent,
+                value: RustOwnedStyleValueKind::TextIndent(RustOwnedTextIndent {
+                    length_percentage: RustOwnedTextIndentLengthPercentage {
+                        primitive_kind: CssPrimitiveValueKind::Length,
+                        numeric_value: Some(2.0),
+                        unit: "em".to_string(),
+                        value_type: PropertyValueType::Length,
+                    },
+                    has_hanging: true,
+                    has_each_line: true,
+                    source: "hanging 2em each-line".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextIndent], "10% each-line hanging"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextIndent,
+                value: RustOwnedStyleValueKind::TextIndent(RustOwnedTextIndent {
+                    length_percentage: RustOwnedTextIndentLengthPercentage {
+                        primitive_kind: CssPrimitiveValueKind::Percentage,
+                        numeric_value: Some(10.0),
+                        unit: String::new(),
+                        value_type: PropertyValueType::Percentage,
+                    },
+                    has_hanging: true,
+                    has_each_line: true,
+                    source: "10% each-line hanging".to_string(),
                 }),
             })
         );

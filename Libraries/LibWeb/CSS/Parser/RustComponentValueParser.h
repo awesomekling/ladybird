@@ -131,6 +131,8 @@ public:
         FFI::CssTextWrapValue text_wrap {};
         FFI::CssTextWrapModeValue text_wrap_mode { FFI::CssTextWrapModeValue::Invalid };
         FFI::CssTextWrapStyleValue text_wrap_style { FFI::CssTextWrapStyleValue::Invalid };
+        bool text_indent_has_hanging { false };
+        bool text_indent_has_each_line { false };
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
         FFI::CssTouchActionValue touch_action {};

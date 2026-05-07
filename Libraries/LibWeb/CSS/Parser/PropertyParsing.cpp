@@ -989,6 +989,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(keyword.release_value()) };
                 }
                 break;
+            case FFI::CssStyleValueKind::TextIndent: {
+                RefPtr<StyleValue const> length_percentage;
+                if (rust_style_value->numeric_value.has_value())
+                    length_percentage = materialize_rust_numeric_value();
+                else
+                    length_percentage = parse_length_percentage_value(tokens, infinite_range, infinite_range);
+                if (!length_percentage)
+                    break;
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue {
+                    rust_style_value->property_id,
+                    TextIndentStyleValue::create(
+                        length_percentage.release_nonnull(),
+                        rust_style_value->text_indent_has_hanging ? TextIndentStyleValue::Hanging::Yes : TextIndentStyleValue::Hanging::No,
+                        rust_style_value->text_indent_has_each_line ? TextIndentStyleValue::EachLine::Yes : TextIndentStyleValue::EachLine::No)
+                };
+            }
             case FFI::CssStyleValueKind::TextUnderlinePosition:
                 if (rust_style_value->text_underline_position_horizontal != FFI::CssTextUnderlinePositionHorizontal::Invalid
                     && rust_style_value->text_underline_position_vertical != FFI::CssTextUnderlinePositionVertical::Invalid) {
