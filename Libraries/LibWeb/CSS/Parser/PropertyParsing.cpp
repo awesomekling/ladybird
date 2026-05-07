@@ -436,6 +436,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return FunctionStyleValue::create("view"_fly_string, TupleStyleValue::create(move(tuple)));
             };
             auto discard_rust_owned_property_value_tokens = [&] {
+                if (property_ids.size() > 1) {
+                    tokens.discard_a_token();
+                    return;
+                }
+
                 while (tokens.has_next_token())
                     tokens.discard_a_token();
             };
@@ -1335,9 +1340,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TransitionProperty:
-                if (auto value = parse_transition_property_value(tokens)) {
+                switch (rust_style_value->transition_property_kind) {
+                case FFI::CssTransitionPropertyValueKind::Invalid:
+                    break;
+                case FFI::CssTransitionPropertyValueKind::None:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create({ KeywordStyleValue::create(Keyword::None) }, StyleValueList::Separator::Comma) };
+                case FFI::CssTransitionPropertyValueKind::List: {
+                    StyleValueVector transition_properties;
+                    transition_properties.ensure_capacity(rust_style_value->transition_properties.size());
+                    for (auto const& property : rust_style_value->transition_properties)
+                        transition_properties.unchecked_append(CustomIdentStyleValue::create(property));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(transition_properties), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::ViewTimelineInset:

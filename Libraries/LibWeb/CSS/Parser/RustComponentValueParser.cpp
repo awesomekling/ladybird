@@ -995,7 +995,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::TimelineScope,
                            FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransformOrigin,
-                           FFI::CssStyleValueKind::TransitionProperty,
                            FFI::CssStyleValueKind::ViewTransitionName,
                            FFI::CssStyleValueKind::WillChange)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
@@ -1091,6 +1090,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.transition_behaviors.ensure_capacity(value_len);
                 for (size_t i = 0; i < value_len; ++i)
                     value.transition_behaviors.unchecked_append(static_cast<FFI::CssTransitionBehaviorItemKind>(value_ptr[i]));
+            } else if (kind == FFI::CssStyleValueKind::TransitionProperty) {
+                value.transition_property_kind = static_cast<FFI::CssTransitionPropertyValueKind>(color_red);
+                for (auto property : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.transition_properties.append(FlyString::from_utf8_without_validation(property.bytes()));
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
                 value.view_timeline_inset_count = color_red;
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {

@@ -2562,7 +2562,6 @@ pub(crate) struct RustOwnedTransitionBehavior {
 pub(crate) struct RustOwnedTransitionProperty {
     kind: CssTransitionPropertyValueKind,
     properties: Vec<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4823,11 +4822,7 @@ fn rust_owned_transition_property_style_value_kind(filtered_input: &[u8]) -> Opt
     }
 
     Some(RustOwnedStyleValueKind::TransitionProperty(
-        RustOwnedTransitionProperty {
-            kind,
-            properties,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedTransitionProperty { kind, properties },
     ))
 }
 
@@ -5978,12 +5973,30 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::TransitionProperty(value) => callback_source_backed_style_value(
-            callback,
-            CssStyleValueKind::TransitionProperty,
-            property_id,
-            &value.source,
-        ),
+        RustOwnedStyleValueKind::TransitionProperty(value) => {
+            let mut property_bytes = Vec::new();
+            for (index, property) in value.properties.iter().enumerate() {
+                if index > 0 {
+                    property_bytes.push(0);
+                }
+                property_bytes.extend_from_slice(property.as_bytes());
+            }
+            callback(
+                CssStyleValueKind::TransitionProperty,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &property_bytes,
+                "",
+            );
+        }
         RustOwnedStyleValueKind::ViewTransitionName(value) => callback_source_backed_style_value(
             callback,
             CssStyleValueKind::ViewTransitionName,
@@ -25563,7 +25576,6 @@ mod tests {
                 value: RustOwnedStyleValueKind::TransitionProperty(RustOwnedTransitionProperty {
                     kind: CssTransitionPropertyValueKind::List,
                     properties: vec!["all".to_string(), "opacity".to_string()],
-                    source: "all, opacity".to_string(),
                 }),
             })
         );
