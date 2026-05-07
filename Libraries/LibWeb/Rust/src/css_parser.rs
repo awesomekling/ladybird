@@ -7577,18 +7577,12 @@ where
             value.as_bytes(),
             property_value_type_name(PropertyValueType::CounterStyle),
         ),
-        RustOwnedStyleValueKind::EasingFunction(_) => callback_style_value_type(
-            callback,
-            CssStyleValueKind::EasingFunction,
-            property_id,
-            PropertyValueType::EasingFunction,
-        ),
-        RustOwnedStyleValueKind::FitContent(_) => callback_style_value_type(
-            callback,
-            CssStyleValueKind::FitContent,
-            property_id,
-            PropertyValueType::FitContent,
-        ),
+        RustOwnedStyleValueKind::EasingFunction(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::EasingFunction, property_id, &value.source);
+        }
+        RustOwnedStyleValueKind::FitContent(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FitContent, property_id, &value.source);
+        }
         RustOwnedStyleValueKind::FontFamily { values } => {
             for value in values {
                 let (kind, family_name, is_string) = match value {
@@ -7648,14 +7642,11 @@ where
                 value,
             );
         }
-        RustOwnedStyleValueKind::BasicShape(_) => callback_style_value_type(
-            callback,
-            CssStyleValueKind::BasicShape,
-            property_id,
-            PropertyValueType::BasicShape,
-        ),
-        RustOwnedStyleValueKind::Rect(_) => {
-            callback_style_value_type(callback, CssStyleValueKind::Rect, property_id, PropertyValueType::Rect);
+        RustOwnedStyleValueKind::BasicShape(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::BasicShape, property_id, &value.source);
+        }
+        RustOwnedStyleValueKind::Rect(value) => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Rect, property_id, &value.source);
         }
         RustOwnedStyleValueKind::ScrollFunction { scroller, axis } => callback(
             CssStyleValueKind::ScrollFunction,
@@ -29152,8 +29143,8 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "EasingFunction".to_string(),
+                value: "linear(0, 1)".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
@@ -29165,8 +29156,8 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "FitContent".to_string(),
+                value: "fit-content(10px)".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
@@ -29178,8 +29169,8 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "BasicShape".to_string(),
+                value: "inset(10px)".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
@@ -29191,8 +29182,8 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "Rect".to_string(),
+                value: "rect(1px, auto, 2px, 3px)".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

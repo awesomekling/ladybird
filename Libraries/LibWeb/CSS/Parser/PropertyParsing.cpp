@@ -900,6 +900,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_easing = [&](StringView source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_easing_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_fit_content = [&](StringView source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_fit_content_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -909,10 +927,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_basic_shape = [&](String const& source) -> RefPtr<StyleValue const> {
+            auto parse_rust_source_as_basic_shape = [&](StringView source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
                 auto value = parse_basic_shape_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_rect = [&](StringView source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_rect_value(value_tokens);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -1413,25 +1440,41 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::EasingFunction:
-                if (auto value = parse_easing_value(tokens)) {
+                if (rust_style_value->string.has_value()) {
+                    auto value = parse_rust_source_as_easing(rust_style_value->string->bytes_as_string_view());
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::FitContent:
-                if (auto value = parse_fit_content_value(tokens)) {
+                if (rust_style_value->string.has_value()) {
+                    auto value = parse_rust_source_as_fit_content(rust_style_value->string->bytes_as_string_view());
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::BasicShape:
-                if (auto value = parse_basic_shape_value(tokens)) {
+                if (rust_style_value->string.has_value()) {
+                    auto value = parse_rust_source_as_basic_shape(rust_style_value->string->bytes_as_string_view());
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::Rect:
-                if (auto value = parse_rect_value(tokens)) {
+                if (rust_style_value->string.has_value()) {
+                    auto value = parse_rust_source_as_rect(rust_style_value->string->bytes_as_string_view());
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }

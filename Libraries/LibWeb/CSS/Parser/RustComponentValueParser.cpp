@@ -957,6 +957,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::EasingFunction || kind == FFI::CssStyleValueKind::FitContent || kind == FFI::CssStyleValueKind::BasicShape || kind == FFI::CssStyleValueKind::Rect) {
+                value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::AnchorNameOrScope) {
                 value.anchor_name_or_scope_kind = static_cast<FFI::CssAnchorNameOrScopeValueKind>(color_red);
                 for (auto name : StringView { value_ptr, value_len }.split_view('\0'))
