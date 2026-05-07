@@ -2513,12 +2513,19 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
     match value_type {
         PropertyValueType::FontStyle => RustOwnedStyleValueKind::FontStyle(value),
         PropertyValueType::Position | PropertyValueType::BackgroundPosition => RustOwnedStyleValueKind::Position(value),
-        PropertyValueType::TransformList => RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
-            values: Vec::new(),
-            separator: RustOwnedStyleValueListSeparator::Space,
-            value_type: Some(value_type),
-            source: Some(value.source),
-        }),
+        PropertyValueType::TransformList => {
+            let source = value.source;
+            if let Some(value) = rust_owned_transform_list_style_value_kind(source.as_bytes(), &source) {
+                value
+            } else {
+                RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+                    values: Vec::new(),
+                    separator: RustOwnedStyleValueListSeparator::Space,
+                    value_type: Some(value_type),
+                    source: Some(source),
+                })
+            }
+        }
         PropertyValueType::FontVariantAlternates
         | PropertyValueType::FontVariantEastAsian
         | PropertyValueType::FontVariantLigatures
@@ -2533,6 +2540,50 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
             source: value.source,
         },
     }
+}
+
+fn rust_owned_transform_list_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
+    // <transform-list> = <transform-function>+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    if component_values.is_empty() {
+        return None;
+    }
+
+    let mut values = Vec::new();
+    for component_value in component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        let ComponentValue::Function(function) = component_value else {
+            return None;
+        };
+        if !component_value_parse_as_transform_function(function) {
+            return None;
+        }
+
+        values.push(RustOwnedStyleValueKind::Transformation(
+            RustOwnedSourceBackedStyleValue {
+                value_type: None,
+                source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input_string,
+                )?,
+            },
+        ));
+    }
+
+    Some(RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+        values,
+        separator: RustOwnedStyleValueListSeparator::Space,
+        value_type: Some(PropertyValueType::TransformList),
+        source: Some(filtered_input_string.to_string()),
+    }))
 }
 
 fn rust_owned_primitive_style_value_kind(
@@ -19516,7 +19567,16 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Transform,
                 value: RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
-                    values: Vec::new(),
+                    values: vec![
+                        RustOwnedStyleValueKind::Transformation(RustOwnedSourceBackedStyleValue {
+                            value_type: None,
+                            source: "translateX(10px)".to_string(),
+                        }),
+                        RustOwnedStyleValueKind::Transformation(RustOwnedSourceBackedStyleValue {
+                            value_type: None,
+                            source: "scale(2)".to_string(),
+                        }),
+                    ],
                     separator: RustOwnedStyleValueListSeparator::Space,
                     value_type: Some(PropertyValueType::TransformList),
                     source: Some("translateX(10px) scale(2)".to_string()),
