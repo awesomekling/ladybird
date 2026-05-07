@@ -1823,7 +1823,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     GridTrackSizeList(RustOwnedSourceBackedStyleValue),
     GuaranteedInvalid,
     Image(RustOwnedSourceBackedStyleValue),
-    ImageSet(RustOwnedSourceBackedStyleValue),
+    ImageSet(RustOwnedImageSet),
     Integer {
         value: i32,
         value_type: PropertyValueType,
@@ -1951,6 +1951,19 @@ pub(crate) struct RustOwnedMathFunction {
 pub(crate) struct RustOwnedSourceBackedStyleValue {
     value_type: Option<PropertyValueType>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedImageSet {
+    options: Vec<RustOwnedImageSetOption>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedImageSetOption {
+    image_source: String,
+    resolution: Option<String>,
+    mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2382,14 +2395,11 @@ fn parse_rust_owned_generated_longhand_value(
         };
     }
 
-    if value_type == PropertyValueType::Image && parse_image_set_value(filtered_input) == CssImageSetValueKind::Valid {
-        return RustOwnedStyleValue {
-            property_id,
-            value: RustOwnedStyleValueKind::ImageSet(RustOwnedSourceBackedStyleValue {
-                value_type: Some(value_type),
-                source: filtered_input_to_string(filtered_input),
-            }),
-        };
+    if value_type == PropertyValueType::Image
+        && let Some(value) =
+            rust_owned_image_set_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+    {
+        return RustOwnedStyleValue { property_id, value };
     }
 
     if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
@@ -2667,6 +2677,100 @@ fn rust_owned_font_variant_numeric_style_value_kind(source: String) -> Option<Ru
     Some(RustOwnedStyleValueKind::FontVariantNumeric { values, source })
 }
 
+fn rust_owned_image_set_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [ComponentValue::Function(function)] = component_values else {
+        return None;
+    };
+
+    if !function.name.eq_ignore_ascii_case("image-set") && !function.name.eq_ignore_ascii_case("-webkit-image-set") {
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-images-4/#image-set-notation
+    // image-set() = image-set( <image-set-option># )
+    // <image-set-option> = [ <image> | <string> ] [ <resolution> || type(<string>) ]
+    // https://compat.spec.whatwg.org/#css-%27-webkit-image-set%27-alias
+    // Implementations must accept -webkit-image-set() as a parse-time alias of image-set().
+    let options = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        rust_owned_image_set_option(component_values, filtered_input_string)
+    })?;
+    if options.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
+        options,
+        source: serialize_component_values_for_reparsing(component_values, filtered_input_string)?,
+    }))
+}
+
+fn rust_owned_image_set_option(
+    component_values: Vec<ComponentValue>,
+    filtered_input_string: &str,
+) -> Option<RustOwnedImageSetOption> {
+    let component_values = strip_whitespace(&component_values);
+    if component_values.is_empty() {
+        return None;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+
+    let image = parser.next_component_value()?;
+    let image_source = if component_value_parse_as_image_set_string(image)
+        || component_value_parse_as_image_set_image(image)
+        || component_value_parse_as_image_set_gradient(image)
+    {
+        let image_source =
+            serialize_component_values_for_reparsing(std::slice::from_ref(image), filtered_input_string)?;
+        parser.index += 1;
+        image_source
+    } else {
+        return None;
+    };
+
+    let mut resolution = None;
+    let mut mime_type = None;
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        if resolution.is_none() && component_value_parse_as_image_set_resolution(component_value) {
+            resolution = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            parser.index += 1;
+            continue;
+        }
+
+        if mime_type.is_none()
+            && let Some(value) = image_set_type_value(component_value)
+        {
+            mime_type = Some(value);
+            parser.index += 1;
+            continue;
+        }
+
+        return None;
+    }
+
+    Some(RustOwnedImageSetOption {
+        image_source,
+        resolution,
+        mime_type,
+    })
+}
+
 fn rust_owned_primitive_style_value_kind(
     value_type: PropertyValueType,
     primitive_kind: CssPrimitiveValueKind,
@@ -2851,7 +2955,6 @@ where
         | RustOwnedStyleValueKind::GridTrackPlacement(value)
         | RustOwnedStyleValueKind::GridTrackSizeList(value)
         | RustOwnedStyleValueKind::Image(value)
-        | RustOwnedStyleValueKind::ImageSet(value)
         | RustOwnedStyleValueKind::LinearGradient(value)
         | RustOwnedStyleValueKind::OpenTypeTagged(value)
         | RustOwnedStyleValueKind::PendingSubstitution(value)
@@ -2871,6 +2974,14 @@ where
             if let Some(value_type) = value.value_type {
                 callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
             }
+        }
+        RustOwnedStyleValueKind::ImageSet(_) => {
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::Image,
+            );
         }
         RustOwnedStyleValueKind::Angle(value)
         | RustOwnedStyleValueKind::Flex(value)
@@ -7572,15 +7683,29 @@ fn component_value_parse_as_image_set_gradient(component_value: &ComponentValue)
 }
 
 fn component_value_parse_as_image_set_type(component_value: &ComponentValue) -> bool {
+    image_set_type_value(component_value).is_some()
+}
+
+fn image_set_type_value(component_value: &ComponentValue) -> Option<String> {
     let ComponentValue::Function(function) = component_value else {
-        return false;
+        return None;
     };
 
     if !function.name.eq_ignore_ascii_case("type") {
-        return false;
+        return None;
     }
 
-    component_values_parse_as_string(strip_whitespace(&function.value))
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        }),
+    ] = strip_whitespace(&function.value)
+    else {
+        return None;
+    };
+
+    Some(value.clone())
 }
 
 fn component_value_parse_as_color_function(function: &Function) -> bool {
@@ -17982,11 +18107,11 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedMathFunction,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -19601,9 +19726,38 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundImage,
-                value: RustOwnedStyleValueKind::ImageSet(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::Image),
+                value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
+                    options: vec![RustOwnedImageSetOption {
+                        image_source: "url(example.png)".to_string(),
+                        resolution: Some("2x".to_string()),
+                        mime_type: None,
+                    }],
                     source: "image-set(url(example.png) 2x)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::BackgroundImage],
+                "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundImage,
+                value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
+                    options: vec![
+                        RustOwnedImageSetOption {
+                            image_source: "\"example.png\"".to_string(),
+                            resolution: None,
+                            mime_type: Some("image/png".to_string()),
+                        },
+                        RustOwnedImageSetOption {
+                            image_source: "linear-gradient(black, white)".to_string(),
+                            resolution: Some("2x".to_string()),
+                            mime_type: None,
+                        },
+                    ],
+                    source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
+                        .to_string(),
                 }),
             })
         );
