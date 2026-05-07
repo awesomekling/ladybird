@@ -2001,7 +2001,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextUnderlinePosition(RustOwnedTextUnderlinePosition),
     Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
-    Transformation(RustOwnedSourceBackedStyleValue),
+    Transformation(RustOwnedTransformation),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
@@ -2319,6 +2319,19 @@ pub(crate) struct RustOwnedScrollbarGutter {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransformation {
+    function_name: String,
+    arguments: Vec<RustOwnedTransformationArgument>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransformationArgument {
+    parameter_type: TransformFunctionParameterType,
     source: String,
 }
 
@@ -3148,18 +3161,8 @@ fn rust_owned_transform_list_style_value_kind(
         let ComponentValue::Function(function) = component_value else {
             return None;
         };
-        if !component_value_parse_as_transform_function(function) {
-            return None;
-        }
-
         values.push(RustOwnedStyleValueKind::Transformation(
-            RustOwnedSourceBackedStyleValue {
-                value_type: None,
-                source: serialize_component_values_for_reparsing(
-                    std::slice::from_ref(component_value),
-                    filtered_input_string,
-                )?,
-            },
+            rust_owned_transformation_style_value_kind(function, component_value, filtered_input_string)?,
         ));
     }
 
@@ -3169,6 +3172,47 @@ fn rust_owned_transform_list_style_value_kind(
         value_type: Some(PropertyValueType::TransformList),
         source: Some(filtered_input_string.to_string()),
     }))
+}
+
+fn rust_owned_transformation_style_value_kind(
+    function: &Function,
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedTransformation> {
+    // https://drafts.csswg.org/css-transforms-1/#typedef-transform-function
+    // <transform-function> = <matrix()> | <translate()> | <translateX()> | <translateY()> | <scale()> | <scaleX()> | <scaleY()> | <rotate()> | <skew()> | <skewX()> | <skewY()>
+    let parameters = transform_function_parameters_from_name(&function.name)?;
+    let arguments = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        Some(component_value.clone())
+    })?;
+
+    if arguments.len() > parameters.len() {
+        return None;
+    }
+    if arguments.len() < parameters.len() && parameters[arguments.len()].required {
+        return None;
+    }
+
+    let mut rust_owned_arguments = Vec::new();
+    for (argument, parameter) in arguments.iter().zip(parameters) {
+        if !component_value_matches_transform_function_parameter(argument, parameter.parameter_type) {
+            return None;
+        }
+
+        rust_owned_arguments.push(RustOwnedTransformationArgument {
+            parameter_type: parameter.parameter_type,
+            source: serialize_component_values_for_reparsing(std::slice::from_ref(argument), filtered_input_string)?,
+        });
+    }
+
+    Some(RustOwnedTransformation {
+        function_name: function.name.clone(),
+        arguments: rust_owned_arguments,
+        source: serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?,
+    })
 }
 
 fn parse_all_component_values<T>(
@@ -4536,7 +4580,6 @@ where
         | RustOwnedStyleValueKind::RandomValueSharing(value)
         | RustOwnedStyleValueKind::Shadow(value)
         | RustOwnedStyleValueKind::Superellipse(value)
-        | RustOwnedStyleValueKind::Transformation(value)
         | RustOwnedStyleValueKind::UnicodeRange(value) => {
             if let Some(value_type) = value.value_type {
                 callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
@@ -4858,6 +4901,7 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::Transformation(_) => {}
         RustOwnedStyleValueKind::TouchAction(value) => callback(
             CssStyleValueKind::TouchAction,
             property_id,
@@ -20325,8 +20369,9 @@ mod tests {
         RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
         RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
-        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -22472,12 +22517,20 @@ mod tests {
                 property_id: PropertyId::Transform,
                 value: RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
                     values: vec![
-                        RustOwnedStyleValueKind::Transformation(RustOwnedSourceBackedStyleValue {
-                            value_type: None,
+                        RustOwnedStyleValueKind::Transformation(RustOwnedTransformation {
+                            function_name: "translateX".to_string(),
+                            arguments: vec![RustOwnedTransformationArgument {
+                                parameter_type: TransformFunctionParameterType::LengthPercentage,
+                                source: "10px".to_string(),
+                            }],
                             source: "translateX(10px)".to_string(),
                         }),
-                        RustOwnedStyleValueKind::Transformation(RustOwnedSourceBackedStyleValue {
-                            value_type: None,
+                        RustOwnedStyleValueKind::Transformation(RustOwnedTransformation {
+                            function_name: "scale".to_string(),
+                            arguments: vec![RustOwnedTransformationArgument {
+                                parameter_type: TransformFunctionParameterType::NumberPercentage,
+                                source: "2".to_string(),
+                            }],
                             source: "scale(2)".to_string(),
                         }),
                     ],
