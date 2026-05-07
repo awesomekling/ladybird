@@ -1847,6 +1847,7 @@ pub enum CssStyleValueKind {
     ColorScheme,
     Contain,
     ContainerType,
+    CounterDefinitions,
     Display,
     GridAutoFlow,
     PaintOrder,
@@ -1904,7 +1905,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: CounterStyle,
         source: String,
     },
-    CounterDefinitions(RustOwnedSourceBackedStyleValue),
+    CounterDefinitions(RustOwnedCounterDefinitions),
     CounterStyleSystem(RustOwnedSourceBackedStyleValue),
     Cursor(RustOwnedSourceBackedStyleValue),
     Display(RustOwnedDisplay),
@@ -2177,6 +2178,19 @@ pub(crate) struct RustOwnedAnimationName {
 pub(crate) struct RustOwnedColorScheme {
     value: CssColorSchemeValue,
     schemes: Vec<String>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCounterDefinition {
+    name: String,
+    is_reversed: bool,
+    value: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCounterDefinitions {
+    definitions: Vec<RustOwnedCounterDefinition>,
     source: String,
 }
 
@@ -2711,6 +2725,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
+        PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
+        PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
         PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
         PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
@@ -3196,6 +3213,72 @@ fn rust_owned_container_type_style_value_kind(filtered_input: &[u8]) -> Option<R
         value,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_counter_definitions_style_value_kind(
+    filtered_input: &[u8],
+    allow_reversed: bool,
+    default_value_if_not_reversed: i32,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut definitions = Vec::new();
+
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        // https://drafts.csswg.org/css-lists-3/#typedef-counter-name
+        // <counter-name> = <custom-ident>
+        // A <counter-name> name cannot match the keyword none; such an identifier is invalid as a <counter-name>.
+        let (name, is_reversed) = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if is_valid_custom_ident(value, &["none"]) => {
+                let name = value.clone();
+                parser.index += 1;
+                (name, false)
+            }
+            // AD-HOC: Match the existing C++ parser, which currently disables reversed() counter parsing.
+            ComponentValue::Function(_) if allow_reversed => return None,
+            _ => return None,
+        };
+        parser.discard_whitespace();
+
+        let mut value = None;
+        if let Some(component_value) = parser.next_component_value()
+            && parse_integer_value_prefix(component_value) == CssPrimitiveValueKind::Integer
+        {
+            let numeric_value =
+                style_value_numeric_value(PropertyValueType::Integer, std::slice::from_ref(component_value))?;
+            if numeric_value < f64::from(i32::MIN) || numeric_value > f64::from(i32::MAX) {
+                return None;
+            }
+            value = Some(numeric_value as i32);
+            parser.index += 1;
+        }
+
+        definitions.push(RustOwnedCounterDefinition {
+            name,
+            is_reversed,
+            value: value.unwrap_or(default_value_if_not_reversed),
+        });
+    }
+
+    if definitions.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::CounterDefinitions(
+        RustOwnedCounterDefinitions {
+            definitions,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
 }
 
 fn rust_owned_grid_auto_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4189,7 +4272,6 @@ where
         | RustOwnedStyleValueKind::ConicGradient(value)
         | RustOwnedStyleValueKind::Content(value)
         | RustOwnedStyleValueKind::Counter(value)
-        | RustOwnedStyleValueKind::CounterDefinitions(value)
         | RustOwnedStyleValueKind::CounterStyleSystem(value)
         | RustOwnedStyleValueKind::Cursor(value)
         | RustOwnedStyleValueKind::Edge(value)
@@ -4277,6 +4359,25 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::CounterDefinitions(value) => {
+            for definition in &value.definitions {
+                callback(
+                    CssStyleValueKind::CounterDefinitions,
+                    property_id,
+                    CssPrimitiveValueKind::Integer,
+                    true,
+                    f64::from(definition.value),
+                    false,
+                    0.0,
+                    u8::from(definition.is_reversed),
+                    0,
+                    0,
+                    0,
+                    definition.name.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::Display(value) => callback(
             CssStyleValueKind::Display,
             property_id,
@@ -19933,17 +20034,17 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent,
-        RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarGutter,
+        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -21785,6 +21886,41 @@ mod tests {
                 value: RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType {
                     value: CssContainerTypeValueKind::InlineSizeAndScrollState,
                     source: "inline-size scroll-state".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::CounterIncrement], "chapter page 2"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::CounterIncrement,
+                value: RustOwnedStyleValueKind::CounterDefinitions(RustOwnedCounterDefinitions {
+                    definitions: vec![
+                        RustOwnedCounterDefinition {
+                            name: "chapter".to_string(),
+                            is_reversed: false,
+                            value: 1,
+                        },
+                        RustOwnedCounterDefinition {
+                            name: "page".to_string(),
+                            is_reversed: false,
+                            value: 2,
+                        },
+                    ],
+                    source: "chapter page 2".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::CounterSet], "chapter -1"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::CounterSet,
+                value: RustOwnedStyleValueKind::CounterDefinitions(RustOwnedCounterDefinitions {
+                    definitions: vec![RustOwnedCounterDefinition {
+                        name: "chapter".to_string(),
+                        is_reversed: false,
+                        value: -1,
+                    }],
+                    source: "chapter -1".to_string(),
                 }),
             })
         );

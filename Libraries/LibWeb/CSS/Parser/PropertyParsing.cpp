@@ -812,6 +812,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             }
+            case FFI::CssStyleValueKind::CounterDefinitions:
+                if (!rust_style_value->counter_definitions.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, CounterDefinitionsStyleValue::create(move(rust_style_value->counter_definitions)) };
+                }
+                break;
             case FFI::CssStyleValueKind::Display:
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();

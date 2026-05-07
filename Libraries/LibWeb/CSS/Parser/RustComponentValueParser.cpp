@@ -12,6 +12,7 @@
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/PropertyName.h>
+#include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
@@ -983,6 +984,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 };
             } else if (kind == FFI::CssStyleValueKind::ContainerType) {
                 value.container_type = static_cast<FFI::CssContainerTypeValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::CounterDefinitions) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::CounterDefinitions);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->counter_definitions.append(CounterDefinition {
+                    .name = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    .is_reversed = color_red != 0,
+                    .value = IntegerStyleValue::create(static_cast<i32>(numeric_value)),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::Display) {
                 value.display_kind = static_cast<RustDisplayValueKind>(color_red);
                 value.display_value = color_green;
