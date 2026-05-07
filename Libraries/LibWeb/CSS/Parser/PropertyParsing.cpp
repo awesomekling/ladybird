@@ -933,6 +933,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return StyleValueList::create(move(values), StyleValueList::Separator::Space);
             };
+            auto materialize_rust_grid_track_placement = [&](RustComponentValueParser::RustGridTrackPlacement const& grid_track_placement) -> RefPtr<GridTrackPlacementStyleValue const> {
+                RefPtr<StyleValue const> line_number;
+                if (grid_track_placement.line_number_source.has_value()) {
+                    line_number = parse_rust_source_as_integer(*grid_track_placement.line_number_source);
+                    if (!line_number)
+                        return nullptr;
+                }
+
+                switch (grid_track_placement.kind) {
+                case RustComponentValueParser::RustGridTrackPlacementKind::Auto:
+                    return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_auto());
+                case RustComponentValueParser::RustGridTrackPlacementKind::Line:
+                    return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_line(line_number, grid_track_placement.name));
+                case RustComponentValueParser::RustGridTrackPlacementKind::Span:
+                    return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_span(line_number ? line_number.release_nonnull() : IntegerStyleValue::create(1), grid_track_placement.name));
+                }
+
+                VERIFY_NOT_REACHED();
+            };
             auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1602,9 +1621,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::GridTrackPlacement:
-                if (auto value = parse_grid_track_placement(tokens)) {
+                if (rust_style_value->grid_track_placement.has_value()) {
+                    auto value = materialize_rust_grid_track_placement(*rust_style_value->grid_track_placement);
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::GridTrackSizeList:

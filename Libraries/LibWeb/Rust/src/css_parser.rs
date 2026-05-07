@@ -2376,8 +2376,16 @@ pub(crate) struct RustOwnedGridAutoFlow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedGridTrackPlacement {
-    source: String,
+pub(crate) enum RustOwnedGridTrackPlacement {
+    Auto,
+    Line {
+        line_number_source: Option<String>,
+        name: Option<String>,
+    },
+    Span {
+        line_number_source: Option<String>,
+        name: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4313,14 +4321,8 @@ fn consume_optional_grid_auto_flow_axis_value(parser: &mut ComponentValueParser)
 }
 
 fn rust_owned_grid_track_placement_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if parse_grid_track_placement_value(filtered_input) == CssGridTrackPlacementValueKind::Invalid {
-        return None;
-    }
-
     Some(RustOwnedStyleValueKind::GridTrackPlacement(
-        RustOwnedGridTrackPlacement {
-            source: filtered_input_to_string(filtered_input),
-        },
+        parse_rust_owned_grid_track_placement_value(filtered_input)?,
     ))
 }
 
@@ -6626,12 +6628,9 @@ where
             property_id,
             &value.source,
         ),
-        RustOwnedStyleValueKind::GridTrackPlacement(value) => callback_source_backed_style_value(
-            callback,
-            CssStyleValueKind::GridTrackPlacement,
-            property_id,
-            &value.source,
-        ),
+        RustOwnedStyleValueKind::GridTrackPlacement(value) => {
+            callback_grid_track_placement_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::GridTrackSizeList(value) => callback_source_backed_style_value(
             callback,
             CssStyleValueKind::GridTrackSizeList,
@@ -7787,6 +7786,51 @@ fn callback_optional_longhand_source<C>(
             "",
         );
     }
+}
+
+const GRID_TRACK_PLACEMENT_CALLBACK_AUTO: u8 = 0;
+const GRID_TRACK_PLACEMENT_CALLBACK_LINE: u8 = 1;
+const GRID_TRACK_PLACEMENT_CALLBACK_SPAN: u8 = 2;
+
+fn callback_grid_track_placement_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedGridTrackPlacement)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, line_number_source, name) = match value {
+        RustOwnedGridTrackPlacement::Auto => (GRID_TRACK_PLACEMENT_CALLBACK_AUTO, None, None),
+        RustOwnedGridTrackPlacement::Line {
+            line_number_source,
+            name,
+        } => (
+            GRID_TRACK_PLACEMENT_CALLBACK_LINE,
+            line_number_source.as_deref(),
+            name.as_deref(),
+        ),
+        RustOwnedGridTrackPlacement::Span {
+            line_number_source,
+            name,
+        } => (
+            GRID_TRACK_PLACEMENT_CALLBACK_SPAN,
+            line_number_source.as_deref(),
+            name.as_deref(),
+        ),
+    };
+
+    callback(
+        CssStyleValueKind::GridTrackPlacement,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        line_number_source.unwrap_or("").as_bytes(),
+        name.unwrap_or(""),
+    );
 }
 
 const POSITION_AREA_CALLBACK_NONE: u8 = 0;
@@ -11546,17 +11590,18 @@ fn consume_optional_ident_matching(parser: &mut ComponentValueParser, expected: 
 }
 
 pub(crate) fn parse_grid_track_placement_value(filtered_input: &[u8]) -> CssGridTrackPlacementValueKind {
-    let (mut parser, _) = parser_from_filtered_input(filtered_input);
-    let component_values = parser.parse_a_list_of_component_values();
-
-    if component_values_parse_as_grid_track_placement(&component_values) {
+    if parse_rust_owned_grid_track_placement_value(filtered_input).is_some() {
         CssGridTrackPlacementValueKind::Valid
     } else {
         CssGridTrackPlacementValueKind::Invalid
     }
 }
 
-fn component_values_parse_as_grid_track_placement(component_values: &[ComponentValue]) -> bool {
+fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<RustOwnedGridTrackPlacement> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+
     // https://www.w3.org/TR/css-grid-2/#line-placement
     // <grid-line> =
     //     auto |
@@ -11567,81 +11612,94 @@ fn component_values_parse_as_grid_track_placement(component_values: &[ComponentV
     parser.discard_whitespace();
     if parser.consume_ident_matching("auto") {
         parser.discard_whitespace();
-        return !parser.has_next_component_value();
+        return (!parser.has_next_component_value()).then_some(RustOwnedGridTrackPlacement::Auto);
     }
 
     let mut is_span = false;
-    let mut parsed_custom_ident = false;
-    let mut parsed_integer = false;
+    let mut parsed_custom_ident = None;
+    let mut parsed_integer_source = None;
     let mut parsed_integer_value = 0.0;
     let mut parsed_integer_has_known_value = false;
 
     while parser.has_next_component_value() {
         if parser.consume_ident_matching("span") {
             if is_span {
-                return false;
+                return None;
             }
 
             is_span = true;
             continue;
         }
 
-        if consume_grid_line_custom_ident(&mut parser) {
-            if parsed_custom_ident {
-                return false;
+        if let Some(custom_ident) = consume_grid_line_custom_ident(&mut parser) {
+            if parsed_custom_ident.is_some() {
+                return None;
             }
-            parsed_custom_ident = true;
+            parsed_custom_ident = Some(custom_ident);
             continue;
         }
 
-        if let Some(integer_value) = consume_integer_component_value(&mut parser) {
-            if parsed_integer {
-                return false;
+        if let Some((integer_source, integer_value)) =
+            consume_integer_component_value_source(&mut parser, &filtered_input_string)
+        {
+            if parsed_integer_source.is_some() {
+                return None;
             }
-            parsed_integer = true;
+            parsed_integer_source = Some(integer_source);
             parsed_integer_value = integer_value;
             parsed_integer_has_known_value = true;
             continue;
         }
 
-        if consume_integer_math_function_component_value(&mut parser) {
-            if parsed_integer {
-                return false;
+        if let Some(integer_source) =
+            consume_integer_math_function_component_value_source(&mut parser, &filtered_input_string)
+        {
+            if parsed_integer_source.is_some() {
+                return None;
             }
-            parsed_integer = true;
+            parsed_integer_source = Some(integer_source);
             continue;
         }
 
-        return false;
+        return None;
     }
 
-    if !is_span && (parsed_integer || parsed_custom_ident) {
-        return !parsed_integer || !parsed_integer_has_known_value || parsed_integer_value != 0.0;
+    if !is_span && (parsed_integer_source.is_some() || parsed_custom_ident.is_some()) {
+        return (parsed_integer_source.is_none() || !parsed_integer_has_known_value || parsed_integer_value != 0.0)
+            .then_some(RustOwnedGridTrackPlacement::Line {
+                line_number_source: parsed_integer_source,
+                name: parsed_custom_ident,
+            });
     }
 
-    if is_span && (parsed_integer || parsed_custom_ident) {
-        return !parsed_integer || !parsed_integer_has_known_value || parsed_integer_value > 0.0;
+    if is_span && (parsed_integer_source.is_some() || parsed_custom_ident.is_some()) {
+        return (parsed_integer_source.is_none() || !parsed_integer_has_known_value || parsed_integer_value > 0.0)
+            .then_some(RustOwnedGridTrackPlacement::Span {
+                line_number_source: parsed_integer_source,
+                name: parsed_custom_ident,
+            });
     }
 
-    false
+    None
 }
 
-fn consume_grid_line_custom_ident(parser: &mut ComponentValueParser) -> bool {
+fn consume_grid_line_custom_ident(parser: &mut ComponentValueParser) -> Option<String> {
     parser.discard_whitespace();
     let Some(ComponentValue::PreservedToken(Token {
         token_type: TokenType::Ident { value },
         ..
     })) = parser.next_component_value()
     else {
-        return false;
+        return None;
     };
 
     if !is_valid_custom_ident(value, &["auto"]) {
-        return false;
+        return None;
     }
 
+    let value = value.clone();
     parser.index += 1;
-    true
+    Some(value)
 }
 
 fn consume_integer_component_value(parser: &mut ComponentValueParser) -> Option<f64> {
@@ -11663,6 +11721,31 @@ fn consume_integer_component_value(parser: &mut ComponentValueParser) -> Option<
     Some(value)
 }
 
+fn consume_integer_component_value_source(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<(String, f64)> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Number { number },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+
+    if !number_is_integer(*number) {
+        return None;
+    }
+
+    let source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    let value = number.value();
+    parser.index += 1;
+    Some((source, value))
+}
+
 fn consume_integer_math_function_component_value(parser: &mut ComponentValueParser) -> bool {
     parser.discard_whitespace();
     let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
@@ -11679,6 +11762,31 @@ fn consume_integer_math_function_component_value(parser: &mut ComponentValuePars
     // AD-HOC: C++ still owns resolving math functions and tree counting functions here.
     parser.index += 1;
     true
+}
+
+fn consume_integer_math_function_component_value_source(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<String> {
+    parser.discard_whitespace();
+    let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
+        return None;
+    };
+
+    if !is_math_function_name(&function.name)
+        && !function.name.eq_ignore_ascii_case("sibling-index")
+        && !function.name.eq_ignore_ascii_case("sibling-count")
+    {
+        return None;
+    }
+
+    let source = serialize_component_values_for_reparsing(
+        std::slice::from_ref(parser.next_component_value()?),
+        filtered_input_string,
+    )?;
+    // AD-HOC: C++ still owns resolving math functions and tree counting functions here.
+    parser.index += 1;
+    Some(source)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27379,8 +27487,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span 2 main"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::GridColumnStart,
-                value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement {
-                    source: "span 2 main".to_string(),
+                value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement::Span {
+                    line_number_source: Some("2".to_string()),
+                    name: Some("main".to_string()),
                 }),
             })
         );

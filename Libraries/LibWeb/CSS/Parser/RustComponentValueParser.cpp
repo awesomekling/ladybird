@@ -1301,10 +1301,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
-                           FFI::CssStyleValueKind::GridTrackPlacement,
                            FFI::CssStyleValueKind::GridTrackSizeList,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::GridTrackPlacement) {
+                value.grid_track_placement = RustGridTrackPlacement {
+                    .kind = static_cast<RustGridTrackPlacementKind>(color_red),
+                    .line_number_source = value_len == 0 ? Optional<String> {} : string_from_ffi_bytes(value_ptr, value_len),
+                    .name = value_type_len == 0 ? Optional<String> {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                };
             } else if (kind == FFI::CssStyleValueKind::PositionArea) {
                 enum : u8 {
                     None,

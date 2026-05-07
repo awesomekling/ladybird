@@ -172,6 +172,18 @@ public:
         bool has_flip_start { false };
     };
 
+    enum class RustGridTrackPlacementKind : u8 {
+        Auto,
+        Line,
+        Span,
+    };
+
+    struct RustGridTrackPlacement {
+        RustGridTrackPlacementKind kind { RustGridTrackPlacementKind::Auto };
+        Optional<String> line_number_source;
+        Optional<String> name;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -267,6 +279,7 @@ public:
         Optional<RustPositionArea> position_area;
         bool position_try_fallbacks_is_none { false };
         Vector<RustPositionTryFallback> position_try_fallbacks;
+        Optional<RustGridTrackPlacement> grid_track_placement;
         bool transform_longhand_is_none { false };
         FlyString transform_longhand_function_name;
         Vector<String> transform_longhand_arguments;
