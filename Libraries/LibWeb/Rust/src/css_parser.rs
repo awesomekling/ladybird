@@ -1924,7 +1924,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
     GuaranteedInvalid,
-    Image(RustOwnedSourceBackedStyleValue),
+    Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
     Integer {
         value: i32,
@@ -2057,12 +2057,6 @@ pub(crate) struct RustOwnedMathFunction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedSourceBackedStyleValue {
-    value_type: Option<PropertyValueType>,
-    source: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorFunction {
     anchor_name: Option<String>,
     anchor_side: String,
@@ -2083,6 +2077,18 @@ pub(crate) struct RustOwnedCounterFunction {
 pub(crate) enum RustOwnedCounterFunctionKind {
     Counter,
     Counters,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedImage {
+    kind: RustOwnedImageKind,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedImageKind {
+    Url,
+    Gradient { function_name: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2951,7 +2957,7 @@ fn parse_rust_owned_generated_longhand_value(
 
     if value_type == PropertyValueType::Image
         && let Some(value) =
-            rust_owned_image_set_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            rust_owned_image_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
     {
         return RustOwnedStyleValue { property_id, value };
     }
@@ -3141,27 +3147,23 @@ fn parse_rust_owned_generated_longhand_value(
 }
 
 fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, source: String) -> RustOwnedStyleValueKind {
-    let value = RustOwnedSourceBackedStyleValue {
-        value_type: Some(value_type),
-        source,
-    };
-
     match value_type {
         PropertyValueType::Anchor => {
-            rust_owned_anchor_function_style_value_kind(value.source.as_bytes()).unwrap_or_else(|| unreachable!())
+            rust_owned_anchor_function_style_value_kind(source.as_bytes()).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::Counter => {
-            rust_owned_counter_function_style_value_kind(value.source.as_bytes()).unwrap_or_else(|| unreachable!())
+            rust_owned_counter_function_style_value_kind(source.as_bytes()).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::Image => {
+            rust_owned_image_style_value_kind(source.as_bytes(), &source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::FontStyle => {
-            rust_owned_font_style_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+            rust_owned_font_style_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::Position | PropertyValueType::BackgroundPosition => {
-            rust_owned_position_style_value_kind(value.value_type.unwrap(), value.source)
-                .unwrap_or_else(|| unreachable!())
+            rust_owned_position_style_value_kind(value_type, source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::TransformList => {
-            let source = value.source;
             if let Some(value) = rust_owned_transform_list_style_value_kind(source.as_bytes(), &source) {
                 value
             } else {
@@ -3174,21 +3176,18 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
             }
         }
         PropertyValueType::FontVariantAlternates => {
-            rust_owned_font_variant_alternates_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+            rust_owned_font_variant_alternates_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::FontVariantEastAsian => {
-            rust_owned_font_variant_east_asian_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+            rust_owned_font_variant_east_asian_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::FontVariantLigatures => {
-            rust_owned_font_variant_ligatures_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+            rust_owned_font_variant_ligatures_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
         PropertyValueType::FontVariantNumeric => {
-            rust_owned_font_variant_numeric_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+            rust_owned_font_variant_numeric_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
-        _ => RustOwnedStyleValueKind::UnresolvedValueType {
-            value_type,
-            source: value.source,
-        },
+        _ => RustOwnedStyleValueKind::UnresolvedValueType { value_type, source },
     }
 }
 
@@ -4335,6 +4334,47 @@ fn rust_owned_font_variant_numeric_style_value_kind(source: String) -> Option<Ru
     Some(RustOwnedStyleValueKind::FontVariantNumeric { values, source })
 }
 
+fn rust_owned_image_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    if let Some(value) = rust_owned_image_set_style_value_kind(filtered_input, filtered_input_string) {
+        return Some(value);
+    }
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [component_value] = strip_whitespace(&component_values) else {
+        return None;
+    };
+
+    if component_value_parse_as_image_url(component_value) {
+        return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
+            kind: RustOwnedImageKind::Url,
+            source: serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?,
+        }));
+    }
+
+    if let ComponentValue::Function(function) = component_value
+        && component_value_parse_as_image_gradient(component_value)
+    {
+        return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
+            kind: RustOwnedImageKind::Gradient {
+                function_name: function.name.clone(),
+            },
+            source: serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?,
+        }));
+    }
+
+    None
+}
+
 fn rust_owned_image_set_style_value_kind(
     filtered_input: &[u8],
     filtered_input_string: &str,
@@ -4897,10 +4937,13 @@ where
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
-        RustOwnedStyleValueKind::Image(value) => {
-            if let Some(value_type) = value.value_type {
-                callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
-            }
+        RustOwnedStyleValueKind::Image(_) => {
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::Image,
+            );
         }
         RustOwnedStyleValueKind::Anchor(_) => {
             callback_style_value_type(
@@ -6165,7 +6208,9 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
             ValueTypeId::FontVariantPositionValue,
             filtered_input,
         ),
-        PropertyValueType::Image => parse_image_set_value(filtered_input) == CssImageSetValueKind::Valid,
+        PropertyValueType::Image => {
+            rust_owned_image_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input)).is_some()
+        }
         _ => false,
     }
 }
@@ -10244,6 +10289,22 @@ fn component_value_parse_as_image_set_string(component_value: &ComponentValue) -
 fn component_value_parse_as_image_set_image(component_value: &ComponentValue) -> bool {
     let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
     parser.parse_a_url_function().is_some()
+}
+
+fn component_value_parse_as_image_url(component_value: &ComponentValue) -> bool {
+    let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+    let Some(url) = parser.parse_a_url_function() else {
+        return false;
+    };
+
+    // If the value is a 'url(..)' parse as image, but if it is just a reference 'url(#xx)', leave it alone,
+    // so we can parse as URL further on. These URLs are used as references inside SVG documents for masks.
+    // FIXME: Remove this special case once mask-image accepts `<image>`.
+    !url.url.starts_with('#')
+}
+
+fn component_value_parse_as_image_gradient(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_image_set_gradient(component_value)
 }
 
 fn component_value_parse_as_image_set_gradient(component_value: &ComponentValue) -> bool {
@@ -20699,16 +20760,16 @@ mod tests {
         RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        RustOwnedGridAutoFlow, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition,
+        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -22287,7 +22348,15 @@ mod tests {
                 "TransformList".to_string()
             ))
         );
-        assert_eq!(parse_generated_property(&[PropertyId::MaskImage], "url(foo.png)"), None);
+        assert_eq!(
+            parse_generated_property(&[PropertyId::MaskImage], "url(foo.png)"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::MaskImage,
+                String::new(),
+                "Image".to_string()
+            ))
+        );
         assert_eq!(parse_generated_property(&[PropertyId::Color], "10px"), None);
     }
 
@@ -22362,6 +22431,28 @@ mod tests {
                         mime_type: None,
                     }],
                     source: "image-set(url(example.png) 2x)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "url(example.png)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundImage,
+                value: RustOwnedStyleValueKind::Image(RustOwnedImage {
+                    kind: RustOwnedImageKind::Url,
+                    source: "url(example.png)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "linear-gradient(black, white)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundImage,
+                value: RustOwnedStyleValueKind::Image(RustOwnedImage {
+                    kind: RustOwnedImageKind::Gradient {
+                        function_name: "linear-gradient".to_string(),
+                    },
+                    source: "linear-gradient(black, white)".to_string(),
                 }),
             })
         );
