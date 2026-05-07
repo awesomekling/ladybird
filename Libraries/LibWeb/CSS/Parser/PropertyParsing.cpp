@@ -230,16 +230,44 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
 
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
-                if (!metadata.has_value() || !metadata->range.contains(*rust_style_value->numeric_value))
+                if (!metadata.has_value())
                     return nullptr;
 
                 switch (*rust_style_value->value_type) {
                 case ValueType::Integer:
+                    if (!metadata->range.contains(*rust_style_value->numeric_value))
+                        return nullptr;
                     return IntegerStyleValue::create(static_cast<i32>(*rust_style_value->numeric_value));
                 case ValueType::Number:
+                    if (!metadata->range.contains(*rust_style_value->numeric_value))
+                        return nullptr;
                     return NumberStyleValue::create(*rust_style_value->numeric_value);
                 case ValueType::Percentage:
+                    if (!metadata->range.contains(*rust_style_value->numeric_value))
+                        return nullptr;
                     return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                case ValueType::Length: {
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto length_unit = string_to_length_unit(*rust_style_value->dimension_unit);
+                    if (!length_unit.has_value())
+                        return nullptr;
+                    Length length { *rust_style_value->numeric_value, length_unit.release_value() };
+                    if (!metadata->range.contains(length.raw_value()))
+                        return nullptr;
+                    return LengthStyleValue::create(length);
+                }
+                case ValueType::Time: {
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto time_unit = string_to_time_unit(*rust_style_value->dimension_unit);
+                    if (!time_unit.has_value())
+                        return nullptr;
+                    Time time { *rust_style_value->numeric_value, time_unit.release_value() };
+                    if (!metadata->range.contains(time.to_seconds()))
+                        return nullptr;
+                    return TimeStyleValue::create(move(time));
+                }
                 default:
                     return nullptr;
                 }
@@ -271,7 +299,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::String && rust_style_value->string.has_value()) {
                         tokens.discard_a_token();
                         maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
-                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Percentage)) {
+                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {

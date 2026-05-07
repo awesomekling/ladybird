@@ -2037,8 +2037,12 @@ where
 
             let primitive_kind = style_value_primitive_kind(*value_type, component_values);
             let numeric_value = style_value_numeric_value(*value_type, component_values);
-            let string_value = if primitive_kind == CssPrimitiveValueKind::String {
+            let value = if primitive_kind == CssPrimitiveValueKind::String {
                 string_token_value(component_values).unwrap_or("").as_bytes()
+            } else if first_is_one_of(property_value_type_name(*value_type), &["Length", "Time"]) {
+                style_value_dimension_unit(*value_type, component_values)
+                    .unwrap_or("")
+                    .as_bytes()
             } else {
                 &[]
             };
@@ -2053,7 +2057,7 @@ where
                 primitive_kind,
                 numeric_value.is_some(),
                 numeric_value.unwrap_or(0.0),
-                string_value,
+                value,
                 property_value_type_name(*value_type),
             );
             return true;
@@ -2078,6 +2082,22 @@ fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[
         (TokenType::Percentage { number }, PropertyValueType::Percentage | PropertyValueType::OpacityValue) => {
             Some(number.value())
         }
+        (TokenType::Dimension { number, .. }, PropertyValueType::Length | PropertyValueType::Time) => {
+            Some(number.value())
+        }
+        (TokenType::Number { number }, PropertyValueType::Length) if number.value() == 0.0 => Some(0.0),
+        _ => None,
+    }
+}
+
+fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<&str> {
+    let [ComponentValue::PreservedToken(token)] = component_values else {
+        return None;
+    };
+
+    match (&token.token_type, value_type) {
+        (TokenType::Dimension { unit, .. }, PropertyValueType::Length | PropertyValueType::Time) => Some(unit),
+        (TokenType::Number { number }, PropertyValueType::Length) if number.value() == 0.0 => Some("px"),
         _ => None,
     }
 }
@@ -17659,6 +17679,39 @@ mod tests {
                 numeric_value: Some(50.0),
                 value: String::new(),
                 value_type: "Percentage".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::MarginLeft], "12px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::MarginLeft,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(12.0),
+                value: "px".to_string(),
+                value_type: "Length".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::MarginLeft], "0"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::MarginLeft,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(0.0),
+                value: "px".to_string(),
+                value_type: "Length".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnimationDuration], "250ms"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::AnimationDuration,
+                primitive_kind: CssPrimitiveValueKind::Time,
+                numeric_value: Some(250.0),
+                value: "ms".to_string(),
+                value_type: "Time".to_string(),
             })
         );
         assert_eq!(

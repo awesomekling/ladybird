@@ -954,6 +954,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     value.numeric_value = numeric_value;
                 if (primitive_kind == FFI::CssPrimitiveValueKind::String)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                else if (primitive_kind == FFI::CssPrimitiveValueKind::Length || primitive_kind == FFI::CssPrimitiveValueKind::Time)
+                    value.dimension_unit = fly_string_from_ffi_bytes(value_ptr, value_len);
             }
 
             style_value = move(value);
