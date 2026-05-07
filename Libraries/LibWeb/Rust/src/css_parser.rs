@@ -1888,33 +1888,21 @@ pub(crate) struct RustOwnedStyleValue {
 pub(crate) enum RustOwnedStyleValueKind {
     Anchor(RustOwnedSourceBackedStyleValue),
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
-    AnchorSize(RustOwnedSourceBackedStyleValue),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
     BackgroundSize(RustOwnedBackgroundSizeList),
-    BorderImageSlice(RustOwnedSourceBackedStyleValue),
-    BorderRadius(RustOwnedSourceBackedStyleValue),
-    BorderRadiusRect(RustOwnedSourceBackedStyleValue),
     Calculated(RustOwnedMathFunction),
-    ColorInterpolationMethod(RustOwnedSourceBackedStyleValue),
     ColorScheme(RustOwnedColorScheme),
-    ConicGradient(RustOwnedSourceBackedStyleValue),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
-    Content(RustOwnedSourceBackedStyleValue),
     Counter(RustOwnedSourceBackedStyleValue),
     CounterStyle {
         value: CounterStyle,
         source: String,
     },
     CounterDefinitions(RustOwnedCounterDefinitions),
-    CounterStyleSystem(RustOwnedSourceBackedStyleValue),
-    Cursor(RustOwnedSourceBackedStyleValue),
     Display(RustOwnedDisplay),
-    Edge(RustOwnedSourceBackedStyleValue),
-    FilterValueList(RustOwnedSourceBackedStyleValue),
     Flex(RustOwnedDimensionStyleValue),
-    FontSource(RustOwnedSourceBackedStyleValue),
     FontStyle(RustOwnedFontStyle),
     FontVariantAlternates {
         values: Vec<FontVariantAlternatesValue>,
@@ -1935,9 +1923,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     Frequency(RustOwnedDimensionStyleValue),
     Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
-    GridTemplateArea(RustOwnedSourceBackedStyleValue),
-    GridTrackPlacement(RustOwnedSourceBackedStyleValue),
-    GridTrackSizeList(RustOwnedSourceBackedStyleValue),
     GuaranteedInvalid,
     Image(RustOwnedSourceBackedStyleValue),
     ImageSet(RustOwnedImageSet),
@@ -1951,7 +1936,6 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Length(RustOwnedDimensionStyleValue),
-    LinearGradient(RustOwnedSourceBackedStyleValue),
     Number {
         value: f64,
         value_type: PropertyValueType,
@@ -1960,8 +1944,6 @@ pub(crate) enum RustOwnedStyleValueKind {
         primitive_kind: CssPrimitiveValueKind,
         value: f64,
     },
-    OpenTypeTagged(RustOwnedSourceBackedStyleValue),
-    PendingSubstitution(RustOwnedSourceBackedStyleValue),
     PaintOrder(RustOwnedPaintOrder),
     Percentage {
         value: f64,
@@ -1971,9 +1953,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     PositionAnchor(RustOwnedPositionAnchor),
     PositionTryOrder(RustOwnedPositionTryOrder),
     PositionVisibility(RustOwnedPositionVisibility),
-    RadialGradient(RustOwnedSourceBackedStyleValue),
-    RadialSize(RustOwnedSourceBackedStyleValue),
-    RandomValueSharing(RustOwnedSourceBackedStyleValue),
     Quotes(RustOwnedQuotes),
     Ratio {
         numerator: f64,
@@ -1985,13 +1964,11 @@ pub(crate) enum RustOwnedStyleValueKind {
     Resolution(RustOwnedDimensionStyleValue),
     ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
-    Shadow(RustOwnedSourceBackedStyleValue),
     Shorthand(RustOwnedStyleValueList),
     String {
         value: String,
         value_type: PropertyValueType,
     },
-    Superellipse(RustOwnedSourceBackedStyleValue),
     TimelineName(RustOwnedTimelineName),
     TimelineScope(RustOwnedTimelineScope),
     TextWrap(RustOwnedTextWrap),
@@ -2006,7 +1983,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
     Tuple(RustOwnedStyleValueList),
-    UnicodeRange(RustOwnedSourceBackedStyleValue),
     ValueList(RustOwnedStyleValueList),
     Primitive {
         primitive_kind: CssPrimitiveValueKind,
@@ -4622,32 +4598,8 @@ where
     let property_id = style_value.property_id as u16;
     match &style_value.value {
         RustOwnedStyleValueKind::Anchor(value)
-        | RustOwnedStyleValueKind::AnchorSize(value)
-        | RustOwnedStyleValueKind::BorderImageSlice(value)
-        | RustOwnedStyleValueKind::BorderRadius(value)
-        | RustOwnedStyleValueKind::BorderRadiusRect(value)
-        | RustOwnedStyleValueKind::ColorInterpolationMethod(value)
-        | RustOwnedStyleValueKind::ConicGradient(value)
-        | RustOwnedStyleValueKind::Content(value)
         | RustOwnedStyleValueKind::Counter(value)
-        | RustOwnedStyleValueKind::CounterStyleSystem(value)
-        | RustOwnedStyleValueKind::Cursor(value)
-        | RustOwnedStyleValueKind::Edge(value)
-        | RustOwnedStyleValueKind::FilterValueList(value)
-        | RustOwnedStyleValueKind::FontSource(value)
-        | RustOwnedStyleValueKind::GridTemplateArea(value)
-        | RustOwnedStyleValueKind::GridTrackPlacement(value)
-        | RustOwnedStyleValueKind::GridTrackSizeList(value)
-        | RustOwnedStyleValueKind::Image(value)
-        | RustOwnedStyleValueKind::LinearGradient(value)
-        | RustOwnedStyleValueKind::OpenTypeTagged(value)
-        | RustOwnedStyleValueKind::PendingSubstitution(value)
-        | RustOwnedStyleValueKind::RadialGradient(value)
-        | RustOwnedStyleValueKind::RadialSize(value)
-        | RustOwnedStyleValueKind::RandomValueSharing(value)
-        | RustOwnedStyleValueKind::Shadow(value)
-        | RustOwnedStyleValueKind::Superellipse(value)
-        | RustOwnedStyleValueKind::UnicodeRange(value) => {
+        | RustOwnedStyleValueKind::Image(value) => {
             if let Some(value_type) = value.value_type {
                 callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
             }
