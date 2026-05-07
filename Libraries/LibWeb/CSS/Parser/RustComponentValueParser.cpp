@@ -1665,7 +1665,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 for (auto property : StringView { value_ptr, value_len }.split_view('\0'))
                     value.transition_properties.append(FlyString::from_utf8_without_validation(property.bytes()));
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
-                value.view_timeline_inset_count = color_red;
+                value.view_timeline_inset_sources.ensure_capacity(color_red);
+                for (auto source : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.view_timeline_inset_sources.append(String::from_utf8_without_validation(source.bytes()));
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_red);
                 value.view_function_inset = static_cast<FFI::CssViewFunctionInsetKind>(color_green);

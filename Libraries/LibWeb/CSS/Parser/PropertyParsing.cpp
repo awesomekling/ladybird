@@ -266,7 +266,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
     {
         auto generated_transaction = tokens.begin_transaction();
+        auto has_view_timeline_inset_property = [&] {
+            for (auto property_id : property_ids) {
+                if (property_id == PropertyID::ViewTimelineInset)
+                    return true;
+            }
+            return false;
+        };
         auto source = property_ids.size() == 1
+            ? serialize_component_values_for_reparsing(tokens.remaining_tokens())
+            : has_view_timeline_inset_property()
             ? serialize_component_values_for_reparsing(tokens.remaining_tokens())
             : [&] {
                   auto component_value_source = peek_token.original_source_text();
@@ -455,6 +464,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto discard_rust_owned_property_value_tokens = [&] {
                 if (property_ids.size() > 1) {
                     tokens.discard_a_token();
+                    return;
+                }
+
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+            };
+            auto discard_rust_view_timeline_inset_value_tokens = [&] {
+                if (property_ids.size() > 1) {
+                    for (size_t i = 0; i < rust_style_value->view_timeline_inset_sources.size(); ++i) {
+                        tokens.discard_whitespace();
+                        tokens.discard_a_token();
+                    }
                     return;
                 }
 
@@ -971,6 +992,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
                 return value.release_nonnull();
+            };
+            auto materialize_rust_view_timeline_inset_value = [&]() -> RefPtr<StyleValue const> {
+                if (rust_style_value->view_timeline_inset_sources.is_empty())
+                    return nullptr;
+
+                StyleValueVector inset_values;
+                inset_values.ensure_capacity(2);
+                for (auto const& source : rust_style_value->view_timeline_inset_sources) {
+                    if (source == "auto"sv) {
+                        inset_values.append(KeywordStyleValue::create(Keyword::Auto));
+                        continue;
+                    }
+
+                    auto value = parse_rust_source_as_value_type(source.bytes_as_string_view(), ValueType::LengthPercentage);
+                    if (!value)
+                        return nullptr;
+                    inset_values.append(value.release_nonnull());
+                }
+
+                // If the second value is omitted, it is set to the first.
+                if (inset_values.size() == 1)
+                    return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
+
+                return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
             };
             auto materialize_rust_content_value = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->content_keyword.has_value())
@@ -2902,12 +2947,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ViewTimelineInset:
-                if (rust_style_value->view_timeline_inset_count > 0) {
-                    auto value = parse_view_timeline_inset_value(tokens);
-                    if (value) {
-                        generated_transaction.commit();
-                        return PropertyAndValue { rust_style_value->property_id, value };
-                    }
+                if (auto value = materialize_rust_view_timeline_inset_value()) {
+                    discard_rust_view_timeline_inset_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::ViewFunction:

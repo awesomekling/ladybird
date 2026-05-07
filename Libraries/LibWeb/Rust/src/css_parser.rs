@@ -2088,7 +2088,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         axis: CssScrollFunctionAxisKind,
     },
     ViewTimelineInset {
-        count: usize,
+        sources: Vec<String>,
     },
     ViewFunction {
         axis: CssScrollFunctionAxisKind,
@@ -3141,6 +3141,15 @@ fn parse_rust_owned_style_value_for_property_with_mode(
             if property_ids.len() != 1 && *value_type == PropertyValueType::FontStyle {
                 continue;
             }
+            if property_ids.len() != 1 && *value_type == PropertyValueType::ViewTimelineInset {
+                if let Some(sources) = parse_rust_owned_view_timeline_inset_value_prefix(filtered_input) {
+                    return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                        property_id,
+                        value: RustOwnedStyleValueKind::ViewTimelineInset { sources },
+                    });
+                }
+                continue;
+            }
             let value_type_matches = if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
                 parse_a_url_function(filtered_input, |_| {}, |_| {})
             } else {
@@ -3479,13 +3488,10 @@ fn parse_rust_owned_generated_longhand_value(
             }
         }
         PropertyValueType::ViewTimelineInset => {
-            let view_timeline_inset = parse_view_timeline_inset_value(filtered_input);
-            if view_timeline_inset.kind == CssViewTimelineInsetValueKind::Valid {
+            if let Some(sources) = parse_rust_owned_view_timeline_inset_value(filtered_input) {
                 return RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::ViewTimelineInset {
-                        count: view_timeline_inset.count,
-                    },
+                    value: RustOwnedStyleValueKind::ViewTimelineInset { sources },
                 };
             }
         }
@@ -7669,21 +7675,24 @@ where
             &[],
             property_value_type_name(PropertyValueType::ScrollFunction),
         ),
-        RustOwnedStyleValueKind::ViewTimelineInset { count } => callback(
-            CssStyleValueKind::ViewTimelineInset,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            *count as u8,
-            0,
-            0,
-            0,
-            &[],
-            property_value_type_name(PropertyValueType::ViewTimelineInset),
-        ),
+        RustOwnedStyleValueKind::ViewTimelineInset { sources } => {
+            let source_bytes = null_separated_string_list_bytes(sources);
+            callback(
+                CssStyleValueKind::ViewTimelineInset,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                sources.len() as u8,
+                0,
+                0,
+                0,
+                &source_bytes,
+                property_value_type_name(PropertyValueType::ViewTimelineInset),
+            );
+        }
         RustOwnedStyleValueKind::ViewFunction {
             axis,
             inset,
@@ -11337,14 +11346,13 @@ pub(crate) fn parse_view_timeline_inset_value(filtered_input: &[u8]) -> CssViewT
         kind: CssViewTimelineInsetValueKind::Invalid,
         count: 0,
     };
-
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
 
     // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
     // [ [ auto | <length-percentage> ]{1,2} ]
     let mut parser = ComponentValueParser::new(component_values);
-    let Some(inset) = parse_view_timeline_inset_prefix(&mut parser) else {
+    let Some(inset) = parse_view_timeline_inset_prefix(&mut parser, None) else {
         return invalid;
     };
 
@@ -11364,14 +11372,13 @@ pub(crate) fn parse_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> C
         kind: CssViewTimelineInsetValueKind::Invalid,
         count: 0,
     };
-
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
 
     // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
     // [ [ auto | <length-percentage> ]{1,2} ]
     let mut parser = ComponentValueParser::new(component_values);
-    let Some(inset) = parse_view_timeline_inset_prefix(&mut parser) else {
+    let Some(inset) = parse_view_timeline_inset_prefix(&mut parser, None) else {
         return invalid;
     };
 
@@ -11379,6 +11386,35 @@ pub(crate) fn parse_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> C
         kind: CssViewTimelineInsetValueKind::Valid,
         count: inset.count,
     }
+}
+
+fn parse_rust_owned_view_timeline_inset_value(filtered_input: &[u8]) -> Option<Vec<String>> {
+    let (sources, has_remaining_component_values) =
+        parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input)?;
+    if has_remaining_component_values {
+        return None;
+    }
+
+    Some(sources)
+}
+
+fn parse_rust_owned_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> Option<Vec<String>> {
+    parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input).map(|(sources, _)| sources)
+}
+
+fn parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input: &[u8]) -> Option<(Vec<String>, bool)> {
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+    // [ [ auto | <length-percentage> ]{1,2} ]
+    let mut parser = ComponentValueParser::new(component_values);
+    let inset = parse_view_timeline_inset_prefix(&mut parser, Some(&filtered_input_string))?;
+
+    parser.discard_whitespace();
+    Some((inset.sources, parser.has_next_component_value()))
 }
 
 pub(crate) fn parse_view_function_value(filtered_input: &[u8]) -> CssViewFunctionValue {
@@ -16639,7 +16675,7 @@ fn component_value_parse_as_number_percentage(component_value: &ComponentValue) 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
     let mut parser = ComponentValueParser::new(component_values);
     let axis = parse_view_function_axis(&mut parser);
-    let inset = parse_view_timeline_inset_prefix(&mut parser);
+    let inset = parse_view_timeline_inset_prefix(&mut parser, None);
 
     parser.discard_whitespace();
     if parser.has_next_component_value() || (axis.is_none() && inset.is_none()) {
@@ -16649,8 +16685,11 @@ fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValu
     Some(CssViewFunctionValue {
         kind: CssViewFunctionValueKind::Valid,
         axis: axis.unwrap_or(CssScrollFunctionAxisKind::None),
-        inset: inset.map(|inset| inset.kind).unwrap_or(CssViewFunctionInsetKind::None),
-        inset_position: inset.map_or(CssViewFunctionInsetPosition::None, |_| {
+        inset: inset
+            .as_ref()
+            .map(|inset| inset.kind)
+            .unwrap_or(CssViewFunctionInsetKind::None),
+        inset_position: inset.as_ref().map_or(CssViewFunctionInsetPosition::None, |_| {
             if axis.is_some() {
                 CssViewFunctionInsetPosition::AfterAxis
             } else {
@@ -16662,7 +16701,7 @@ fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValu
 
 fn parse_view_function_value_with_inset_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
     let mut parser = ComponentValueParser::new(component_values);
-    let inset = parse_view_timeline_inset_prefix(&mut parser);
+    let inset = parse_view_timeline_inset_prefix(&mut parser, None);
     let axis = parse_view_function_axis(&mut parser);
 
     parser.discard_whitespace();
@@ -16673,8 +16712,12 @@ fn parse_view_function_value_with_inset_first(component_values: Vec<ComponentVal
     Some(CssViewFunctionValue {
         kind: CssViewFunctionValueKind::Valid,
         axis: axis.unwrap_or(CssScrollFunctionAxisKind::None),
-        inset: inset.map(|inset| inset.kind).unwrap_or(CssViewFunctionInsetKind::None),
+        inset: inset
+            .as_ref()
+            .map(|inset| inset.kind)
+            .unwrap_or(CssViewFunctionInsetKind::None),
         inset_position: inset
+            .as_ref()
             .map(|_| CssViewFunctionInsetPosition::BeforeAxis)
             .unwrap_or(CssViewFunctionInsetPosition::None),
     })
@@ -16721,10 +16764,10 @@ fn parse_non_negative_number_prefix_value(parser: &mut ComponentValueParser) -> 
     None
 }
 
-#[derive(Clone, Copy)]
 struct ViewTimelineInsetPrefix {
     kind: CssViewFunctionInsetKind,
     count: usize,
+    sources: Vec<String>,
 }
 
 fn parse_view_function_axis(parser: &mut ComponentValueParser) -> Option<CssScrollFunctionAxisKind> {
@@ -16741,9 +16784,13 @@ fn parse_view_function_axis(parser: &mut ComponentValueParser) -> Option<CssScro
     Some(axis)
 }
 
-fn parse_view_timeline_inset_prefix(parser: &mut ComponentValueParser) -> Option<ViewTimelineInsetPrefix> {
+fn parse_view_timeline_inset_prefix(
+    parser: &mut ComponentValueParser,
+    filtered_input: Option<&str>,
+) -> Option<ViewTimelineInsetPrefix> {
     let mut count = 0;
     let mut all_auto = true;
+    let mut sources = Vec::new();
 
     while count < 2 {
         parser.discard_whitespace();
@@ -16752,12 +16799,19 @@ fn parse_view_timeline_inset_prefix(parser: &mut ComponentValueParser) -> Option
         };
 
         if component_value_is_ident(Some(component_value), "auto") {
+            sources.push("auto".to_string());
             parser.index += 1;
             count += 1;
             continue;
         }
 
         if component_value_parse_as_length_percentage(component_value) {
+            if let Some(filtered_input) = filtered_input {
+                sources.push(serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input,
+                )?);
+            }
             parser.index += 1;
             count += 1;
             all_auto = false;
@@ -16778,6 +16832,7 @@ fn parse_view_timeline_inset_prefix(parser: &mut ComponentValueParser) -> Option
             CssViewFunctionInsetKind::NonDefault
         },
         count,
+        sources,
     })
 }
 
@@ -26187,16 +26242,17 @@ mod tests {
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
         parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
-        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
-        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
+        parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
+        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
+        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -28375,6 +28431,27 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ViewTimelineInset], "1px 2px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ViewTimelineInset,
+                value: RustOwnedStyleValueKind::ViewTimelineInset {
+                    sources: vec!["1px".to_string(), "2px".to_string()],
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::ViewTimelineAxis, PropertyId::ViewTimelineInset],
+                "1px 2px inline"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ViewTimelineInset,
+                value: RustOwnedStyleValueKind::ViewTimelineInset {
+                    sources: vec!["1px".to_string(), "2px".to_string()],
+                },
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::MarginLeft], "12px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MarginLeft,
@@ -29239,7 +29316,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
+                value: "1px\02px".to_string(),
                 value_type: "ViewTimelineInset".to_string(),
             })
         );
@@ -31979,6 +32056,14 @@ mod tests {
         assert_eq!(parse_view_timeline_inset("1px").count, 1);
         assert_eq!(parse_view_timeline_inset("10% auto").count, 2);
         assert_eq!(parse_view_timeline_inset("calc(1px + 2px) 5%").count, 2);
+        assert_eq!(
+            parse_rust_owned_view_timeline_inset_value("calc(1px + 2px) 5%".as_bytes()),
+            Some(vec!["calc(1px + 2px)".to_string(), "5%".to_string()])
+        );
+        assert_eq!(
+            parse_rust_owned_view_timeline_inset_value("10% auto".as_bytes()),
+            Some(vec!["10%".to_string(), "auto".to_string()])
+        );
     }
 
     #[test]
