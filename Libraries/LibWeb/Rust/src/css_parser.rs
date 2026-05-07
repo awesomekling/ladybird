@@ -1847,6 +1847,7 @@ pub enum CssStyleValueKind {
     FontVariationSettings,
     BasicShape,
     Rect,
+    AspectRatio,
     AnimationName,
     AnchorNameOrScope,
     BackgroundSize,
@@ -1855,6 +1856,7 @@ pub enum CssStyleValueKind {
     ContainerType,
     CounterDefinitions,
     BorderRadius,
+    Columns,
     Cursor,
     Display,
     GridAutoFlow,
@@ -1870,6 +1872,7 @@ pub enum CssStyleValueKind {
     PositionVisibility,
     Quotes,
     RepeatStyle,
+    OverflowClipMargin,
     Shadow,
     ScrollFunction,
     ScrollbarColor,
@@ -1907,6 +1910,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
+    AspectRatio {
+        source: String,
+    },
     BackgroundSize(RustOwnedBackgroundSizeList),
     Calculated(RustOwnedMathFunction),
     ColorScheme(RustOwnedColorScheme),
@@ -1919,6 +1925,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     CounterDefinitions(RustOwnedCounterDefinitions),
     BorderRadius {
+        source: String,
+    },
+    Columns {
         source: String,
     },
     Cursor {
@@ -1997,6 +2006,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     RepeatStyle(RustOwnedRepeatStyle),
     Resolution(RustOwnedDimensionStyleValue),
+    OverflowClipMargin {
+        source: String,
+    },
     Shadow {
         source: String,
     },
@@ -2924,6 +2936,8 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_background_size_style_value_kind(filtered_input)
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
+        PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
+        PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderBottomLeftRadius
         | PropertyId::BorderBottomRightRadius
         | PropertyId::BorderEndEndRadius
@@ -2938,6 +2952,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
         PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
@@ -2967,6 +2982,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::OverflowClipMarginLeft
         | PropertyId::OverflowClipMarginRight
         | PropertyId::OverflowClipMarginTop => rust_owned_overflow_clip_margin_style_value_kind(filtered_input),
+        PropertyId::OverflowClipMargin | PropertyId::OverflowClipMarginBlock | PropertyId::OverflowClipMarginInline => {
+            rust_owned_overflow_clip_margin_shorthand_style_value_kind(filtered_input)
+        }
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
         PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
@@ -4282,12 +4300,42 @@ fn rust_owned_background_size_component_from_component_value(
     None
 }
 
+fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_aspect_ratio_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::AspectRatio {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     if !parse_border_radius_value(filtered_input) {
         return None;
     }
 
     Some(RustOwnedStyleValueKind::BorderRadius {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_border_radius_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_border_radius_shorthand_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::BorderRadius {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_columns_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Columns {
         source: filtered_input_to_string(filtered_input),
     })
 }
@@ -4309,6 +4357,18 @@ fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Op
 
     Some(RustOwnedStyleValueKind::UnresolvedValueType {
         value_type: PropertyValueType::Length,
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    if !parse_overflow_clip_margin_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::OverflowClipMargin {
         source: filtered_input_to_string(filtered_input),
     })
 }
@@ -5328,6 +5388,9 @@ where
         RustOwnedStyleValueKind::AnimationName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::AnimationName, property_id, &value.source);
         }
+        RustOwnedStyleValueKind::AspectRatio { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::AspectRatio, property_id, source);
+        }
         RustOwnedStyleValueKind::BackgroundSize(_) => callback(
             CssStyleValueKind::Invalid,
             property_id,
@@ -5345,6 +5408,9 @@ where
         ),
         RustOwnedStyleValueKind::BorderRadius { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::BorderRadius, property_id, source);
+        }
+        RustOwnedStyleValueKind::Columns { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Columns, property_id, source);
         }
         RustOwnedStyleValueKind::ColorScheme(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
@@ -5538,6 +5604,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::OverflowClipMargin { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::OverflowClipMargin, property_id, source);
+        }
         RustOwnedStyleValueKind::ScrollbarColor(value) => callback(
             CssStyleValueKind::ScrollbarColor,
             property_id,
@@ -12229,6 +12298,26 @@ pub(crate) fn parse_math_depth_value(filtered_input: &[u8]) -> bool {
     component_values_parse_as_property_value_type(PropertyValueType::Integer, source.as_bytes())
 }
 
+pub(crate) fn parse_aspect_ratio_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://www.w3.org/TR/css-sizing-4/#aspect-ratio
+    // auto || <ratio>
+    match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "auto") => true,
+        component_values if component_values_parse_as_exact_ratio(component_values) => true,
+        [first, rest @ ..] if component_value_is_ident(Some(first), "auto") => {
+            component_values_parse_as_exact_ratio(rest)
+        }
+        [rest @ .., last] if component_value_is_ident(Some(last), "auto") => {
+            component_values_parse_as_exact_ratio(rest)
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn parse_border_radius_value(filtered_input: &[u8]) -> bool {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -12251,6 +12340,100 @@ pub(crate) fn parse_border_radius_value(filtered_input: &[u8]) -> bool {
         }
         _ => false,
     }
+}
+
+pub(crate) fn parse_border_radius_shorthand_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let slash_positions = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| component_value_is_delim(Some(component_value), '/').then_some(index))
+        .collect::<Vec<_>>();
+
+    if slash_positions.len() > 1 {
+        return false;
+    }
+
+    let (horizontal_radii, vertical_radii) = if let Some(slash_position) = slash_positions.first() {
+        (
+            &component_values[..*slash_position],
+            Some(&component_values[*slash_position + 1..]),
+        )
+    } else {
+        (component_values.as_slice(), None)
+    };
+
+    // https://drafts.csswg.org/css-backgrounds-3/#border-radius
+    // <'border-radius'> = <length-percentage [0,∞]>{1,4} [ / <length-percentage [0,∞]>{1,4} ]?
+    parse_border_radius_shorthand_side(horizontal_radii)
+        && vertical_radii.is_none_or(parse_border_radius_shorthand_side)
+}
+
+pub(crate) fn parse_columns_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let slash_positions = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| component_value_is_delim(Some(component_value), '/').then_some(index))
+        .collect::<Vec<_>>();
+
+    if slash_positions.len() > 1 {
+        return false;
+    }
+
+    let (columns, column_height) = if let Some(slash_position) = slash_positions.first() {
+        (
+            &component_values[..*slash_position],
+            Some(&component_values[*slash_position + 1..]),
+        )
+    } else {
+        (component_values.as_slice(), None)
+    };
+
+    // https://drafts.csswg.org/css-multicol-2/#propdef-columns
+    // <'column-width'> || <'column-count'> [ / <'column-height'> ]?
+    if columns.is_empty() || columns.len() > 2 {
+        return false;
+    }
+
+    if let Some(column_height) = column_height
+        && !parse_single_column_component_value(PropertyId::ColumnHeight, column_height, filtered_input_string)
+    {
+        return false;
+    }
+
+    let mut found_autos = 0_u8;
+    let mut has_column_count = false;
+    let mut has_column_width = false;
+    for component_value in columns {
+        if component_value_is_ident(Some(component_value), "auto") {
+            found_autos += 1;
+            continue;
+        }
+
+        let component_values = std::slice::from_ref(component_value);
+        if !has_column_count
+            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
+        {
+            has_column_count = true;
+            continue;
+        }
+
+        if !has_column_width
+            && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
+        {
+            has_column_width = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    found_autos <= 2
 }
 
 pub(crate) fn parse_cursor_value(filtered_input: &[u8]) -> bool {
@@ -12306,6 +12489,42 @@ pub(crate) fn parse_overflow_clip_margin_value(filtered_input: &[u8]) -> bool {
     // <visual-box> || <length [0,∞]>
     // FIXME: Implement the <visual-box> part of this.
     matches!(component_values, [component_value] if component_value_parse_as_non_negative_length(component_value))
+}
+
+fn component_values_parse_as_exact_ratio(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-values-4/#ratios
+    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
+    match component_values {
+        [numerator] => component_value_parse_as_non_negative_number(numerator),
+        [numerator, slash, denominator] => {
+            component_value_parse_as_non_negative_number(numerator)
+                && component_value_is_delim(Some(slash), '/')
+                && component_value_parse_as_non_negative_number(denominator)
+        }
+        _ => false,
+    }
+}
+
+fn parse_border_radius_shorthand_side(component_values: &[ComponentValue]) -> bool {
+    matches!(component_values.len(), 1..=4)
+        && component_values
+            .iter()
+            .all(component_value_parse_as_non_negative_length_percentage)
+}
+
+fn parse_single_column_component_value(
+    property_id: PropertyId,
+    component_values: &[ComponentValue],
+    source: &str,
+) -> bool {
+    let Some(source) = serialize_component_values_for_reparsing(component_values, source) else {
+        return false;
+    };
+
+    matches!(
+        parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
+        RustOwnedStyleValueParseResult::Parsed(_)
+    )
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
@@ -21728,13 +21947,14 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
-        parse_background_size_value, parse_basic_shape_value, parse_border_radius_value, parse_color_function_value,
-        parse_color_scheme_value, parse_color_value, parse_contain_value, parse_container_rule_prelude,
-        parse_container_type_value, parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_cursor_value,
-        parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
+        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_aspect_ratio_value,
+        parse_background_position_longhand_value, parse_background_size_value, parse_basic_shape_value,
+        parse_border_radius_shorthand_value, parse_border_radius_value, parse_color_function_value,
+        parse_color_scheme_value, parse_color_value, parse_columns_value, parse_contain_value,
+        parse_container_rule_prelude, parse_container_type_value, parse_coordinating_value_list_shorthand,
+        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
+        parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
@@ -22448,8 +22668,20 @@ mod tests {
         parse_math_depth_value(input.as_bytes())
     }
 
+    fn parse_aspect_ratio(input: &str) -> bool {
+        parse_aspect_ratio_value(input.as_bytes())
+    }
+
     fn parse_border_radius(input: &str) -> bool {
         parse_border_radius_value(input.as_bytes())
+    }
+
+    fn parse_border_radius_shorthand(input: &str) -> bool {
+        parse_border_radius_shorthand_value(input.as_bytes())
+    }
+
+    fn parse_columns(input: &str) -> bool {
+        parse_columns_value(input.as_bytes())
     }
 
     fn parse_cursor(input: &str) -> bool {
@@ -24712,27 +24944,66 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::AspectRatio], "16 / 9"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::AspectRatio,
                 property_id: PropertyId::AspectRatio,
-                primitive_kind: CssPrimitiveValueKind::Ratio,
-                numeric_value: Some(16.0),
-                secondary_numeric_value: Some(9.0),
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
                 color: None,
-                value: "has-denominator".to_string(),
-                value_type: "Ratio".to_string(),
+                value: "16 / 9".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
             parse_style_value(&[PropertyId::AspectRatio], "1"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::AspectRatio,
                 property_id: PropertyId::AspectRatio,
-                primitive_kind: CssPrimitiveValueKind::Ratio,
-                numeric_value: Some(1.0),
-                secondary_numeric_value: Some(1.0),
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "Ratio".to_string(),
+                value: "1".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BorderRadius], "1px / 2px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::BorderRadius,
+                property_id: PropertyId::BorderRadius,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "1px / 2px".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Columns], "3 12em / auto"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Columns,
+                property_id: PropertyId::Columns,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "3 12em / auto".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::OverflowClipMargin], "2px"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::OverflowClipMargin,
+                property_id: PropertyId::OverflowClipMargin,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "2px".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(parse_style_value(&[PropertyId::Color], "10px"), None);
@@ -27952,6 +28223,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_aspect_ratio_values() {
+        assert!(parse_aspect_ratio("auto"));
+        assert!(parse_aspect_ratio("1"));
+        assert!(parse_aspect_ratio("16 / 9"));
+        assert!(parse_aspect_ratio("auto 16 / 9"));
+        assert!(parse_aspect_ratio("calc(6em / 1px) / calc(3rem / 1px)"));
+    }
+
+    #[test]
+    fn rejects_invalid_aspect_ratio_values() {
+        assert!(!parse_aspect_ratio(""));
+        assert!(!parse_aspect_ratio("auto auto"));
+        assert!(!parse_aspect_ratio("16 /"));
+        assert!(!parse_aspect_ratio("-1 / 1"));
+        assert!(!parse_aspect_ratio("16 / 9 auto auto"));
+        assert!(!parse_aspect_ratio("16 auto / 9"));
+    }
+
+    #[test]
     fn parses_border_radius_values() {
         assert!(parse_border_radius("0"));
         assert!(parse_border_radius("1px 2%"));
@@ -27965,6 +28255,43 @@ mod tests {
         assert!(!parse_border_radius("1px /"));
         assert!(!parse_border_radius("1px 2px 3px"));
         assert!(!parse_border_radius("1px auto"));
+    }
+
+    #[test]
+    fn parses_border_radius_shorthand_values() {
+        assert!(parse_border_radius_shorthand("0"));
+        assert!(parse_border_radius_shorthand("1px 2px 3px 4px"));
+        assert!(parse_border_radius_shorthand("1px 2px / 3px 4px"));
+        assert!(parse_border_radius_shorthand("calc(1px + 2%) / 3px"));
+    }
+
+    #[test]
+    fn rejects_invalid_border_radius_shorthand_values() {
+        assert!(!parse_border_radius_shorthand(""));
+        assert!(!parse_border_radius_shorthand("-1px"));
+        assert!(!parse_border_radius_shorthand("1px 2px 3px 4px 5px"));
+        assert!(!parse_border_radius_shorthand("1px /"));
+        assert!(!parse_border_radius_shorthand("1px / 2px / 3px"));
+    }
+
+    #[test]
+    fn parses_columns_values() {
+        assert!(parse_columns("auto"));
+        assert!(parse_columns("12em"));
+        assert!(parse_columns("3"));
+        assert!(parse_columns("12em 3"));
+        assert!(parse_columns("3 12em / auto"));
+        assert!(parse_columns("auto / 20px"));
+    }
+
+    #[test]
+    fn rejects_invalid_columns_values() {
+        assert!(!parse_columns(""));
+        assert!(!parse_columns("/ auto"));
+        assert!(!parse_columns("auto auto auto"));
+        assert!(!parse_columns("3 4"));
+        assert!(!parse_columns("12em 13em"));
+        assert!(!parse_columns("auto /"));
     }
 
     #[test]

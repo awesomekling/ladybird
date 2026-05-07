@@ -745,6 +745,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::AspectRatio:
+                if (auto value = parse_aspect_ratio_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::ColorScheme:
                 if (auto value = parse_color_scheme_value(tokens)) {
                     generated_transaction.commit();
@@ -883,7 +889,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BorderRadius:
-                if (auto value = parse_border_radius_value(tokens)) {
+                if (auto value = rust_style_value->property_id == PropertyID::BorderRadius
+                        ? parse_border_radius_shorthand_value(tokens)
+                        : parse_border_radius_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::Columns:
+                if (auto value = parse_columns_value(tokens)) {
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
@@ -1031,6 +1045,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::Quotes:
                 if (auto value = parse_quotes_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::OverflowClipMargin:
+                if (auto value = parse_overflow_clip_margin_shorthand(rust_style_value->property_id, tokens)) {
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
@@ -2379,21 +2399,21 @@ RefPtr<StyleValue const> Parser::parse_aspect_ratio_value(TokenStream<ComponentV
 
     auto transaction = tokens.begin_transaction();
     while (tokens.has_next_token()) {
-        auto maybe_value = parse_css_value_for_property(PropertyID::AspectRatio, tokens);
-        if (!maybe_value)
-            return nullptr;
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
 
-        if (maybe_value->is_ratio()) {
+        if (auto maybe_ratio_value = parse_ratio_value(tokens)) {
             if (ratio_value)
                 return nullptr;
-            ratio_value = maybe_value.release_nonnull();
+            ratio_value = maybe_ratio_value.release_nonnull();
             continue;
         }
 
-        if (maybe_value->is_keyword() && maybe_value->as_keyword().keyword() == Keyword::Auto) {
+        if (auto maybe_auto_value = parse_specific_keyword_value(tokens, Keyword::Auto)) {
             if (auto_value)
                 return nullptr;
-            auto_value = maybe_value.release_nonnull();
+            auto_value = maybe_auto_value.release_nonnull();
             continue;
         }
 
