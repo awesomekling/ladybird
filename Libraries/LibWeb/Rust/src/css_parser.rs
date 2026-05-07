@@ -1897,7 +1897,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedFitContent),
     BasicShape(RustOwnedSourceBackedStyleValue),
-    Rect(RustOwnedSourceBackedStyleValue),
+    Rect(RustOwnedRect),
     ScrollFunction {
         scroller: CssScrollFunctionScrollerKind,
         axis: CssScrollFunctionAxisKind,
@@ -2005,6 +2005,16 @@ pub(crate) struct RustOwnedFitContent {
 pub(crate) enum RustOwnedFitContentValue {
     Keyword,
     Function { argument: String },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedRect {
+    top: String,
+    right: String,
+    bottom: String,
+    left: String,
+    requires_commas: bool,
+    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2491,12 +2501,18 @@ fn parse_rust_owned_generated_longhand_value(
             };
         }
         PropertyValueType::Rect => {
+            if let Some(value) =
+                rust_owned_rect_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::Rect(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(value_type),
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type,
                     source: filtered_input_to_string(filtered_input),
-                }),
+                },
             };
         }
         PropertyValueType::ScrollFunction => {
@@ -3035,6 +3051,82 @@ fn rust_owned_fit_content_style_value_kind(
         value,
         source,
     }))
+}
+
+fn rust_owned_rect_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let [ComponentValue::Function(function)] = component_values else {
+        return None;
+    };
+    if !function.name.eq_ignore_ascii_case("rect") {
+        return None;
+    }
+
+    // https://www.w3.org/TR/CSS2/visufx.html#value-def-shape
+    // In CSS 2.1, the only valid <shape> value is:
+    // rect(<top>, <right>, <bottom>, <left>)
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut sides = Vec::with_capacity(4);
+    let mut requires_commas = None;
+
+    for side in 0..4 {
+        sides.push(rust_owned_rect_side(&mut parser, filtered_input_string)?);
+
+        parser.discard_whitespace();
+        if side == 3 {
+            if parser.has_next_component_value() {
+                return None;
+            }
+            break;
+        }
+
+        let next_is_comma = parser.consume_a_comma();
+        match requires_commas {
+            Some(true) if !next_is_comma => return None,
+            Some(false) if next_is_comma => return None,
+            None => requires_commas = Some(next_is_comma),
+            _ => {}
+        }
+    }
+
+    let [top, right, bottom, left] = sides.as_slice() else {
+        return None;
+    };
+
+    Some(RustOwnedStyleValueKind::Rect(RustOwnedRect {
+        top: top.clone(),
+        right: right.clone(),
+        bottom: bottom.clone(),
+        left: left.clone(),
+        requires_commas: requires_commas.unwrap_or(false),
+        source: serialize_component_values_for_reparsing(component_values, filtered_input_string)?,
+    }))
+}
+
+fn rust_owned_rect_side(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+    parser.discard_whitespace();
+
+    let component_value = parser.next_component_value()?;
+    let is_auto = matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("auto")
+    );
+    if is_auto || component_value_parse_as_length(component_value) {
+        let value =
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+        parser.index += 1;
+        return Some(value);
+    }
+
+    None
 }
 
 fn rust_owned_primitive_style_value_kind(
@@ -18376,7 +18468,7 @@ mod tests {
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedImageSet,
         RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
         RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
@@ -20104,8 +20196,12 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Clip], "rect(1px, auto, 2px, 3px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Clip,
-                value: RustOwnedStyleValueKind::Rect(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::Rect),
+                value: RustOwnedStyleValueKind::Rect(RustOwnedRect {
+                    top: "1px".to_string(),
+                    right: "auto".to_string(),
+                    bottom: "2px".to_string(),
+                    left: "3px".to_string(),
+                    requires_commas: true,
                     source: "rect(1px, auto, 2px, 3px)".to_string(),
                 }),
             })
