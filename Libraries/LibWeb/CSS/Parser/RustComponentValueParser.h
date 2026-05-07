@@ -408,6 +408,7 @@ public:
         FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };
         FFI::CssViewTransitionNameValueKind view_transition_name_kind { FFI::CssViewTransitionNameValueKind::Invalid };
         FlyString view_transition_name;
+        FlyString white_space_collapse;
         FFI::CssWhiteSpaceTrimValue white_space_trim {};
         FFI::CssQuotesValueKind quotes_kind { FFI::CssQuotesValueKind::Invalid };
         Vector<FlyString> quotes_strings;

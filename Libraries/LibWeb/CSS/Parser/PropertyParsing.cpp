@@ -476,6 +476,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_white_space_trim = [](FFI::CssWhiteSpaceTrimValue const& white_space_trim) -> RefPtr<StyleValue const> {
+                switch (white_space_trim.kind) {
+                case FFI::CssWhiteSpaceTrimValueKind::Invalid:
+                    return nullptr;
+                case FFI::CssWhiteSpaceTrimValueKind::None:
+                    return KeywordStyleValue::create(Keyword::None);
+                case FFI::CssWhiteSpaceTrimValueKind::List: {
+                    StyleValueVector values;
+                    if (white_space_trim.has_discard_before)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardBefore));
+                    if (white_space_trim.has_discard_after)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardAfter));
+                    if (white_space_trim.has_discard_inner)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardInner));
+                    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+                }
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto discard_rust_owned_property_value_tokens = [&] {
                 if (property_ids.size() > 1) {
                     tokens.discard_a_token();
@@ -3108,6 +3127,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, CustomIdentStyleValue::create(rust_style_value->view_transition_name) };
                 }
                 break;
+            case FFI::CssStyleValueKind::WhiteSpace: {
+                auto white_space_collapse_keyword = keyword_from_string(rust_style_value->white_space_collapse);
+                auto text_wrap_mode_keyword = text_wrap_mode_keyword_from_rust(rust_style_value->text_wrap_mode);
+                auto white_space_trim = materialize_white_space_trim(rust_style_value->white_space_trim);
+                if (!white_space_collapse_keyword.has_value() || !text_wrap_mode_keyword.has_value() || !white_space_trim)
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { PropertyID::WhiteSpace,
+                    ShorthandStyleValue::create(PropertyID::WhiteSpace,
+                        { PropertyID::WhiteSpaceCollapse, PropertyID::TextWrapMode, PropertyID::WhiteSpaceTrim },
+                        { KeywordStyleValue::create(white_space_collapse_keyword.release_value()),
+                            KeywordStyleValue::create(text_wrap_mode_keyword.release_value()),
+                            white_space_trim.release_nonnull() }) };
+            }
             case FFI::CssStyleValueKind::WhiteSpaceTrim:
                 switch (rust_style_value->white_space_trim.kind) {
                 case FFI::CssWhiteSpaceTrimValueKind::Invalid:

@@ -1720,6 +1720,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::ViewTransitionName) {
                 value.view_transition_name_kind = static_cast<FFI::CssViewTransitionNameValueKind>(color_red);
                 value.view_transition_name = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::WhiteSpace) {
+                value.white_space_collapse = fly_string_from_ffi_bytes(value_ptr, value_len);
+                value.text_wrap_mode = static_cast<FFI::CssTextWrapModeValue>(color_red);
+                value.white_space_trim = FFI::CssWhiteSpaceTrimValue {
+                    .kind = static_cast<FFI::CssWhiteSpaceTrimValueKind>(color_green),
+                    .has_discard_before = static_cast<bool>(color_blue & 1),
+                    .has_discard_after = static_cast<bool>(color_blue & 2),
+                    .has_discard_inner = static_cast<bool>(color_blue & 4),
+                };
             } else if (kind == FFI::CssStyleValueKind::WhiteSpaceTrim) {
                 value.white_space_trim = FFI::CssWhiteSpaceTrimValue {
                     .kind = static_cast<FFI::CssWhiteSpaceTrimValueKind>(color_red),

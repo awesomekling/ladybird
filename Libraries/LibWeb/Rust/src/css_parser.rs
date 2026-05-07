@@ -1911,6 +1911,7 @@ pub enum CssStyleValueKind {
     ViewTimeline,
     ViewFunction,
     ViewTransitionName,
+    WhiteSpace,
     WhiteSpaceTrim,
     WillChange,
     ValueType,
@@ -2100,6 +2101,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         inset_position: CssViewFunctionInsetPosition,
     },
     ViewTransitionName(RustOwnedViewTransitionName),
+    WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
     MathFunction {
         value_type: PropertyValueType,
@@ -2796,6 +2798,13 @@ pub(crate) struct RustOwnedWhiteSpaceTrim {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedWhiteSpace {
+    white_space_collapse: String,
+    text_wrap_mode: CssTextWrapModeValue,
+    white_space_trim: CssWhiteSpaceTrimValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWillChangeFeature {
     kind: CssWillChangeFeatureKind,
     value: String,
@@ -3304,6 +3313,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TransitionProperty => rust_owned_transition_property_style_value_kind(filtered_input),
         PropertyId::ViewTimeline => rust_owned_view_timeline_style_value_kind(filtered_input),
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
+        PropertyId::WhiteSpace => rust_owned_white_space_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
         PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
         _ => None,
@@ -5876,6 +5886,182 @@ fn rust_owned_white_space_trim_style_value_kind(filtered_input: &[u8]) -> Option
     }))
 }
 
+fn rust_owned_white_space_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-text-4/#white-space-property
+    // normal | pre | pre-wrap | pre-line | <'white-space-collapse'> || <'text-wrap-mode'> || <'white-space-trim'>
+    if let Some(value) = parse_legacy_white_space_keyword(&mut parser) {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            return Some(RustOwnedStyleValueKind::WhiteSpace(value));
+        }
+        return None;
+    }
+
+    let mut white_space_collapse = None;
+    let mut text_wrap_mode = None;
+    let mut white_space_trim = None;
+
+    while parser.has_next_component_value() {
+        if white_space_collapse.is_none()
+            && let Some(value) = parse_white_space_collapse_keyword(&mut parser)
+        {
+            white_space_collapse = Some(value);
+            continue;
+        }
+
+        if text_wrap_mode.is_none()
+            && let Some(value) = parse_text_wrap_mode_keyword(&mut parser)
+        {
+            text_wrap_mode = Some(value);
+            continue;
+        }
+
+        if white_space_trim.is_none()
+            && let Some(value) = parse_white_space_trim_prefix(&mut parser)
+        {
+            white_space_trim = Some(value);
+            continue;
+        }
+
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::WhiteSpace(RustOwnedWhiteSpace {
+        white_space_collapse: white_space_collapse.unwrap_or_else(|| "collapse".to_string()),
+        text_wrap_mode: text_wrap_mode.unwrap_or(CssTextWrapModeValue::Wrap),
+        white_space_trim: white_space_trim.unwrap_or(CssWhiteSpaceTrimValue {
+            kind: CssWhiteSpaceTrimValueKind::None,
+            has_discard_before: false,
+            has_discard_after: false,
+            has_discard_inner: false,
+        }),
+    }))
+}
+
+fn parse_legacy_white_space_keyword(parser: &mut ComponentValueParser) -> Option<RustOwnedWhiteSpace> {
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value: ident },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return None;
+    };
+    let (white_space_collapse, text_wrap_mode) = if ident.eq_ignore_ascii_case("normal") {
+        ("collapse", CssTextWrapModeValue::Wrap)
+    } else if ident.eq_ignore_ascii_case("pre") {
+        ("preserve", CssTextWrapModeValue::Nowrap)
+    } else if ident.eq_ignore_ascii_case("pre-wrap") {
+        ("preserve", CssTextWrapModeValue::Wrap)
+    } else if ident.eq_ignore_ascii_case("pre-line") {
+        ("preserve-breaks", CssTextWrapModeValue::Wrap)
+    } else {
+        return None;
+    };
+    parser.index += 1;
+
+    Some(RustOwnedWhiteSpace {
+        white_space_collapse: white_space_collapse.to_string(),
+        text_wrap_mode,
+        white_space_trim: CssWhiteSpaceTrimValue {
+            kind: CssWhiteSpaceTrimValueKind::None,
+            has_discard_before: false,
+            has_discard_after: false,
+            has_discard_inner: false,
+        },
+    })
+}
+
+fn parse_white_space_collapse_keyword(parser: &mut ComponentValueParser) -> Option<String> {
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return None;
+    };
+
+    if !property_accepts_keyword(PropertyId::WhiteSpaceCollapse, value) {
+        return None;
+    }
+
+    let value = value.to_string();
+    parser.index += 1;
+    Some(value)
+}
+
+fn parse_text_wrap_mode_keyword(parser: &mut ComponentValueParser) -> Option<CssTextWrapModeValue> {
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return None;
+    };
+
+    let value = if value.eq_ignore_ascii_case("wrap") {
+        CssTextWrapModeValue::Wrap
+    } else if value.eq_ignore_ascii_case("nowrap") {
+        CssTextWrapModeValue::Nowrap
+    } else {
+        return None;
+    };
+    parser.index += 1;
+    Some(value)
+}
+
+fn parse_white_space_trim_prefix(parser: &mut ComponentValueParser) -> Option<CssWhiteSpaceTrimValue> {
+    if parser.consume_ident_matching("none") {
+        return Some(CssWhiteSpaceTrimValue {
+            kind: CssWhiteSpaceTrimValueKind::None,
+            has_discard_before: false,
+            has_discard_after: false,
+            has_discard_inner: false,
+        });
+    }
+
+    let mut value = CssWhiteSpaceTrimValue {
+        kind: CssWhiteSpaceTrimValueKind::List,
+        has_discard_before: false,
+        has_discard_after: false,
+        has_discard_inner: false,
+    };
+    let mut parsed_any = false;
+    while let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value: ident },
+        ..
+    })) = parser.next_component_value()
+    {
+        if ident.eq_ignore_ascii_case("discard-before") {
+            if value.has_discard_before {
+                return None;
+            }
+            value.has_discard_before = true;
+        } else if ident.eq_ignore_ascii_case("discard-after") {
+            if value.has_discard_after {
+                return None;
+            }
+            value.has_discard_after = true;
+        } else if ident.eq_ignore_ascii_case("discard-inner") {
+            if value.has_discard_inner {
+                return None;
+            }
+            value.has_discard_inner = true;
+        } else {
+            break;
+        }
+        parser.index += 1;
+        parser.discard_whitespace();
+        parsed_any = true;
+    }
+
+    parsed_any.then_some(value)
+}
+
 fn rust_owned_will_change_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let mut features = Vec::new();
     let kind = parse_will_change_value(filtered_input, |kind, value| {
@@ -7404,6 +7590,23 @@ where
             0,
             0,
             value.name.as_ref().map_or(&[], |name| name.as_bytes()),
+            "",
+        ),
+        RustOwnedStyleValueKind::WhiteSpace(value) => callback(
+            CssStyleValueKind::WhiteSpace,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.text_wrap_mode as u8,
+            value.white_space_trim.kind as u8,
+            (value.white_space_trim.has_discard_before as u8)
+                | ((value.white_space_trim.has_discard_after as u8) << 1)
+                | ((value.white_space_trim.has_discard_inner as u8) << 2),
+            0,
+            value.white_space_collapse.as_bytes(),
             "",
         ),
         RustOwnedStyleValueKind::WhiteSpaceTrim(value) => callback(
@@ -26422,18 +26625,18 @@ mod tests {
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
         RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -29146,6 +29349,38 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::WhiteSpace], "preserve nowrap discard-inner"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::WhiteSpace,
+                value: RustOwnedStyleValueKind::WhiteSpace(RustOwnedWhiteSpace {
+                    white_space_collapse: "preserve".to_string(),
+                    text_wrap_mode: CssTextWrapModeValue::Nowrap,
+                    white_space_trim: CssWhiteSpaceTrimValue {
+                        kind: CssWhiteSpaceTrimValueKind::List,
+                        has_discard_before: false,
+                        has_discard_after: false,
+                        has_discard_inner: true,
+                    },
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::WhiteSpace], "pre-line"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::WhiteSpace,
+                value: RustOwnedStyleValueKind::WhiteSpace(RustOwnedWhiteSpace {
+                    white_space_collapse: "preserve-breaks".to_string(),
+                    text_wrap_mode: CssTextWrapModeValue::Wrap,
+                    white_space_trim: CssWhiteSpaceTrimValue {
+                        kind: CssWhiteSpaceTrimValueKind::None,
+                        has_discard_before: false,
+                        has_discard_after: false,
+                        has_discard_inner: false,
+                    },
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TextWrapMode], "nowrap"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextWrapMode,
@@ -29597,6 +29832,19 @@ mod tests {
                 color: None,
                 value: "\u{1}--view\0\u{0}\0".to_string(),
                 value_type: "\u{2}\u{1}\u{1}1px\0\u{1}auto\0".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::WhiteSpace], "preserve nowrap discard-inner"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::WhiteSpace,
+                property_id: PropertyId::WhiteSpace,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "preserve".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
