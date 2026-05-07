@@ -1798,7 +1798,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FilterValueList(RustOwnedSourceBackedStyleValue),
     Flex(RustOwnedDimensionStyleValue),
     FontSource(RustOwnedSourceBackedStyleValue),
-    FontStyle(RustOwnedSourceBackedStyleValue),
+    FontStyle(RustOwnedFontStyle),
     FontVariantAlternates {
         values: Vec<FontVariantAlternatesValue>,
         source: String,
@@ -2014,6 +2014,12 @@ pub(crate) struct RustOwnedRect {
     bottom: String,
     left: String,
     requires_commas: bool,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFontStyle {
+    value: FontStyle,
     source: String,
 }
 
@@ -2632,7 +2638,9 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
     };
 
     match value_type {
-        PropertyValueType::FontStyle => RustOwnedStyleValueKind::FontStyle(value),
+        PropertyValueType::FontStyle => {
+            rust_owned_font_style_style_value_kind(value.source).unwrap_or_else(|| unreachable!())
+        }
         PropertyValueType::Position | PropertyValueType::BackgroundPosition => RustOwnedStyleValueKind::Position(value),
         PropertyValueType::TransformList => {
             let source = value.source;
@@ -2724,6 +2732,11 @@ fn parse_all_component_values<T>(
     }
 
     Some(values)
+}
+
+fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_style)?;
+    Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
 }
 
 fn rust_owned_font_variant_alternates_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
@@ -3307,7 +3320,6 @@ where
         | RustOwnedStyleValueKind::Edge(value)
         | RustOwnedStyleValueKind::FilterValueList(value)
         | RustOwnedStyleValueKind::FontSource(value)
-        | RustOwnedStyleValueKind::FontStyle(value)
         | RustOwnedStyleValueKind::GridAutoFlow(value)
         | RustOwnedStyleValueKind::GridTemplateArea(value)
         | RustOwnedStyleValueKind::GridTrackPlacement(value)
@@ -3339,6 +3351,14 @@ where
                 CssStyleValueKind::ValueType,
                 property_id,
                 PropertyValueType::Image,
+            );
+        }
+        RustOwnedStyleValueKind::FontStyle(_) => {
+            callback_style_value_type(
+                callback,
+                CssStyleValueKind::ValueType,
+                property_id,
+                PropertyValueType::FontStyle,
             );
         }
         RustOwnedStyleValueKind::Angle(value)
@@ -18466,8 +18486,8 @@ mod tests {
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
+        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
         RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
@@ -20314,8 +20334,8 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontStyle], "oblique 10deg"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontStyle,
-                value: RustOwnedStyleValueKind::FontStyle(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::FontStyle),
+                value: RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle {
+                    value: FontStyle::Oblique { has_angle: true },
                     source: "oblique 10deg".to_string(),
                 }),
             })
