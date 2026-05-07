@@ -3669,6 +3669,34 @@ pub(crate) fn parse_primitive_value_prefix(
     }
 }
 
+pub(crate) fn parse_primitive_value(
+    filtered_input: &[u8],
+    value_type: CssPrimitiveValueType,
+    options: CssPrimitiveValueOptions,
+) -> CssPrimitiveValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [component_value] = component_values else {
+        return CssPrimitiveValueKind::Invalid;
+    };
+
+    match value_type {
+        CssPrimitiveValueType::Integer => parse_integer_value_prefix(component_value),
+        CssPrimitiveValueType::Number => parse_number_value_prefix(component_value),
+        CssPrimitiveValueType::Percentage => parse_percentage_value_prefix(component_value),
+        CssPrimitiveValueType::Angle => parse_angle_value_prefix(component_value, options),
+        CssPrimitiveValueType::Flex => parse_flex_value_prefix(component_value),
+        CssPrimitiveValueType::Frequency => parse_frequency_value_prefix(component_value),
+        CssPrimitiveValueType::Length => parse_length_value_prefix(component_value, options),
+        CssPrimitiveValueType::Resolution => parse_resolution_value_prefix(component_value),
+        CssPrimitiveValueType::String => parse_string_value_prefix(component_value),
+        CssPrimitiveValueType::Time => parse_time_value_prefix(component_value),
+        CssPrimitiveValueType::Opacity => parse_opacity_value_prefix(component_value),
+    }
+}
+
 fn parse_integer_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
     // https://drafts.csswg.org/css-values-4/#integers
     // <integer> = [-+]? [0-9]+
@@ -15477,15 +15505,16 @@ mod tests {
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
         parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value_prefix,
-        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value,
-        parse_scale_value, parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -16081,6 +16110,18 @@ mod tests {
         options: CssPrimitiveValueOptions,
     ) -> CssPrimitiveValueKind {
         parse_primitive_value_prefix(input.as_bytes(), value_type, options)
+    }
+
+    fn parse_primitive(input: &str, value_type: CssPrimitiveValueType) -> CssPrimitiveValueKind {
+        parse_primitive_value(input.as_bytes(), value_type, CssPrimitiveValueOptions::default())
+    }
+
+    fn parse_primitive_with_options(
+        input: &str,
+        value_type: CssPrimitiveValueType,
+        options: CssPrimitiveValueOptions,
+    ) -> CssPrimitiveValueKind {
+        parse_primitive_value(input.as_bytes(), value_type, options)
     }
 
     fn parse_easing(input: &str) -> CssEasingValueKind {
@@ -19452,6 +19493,110 @@ mod tests {
         );
         assert_eq!(
             parse_primitive_prefix("ident", CssPrimitiveValueType::String),
+            CssPrimitiveValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_primitive_values() {
+        assert_eq!(
+            parse_primitive("1", CssPrimitiveValueType::Integer),
+            CssPrimitiveValueKind::Integer
+        );
+        assert_eq!(
+            parse_primitive("1.5", CssPrimitiveValueType::Number),
+            CssPrimitiveValueKind::Number
+        );
+        assert_eq!(
+            parse_primitive("50%", CssPrimitiveValueType::Percentage),
+            CssPrimitiveValueKind::Percentage
+        );
+        assert_eq!(
+            parse_primitive("1deg", CssPrimitiveValueType::Angle),
+            CssPrimitiveValueKind::Angle
+        );
+        assert_eq!(
+            parse_primitive("1fr", CssPrimitiveValueType::Flex),
+            CssPrimitiveValueKind::Flex
+        );
+        assert_eq!(
+            parse_primitive("1Hz", CssPrimitiveValueType::Frequency),
+            CssPrimitiveValueKind::Frequency
+        );
+        assert_eq!(
+            parse_primitive("1px", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive("96dpi", CssPrimitiveValueType::Resolution),
+            CssPrimitiveValueKind::Resolution
+        );
+        assert_eq!(
+            parse_primitive("\"hello\"", CssPrimitiveValueType::String),
+            CssPrimitiveValueKind::String
+        );
+        assert_eq!(
+            parse_primitive("1s", CssPrimitiveValueType::Time),
+            CssPrimitiveValueKind::Time
+        );
+        assert_eq!(
+            parse_primitive("50%", CssPrimitiveValueType::Opacity),
+            CssPrimitiveValueKind::Opacity
+        );
+    }
+
+    #[test]
+    fn parses_primitive_value_options() {
+        assert_eq!(
+            parse_primitive("0", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive_with_options(
+                "1",
+                CssPrimitiveValueType::Length,
+                CssPrimitiveValueOptions {
+                    allow_quirky_length: true,
+                    allow_svg_unitless_length: false,
+                    allow_svg_unitless_angle: false,
+                }
+            ),
+            CssPrimitiveValueKind::Length
+        );
+        assert_eq!(
+            parse_primitive_with_options(
+                "1",
+                CssPrimitiveValueType::Angle,
+                CssPrimitiveValueOptions {
+                    allow_quirky_length: false,
+                    allow_svg_unitless_length: false,
+                    allow_svg_unitless_angle: true,
+                }
+            ),
+            CssPrimitiveValueKind::Angle
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_primitive_values() {
+        assert_eq!(
+            parse_primitive("1px 2px", CssPrimitiveValueType::Length),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive("1.5", CssPrimitiveValueType::Integer),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive("1px", CssPrimitiveValueType::Percentage),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive("-1dpi", CssPrimitiveValueType::Resolution),
+            CssPrimitiveValueKind::Invalid
+        );
+        assert_eq!(
+            parse_primitive("ident", CssPrimitiveValueType::String),
             CssPrimitiveValueKind::Invalid
         );
     }

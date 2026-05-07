@@ -3247,6 +3247,18 @@ FFI::CssPrimitiveValueKind RustComponentValueParser::parse_primitive_value_prefi
         options);
 }
 
+FFI::CssPrimitiveValueKind RustComponentValueParser::parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType value_type, FFI::CssPrimitiveValueOptions options)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_primitive_value(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        value_type,
+        options);
+}
+
 FFI::CssEasingValueKind RustComponentValueParser::parse_easing(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

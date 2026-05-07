@@ -368,6 +368,7 @@ public:
     static FFI::CssRectValueKind parse_rect(StringView input, StringView encoding);
     static FFI::CssRatioValue parse_ratio_prefix(StringView input, StringView encoding);
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
+    static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssEasingValueKind parse_easing(StringView input, StringView encoding);
     static FFI::CssTransformFunctionValueKind parse_transform_function(StringView input, StringView encoding);
     static FFI::CssFitContentValueKind parse_fit_content(StringView input, StringView encoding);

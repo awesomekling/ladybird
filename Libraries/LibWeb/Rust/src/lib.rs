@@ -1315,6 +1315,26 @@ pub unsafe extern "C" fn rust_css_parse_primitive_value_prefix(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_primitive_value(
+    input: *const u8,
+    input_len: usize,
+    value_type: CssPrimitiveValueType,
+    options: CssPrimitiveValueOptions,
+) -> CssPrimitiveValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPrimitiveValueKind::Invalid;
+            };
+
+            css_parser::parse_primitive_value(input, value_type, options)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_easing(input: *const u8, input_len: usize) -> CssEasingValueKind {
     unsafe {
         abort_on_panic(|| {
