@@ -1871,6 +1871,7 @@ pub enum CssStyleValueKind {
     TextIndent,
     TextUnderlinePosition,
     TouchAction,
+    TransformLonghand,
     TransitionBehavior,
     TransitionProperty,
     ViewTimelineInset,
@@ -1984,6 +1985,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextUnderlinePosition(RustOwnedTextUnderlinePosition),
     Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
+    TransformLonghand(RustOwnedTransformLonghand),
     Transformation(RustOwnedTransformation),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
@@ -2358,6 +2360,11 @@ pub(crate) struct RustOwnedScrollbarGutter {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransformLonghand {
     source: String,
 }
 
@@ -2870,6 +2877,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TextIndent => rust_owned_text_indent_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
         PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::Rotate | PropertyId::Scale | PropertyId::Translate => {
+            rust_owned_transform_longhand_style_value_kind(property_id, filtered_input)
+        }
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
         PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
@@ -4294,6 +4304,25 @@ fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<Rus
     }))
 }
 
+fn rust_owned_transform_longhand_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    let value = match property_id {
+        PropertyId::Rotate => parse_rotate_value(filtered_input),
+        PropertyId::Scale => parse_scale_value(filtered_input),
+        PropertyId::Translate => parse_translate_value(filtered_input),
+        _ => unreachable!(),
+    };
+    if value == CssTransformLonghandValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
 fn rust_owned_transition_behavior_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let mut behaviors = Vec::new();
     let kind = parse_transition_behavior_value(filtered_input, |behavior| behaviors.push(behavior));
@@ -5353,6 +5382,12 @@ where
             0,
             &[],
             "",
+        ),
+        RustOwnedStyleValueKind::TransformLonghand(value) => callback_source_backed_style_value(
+            callback,
+            CssStyleValueKind::TransformLonghand,
+            property_id,
+            &value.source,
         ),
         RustOwnedStyleValueKind::Transformation(_) => {}
         RustOwnedStyleValueKind::TouchAction(value) => callback(
@@ -20845,9 +20880,9 @@ mod tests {
         RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -23115,6 +23150,33 @@ mod tests {
                     separator: RustOwnedStyleValueListSeparator::Space,
                     value_type: Some(PropertyValueType::TransformList),
                     source: Some("translateX(10px) scale(2)".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Translate], "10px 20% 1em"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Translate,
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
+                    source: "10px 20% 1em".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Scale], "1 50% 2"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Scale,
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
+                    source: "1 50% 2".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Rotate], "1 0 0 45deg"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Rotate,
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
+                    source: "1 0 0 45deg".to_string(),
                 }),
             })
         );

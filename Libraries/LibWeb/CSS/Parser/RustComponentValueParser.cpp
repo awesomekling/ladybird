@@ -968,6 +968,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Quotes,
                            FFI::CssStyleValueKind::TimelineName,
                            FFI::CssStyleValueKind::TimelineScope,
+                           FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransitionBehavior,
                            FFI::CssStyleValueKind::TransitionProperty,
                            FFI::CssStyleValueKind::ViewTransitionName,

@@ -870,6 +870,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::TransformLonghand:
+                switch (rust_style_value->property_id) {
+                case PropertyID::Rotate:
+                    if (auto value = parse_rotate_value(tokens)) {
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+                    break;
+                case PropertyID::Scale:
+                    if (auto value = parse_scale_value(tokens)) {
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+                    break;
+                case PropertyID::Translate:
+                    if (auto value = parse_translate_value(tokens)) {
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+                    break;
+                default:
+                    break;
+                }
+                break;
             case FFI::CssStyleValueKind::PaintOrder:
                 switch (rust_style_value->paint_order.kind) {
                 case FFI::CssPaintOrderValueKind::Invalid:
