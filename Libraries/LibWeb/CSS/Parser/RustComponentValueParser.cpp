@@ -3327,6 +3327,46 @@ FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_track_si
         filtered_input_bytes.size());
 }
 
+FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_translate(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_translate(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_scale(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_scale(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_rotate(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_rotate(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
+FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_transform_origin(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_transform_origin(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssWhiteSpaceTrimValue RustComponentValueParser::parse_white_space_trim(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

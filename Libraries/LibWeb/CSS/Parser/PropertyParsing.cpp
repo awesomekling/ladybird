@@ -2154,6 +2154,9 @@ RefPtr<StyleValue const> Parser::parse_shape_outside_value(TokenStream<Component
 RefPtr<StyleValue const> Parser::parse_rotate_value(TokenStream<ComponentValue>& tokens)
 {
     // none | <angle> | [ x | y | z | <number>{3} ] && <angle>
+    auto serialized_rotate = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (RustComponentValueParser::parse_rotate(serialized_rotate.bytes_as_string_view(), "utf-8"sv) == FFI::CssTransformLonghandValueKind::Invalid)
+        return nullptr;
 
     // none
     if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
@@ -4597,6 +4600,9 @@ RefPtr<StyleValue const> Parser::parse_transform_origin_value(TokenStream<Compon
     //   [ top | center | bottom | <length-percentage> ] <length>?
     // |
     //   [[ center | left | right ] && [ center | top | bottom ]] <length>?
+    auto serialized_transform_origin = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (RustComponentValueParser::parse_transform_origin(serialized_transform_origin.bytes_as_string_view(), "utf-8"sv) == FFI::CssTransformLonghandValueKind::Invalid)
+        return nullptr;
 
     enum class Axis {
         None,
@@ -4780,6 +4786,9 @@ RefPtr<StyleValue const> Parser::parse_transition_property_value(TokenStream<Com
 RefPtr<StyleValue const> Parser::parse_translate_value(TokenStream<ComponentValue>& tokens)
 {
     // none | <length-percentage> [ <length-percentage> <length>? ]?
+    auto serialized_translate = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (RustComponentValueParser::parse_translate(serialized_translate.bytes_as_string_view(), "utf-8"sv) == FFI::CssTransformLonghandValueKind::Invalid)
+        return nullptr;
 
     // none
     if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
@@ -4820,6 +4829,9 @@ RefPtr<StyleValue const> Parser::parse_translate_value(TokenStream<ComponentValu
 RefPtr<StyleValue const> Parser::parse_scale_value(TokenStream<ComponentValue>& tokens)
 {
     // none | [ <number> | <percentage> ]{1,3}
+    auto serialized_scale = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (RustComponentValueParser::parse_scale(serialized_scale.bytes_as_string_view(), "utf-8"sv) == FFI::CssTransformLonghandValueKind::Invalid)
+        return nullptr;
 
     // none
     if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))

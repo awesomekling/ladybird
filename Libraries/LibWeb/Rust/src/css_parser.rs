@@ -1107,6 +1107,13 @@ pub enum CssGridTrackSizeListValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssTransformLonghandValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -4934,6 +4941,353 @@ fn parse_positive_integer_component_values(component_values: &[ComponentValue]) 
         return false;
     };
     component_value_parse_as_integer_in_range(component_value, 1.0, f64::INFINITY)
+}
+
+pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-transforms-2/#propdef-translate
+    // translate = none | <length-percentage> [ <length-percentage> <length>? ]?
+    if consume_optional_ident_matching(&mut parser, "none") {
+        parser.discard_whitespace();
+        return if parser.has_next_component_value() {
+            CssTransformLonghandValueKind::Invalid
+        } else {
+            CssTransformLonghandValueKind::Valid
+        };
+    }
+
+    if !consume_length_percentage_component_value(&mut parser) {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    parser.discard_whitespace();
+    if !parser.has_next_component_value() {
+        return CssTransformLonghandValueKind::Valid;
+    }
+
+    if !consume_length_percentage_component_value(&mut parser) {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    parser.discard_whitespace();
+    if !parser.has_next_component_value() {
+        return CssTransformLonghandValueKind::Valid;
+    }
+
+    if !consume_length_component_value(&mut parser) {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        CssTransformLonghandValueKind::Invalid
+    } else {
+        CssTransformLonghandValueKind::Valid
+    }
+}
+
+pub(crate) fn parse_scale_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-transforms-2/#propdef-scale
+    // scale = none | [ <number> | <percentage> ]{1,3}
+    if consume_optional_ident_matching(&mut parser, "none") {
+        parser.discard_whitespace();
+        return if parser.has_next_component_value() {
+            CssTransformLonghandValueKind::Invalid
+        } else {
+            CssTransformLonghandValueKind::Valid
+        };
+    }
+
+    for component_count in 1..=3 {
+        if !consume_number_percentage_component_value(&mut parser) {
+            return CssTransformLonghandValueKind::Invalid;
+        }
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            return CssTransformLonghandValueKind::Valid;
+        }
+        if component_count == 3 {
+            return CssTransformLonghandValueKind::Invalid;
+        }
+    }
+
+    CssTransformLonghandValueKind::Invalid
+}
+
+pub(crate) fn parse_rotate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-transforms-2/#propdef-rotate
+    // rotate = none | <angle> | [ x | y | z | <number>{3} ] && <angle>
+    if consume_optional_ident_matching(&mut parser, "none") {
+        parser.discard_whitespace();
+        return if parser.has_next_component_value() {
+            CssTransformLonghandValueKind::Invalid
+        } else {
+            CssTransformLonghandValueKind::Valid
+        };
+    }
+
+    let angle = consume_rotate_angle_component_value(&mut parser);
+    parser.discard_whitespace();
+    if angle && !parser.has_next_component_value() {
+        return CssTransformLonghandValueKind::Valid;
+    }
+
+    if consume_rotate_axis(&mut parser) {
+        parser.discard_whitespace();
+        if angle || consume_rotate_angle_component_value(&mut parser) {
+            parser.discard_whitespace();
+            return if parser.has_next_component_value() {
+                CssTransformLonghandValueKind::Invalid
+            } else {
+                CssTransformLonghandValueKind::Valid
+            };
+        }
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    for _ in 0..3 {
+        if !consume_number_component_value(&mut parser) {
+            return CssTransformLonghandValueKind::Invalid;
+        }
+    }
+
+    parser.discard_whitespace();
+    if !angle && !consume_rotate_angle_component_value(&mut parser) {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        CssTransformLonghandValueKind::Invalid
+    } else {
+        CssTransformLonghandValueKind::Valid
+    }
+}
+
+fn consume_rotate_axis(parser: &mut ComponentValueParser) -> bool {
+    consume_optional_ident_matching(parser, "x")
+        || consume_optional_ident_matching(parser, "y")
+        || consume_optional_ident_matching(parser, "z")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransformOriginAxis {
+    X,
+    Y,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TransformOriginComponent {
+    axis: Option<TransformOriginAxis>,
+    is_offset: bool,
+}
+
+pub(crate) fn parse_transform_origin_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://www.w3.org/TR/css-transforms-1/#propdef-transform-origin
+    // transform-origin =
+    //     [ left | center | right | top | bottom | <length-percentage> ] |
+    //     [ left | center | right | <length-percentage> ]
+    //     [ top | center | bottom | <length-percentage> ] <length>? |
+    //     [[ center | left | right ] && [ center | top | bottom ]] <length>?
+    let Some(first_value) = consume_transform_origin_component(&mut parser) else {
+        return CssTransformLonghandValueKind::Invalid;
+    };
+
+    parser.discard_whitespace();
+    if !parser.has_next_component_value() {
+        return CssTransformLonghandValueKind::Valid;
+    }
+
+    let Some(second_value) = consume_transform_origin_component(&mut parser) else {
+        return CssTransformLonghandValueKind::Invalid;
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() && !consume_length_component_value(&mut parser) {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value()
+        || (first_value.is_offset && second_value.axis == Some(TransformOriginAxis::X))
+        || (second_value.is_offset && first_value.axis == Some(TransformOriginAxis::Y))
+    {
+        return CssTransformLonghandValueKind::Invalid;
+    }
+
+    let mut x_value = if first_value.axis == Some(TransformOriginAxis::X) {
+        Some(first_value)
+    } else {
+        None
+    };
+    let mut y_value = if first_value.axis == Some(TransformOriginAxis::Y) {
+        Some(first_value)
+    } else {
+        None
+    };
+
+    match second_value.axis {
+        Some(TransformOriginAxis::X) => {
+            if x_value.is_some() {
+                return CssTransformLonghandValueKind::Invalid;
+            }
+            x_value = Some(second_value);
+            y_value = Some(first_value);
+        }
+        Some(TransformOriginAxis::Y) => {
+            if y_value.is_some() {
+                return CssTransformLonghandValueKind::Invalid;
+            }
+            y_value = Some(second_value);
+            x_value = Some(first_value);
+        }
+        None => {
+            if x_value.is_some() {
+                y_value = Some(second_value);
+            } else {
+                x_value = Some(second_value);
+            }
+        }
+    }
+
+    if first_value.axis.is_none() && second_value.axis.is_none() {
+        x_value = Some(first_value);
+        y_value = Some(second_value);
+    }
+
+    if x_value.is_some() && y_value.is_some() {
+        CssTransformLonghandValueKind::Valid
+    } else {
+        CssTransformLonghandValueKind::Invalid
+    }
+}
+
+fn consume_transform_origin_component(parser: &mut ComponentValueParser) -> Option<TransformOriginComponent> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if component_value_parse_as_length_percentage(component_value) {
+        parser.index += 1;
+        return Some(TransformOriginComponent {
+            axis: None,
+            is_offset: true,
+        });
+    }
+
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+
+    let axis = if value.eq_ignore_ascii_case("left") || value.eq_ignore_ascii_case("right") {
+        Some(TransformOriginAxis::X)
+    } else if value.eq_ignore_ascii_case("top") || value.eq_ignore_ascii_case("bottom") {
+        Some(TransformOriginAxis::Y)
+    } else if value.eq_ignore_ascii_case("center") {
+        None
+    } else {
+        return None;
+    };
+
+    parser.index += 1;
+    Some(TransformOriginComponent { axis, is_offset: false })
+}
+
+fn consume_length_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_length(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn consume_number_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_number_prefix(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn consume_number_percentage_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_number_percentage(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn consume_rotate_angle_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_angle_for_transform_longhand(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn component_value_parse_as_angle_for_transform_longhand(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::Function(function) if function.name.eq_ignore_ascii_case("random") => {
+            component_values_contain_angle_dimension(&function.value)
+        }
+        _ => component_value_parse_as_angle(component_value),
+    }
+}
+
+fn component_values_contain_angle_dimension(component_values: &[ComponentValue]) -> bool {
+    component_values.iter().any(|component_value| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => matches!(dimension_for_unit(unit), Some(DimensionType::Angle)),
+        ComponentValue::Function(function) => component_values_contain_angle_dimension(&function.value),
+        ComponentValue::SimpleBlock(block) => component_values_contain_angle_dimension(&block.value),
+        _ => false,
+    })
+}
+
+fn component_value_parse_as_number_percentage(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_number_prefix(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Percentage { .. },
+                ..
+            }) | ComponentValue::Function(_)
+        )
 }
 
 fn parse_view_function_value_with_axis_first(component_values: Vec<ComponentValue>) -> Option<CssViewFunctionValue> {
@@ -13730,25 +14084,25 @@ mod tests {
         CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
         CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
         CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransformFunctionValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssTransformFunctionValueKind, CssTransformLonghandValueKind, CssTransitionBehaviorItemKind,
+        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
+        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
+        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -13762,11 +14116,12 @@ mod tests {
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
         parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value_prefix,
-        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_view_function_value,
+        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_rotate_value, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
         parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
         parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
@@ -14372,6 +14727,22 @@ mod tests {
 
     fn parse_transform_function(input: &str) -> CssTransformFunctionValueKind {
         parse_transform_function_value(input.as_bytes())
+    }
+
+    fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
+        parse_translate_value(input.as_bytes())
+    }
+
+    fn parse_scale(input: &str) -> CssTransformLonghandValueKind {
+        parse_scale_value(input.as_bytes())
+    }
+
+    fn parse_rotate(input: &str) -> CssTransformLonghandValueKind {
+        parse_rotate_value(input.as_bytes())
+    }
+
+    fn parse_transform_origin(input: &str) -> CssTransformLonghandValueKind {
+        parse_transform_origin_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -17541,6 +17912,69 @@ mod tests {
         assert_eq!(
             parse_transform_function("matrix(1 0 0 1 10 20)"),
             CssTransformFunctionValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_transform_longhand_values() {
+        assert_eq!(parse_translate("none"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_translate("10px 20% 30px"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_translate("calc(10px + 5%)"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_scale("none"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_scale("1 50% calc(1 + 2)"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_rotate("none"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_rotate("45deg"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_rotate("45deg x"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(parse_rotate("1 0 0 45deg"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(
+            parse_rotate("random(1, 0) random(1, 0) 1 90deg"),
+            CssTransformLonghandValueKind::Valid
+        );
+        assert_eq!(
+            parse_rotate("x random(90deg, 30deg)"),
+            CssTransformLonghandValueKind::Valid
+        );
+        assert_eq!(parse_transform_origin("left"), CssTransformLonghandValueKind::Valid);
+        assert_eq!(
+            parse_transform_origin("top center"),
+            CssTransformLonghandValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_origin("center left 6px"),
+            CssTransformLonghandValueKind::Valid
+        );
+        assert_eq!(
+            parse_transform_origin("-1px -2px -3px"),
+            CssTransformLonghandValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_transform_longhand_values() {
+        assert_eq!(parse_translate("10px 20% 30%"), CssTransformLonghandValueKind::Invalid);
+        assert_eq!(
+            parse_translate("10px 20% 30px 40px"),
+            CssTransformLonghandValueKind::Invalid
+        );
+        assert_eq!(parse_scale("1px"), CssTransformLonghandValueKind::Invalid);
+        assert_eq!(parse_scale("1 2 3 4"), CssTransformLonghandValueKind::Invalid);
+        assert_eq!(parse_rotate("x y 45deg"), CssTransformLonghandValueKind::Invalid);
+        assert_eq!(parse_rotate("1 2 45deg"), CssTransformLonghandValueKind::Invalid);
+        assert_eq!(
+            parse_transform_origin("left right"),
+            CssTransformLonghandValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_origin("top bottom"),
+            CssTransformLonghandValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_origin("1px left"),
+            CssTransformLonghandValueKind::Invalid
+        );
+        assert_eq!(
+            parse_transform_origin("left 1px 2%"),
+            CssTransformLonghandValueKind::Invalid
         );
     }
 
