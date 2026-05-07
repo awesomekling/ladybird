@@ -1009,11 +1009,13 @@ pub enum CssRatioValueKind {
     Valid,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct CssRatioValue {
     pub kind: CssRatioValueKind,
     pub has_denominator: bool,
+    pub numerator: f64,
+    pub denominator: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1049,6 +1051,7 @@ pub enum CssPrimitiveValueKind {
     Opacity,
     Keyword,
     CustomIdent,
+    Ratio,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1970,7 +1973,7 @@ where
 
 pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
 where
-    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, &[u8], &str),
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, &[u8], &str),
 {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -1995,6 +1998,8 @@ where
                     CssPrimitiveValueKind::Invalid,
                     false,
                     0.0,
+                    false,
+                    0.0,
                     resolved_keyword.as_bytes(),
                     "",
                 );
@@ -2017,6 +2022,8 @@ where
                 CssStyleValueKind::CustomIdent,
                 property_id as u16,
                 CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
                 false,
                 0.0,
                 name.as_bytes(),
@@ -2062,10 +2069,17 @@ where
             let numeric_value = generated_style_value
                 .and_then(|style_value| style_value.numeric_value)
                 .or_else(|| style_value_numeric_value(*value_type, component_values));
+            let secondary_numeric_value = style_value_secondary_numeric_value(*value_type, component_values);
             let value = if let Some(generated_style_value) = generated_style_value
                 && let Some(value) = generated_style_value.value
             {
                 value.as_bytes()
+            } else if primitive_kind == CssPrimitiveValueKind::Ratio {
+                if style_value_ratio_has_denominator(*value_type, component_values) {
+                    "has-denominator".as_bytes()
+                } else {
+                    &[]
+                }
             } else if primitive_kind == CssPrimitiveValueKind::String {
                 string_token_value(component_values).unwrap_or("").as_bytes()
             } else if first_is_one_of(property_value_type_name(*value_type), &["Length", "Time"]) {
@@ -2086,6 +2100,8 @@ where
                 primitive_kind,
                 numeric_value.is_some(),
                 numeric_value.unwrap_or(0.0),
+                secondary_numeric_value.is_some(),
+                secondary_numeric_value.unwrap_or(0.0),
                 value,
                 property_value_type_name(*value_type),
             );
@@ -2097,6 +2113,10 @@ where
 }
 
 fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
+    if value_type == PropertyValueType::Ratio {
+        return style_value_ratio_values(value_type, component_values).map(|(numerator, _)| numerator);
+    }
+
     let [ComponentValue::PreservedToken(token)] = component_values else {
         return None;
     };
@@ -2119,6 +2139,72 @@ fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[
     }
 }
 
+fn style_value_secondary_numeric_value(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+) -> Option<f64> {
+    style_value_ratio_values(value_type, component_values).map(|(_, denominator)| denominator)
+}
+
+fn style_value_ratio_values(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<(f64, f64)> {
+    if value_type != PropertyValueType::Ratio {
+        return None;
+    }
+
+    let component_values = strip_whitespace(component_values);
+    match component_values {
+        [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { number },
+                ..
+            }),
+        ] if number.value() >= 0.0 => Some((number.value(), 1.0)),
+        _ => {
+            let (slash_index, _) = component_values.iter().enumerate().find(|(_, component_value)| {
+                matches!(
+                    component_value,
+                    ComponentValue::PreservedToken(Token {
+                        token_type: TokenType::Delim { value },
+                        ..
+                    }) if *value == '/' as u32
+                )
+            })?;
+
+            let numerator = strip_whitespace(&component_values[..slash_index]);
+            let denominator = strip_whitespace(&component_values[slash_index + 1..]);
+            let [
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Number { number: numerator },
+                    ..
+                }),
+            ] = numerator
+            else {
+                return None;
+            };
+            let [
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Number { number: denominator },
+                    ..
+                }),
+            ] = denominator
+            else {
+                return None;
+            };
+
+            (numerator.value() >= 0.0 && denominator.value() >= 0.0).then_some((numerator.value(), denominator.value()))
+        }
+    }
+}
+
+fn style_value_ratio_has_denominator(value_type: PropertyValueType, component_values: &[ComponentValue]) -> bool {
+    if value_type != PropertyValueType::Ratio {
+        return false;
+    }
+
+    style_value_ratio_values(value_type, component_values).is_some()
+        && component_values_parse_as_ratio_with_denominator(component_values)
+}
+
 fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<&str> {
     let [ComponentValue::PreservedToken(token)] = component_values else {
         return None;
@@ -2135,6 +2221,14 @@ fn style_value_primitive_kind(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
 ) -> CssPrimitiveValueKind {
+    if value_type == PropertyValueType::Ratio {
+        return if style_value_ratio_values(value_type, component_values).is_some() {
+            CssPrimitiveValueKind::Ratio
+        } else {
+            CssPrimitiveValueKind::Invalid
+        };
+    }
+
     let [component_value] = component_values else {
         return CssPrimitiveValueKind::Invalid;
     };
@@ -2146,7 +2240,10 @@ fn style_value_primitive_kind(
         PropertyValueType::Time => parse_time_value_prefix(component_value),
         PropertyValueType::Percentage => parse_percentage_value_prefix(component_value),
         PropertyValueType::String => parse_string_value_prefix(component_value),
-        PropertyValueType::OpacityValue => parse_opacity_value_prefix(component_value),
+        PropertyValueType::OpacityValue => match parse_number_value_prefix(component_value) {
+            CssPrimitiveValueKind::Number => CssPrimitiveValueKind::Number,
+            _ => parse_percentage_value_prefix(component_value),
+        },
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -4135,6 +4232,8 @@ pub(crate) fn parse_ratio_value_prefix(filtered_input: &[u8]) -> CssRatioValue {
     let invalid = CssRatioValue {
         kind: CssRatioValueKind::Invalid,
         has_denominator: false,
+        numerator: 0.0,
+        denominator: 0.0,
     };
 
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -4143,25 +4242,29 @@ pub(crate) fn parse_ratio_value_prefix(filtered_input: &[u8]) -> CssRatioValue {
 
     // https://drafts.csswg.org/css-values-4/#ratios
     // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
-    if !parse_non_negative_number_prefix(&mut parser) {
+    let Some(numerator) = parse_non_negative_number_prefix_value(&mut parser) else {
         return invalid;
-    }
+    };
 
     parser.discard_whitespace();
     if !parser.consume_a_delim('/') {
         return CssRatioValue {
             kind: CssRatioValueKind::Valid,
             has_denominator: false,
+            numerator,
+            denominator: 1.0,
         };
     }
 
-    if !parse_non_negative_number_prefix(&mut parser) {
+    let Some(denominator) = parse_non_negative_number_prefix_value(&mut parser) else {
         return invalid;
-    }
+    };
 
     CssRatioValue {
         kind: CssRatioValueKind::Valid,
         has_denominator: true,
+        numerator,
+        denominator,
     }
 }
 
@@ -7416,18 +7519,25 @@ fn parse_rect_side(parser: &mut ComponentValueParser) -> bool {
 }
 
 fn parse_non_negative_number_prefix(parser: &mut ComponentValueParser) -> bool {
+    parse_non_negative_number_prefix_value(parser).is_some()
+}
+
+fn parse_non_negative_number_prefix_value(parser: &mut ComponentValueParser) -> Option<f64> {
     parser.discard_whitespace();
 
-    let Some(component_value) = parser.next_component_value() else {
-        return false;
-    };
+    let component_value = parser.next_component_value()?;
+
+    if let Some(value) = component_value_non_negative_number_value(component_value) {
+        parser.index += 1;
+        return Some(value);
+    }
 
     if component_value_parse_as_non_negative_number(component_value) {
         parser.index += 1;
-        return true;
+        return Some(0.0);
     }
 
-    false
+    None
 }
 
 #[derive(Clone, Copy)]
@@ -14799,13 +14909,25 @@ fn component_values_parse_as_ratio_with_denominator(component_values: &[Componen
 }
 
 fn component_value_parse_as_non_negative_number(component_value: &ComponentValue) -> bool {
+    component_value_non_negative_number_value(component_value).is_some()
+        || matches!(component_value, ComponentValue::Function(_))
+}
+
+fn component_value_non_negative_number_value(component_value: &ComponentValue) -> Option<f64> {
     matches!(
         component_value,
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Number { number },
             ..
         }) if number.value() >= 0.0
-    ) || matches!(component_value, ComponentValue::Function(_))
+    )
+    .then(|| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value(),
+        _ => 0.0,
+    })
 }
 
 fn number_is_integer(number: NumericValue) -> bool {
@@ -17166,6 +17288,7 @@ mod tests {
         property_id: PropertyId,
         primitive_kind: CssPrimitiveValueKind,
         numeric_value: Option<f64>,
+        secondary_numeric_value: Option<f64>,
         value: String,
         value_type: String,
     }
@@ -17176,12 +17299,21 @@ mod tests {
         parse_style_value_for_property(
             &property_ids,
             input.as_bytes(),
-            |kind, property_id, primitive_kind, has_numeric_value, numeric_value, value, value_type| {
+            |kind,
+             property_id,
+             primitive_kind,
+             has_numeric_value,
+             numeric_value,
+             has_secondary_numeric_value,
+             secondary_numeric_value,
+             value,
+             value_type| {
                 parsed_value = Some(ParsedStyleValue {
                     kind,
                     property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
                     primitive_kind,
                     numeric_value: has_numeric_value.then_some(numeric_value),
+                    secondary_numeric_value: has_secondary_numeric_value.then_some(secondary_numeric_value),
                     value: String::from_utf8(value.to_vec()).unwrap(),
                     value_type: value_type.to_string(),
                 });
@@ -17714,6 +17846,7 @@ mod tests {
                 property_id: PropertyId::Display,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
+                secondary_numeric_value: None,
                 value: "block".to_string(),
                 value_type: String::new(),
             })
@@ -17725,6 +17858,7 @@ mod tests {
                 property_id: PropertyId::AnimationName,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
+                secondary_numeric_value: None,
                 value: "slide".to_string(),
                 value_type: "CustomIdent".to_string(),
             })
@@ -17736,6 +17870,7 @@ mod tests {
                 property_id: PropertyId::FontWeight,
                 primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
+                secondary_numeric_value: None,
                 value: "bold".to_string(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
@@ -17747,6 +17882,7 @@ mod tests {
                 property_id: PropertyId::FontWeight,
                 primitive_kind: CssPrimitiveValueKind::Number,
                 numeric_value: Some(700.0),
+                secondary_numeric_value: None,
                 value: String::new(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
@@ -17758,6 +17894,7 @@ mod tests {
                 property_id: PropertyId::FontKerning,
                 primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
+                secondary_numeric_value: None,
                 value: "normal".to_string(),
                 value_type: "FontKerningValue".to_string(),
             })
@@ -17769,6 +17906,7 @@ mod tests {
                 property_id: PropertyId::ZIndex,
                 primitive_kind: CssPrimitiveValueKind::Integer,
                 numeric_value: Some(12.0),
+                secondary_numeric_value: None,
                 value: String::new(),
                 value_type: "Integer".to_string(),
             })
@@ -17778,8 +17916,9 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::Primitive,
                 property_id: PropertyId::Opacity,
-                primitive_kind: CssPrimitiveValueKind::Opacity,
+                primitive_kind: CssPrimitiveValueKind::Percentage,
                 numeric_value: Some(50.0),
+                secondary_numeric_value: None,
                 value: String::new(),
                 value_type: "OpacityValue".to_string(),
             })
@@ -17791,6 +17930,7 @@ mod tests {
                 property_id: PropertyId::BackgroundPositionX,
                 primitive_kind: CssPrimitiveValueKind::Percentage,
                 numeric_value: Some(50.0),
+                secondary_numeric_value: None,
                 value: String::new(),
                 value_type: "Percentage".to_string(),
             })
@@ -17802,6 +17942,7 @@ mod tests {
                 property_id: PropertyId::MarginLeft,
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(12.0),
+                secondary_numeric_value: None,
                 value: "px".to_string(),
                 value_type: "Length".to_string(),
             })
@@ -17813,6 +17954,7 @@ mod tests {
                 property_id: PropertyId::MarginLeft,
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(0.0),
+                secondary_numeric_value: None,
                 value: "px".to_string(),
                 value_type: "Length".to_string(),
             })
@@ -17824,6 +17966,7 @@ mod tests {
                 property_id: PropertyId::AnimationDuration,
                 primitive_kind: CssPrimitiveValueKind::Time,
                 numeric_value: Some(250.0),
+                secondary_numeric_value: None,
                 value: "ms".to_string(),
                 value_type: "Time".to_string(),
             })
@@ -17835,8 +17978,33 @@ mod tests {
                 property_id: PropertyId::AnimationName,
                 primitive_kind: CssPrimitiveValueKind::String,
                 numeric_value: None,
+                secondary_numeric_value: None,
                 value: "slide".to_string(),
                 value_type: "String".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AspectRatio], "16 / 9"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::AspectRatio,
+                primitive_kind: CssPrimitiveValueKind::Ratio,
+                numeric_value: Some(16.0),
+                secondary_numeric_value: Some(9.0),
+                value: "has-denominator".to_string(),
+                value_type: "Ratio".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AspectRatio], "1"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::AspectRatio,
+                primitive_kind: CssPrimitiveValueKind::Ratio,
+                numeric_value: Some(1.0),
+                secondary_numeric_value: Some(1.0),
+                value: String::new(),
+                value_type: "Ratio".to_string(),
             })
         );
         assert_eq!(parse_style_value(&[PropertyId::Color], "10px"), None);
@@ -20140,6 +20308,8 @@ mod tests {
             CssRatioValue {
                 kind: CssRatioValueKind::Valid,
                 has_denominator: false,
+                numerator: 1.0,
+                denominator: 1.0,
             }
         );
         assert_eq!(parse_ratio_prefix("16 / 9").has_denominator, true);

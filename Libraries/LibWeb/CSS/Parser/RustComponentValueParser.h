@@ -82,6 +82,8 @@ public:
         Optional<FlyString> custom_ident;
         Optional<ValueType> value_type;
         Optional<double> numeric_value;
+        Optional<double> secondary_numeric_value;
+        bool ratio_has_denominator { false };
         Optional<FlyString> dimension_unit;
         Optional<FlyString> string;
     };

@@ -47,9 +47,11 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
+#include <LibWeb/CSS/StyleValues/OpacityValueStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ScrollbarColorStyleValue.h>
@@ -221,6 +223,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parse_time_value(tokens, metadata->range);
                 case ValueType::Percentage:
                     return parse_percentage_value(tokens, metadata->range);
+                case ValueType::OpacityValue:
+                    return parse_opacity_value_value(tokens);
                 default:
                     return nullptr;
                 }
@@ -246,6 +250,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!metadata->range.contains(*rust_style_value->numeric_value))
                         return nullptr;
                     return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                case ValueType::OpacityValue:
+                    if (!metadata->range.contains(*rust_style_value->numeric_value))
+                        return nullptr;
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Percentage)
+                        return OpacityValueStyleValue::create(PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value)));
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Number)
+                        return OpacityValueStyleValue::create(NumberStyleValue::create(*rust_style_value->numeric_value));
+                    return nullptr;
                 case ValueType::Length: {
                     if (!rust_style_value->dimension_unit.has_value())
                         return nullptr;
@@ -271,6 +283,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 default:
                     return nullptr;
                 }
+            };
+            auto materialize_rust_ratio_value = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->value_type.has_value()
+                    || *rust_style_value->value_type != ValueType::Ratio
+                    || rust_style_value->primitive_kind != FFI::CssPrimitiveValueKind::Ratio
+                    || !rust_style_value->numeric_value.has_value()
+                    || !rust_style_value->secondary_numeric_value.has_value())
+                    return nullptr;
+
+                return RatioStyleValue::create(
+                    NumberStyleValue::create(*rust_style_value->numeric_value),
+                    NumberStyleValue::create(*rust_style_value->secondary_numeric_value));
             };
 
             switch (rust_style_value->kind) {
@@ -307,13 +331,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
                     } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Number
                         && rust_style_value->numeric_value.has_value()
-                        && !first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
+                        && !first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = NumberStyleValue::create(*rust_style_value->numeric_value);
-                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
+                    } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Ratio) {
+                        tokens.discard_a_token();
+                        if (rust_style_value->ratio_has_denominator) {
+                            tokens.discard_whitespace();
+                            tokens.discard_a_token();
+                            tokens.discard_whitespace();
+                            tokens.discard_a_token();
+                        }
+                        maybe_parsed_value = materialize_rust_ratio_value();
+                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();
-                    } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
+                    } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
                     } else {
                         maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);

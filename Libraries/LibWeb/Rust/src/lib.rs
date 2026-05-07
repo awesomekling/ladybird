@@ -559,6 +559,8 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
         primitive_kind: CssPrimitiveValueKind,
         has_numeric_value: bool,
         numeric_value: f64,
+        has_secondary_numeric_value: bool,
+        secondary_numeric_value: f64,
         value: *const u8,
         value_len: usize,
         value_type: *const u8,
@@ -577,7 +579,15 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
             css_parser::parse_style_value_for_property(
                 property_ids,
                 input,
-                |kind, property_id, primitive_kind, has_numeric_value, numeric_value, value, value_type| {
+                |kind,
+                 property_id,
+                 primitive_kind,
+                 has_numeric_value,
+                 numeric_value,
+                 has_secondary_numeric_value,
+                 secondary_numeric_value,
+                 value,
+                 value_type| {
                     callback(
                         ctx,
                         kind,
@@ -585,6 +595,8 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                         primitive_kind,
                         has_numeric_value,
                         numeric_value,
+                        has_secondary_numeric_value,
+                        secondary_numeric_value,
                         value.as_ptr(),
                         value.len(),
                         value_type.as_ptr(),
@@ -1384,6 +1396,8 @@ pub unsafe extern "C" fn rust_css_parse_ratio_prefix(input: *const u8, input_len
                 return CssRatioValue {
                     kind: CssRatioValueKind::Invalid,
                     has_denominator: false,
+                    numerator: 0.0,
+                    denominator: 0.0,
                 };
             };
 
