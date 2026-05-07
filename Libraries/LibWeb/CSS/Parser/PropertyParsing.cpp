@@ -1519,8 +1519,22 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
     Optional<PositionEdge> relative_edge {};
 
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
     if (!tokens.has_next_token())
         return nullptr;
+
+    auto validate_parsed_position_longhand = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
+        if (!value)
+            return nullptr;
+
+        auto serialized_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto is_horizontal = property == PropertyID::BackgroundPositionX;
+        if (RustComponentValueParser::parse_background_position_longhand(serialized_position.bytes_as_string_view(), "utf-8"sv, is_horizontal) == FFI::CssPositionValueKind::Invalid)
+            return nullptr;
+
+        transaction.commit();
+        return value;
+    };
 
     auto value = parse_css_value_for_property(property, tokens);
     if (!value)
@@ -1529,8 +1543,7 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
     if (value->is_keyword()) {
         auto keyword = value->to_keyword();
         if (keyword == Keyword::Center) {
-            transaction.commit();
-            return EdgeStyleValue::create(PositionEdge::Center, {});
+            return validate_parsed_position_longhand(EdgeStyleValue::create(PositionEdge::Center, {}));
         }
         if (auto edge = keyword_to_position_edge(keyword); edge.has_value()) {
             relative_edge = edge;
@@ -1540,36 +1553,44 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
 
         value = parse_length_percentage_value(tokens, infinite_range, infinite_range);
         if (!value) {
-            transaction.commit();
-            return EdgeStyleValue::create(relative_edge, {});
+            return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, {}));
         }
     }
 
-    transaction.commit();
-    return EdgeStyleValue::create(relative_edge, value);
+    return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, value));
 }
 
 RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID property, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+
+    auto validate_parsed_background_size = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
+        if (!value)
+            return nullptr;
+
+        auto serialized_background_size = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        if (RustComponentValueParser::parse_background_size(serialized_background_size.bytes_as_string_view(), "utf-8"sv) == FFI::CssBackgroundSizeValueKind::Invalid)
+            return nullptr;
+
+        transaction.commit();
+        return value;
+    };
 
     auto maybe_x_value = parse_css_value_for_property(property, tokens);
     if (!maybe_x_value)
         return nullptr;
 
     if (maybe_x_value->to_keyword() == Keyword::Cover || maybe_x_value->to_keyword() == Keyword::Contain) {
-        transaction.commit();
-        return maybe_x_value;
+        return validate_parsed_background_size(maybe_x_value);
     }
 
     auto maybe_y_value = parse_css_value_for_property(property, tokens);
     if (!maybe_y_value) {
-        transaction.commit();
-        return BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), KeywordStyleValue::create(Keyword::Auto));
+        return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), KeywordStyleValue::create(Keyword::Auto)));
     }
 
-    transaction.commit();
-    return BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), maybe_y_value.release_nonnull());
+    return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), maybe_y_value.release_nonnull()));
 }
 
 // https://drafts.csswg.org/css-backgrounds-3/#propdef-border

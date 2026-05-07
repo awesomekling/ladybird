@@ -1121,6 +1121,13 @@ pub enum CssPositionValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssBackgroundSizeValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -5247,6 +5254,94 @@ fn is_horizontal_position_edge(edge: PositionEdge, accept_center: bool) -> bool 
 
 fn is_vertical_position_edge(edge: PositionEdge, accept_center: bool) -> bool {
     matches!(edge, PositionEdge::Top | PositionEdge::Bottom) || (accept_center && edge == PositionEdge::Center)
+}
+
+pub(crate) fn parse_background_position_longhand_value(
+    filtered_input: &[u8],
+    is_horizontal: bool,
+) -> CssPositionValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    if consume_background_position_longhand_value(&mut parser, is_horizontal)
+        && parser_has_no_remaining_component_values(&mut parser)
+    {
+        CssPositionValueKind::Valid
+    } else {
+        CssPositionValueKind::Invalid
+    }
+}
+
+fn consume_background_position_longhand_value(parser: &mut ComponentValueParser, is_horizontal: bool) -> bool {
+    // https://drafts.csswg.org/css-backgrounds-4/#propdef-background-position-x
+    // background-position-x = [ center | [ left | right | x-start | x-end ]? <length-percentage>? ]#
+    //
+    // https://drafts.csswg.org/css-backgrounds-4/#propdef-background-position-y
+    // background-position-y = [ center | [ top | bottom | y-start | y-end ]? <length-percentage>? ]#
+    if consume_optional_ident_matching(parser, "center") {
+        return true;
+    }
+
+    let parsed_edge = if is_horizontal {
+        consume_optional_ident_matching(parser, "left")
+            || consume_optional_ident_matching(parser, "right")
+            || consume_optional_ident_matching(parser, "x-start")
+            || consume_optional_ident_matching(parser, "x-end")
+    } else {
+        consume_optional_ident_matching(parser, "top")
+            || consume_optional_ident_matching(parser, "bottom")
+            || consume_optional_ident_matching(parser, "y-start")
+            || consume_optional_ident_matching(parser, "y-end")
+    };
+
+    let parsed_offset = consume_length_percentage_component_value(parser);
+    parsed_edge || parsed_offset
+}
+
+pub(crate) fn parse_background_size_value(filtered_input: &[u8]) -> CssBackgroundSizeValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    if consume_background_size_value(&mut parser) && parser_has_no_remaining_component_values(&mut parser) {
+        CssBackgroundSizeValueKind::Valid
+    } else {
+        CssBackgroundSizeValueKind::Invalid
+    }
+}
+
+fn consume_background_size_value(parser: &mut ComponentValueParser) -> bool {
+    // https://drafts.csswg.org/css-backgrounds-3/#typedef-bg-size
+    // <bg-size> = [ <length-percentage [0,∞]> | auto ]{1,2} | cover | contain
+    if consume_optional_ident_matching(parser, "cover") || consume_optional_ident_matching(parser, "contain") {
+        return true;
+    }
+
+    if !consume_background_size_component(parser) {
+        return false;
+    }
+
+    consume_background_size_component(parser);
+    true
+}
+
+fn consume_background_size_component(parser: &mut ComponentValueParser) -> bool {
+    consume_optional_ident_matching(parser, "auto") || consume_non_negative_length_percentage_component_value(parser)
+}
+
+fn consume_non_negative_length_percentage_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_non_negative_length_percentage(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
 }
 
 pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
@@ -14372,11 +14467,11 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
-        CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBasicShapeValueKind,
-        CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue, CssContainValueKind,
-        CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
-        CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind,
-        CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+        CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
+        CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue,
+        CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
+        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
+        CssEasingValueKind, CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
         CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
         CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
         CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind,
@@ -14412,11 +14507,12 @@ mod tests {
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_basic_shape_value,
-        parse_color_scheme_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
-        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
+        parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
+        parse_background_size_value, parse_basic_shape_value, parse_color_scheme_value, parse_contain_value,
+        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
+        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
+        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_easing_value,
+        parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
         parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
@@ -15041,6 +15137,18 @@ mod tests {
 
     fn parse_background_position(input: &str) -> CssPositionValueKind {
         parse_position_value(input.as_bytes(), true)
+    }
+
+    fn parse_background_position_x(input: &str) -> CssPositionValueKind {
+        parse_background_position_longhand_value(input.as_bytes(), true)
+    }
+
+    fn parse_background_position_y(input: &str) -> CssPositionValueKind {
+        parse_background_position_longhand_value(input.as_bytes(), false)
+    }
+
+    fn parse_background_size(input: &str) -> CssBackgroundSizeValueKind {
+        parse_background_size_value(input.as_bytes())
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -18061,6 +18169,82 @@ mod tests {
         assert_eq!(parse_position("left 10px 50%"), CssPositionValueKind::Invalid);
         assert_eq!(parse_position("right 11% 100%"), CssPositionValueKind::Invalid);
         assert_eq!(parse_position("left / cover"), CssPositionValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_background_position_longhand_values() {
+        assert_eq!(parse_background_position_x("center"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_x("left -20%"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_x("right 10px"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_x("x-start"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_x("x-end 1px"), CssPositionValueKind::Valid);
+        assert_eq!(
+            parse_background_position_x("calc(10px - 0.5em)"),
+            CssPositionValueKind::Valid
+        );
+
+        assert_eq!(parse_background_position_y("center"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_y("top -20%"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_y("bottom 10px"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_y("y-start"), CssPositionValueKind::Valid);
+        assert_eq!(parse_background_position_y("y-end 1px"), CssPositionValueKind::Valid);
+        assert_eq!(
+            parse_background_position_y("calc(10px - 0.5em)"),
+            CssPositionValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_background_position_longhand_values() {
+        assert_eq!(parse_background_position_x("top"), CssPositionValueKind::Invalid);
+        assert_eq!(
+            parse_background_position_x("center 10px"),
+            CssPositionValueKind::Invalid
+        );
+        assert_eq!(parse_background_position_x("20% left"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_background_position_x("right left"), CssPositionValueKind::Invalid);
+        assert_eq!(
+            parse_background_position_x("x-start center"),
+            CssPositionValueKind::Invalid
+        );
+
+        assert_eq!(parse_background_position_y("left"), CssPositionValueKind::Invalid);
+        assert_eq!(
+            parse_background_position_y("center 10px"),
+            CssPositionValueKind::Invalid
+        );
+        assert_eq!(parse_background_position_y("20% top"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_background_position_y("bottom top"), CssPositionValueKind::Invalid);
+        assert_eq!(
+            parse_background_position_y("y-start center"),
+            CssPositionValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_background_size_values() {
+        assert_eq!(parse_background_size("auto"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(parse_background_size("cover"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(parse_background_size("contain"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(parse_background_size("1px"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(parse_background_size("2% 3%"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(parse_background_size("auto 1px"), CssBackgroundSizeValueKind::Valid);
+        assert_eq!(
+            parse_background_size("calc(10px + 5%) auto"),
+            CssBackgroundSizeValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_background_size_values() {
+        assert_eq!(parse_background_size(""), CssBackgroundSizeValueKind::Invalid);
+        assert_eq!(parse_background_size("-1px"), CssBackgroundSizeValueKind::Invalid);
+        assert_eq!(parse_background_size("2% -3%"), CssBackgroundSizeValueKind::Invalid);
+        assert_eq!(parse_background_size("cover 1px"), CssBackgroundSizeValueKind::Invalid);
+        assert_eq!(
+            parse_background_size("1px 2px 3px"),
+            CssBackgroundSizeValueKind::Invalid
+        );
     }
 
     #[test]

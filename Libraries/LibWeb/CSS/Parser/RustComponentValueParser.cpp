@@ -3338,6 +3338,27 @@ FFI::CssPositionValueKind RustComponentValueParser::parse_position(StringView in
         allow_background_position_3_value_syntax);
 }
 
+FFI::CssPositionValueKind RustComponentValueParser::parse_background_position_longhand(StringView input, StringView encoding, bool is_horizontal)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_background_position_longhand(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        is_horizontal);
+}
+
+FFI::CssBackgroundSizeValueKind RustComponentValueParser::parse_background_size(StringView input, StringView encoding)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_background_size(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size());
+}
+
 FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_translate(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

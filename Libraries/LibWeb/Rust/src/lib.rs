@@ -38,21 +38,22 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use css_parser::{
     CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssAttributeCaseType,
-    CssAttributeMatchType, CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValue,
-    CssColorSchemeValueKind, CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind,
-    CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
-    CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssEasingValueKind,
-    CssFitContentValueKind, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind,
-    CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
-    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaFeature, CssMediaFeatureComparison,
-    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
-    CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-    CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
-    CssPrimitiveValueOptions, CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue,
-    CssRatioValueKind, CssRectValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
+    CssAttributeMatchType, CssBackgroundSizeValueKind, CssBasicShapeValueKind, CssBooleanExpressionEventKind,
+    CssColorSchemeValue, CssColorSchemeValueKind, CssComponentValue, CssComponentValueKind, CssContainValue,
+    CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
+    CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
+    CssDeclaration, CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind, CssFontLanguageOverrideKind,
+    CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+    CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
+    CssGridTrackSizeListValueKind, CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind,
+    CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind,
+    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue,
+    CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind,
+    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
+    CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
+    CssRectValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
     CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
     CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
     CssSimpleSelectorKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
@@ -1458,6 +1459,43 @@ pub unsafe extern "C" fn rust_css_parse_position(
             };
 
             css_parser::parse_position_value(input, allow_background_position_3_value_syntax)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_background_position_longhand(
+    input: *const u8,
+    input_len: usize,
+    is_horizontal: bool,
+) -> CssPositionValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPositionValueKind::Invalid;
+            };
+
+            css_parser::parse_background_position_longhand_value(input, is_horizontal)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_background_size(
+    input: *const u8,
+    input_len: usize,
+) -> CssBackgroundSizeValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssBackgroundSizeValueKind::Invalid;
+            };
+
+            css_parser::parse_background_size_value(input)
         })
     }
 }
