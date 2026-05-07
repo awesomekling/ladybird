@@ -125,6 +125,17 @@ RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenSt
                 if (!parsed_value || value_tokens.has_next_token())
                     return {};
 
+                if (first_is_one_of(item.property_id,
+                        PropertyID::AnimationName,
+                        PropertyID::ScrollTimelineName,
+                        PropertyID::TransitionBehavior,
+                        PropertyID::TransitionProperty,
+                        PropertyID::ViewTimelineName)
+                    && parsed_value->is_value_list()
+                    && parsed_value->as_value_list().size() == 1) {
+                    parsed_value = parsed_value->as_value_list().values()[0];
+                }
+
                 parsed_layers[item.layer_index].set(item.property_id, parsed_value.release_nonnull());
             }
 
@@ -6049,8 +6060,9 @@ RefPtr<StyleValue const> Parser::parse_scroll_timeline_value(TokenStream<Compone
 
         tokens.discard_whitespace();
 
-        auto maybe_name = parse_css_value_for_property(PropertyID::ScrollTimelineName, tokens);
-
+        auto maybe_name = parse_specific_keyword_value(tokens, Keyword::None);
+        if (!maybe_name)
+            maybe_name = parse_dashed_ident_value(tokens);
         if (!maybe_name)
             return nullptr;
 
@@ -7230,8 +7242,9 @@ RefPtr<StyleValue const> Parser::parse_view_timeline_value(TokenStream<Component
 
         tokens.discard_whitespace();
 
-        auto maybe_name = parse_css_value_for_property(PropertyID::ViewTimelineName, tokens);
-
+        auto maybe_name = parse_specific_keyword_value(tokens, Keyword::None);
+        if (!maybe_name)
+            maybe_name = parse_dashed_ident_value(tokens);
         if (!maybe_name)
             return nullptr;
 

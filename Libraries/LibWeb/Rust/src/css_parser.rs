@@ -2763,6 +2763,14 @@ pub(crate) fn parse_rust_owned_style_value_for_property(
     property_ids: &[u16],
     filtered_input: &[u8],
 ) -> RustOwnedStyleValueParseResult {
+    parse_rust_owned_style_value_for_property_with_mode(property_ids, filtered_input, false)
+}
+
+fn parse_rust_owned_style_value_for_property_with_mode(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+    is_coordinating_shorthand_item: bool,
+) -> RustOwnedStyleValueParseResult {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
@@ -2771,6 +2779,26 @@ pub(crate) fn parse_rust_owned_style_value_for_property(
         let Some(property_id) = property_id_from_u16(*property_id) else {
             continue;
         };
+        // AD-HOC: These list-valued longhands parse to complete StyleValueLists
+        // when materialized in C++. During coordinating shorthand parsing we
+        // need one layer item at a time, since the shorthand parser wraps each
+        // longhand's layer items into the final outer comma-separated list.
+        //
+        // This also keeps `animation-name`, which accepts arbitrary custom
+        // identifiers, from stealing keywords such as `ease-in` from the other
+        // animation longhands while parsing the `animation` shorthand.
+        if is_coordinating_shorthand_item
+            && matches!(
+                property_id,
+                PropertyId::AnimationName
+                    | PropertyId::ScrollTimelineName
+                    | PropertyId::TransitionBehavior
+                    | PropertyId::TransitionProperty
+                    | PropertyId::ViewTimelineName
+            )
+        {
+            continue;
+        }
         if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
         }
@@ -2867,6 +2895,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackgroundSize | PropertyId::MaskSize => {
             rust_owned_background_size_style_value_kind(filtered_input)
         }
+        PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
@@ -2900,6 +2929,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
         PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
+        PropertyId::ScrollTimelineName | PropertyId::ViewTimelineName => {
+            rust_owned_timeline_name_style_value_kind(filtered_input)
+        }
         PropertyId::TimelineScope => rust_owned_timeline_scope_style_value_kind(filtered_input),
         PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
         PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
@@ -2910,6 +2942,8 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::Rotate | PropertyId::Scale | PropertyId::Translate => {
             rust_owned_transform_longhand_style_value_kind(property_id, filtered_input)
         }
+        PropertyId::TransitionBehavior => rust_owned_transition_behavior_style_value_kind(filtered_input),
+        PropertyId::TransitionProperty => rust_owned_transition_property_style_value_kind(filtered_input),
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
         PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
@@ -6007,7 +6041,11 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
             )?;
 
             let RustOwnedStyleValueParseResult::Parsed(style_value) =
-                parse_rust_owned_style_value_for_property(&remaining_property_ids, serialized_value.as_bytes())
+                parse_rust_owned_style_value_for_property_with_mode(
+                    &remaining_property_ids,
+                    serialized_value.as_bytes(),
+                    true,
+                )
             else {
                 return None;
             };
@@ -21017,22 +21055,24 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
-        RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeKind, RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent,
+        RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
+        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
+        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -23224,6 +23264,89 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AnimationName], "foo, \"none\", Both"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AnimationName,
+                value: RustOwnedStyleValueKind::AnimationName(RustOwnedAnimationName {
+                    kind: CssAnimationNameValueKind::List,
+                    names: vec![
+                        RustOwnedAnimationNameItem {
+                            kind: CssAnimationNameItemKind::CustomIdent,
+                            value: "foo".to_string(),
+                        },
+                        RustOwnedAnimationNameItem {
+                            kind: CssAnimationNameItemKind::String,
+                            value: "none".to_string(),
+                        },
+                        RustOwnedAnimationNameItem {
+                            kind: CssAnimationNameItemKind::CustomIdent,
+                            value: "Both".to_string(),
+                        },
+                    ],
+                    source: "foo, \"none\", Both".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ScrollTimelineName], "none, --track"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ScrollTimelineName,
+                value: RustOwnedStyleValueKind::TimelineName(RustOwnedTimelineName {
+                    kind: CssTimelineNameValueKind::List,
+                    names: vec![
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::None,
+                            name: String::new(),
+                        },
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::DashedIdent,
+                            name: "--track".to_string(),
+                        },
+                    ],
+                    source: "none, --track".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ViewTimelineName], "--view"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ViewTimelineName,
+                value: RustOwnedStyleValueKind::TimelineName(RustOwnedTimelineName {
+                    kind: CssTimelineNameValueKind::List,
+                    names: vec![RustOwnedTimelineNameItem {
+                        kind: CssTimelineNameItemKind::DashedIdent,
+                        name: "--view".to_string(),
+                    }],
+                    source: "--view".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransitionBehavior], "normal, allow-discrete"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransitionBehavior,
+                value: RustOwnedStyleValueKind::TransitionBehavior(RustOwnedTransitionBehavior {
+                    kind: CssTransitionBehaviorValueKind::List,
+                    behaviors: vec![
+                        CssTransitionBehaviorItemKind::Normal,
+                        CssTransitionBehaviorItemKind::AllowDiscrete,
+                    ],
+                    source: "normal, allow-discrete".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransitionProperty], "all, opacity"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransitionProperty,
+                value: RustOwnedStyleValueKind::TransitionProperty(RustOwnedTransitionProperty {
+                    kind: CssTransitionPropertyValueKind::List,
+                    properties: vec!["all".to_string(), "opacity".to_string()],
+                    source: "all, opacity".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TextWrap], "pretty nowrap"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextWrap,
@@ -23681,14 +23804,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::AnimationName], "slide"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::CustomIdent,
+                kind: CssStyleValueKind::AnimationName,
                 property_id: PropertyId::AnimationName,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
                 value: "slide".to_string(),
-                value_type: "CustomIdent".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
@@ -23824,14 +23947,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::AnimationName], "\"slide\""),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::AnimationName,
                 property_id: PropertyId::AnimationName,
-                primitive_kind: CssPrimitiveValueKind::String,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "slide".to_string(),
-                value_type: "String".to_string(),
+                value: "\"slide\"".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(
