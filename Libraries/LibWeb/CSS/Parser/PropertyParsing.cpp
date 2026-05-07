@@ -1671,9 +1671,27 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecoration:
-                if (auto value = parse_text_decoration_value(tokens)) {
+                if (rust_style_value->text_decoration_line_source.has_value() || rust_style_value->text_decoration_thickness_source.has_value() || rust_style_value->text_decoration_style_source.has_value() || rust_style_value->text_decoration_color_source.has_value()) {
+                    auto decoration_line = rust_style_value->text_decoration_line_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::TextDecorationLine, *rust_style_value->text_decoration_line_source)
+                        : property_initial_value(PropertyID::TextDecorationLine);
+                    auto decoration_thickness = rust_style_value->text_decoration_thickness_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::TextDecorationThickness, *rust_style_value->text_decoration_thickness_source)
+                        : property_initial_value(PropertyID::TextDecorationThickness);
+                    auto decoration_style = rust_style_value->text_decoration_style_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::TextDecorationStyle, *rust_style_value->text_decoration_style_source)
+                        : property_initial_value(PropertyID::TextDecorationStyle);
+                    auto decoration_color = rust_style_value->text_decoration_color_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::TextDecorationColor, *rust_style_value->text_decoration_color_source)
+                        : property_initial_value(PropertyID::TextDecorationColor);
+                    if (!decoration_line || !decoration_thickness || !decoration_style || !decoration_color)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::TextDecoration,
+                            { PropertyID::TextDecorationLine, PropertyID::TextDecorationThickness, PropertyID::TextDecorationStyle, PropertyID::TextDecorationColor },
+                            { decoration_line.release_nonnull(), decoration_thickness.release_nonnull(), decoration_style.release_nonnull(), decoration_color.release_nonnull() }) };
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecorationLine:

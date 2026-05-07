@@ -2041,9 +2041,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ShapeOutside {
         source: String,
     },
-    TextDecoration {
-        source: String,
-    },
+    TextDecoration(RustOwnedTextDecoration),
     TextDecorationLine(RustOwnedTextDecorationLine),
     ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
@@ -2478,6 +2476,14 @@ pub(crate) struct RustOwnedTextUnderlinePosition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RustOwnedTextDecorationLine {
     bits: u8,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextDecoration {
+    line_source: Option<String>,
+    thickness_source: Option<String>,
+    style_source: Option<String>,
+    color_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4716,13 +4722,70 @@ fn rust_owned_shape_outside_style_value_kind(filtered_input: &[u8]) -> Option<Ru
 }
 
 fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_text_decoration_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    if component_values.is_empty() {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TextDecoration {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let mut line_component_values = Vec::new();
+    let mut thickness_source = None;
+    let mut style_source = None;
+    let mut color_source = None;
+
+    for component_value in &component_values {
+        if component_value_is_text_decoration_line(component_value) {
+            line_component_values.push(component_value.clone());
+            continue;
+        }
+
+        if style_source.is_none() && component_value_is_text_decoration_style(component_value) {
+            style_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if thickness_source.is_none() && component_value_parse_as_text_decoration_thickness(component_value) {
+            thickness_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if color_source.is_none() && component_value_parse_as_color_value(component_value) {
+            color_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-text-decor-4/#text-decoration-property
+    // <'text-decoration-line'> || <'text-decoration-thickness'> || <'text-decoration-style'> || <'text-decoration-color'>
+    let line_source = if line_component_values.is_empty() {
+        None
+    } else if component_values_parse_as_text_decoration_line(&line_component_values).is_some() {
+        Some(serialize_component_values_for_reparsing(
+            &line_component_values,
+            filtered_input_string,
+        )?)
+    } else {
+        return None;
+    };
+
+    Some(RustOwnedStyleValueKind::TextDecoration(RustOwnedTextDecoration {
+        line_source,
+        thickness_source,
+        style_source,
+        color_source,
+    }))
 }
 
 fn rust_owned_text_decoration_line_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6147,8 +6210,35 @@ where
         RustOwnedStyleValueKind::ShapeOutside { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ShapeOutside, property_id, source);
         }
-        RustOwnedStyleValueKind::TextDecoration { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::TextDecoration, property_id, source);
+        RustOwnedStyleValueKind::TextDecoration(value) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TextDecoration,
+                property_id,
+                0,
+                value.line_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TextDecoration,
+                property_id,
+                1,
+                value.thickness_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TextDecoration,
+                property_id,
+                2,
+                value.style_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TextDecoration,
+                property_id,
+                3,
+                value.color_source.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::TextDecorationLine(value) => callback(
             CssStyleValueKind::TextDecorationLine,
@@ -23770,7 +23860,7 @@ mod tests {
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
         RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
         RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
@@ -26324,6 +26414,18 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextDecoration], "overline green from-font"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextDecoration,
+                value: RustOwnedStyleValueKind::TextDecoration(RustOwnedTextDecoration {
+                    line_source: Some("overline".to_string()),
+                    thickness_source: Some("from-font".to_string()),
+                    style_source: None,
+                    color_source: Some("green".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TextIndent], "hanging 2em each-line"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextIndent,
@@ -26978,7 +27080,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "underline red 2px".to_string(),
+                value: "red".to_string(),
                 value_type: String::new(),
             })
         );

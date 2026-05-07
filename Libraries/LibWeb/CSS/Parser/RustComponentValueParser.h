@@ -167,6 +167,10 @@ public:
         Optional<String> column_height_source;
         Optional<String> flex_direction_source;
         Optional<String> flex_wrap_source;
+        Optional<String> text_decoration_line_source;
+        Optional<String> text_decoration_thickness_source;
+        Optional<String> text_decoration_style_source;
+        Optional<String> text_decoration_color_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

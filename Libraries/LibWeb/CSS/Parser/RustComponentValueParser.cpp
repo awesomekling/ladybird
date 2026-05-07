@@ -1135,6 +1135,23 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->flex_wrap_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::TextDecoration) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::TextDecoration);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->text_decoration_line_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1)
+                    style_value->text_decoration_thickness_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 2)
+                    style_value->text_decoration_style_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->text_decoration_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1152,7 +1169,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside,
-                           FFI::CssStyleValueKind::TextDecoration,
                            FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransformOrigin)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
