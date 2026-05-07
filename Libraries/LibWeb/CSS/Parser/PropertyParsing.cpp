@@ -911,6 +911,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::MathDepth:
+                if (auto value = parse_math_depth_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::TransformLonghand:
                 switch (rust_style_value->property_id) {
                 case PropertyID::Rotate:
@@ -933,6 +939,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     break;
                 default:
                     break;
+                }
+                break;
+            case FFI::CssStyleValueKind::TransformOrigin:
+                if (auto value = parse_transform_origin_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
             case FFI::CssStyleValueKind::PaintOrder:
@@ -5834,6 +5846,30 @@ RefPtr<StyleValue const> Parser::parse_transform_origin_value(TokenStream<Compon
         return OptionalNone {};
     };
 
+    auto parse_transform_origin_component_value = [this](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+        auto transaction = tokens.begin_transaction();
+        if (auto value = parse_keyword_value(tokens)) {
+            switch (value->to_keyword()) {
+            case Keyword::Bottom:
+            case Keyword::Center:
+            case Keyword::Left:
+            case Keyword::Right:
+            case Keyword::Top:
+                transaction.commit();
+                return value;
+            default:
+                return nullptr;
+            }
+        }
+
+        if (auto value = parse_length_percentage_value(tokens, infinite_range, infinite_range)) {
+            transaction.commit();
+            return value;
+        }
+
+        return nullptr;
+    };
+
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
@@ -5844,7 +5880,7 @@ RefPtr<StyleValue const> Parser::parse_transform_origin_value(TokenStream<Compon
 
     NonnullRefPtr<StyleValue const> const zero_value = LengthStyleValue::create(Length::make_px(0));
 
-    auto first_value = to_axis_offset(parse_css_value_for_property(PropertyID::TransformOrigin, tokens));
+    auto first_value = to_axis_offset(parse_transform_origin_component_value(tokens));
     if (!first_value.has_value())
         return nullptr;
     tokens.discard_whitespace();
@@ -5860,7 +5896,7 @@ RefPtr<StyleValue const> Parser::parse_transform_origin_value(TokenStream<Compon
         VERIFY_NOT_REACHED();
     }
 
-    auto second_value = to_axis_offset(parse_css_value_for_property(PropertyID::TransformOrigin, tokens));
+    auto second_value = to_axis_offset(parse_transform_origin_component_value(tokens));
     auto third_value = parse_length_value(tokens, infinite_range);
 
     if (!first_value.has_value() || !second_value.has_value())

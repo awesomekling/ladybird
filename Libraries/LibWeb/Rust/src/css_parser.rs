@@ -1859,6 +1859,7 @@ pub enum CssStyleValueKind {
     GridAutoTrackSizes,
     GridTrackPlacement,
     GridTrackSizeList,
+    MathDepth,
     PaintOrder,
     PositionArea,
     PositionAnchor,
@@ -1880,6 +1881,7 @@ pub enum CssStyleValueKind {
     TextUnderlinePosition,
     TouchAction,
     TransformLonghand,
+    TransformOrigin,
     TransitionBehavior,
     TransitionProperty,
     ViewTimelineInset,
@@ -1955,6 +1957,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: f64,
         value_type: PropertyValueType,
     },
+    MathDepth {
+        source: String,
+    },
     OpacityValue {
         primitive_kind: CssPrimitiveValueKind,
         value: f64,
@@ -2000,6 +2005,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
     TransformLonghand(RustOwnedTransformLonghand),
+    TransformOrigin {
+        source: String,
+    },
     Transformation(RustOwnedTransformation),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
@@ -2926,6 +2934,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
+        PropertyId::MathDepth => rust_owned_math_depth_style_value_kind(filtered_input),
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
         PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
@@ -2949,6 +2958,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TextIndent => rust_owned_text_indent_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
         PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::TransformOrigin => rust_owned_transform_origin_style_value_kind(filtered_input),
         PropertyId::Rotate | PropertyId::Scale | PropertyId::Translate => {
             rust_owned_transform_longhand_style_value_kind(property_id, filtered_input)
         }
@@ -3936,6 +3946,16 @@ fn rust_owned_grid_track_size_list_style_value_kind(filtered_input: &[u8]) -> Op
     }))
 }
 
+fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_math_depth_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::MathDepth {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let value = parse_paint_order_value(filtered_input);
     if value.kind == CssPaintOrderValueKind::Invalid {
@@ -4450,6 +4470,16 @@ fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         value,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_transform_origin_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if parse_transform_origin_value(filtered_input) == CssTransformLonghandValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TransformOrigin {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_transform_longhand_style_value_kind(
@@ -5346,6 +5376,9 @@ where
             property_id,
             &value.source,
         ),
+        RustOwnedStyleValueKind::MathDepth { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::MathDepth, property_id, source);
+        }
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
             property_id,
@@ -5537,6 +5570,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::TransformOrigin { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::TransformOrigin, property_id, source);
+        }
         RustOwnedStyleValueKind::TransformLonghand(value) => callback_source_backed_style_value(
             callback,
             CssStyleValueKind::TransformLonghand,
@@ -12052,6 +12088,41 @@ pub(crate) fn parse_transform_origin_value(filtered_input: &[u8]) -> CssTransfor
     } else {
         CssTransformLonghandValueKind::Invalid
     }
+}
+
+pub(crate) fn parse_math_depth_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://w3c.github.io/mathml-core/#propdef-math-depth
+    // Value: auto-add | add(<integer>) | <integer>
+    if parser.consume_ident_matching("auto-add") {
+        return !parser.has_next_component_value();
+    }
+
+    let Some(component_value) = parser.consume_the_next_component_value() else {
+        return false;
+    };
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    if let ComponentValue::Function(function) = &component_value
+        && function.name.eq_ignore_ascii_case("add")
+    {
+        let Some(source) = serialize_component_values_for_reparsing(&function.value, filtered_input_string) else {
+            return false;
+        };
+        return component_values_parse_as_property_value_type(PropertyValueType::Integer, source.as_bytes());
+    }
+
+    let Some(source) = serialize_component_values_for_reparsing(&[component_value], filtered_input_string) else {
+        return false;
+    };
+    component_values_parse_as_property_value_type(PropertyValueType::Integer, source.as_bytes())
 }
 
 fn consume_transform_origin_component(parser: &mut ComponentValueParser) -> Option<TransformOriginComponent> {
@@ -21397,21 +21468,22 @@ mod tests {
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
-        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
-        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
-        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
-        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
-        parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
-        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
-        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_image_set_value, parse_length_descriptor, parse_math_depth_value,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
+        parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
+        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
+        parse_stroke_dasharray_value, parse_style_value_for_property, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -22099,6 +22171,10 @@ mod tests {
 
     fn parse_transform_origin(input: &str) -> CssTransformLonghandValueKind {
         parse_transform_origin_value(input.as_bytes())
+    }
+
+    fn parse_math_depth(input: &str) -> bool {
+        parse_math_depth_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -23503,6 +23579,15 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::MathDepth], "add(-2)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::MathDepth,
+                value: RustOwnedStyleValueKind::MathDepth {
+                    source: "add(-2)".to_string(),
+                },
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::PositionArea], "span-inline-end block-start"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PositionArea,
@@ -23543,6 +23628,15 @@ mod tests {
                     },
                     source: "no-overflow anchors-visible".to_string(),
                 }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransformOrigin], "right 25% 3px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransformOrigin,
+                value: RustOwnedStyleValueKind::TransformOrigin {
+                    source: "right 25% 3px".to_string(),
+                },
             })
         );
         assert_eq!(
@@ -27508,6 +27602,25 @@ mod tests {
             parse_transform_origin("left 1px 2%"),
             CssTransformLonghandValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_math_depth_values() {
+        assert!(parse_math_depth("auto-add"));
+        assert!(parse_math_depth("0"));
+        assert!(parse_math_depth("-1"));
+        assert!(parse_math_depth("add(2)"));
+        assert!(parse_math_depth("add(calc(1 + 2))"));
+    }
+
+    #[test]
+    fn rejects_invalid_math_depth_values() {
+        assert!(!parse_math_depth(""));
+        assert!(!parse_math_depth("auto-add 1"));
+        assert!(!parse_math_depth("add()"));
+        assert!(!parse_math_depth("add(1 2)"));
+        assert!(!parse_math_depth("1 2"));
+        assert!(!parse_math_depth("1px"));
     }
 
     #[test]
