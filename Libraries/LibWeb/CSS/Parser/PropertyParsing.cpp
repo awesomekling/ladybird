@@ -1124,6 +1124,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             }
+            case FFI::CssStyleValueKind::ShapeOutside:
+                if (auto value = parse_shape_outside_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::TimelineName:
                 if (auto value = parse_timeline_name_value(tokens)) {
                     generated_transaction.commit();

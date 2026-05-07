@@ -980,6 +980,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Quotes,
                            FFI::CssStyleValueKind::OverflowClipMargin,
                            FFI::CssStyleValueKind::Shadow,
+                           FFI::CssStyleValueKind::ShapeOutside,
                            FFI::CssStyleValueKind::StrokeDasharray,
                            FFI::CssStyleValueKind::TimelineName,
                            FFI::CssStyleValueKind::TimelineScope,

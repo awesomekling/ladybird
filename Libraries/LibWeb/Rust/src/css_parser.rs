@@ -1874,6 +1874,7 @@ pub enum CssStyleValueKind {
     RepeatStyle,
     OverflowClipMargin,
     Shadow,
+    ShapeOutside,
     ScrollFunction,
     ScrollbarColor,
     ScrollbarGutter,
@@ -2010,6 +2011,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     Shadow {
+        source: String,
+    },
+    ShapeOutside {
         source: String,
     },
     ScrollbarColor(RustOwnedScrollbarColor),
@@ -2997,6 +3001,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::ShapeOutside => rust_owned_shape_outside_style_value_kind(filtered_input),
         PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
         PropertyId::ScrollTimelineName | PropertyId::ViewTimelineName => {
             rust_owned_timeline_name_style_value_kind(filtered_input)
@@ -4386,6 +4391,16 @@ fn rust_owned_shadow_style_value_kind(
     })
 }
 
+fn rust_owned_shape_outside_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_shape_outside_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ShapeOutside {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
 fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -5642,6 +5657,9 @@ where
         ),
         RustOwnedStyleValueKind::Shadow { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::Shadow, property_id, source);
+        }
+        RustOwnedStyleValueKind::ShapeOutside { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::ShapeOutside, property_id, source);
         }
         RustOwnedStyleValueKind::TimelineName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
@@ -12491,6 +12509,46 @@ pub(crate) fn parse_overflow_clip_margin_value(filtered_input: &[u8]) -> bool {
     matches!(component_values, [component_value] if component_value_parse_as_non_negative_length(component_value))
 }
 
+pub(crate) fn parse_shape_outside_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-shapes-1/#shape-outside-property
+    // none | [ <basic-shape> || <shape-box> ] | <image>
+    match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
+        [] => return false,
+        _ => {}
+    }
+
+    if rust_owned_image_style_value_kind(filtered_input, filtered_input_string).is_some() {
+        return true;
+    }
+
+    let mut has_basic_shape = false;
+    let mut has_shape_box = false;
+    for component_value in &component_values {
+        let component_values = std::slice::from_ref(component_value);
+        if !has_basic_shape
+            && let Some(source) = serialize_component_values_for_reparsing(component_values, filtered_input_string)
+            && parse_basic_shape_value(source.as_bytes()) == CssBasicShapeValueKind::Valid
+        {
+            has_basic_shape = true;
+            continue;
+        }
+
+        if !has_shape_box && component_value_is_shape_box(component_value) {
+            has_shape_box = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    has_basic_shape || has_shape_box
+}
+
 fn component_values_parse_as_exact_ratio(component_values: &[ComponentValue]) -> bool {
     // https://drafts.csswg.org/css-values-4/#ratios
     // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
@@ -12525,6 +12583,20 @@ fn parse_single_column_component_value(
         parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
         RustOwnedStyleValueParseResult::Parsed(_)
     )
+}
+
+fn component_value_is_shape_box(component_value: &ComponentValue) -> bool {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    else {
+        return false;
+    };
+
+    // https://drafts.csswg.org/css-shapes-1/#typedef-shape-box
+    // <shape-box> = <box> | margin-box
+    first_is_one_of(value, &["content-box", "padding-box", "border-box", "margin-box"])
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> bool {
@@ -21967,14 +22039,14 @@ mod tests {
         parse_rect_value, parse_repeat_style_value, parse_rotate_value,
         parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
         parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_shadow_value, parse_simple_color_value, parse_string_descriptor,
-        parse_stroke_dasharray_value, parse_style_value_for_property, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
+        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -22698,6 +22770,10 @@ mod tests {
 
     fn parse_overflow_clip_margin(input: &str) -> bool {
         parse_overflow_clip_margin_value(input.as_bytes())
+    }
+
+    fn parse_shape_outside(input: &str) -> bool {
+        parse_shape_outside_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -25003,6 +25079,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "2px".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ShapeOutside], "circle(10px) border-box"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ShapeOutside,
+                property_id: PropertyId::ShapeOutside,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "circle(10px) border-box".to_string(),
                 value_type: String::new(),
             })
         );
@@ -28343,6 +28432,26 @@ mod tests {
         assert!(!parse_overflow_clip_margin("1%"));
         assert!(!parse_overflow_clip_margin("content-box"));
         assert!(!parse_overflow_clip_margin("1px 2px"));
+    }
+
+    #[test]
+    fn parses_shape_outside_values() {
+        assert!(parse_shape_outside("none"));
+        assert!(parse_shape_outside("url(shape.png)"));
+        assert!(parse_shape_outside("linear-gradient(black, white)"));
+        assert!(parse_shape_outside("inset(10px)"));
+        assert!(parse_shape_outside("circle(closest-side at center) border-box"));
+        assert!(parse_shape_outside("margin-box ellipse(10px 20px)"));
+    }
+
+    #[test]
+    fn rejects_invalid_shape_outside_values() {
+        assert!(!parse_shape_outside(""));
+        assert!(!parse_shape_outside("auto"));
+        assert!(!parse_shape_outside("none border-box"));
+        assert!(!parse_shape_outside("border-box margin-box"));
+        assert!(!parse_shape_outside("inset(10px) circle(10px)"));
+        assert!(!parse_shape_outside("url(shape.png) border-box"));
     }
 
     #[test]
