@@ -1782,13 +1782,23 @@ pub enum CssStyleValueKind {
     FitContent,
     BasicShape,
     Rect,
+    Contain,
+    ContainerType,
     GridAutoFlow,
+    PaintOrder,
+    PositionTryOrder,
+    PositionVisibility,
     RepeatStyle,
     ScrollFunction,
     ScrollbarGutter,
+    TextWrap,
+    TextWrapMode,
+    TextWrapStyle,
     TextUnderlinePosition,
+    TouchAction,
     ViewTimelineInset,
     ViewFunction,
+    WhiteSpaceTrim,
     ValueType,
 }
 
@@ -1811,6 +1821,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     ColorInterpolationMethod(RustOwnedSourceBackedStyleValue),
     ColorScheme(RustOwnedSourceBackedStyleValue),
     ConicGradient(RustOwnedSourceBackedStyleValue),
+    Contain(RustOwnedContain),
+    ContainerType(RustOwnedContainerType),
     Content(RustOwnedSourceBackedStyleValue),
     Counter(RustOwnedSourceBackedStyleValue),
     CounterStyle {
@@ -1872,11 +1884,14 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     OpenTypeTagged(RustOwnedSourceBackedStyleValue),
     PendingSubstitution(RustOwnedSourceBackedStyleValue),
+    PaintOrder(RustOwnedPaintOrder),
     Percentage {
         value: f64,
         value_type: PropertyValueType,
     },
     Position(RustOwnedSourceBackedStyleValue),
+    PositionTryOrder(RustOwnedPositionTryOrder),
+    PositionVisibility(RustOwnedPositionVisibility),
     RadialGradient(RustOwnedSourceBackedStyleValue),
     RadialSize(RustOwnedSourceBackedStyleValue),
     RandomValueSharing(RustOwnedSourceBackedStyleValue),
@@ -1897,9 +1912,13 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Superellipse(RustOwnedSourceBackedStyleValue),
+    TextWrap(RustOwnedTextWrap),
+    TextWrapMode(RustOwnedTextWrapMode),
+    TextWrapStyle(RustOwnedTextWrapStyle),
     TextIndent(RustOwnedSourceBackedStyleValue),
     TextUnderlinePosition(RustOwnedTextUnderlinePosition),
     Time(RustOwnedDimensionStyleValue),
+    TouchAction(RustOwnedTouchAction),
     Transformation(RustOwnedSourceBackedStyleValue),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     Tuple(RustOwnedStyleValueList),
@@ -1925,6 +1944,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FitContent(RustOwnedFitContent),
     BasicShape(RustOwnedSourceBackedStyleValue),
     Rect(RustOwnedRect),
+    WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
     ScrollFunction {
         scroller: CssScrollFunctionScrollerKind,
         axis: CssScrollFunctionAxisKind,
@@ -2058,6 +2078,36 @@ pub(crate) struct RustOwnedGridAutoFlow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedContain {
+    value: CssContainValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedContainerType {
+    value: CssContainerTypeValueKind,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPaintOrder {
+    value: CssPaintOrderValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionTryOrder {
+    value: CssPositionTryOrderValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionVisibility {
+    value: CssPositionVisibilityValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRepeatStyle {
     repeat_x: CssRepeatStyleRepetition,
     repeat_y: CssRepeatStyleRepetition,
@@ -2073,6 +2123,36 @@ pub(crate) struct RustOwnedScrollbarGutter {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
     value: CssTextUnderlinePositionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextWrap {
+    value: CssTextWrapValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextWrapMode {
+    value: CssTextWrapModeValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextWrapStyle {
+    value: CssTextWrapStyleValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTouchAction {
+    value: CssTouchActionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedWhiteSpaceTrim {
+    value: CssWhiteSpaceTrimValue,
     source: String,
 }
 
@@ -2422,12 +2502,22 @@ fn parse_rust_owned_property_specific_longhand_value(
     filtered_input: &[u8],
 ) -> Option<RustOwnedStyleValueKind> {
     match property_id {
+        PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
+        PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
         PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
+        PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::PositionTryOrder => rust_owned_position_try_order_style_value_kind(filtered_input),
+        PropertyId::PositionVisibility => rust_owned_position_visibility_style_value_kind(filtered_input),
         PropertyId::BackgroundRepeat | PropertyId::MaskRepeat => {
             rust_owned_repeat_style_style_value_kind(filtered_input)
         }
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
+        PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
+        PropertyId::TextWrapStyle => rust_owned_text_wrap_style_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
+        PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
         _ => None,
     }
 }
@@ -2816,6 +2906,30 @@ fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedSty
     Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
 }
 
+fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_contain_value(filtered_input);
+    if value.kind == CssContainValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Contain(RustOwnedContain {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_container_type_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_container_type_value(filtered_input);
+    if value == CssContainerTypeValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
 fn rust_owned_grid_auto_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -2859,6 +2973,44 @@ fn consume_optional_grid_auto_flow_axis_value(parser: &mut ComponentValueParser)
         return Some(CssGridAutoFlowAxis::Column);
     }
     None
+}
+
+fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_paint_order_value(filtered_input);
+    if value.kind == CssPaintOrderValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PaintOrder(RustOwnedPaintOrder {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_position_try_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_position_try_order_value(filtered_input);
+    if value == CssPositionTryOrderValue::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionTryOrder(RustOwnedPositionTryOrder {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_position_visibility_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_position_visibility_value(filtered_input);
+    if value.kind == CssPositionVisibilityValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionVisibility(
+        RustOwnedPositionVisibility {
+            value,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
 }
 
 fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -2944,6 +3096,66 @@ fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) ->
             source: filtered_input_to_string(filtered_input),
         },
     ))
+}
+
+fn rust_owned_text_wrap_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_text_wrap_value(filtered_input);
+    if value.kind == CssTextWrapValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextWrap(RustOwnedTextWrap {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_text_wrap_mode_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_text_wrap_mode_value(filtered_input);
+    if value == CssTextWrapModeValue::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextWrapMode(RustOwnedTextWrapMode {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_text_wrap_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_text_wrap_style_value(filtered_input);
+    if value == CssTextWrapStyleValue::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_touch_action_value(filtered_input);
+    if value.kind == CssTouchActionValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TouchAction(RustOwnedTouchAction {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_white_space_trim_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_white_space_trim_value(filtered_input);
+    if value.kind == CssWhiteSpaceTrimValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::WhiteSpaceTrim(RustOwnedWhiteSpaceTrim {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
 }
 
 fn rust_owned_font_variant_alternates_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
@@ -3564,6 +3776,40 @@ where
                 PropertyValueType::FontStyle,
             );
         }
+        RustOwnedStyleValueKind::Contain(value) => callback(
+            CssStyleValueKind::Contain,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.kind as u8,
+            (value.value.is_size as u8)
+                | ((value.value.is_inline_size as u8) << 1)
+                | ((value.value.has_layout as u8) << 2)
+                | ((value.value.has_style as u8) << 3)
+                | ((value.value.has_paint as u8) << 4),
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::ContainerType(value) => callback(
+            CssStyleValueKind::ContainerType,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
         RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
             CssStyleValueKind::GridAutoFlow,
             property_id,
@@ -3574,6 +3820,53 @@ where
             0.0,
             value.axis as u8,
             value.dense as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::PaintOrder(value) => callback(
+            CssStyleValueKind::PaintOrder,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.kind as u8,
+            value.value.first as u8,
+            value.value.second as u8,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::PositionTryOrder(value) => callback(
+            CssStyleValueKind::PositionTryOrder,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::PositionVisibility(value) => callback(
+            CssStyleValueKind::PositionVisibility,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.kind as u8,
+            (value.value.has_anchors_valid as u8)
+                | ((value.value.has_anchors_visible as u8) << 1)
+                | ((value.value.has_no_overflow as u8) << 2),
             0,
             0,
             &[],
@@ -3609,6 +3902,51 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::TextWrap(value) => callback(
+            CssStyleValueKind::TextWrap,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.mode as u8,
+            value.value.style as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::TextWrapMode(value) => callback(
+            CssStyleValueKind::TextWrapMode,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::TextWrapStyle(value) => callback(
+            CssStyleValueKind::TextWrapStyle,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
         RustOwnedStyleValueKind::TextUnderlinePosition(value) => callback(
             CssStyleValueKind::TextUnderlinePosition,
             property_id,
@@ -3619,6 +3957,38 @@ where
             0.0,
             value.value.horizontal as u8,
             value.value.vertical as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::TouchAction(value) => callback(
+            CssStyleValueKind::TouchAction,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.kind as u8,
+            value.value.first as u8,
+            value.value.second as u8,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::WhiteSpaceTrim(value) => callback(
+            CssStyleValueKind::WhiteSpaceTrim,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.kind as u8,
+            (value.value.has_discard_before as u8)
+                | ((value.value.has_discard_after as u8) << 1)
+                | ((value.value.has_discard_inner as u8) << 2),
             0,
             0,
             &[],
@@ -18748,15 +19118,17 @@ mod tests {
         FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue,
+        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
         RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
         RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextUnderlinePosition, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -20575,6 +20947,33 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Contain], "inline-size layout paint"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Contain,
+                value: RustOwnedStyleValueKind::Contain(RustOwnedContain {
+                    value: CssContainValue {
+                        kind: CssContainValueKind::List,
+                        is_size: false,
+                        is_inline_size: true,
+                        has_layout: true,
+                        has_style: false,
+                        has_paint: true,
+                    },
+                    source: "inline-size layout paint".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ContainerType], "inline-size scroll-state"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ContainerType,
+                value: RustOwnedStyleValueKind::ContainerType(RustOwnedContainerType {
+                    value: CssContainerTypeValueKind::InlineSizeAndScrollState,
+                    source: "inline-size scroll-state".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::GridAutoFlow], "dense column"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::GridAutoFlow,
@@ -20582,6 +20981,45 @@ mod tests {
                     axis: CssGridAutoFlowAxis::Column,
                     dense: CssGridAutoFlowDense::Yes,
                     source: "dense column".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PaintOrder], "markers stroke"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PaintOrder,
+                value: RustOwnedStyleValueKind::PaintOrder(RustOwnedPaintOrder {
+                    value: CssPaintOrderValue {
+                        kind: CssPaintOrderValueKind::Pair,
+                        first: CssPaintOrderKeyword::Markers,
+                        second: CssPaintOrderKeyword::Stroke,
+                    },
+                    source: "markers stroke".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PositionTryOrder], "most-inline-size"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PositionTryOrder,
+                value: RustOwnedStyleValueKind::PositionTryOrder(RustOwnedPositionTryOrder {
+                    value: CssPositionTryOrderValue::MostInlineSize,
+                    source: "most-inline-size".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PositionVisibility], "no-overflow anchors-visible"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PositionVisibility,
+                value: RustOwnedStyleValueKind::PositionVisibility(RustOwnedPositionVisibility {
+                    value: CssPositionVisibilityValue {
+                        kind: CssPositionVisibilityValueKind::List,
+                        has_anchors_valid: false,
+                        has_anchors_visible: true,
+                        has_no_overflow: true,
+                    },
+                    source: "no-overflow anchors-visible".to_string(),
                 }),
             })
         );
@@ -20607,6 +21045,40 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextWrap], "pretty nowrap"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextWrap,
+                value: RustOwnedStyleValueKind::TextWrap(RustOwnedTextWrap {
+                    value: CssTextWrapValue {
+                        kind: CssTextWrapValueKind::Valid,
+                        mode: CssTextWrapModeValue::Nowrap,
+                        style: CssTextWrapStyleValue::Pretty,
+                    },
+                    source: "pretty nowrap".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextWrapMode], "nowrap"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextWrapMode,
+                value: RustOwnedStyleValueKind::TextWrapMode(RustOwnedTextWrapMode {
+                    value: CssTextWrapModeValue::Nowrap,
+                    source: "nowrap".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextWrapStyle], "balance"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextWrapStyle,
+                value: RustOwnedStyleValueKind::TextWrapStyle(RustOwnedTextWrapStyle {
+                    value: CssTextWrapStyleValue::Balance,
+                    source: "balance".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::TextUnderlinePosition], "under right"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextUnderlinePosition,
@@ -20616,6 +21088,35 @@ mod tests {
                         vertical: CssTextUnderlinePositionVertical::Right,
                     },
                     source: "under right".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TouchAction], "pan-y pan-left"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TouchAction,
+                value: RustOwnedStyleValueKind::TouchAction(RustOwnedTouchAction {
+                    value: CssTouchActionValue {
+                        kind: CssTouchActionValueKind::List,
+                        first: CssTouchActionKeyword::PanLeft,
+                        second: CssTouchActionKeyword::PanY,
+                    },
+                    source: "pan-y pan-left".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::WhiteSpaceTrim], "discard-inner discard-before"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::WhiteSpaceTrim,
+                value: RustOwnedStyleValueKind::WhiteSpaceTrim(RustOwnedWhiteSpaceTrim {
+                    value: CssWhiteSpaceTrimValue {
+                        kind: CssWhiteSpaceTrimValueKind::List,
+                        has_discard_before: true,
+                        has_discard_after: false,
+                        has_discard_inner: true,
+                    },
+                    source: "discard-inner discard-before".to_string(),
                 }),
             })
         );

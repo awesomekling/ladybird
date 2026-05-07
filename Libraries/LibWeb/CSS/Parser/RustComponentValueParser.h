@@ -92,16 +92,26 @@ public:
         Optional<FlyString> string;
         FFI::CssScrollFunctionScrollerKind scroll_function_scroller { FFI::CssScrollFunctionScrollerKind::None };
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
+        FFI::CssContainValue contain {};
+        FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
+        FFI::CssPaintOrderValue paint_order {};
+        FFI::CssPositionTryOrderValue position_try_order { FFI::CssPositionTryOrderValue::Invalid };
+        FFI::CssPositionVisibilityValue position_visibility {};
         u8 repeat_x { 1 };
         u8 repeat_y { 1 };
         FFI::CssScrollbarGutterValueKind scrollbar_gutter { FFI::CssScrollbarGutterValueKind::Invalid };
+        FFI::CssTextWrapValue text_wrap {};
+        FFI::CssTextWrapModeValue text_wrap_mode { FFI::CssTextWrapModeValue::Invalid };
+        FFI::CssTextWrapStyleValue text_wrap_style { FFI::CssTextWrapStyleValue::Invalid };
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
+        FFI::CssTouchActionValue touch_action {};
         size_t view_timeline_inset_count { 0 };
         FFI::CssViewFunctionInsetKind view_function_inset { FFI::CssViewFunctionInsetKind::None };
         FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };
+        FFI::CssWhiteSpaceTrimValue white_space_trim {};
     };
 
     struct SimpleColor {

@@ -959,23 +959,72 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_green);
+            } else if (kind == FFI::CssStyleValueKind::Contain) {
+                value.contain = FFI::CssContainValue {
+                    .kind = static_cast<FFI::CssContainValueKind>(color_red),
+                    .is_size = static_cast<bool>(color_green & 1),
+                    .is_inline_size = static_cast<bool>(color_green & 2),
+                    .has_layout = static_cast<bool>(color_green & 4),
+                    .has_style = static_cast<bool>(color_green & 8),
+                    .has_paint = static_cast<bool>(color_green & 16),
+                };
+            } else if (kind == FFI::CssStyleValueKind::ContainerType) {
+                value.container_type = static_cast<FFI::CssContainerTypeValueKind>(color_red);
             } else if (kind == FFI::CssStyleValueKind::GridAutoFlow) {
                 value.grid_auto_flow_axis = color_red;
                 value.grid_auto_flow_dense = color_green;
+            } else if (kind == FFI::CssStyleValueKind::PaintOrder) {
+                value.paint_order = FFI::CssPaintOrderValue {
+                    .kind = static_cast<FFI::CssPaintOrderValueKind>(color_red),
+                    .first = static_cast<FFI::CssPaintOrderKeyword>(color_green),
+                    .second = static_cast<FFI::CssPaintOrderKeyword>(color_blue),
+                };
+            } else if (kind == FFI::CssStyleValueKind::PositionTryOrder) {
+                value.position_try_order = static_cast<FFI::CssPositionTryOrderValue>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::PositionVisibility) {
+                value.position_visibility = FFI::CssPositionVisibilityValue {
+                    .kind = static_cast<FFI::CssPositionVisibilityValueKind>(color_red),
+                    .has_anchors_valid = static_cast<bool>(color_green & 1),
+                    .has_anchors_visible = static_cast<bool>(color_green & 2),
+                    .has_no_overflow = static_cast<bool>(color_green & 4),
+                };
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
                 value.repeat_x = color_red;
                 value.repeat_y = color_green;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
                 value.scrollbar_gutter = static_cast<FFI::CssScrollbarGutterValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::TextWrap) {
+                value.text_wrap = FFI::CssTextWrapValue {
+                    .kind = FFI::CssTextWrapValueKind::Valid,
+                    .mode = static_cast<FFI::CssTextWrapModeValue>(color_red),
+                    .style = static_cast<FFI::CssTextWrapStyleValue>(color_green),
+                };
+            } else if (kind == FFI::CssStyleValueKind::TextWrapMode) {
+                value.text_wrap_mode = static_cast<FFI::CssTextWrapModeValue>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::TextWrapStyle) {
+                value.text_wrap_style = static_cast<FFI::CssTextWrapStyleValue>(color_red);
             } else if (kind == FFI::CssStyleValueKind::TextUnderlinePosition) {
                 value.text_underline_position_horizontal = static_cast<FFI::CssTextUnderlinePositionHorizontal>(color_red);
                 value.text_underline_position_vertical = static_cast<FFI::CssTextUnderlinePositionVertical>(color_green);
+            } else if (kind == FFI::CssStyleValueKind::TouchAction) {
+                value.touch_action = FFI::CssTouchActionValue {
+                    .kind = static_cast<FFI::CssTouchActionValueKind>(color_red),
+                    .first = static_cast<FFI::CssTouchActionKeyword>(color_green),
+                    .second = static_cast<FFI::CssTouchActionKeyword>(color_blue),
+                };
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
                 value.view_timeline_inset_count = color_red;
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_red);
                 value.view_function_inset = static_cast<FFI::CssViewFunctionInsetKind>(color_green);
                 value.view_function_inset_position = static_cast<FFI::CssViewFunctionInsetPosition>(color_blue);
+            } else if (kind == FFI::CssStyleValueKind::WhiteSpaceTrim) {
+                value.white_space_trim = FFI::CssWhiteSpaceTrimValue {
+                    .kind = static_cast<FFI::CssWhiteSpaceTrimValueKind>(color_red),
+                    .has_discard_before = static_cast<bool>(color_green & 1),
+                    .has_discard_after = static_cast<bool>(color_green & 2),
+                    .has_discard_inner = static_cast<bool>(color_green & 4),
+                };
             } else if (kind == FFI::CssStyleValueKind::Primitive || kind == FFI::CssStyleValueKind::ValueType) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())

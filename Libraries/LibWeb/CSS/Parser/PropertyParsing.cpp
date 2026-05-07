@@ -470,6 +470,84 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 VERIFY_NOT_REACHED();
             };
+            auto paint_order_keyword_from_rust = [](FFI::CssPaintOrderKeyword keyword) {
+                switch (keyword) {
+                case FFI::CssPaintOrderKeyword::Invalid:
+                    break;
+                case FFI::CssPaintOrderKeyword::Fill:
+                    return Keyword::Fill;
+                case FFI::CssPaintOrderKeyword::Stroke:
+                    return Keyword::Stroke;
+                case FFI::CssPaintOrderKeyword::Markers:
+                    return Keyword::Markers;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
+            auto position_try_order_keyword_from_rust = [](FFI::CssPositionTryOrderValue value) -> Optional<Keyword> {
+                switch (value) {
+                case FFI::CssPositionTryOrderValue::Invalid:
+                    return {};
+                case FFI::CssPositionTryOrderValue::Normal:
+                    return Keyword::Normal;
+                case FFI::CssPositionTryOrderValue::MostWidth:
+                    return Keyword::MostWidth;
+                case FFI::CssPositionTryOrderValue::MostHeight:
+                    return Keyword::MostHeight;
+                case FFI::CssPositionTryOrderValue::MostBlockSize:
+                    return Keyword::MostBlockSize;
+                case FFI::CssPositionTryOrderValue::MostInlineSize:
+                    return Keyword::MostInlineSize;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
+            auto text_wrap_mode_keyword_from_rust = [](FFI::CssTextWrapModeValue value) -> Optional<Keyword> {
+                switch (value) {
+                case FFI::CssTextWrapModeValue::Invalid:
+                    return {};
+                case FFI::CssTextWrapModeValue::Wrap:
+                    return Keyword::Wrap;
+                case FFI::CssTextWrapModeValue::Nowrap:
+                    return Keyword::Nowrap;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto text_wrap_style_keyword_from_rust = [](FFI::CssTextWrapStyleValue value) -> Optional<Keyword> {
+                switch (value) {
+                case FFI::CssTextWrapStyleValue::Invalid:
+                    return {};
+                case FFI::CssTextWrapStyleValue::Auto:
+                    return Keyword::Auto;
+                case FFI::CssTextWrapStyleValue::Balance:
+                    return Keyword::Balance;
+                case FFI::CssTextWrapStyleValue::Stable:
+                    return Keyword::Stable;
+                case FFI::CssTextWrapStyleValue::Pretty:
+                    return Keyword::Pretty;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto touch_action_keyword_from_rust = [](FFI::CssTouchActionKeyword keyword) {
+                switch (keyword) {
+                case FFI::CssTouchActionKeyword::Invalid:
+                    break;
+                case FFI::CssTouchActionKeyword::PanX:
+                    return Keyword::PanX;
+                case FFI::CssTouchActionKeyword::PanLeft:
+                    return Keyword::PanLeft;
+                case FFI::CssTouchActionKeyword::PanRight:
+                    return Keyword::PanRight;
+                case FFI::CssTouchActionKeyword::PanY:
+                    return Keyword::PanY;
+                case FFI::CssTouchActionKeyword::PanUp:
+                    return Keyword::PanUp;
+                case FFI::CssTouchActionKeyword::PanDown:
+                    return Keyword::PanDown;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -551,6 +629,80 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::Contain: {
+                auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
+                    values.append(KeywordStyleValue::create(keyword));
+                };
+                StyleValueVector values;
+                switch (rust_style_value->contain.kind) {
+                case FFI::CssContainValueKind::Invalid:
+                    break;
+                case FFI::CssContainValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssContainValueKind::Strict:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Strict) };
+                case FFI::CssContainValueKind::Content:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Content) };
+                case FFI::CssContainValueKind::List:
+                    if (rust_style_value->contain.is_size)
+                        append_keyword(values, Keyword::Size);
+                    if (rust_style_value->contain.is_inline_size)
+                        append_keyword(values, Keyword::InlineSize);
+                    if (rust_style_value->contain.has_layout)
+                        append_keyword(values, Keyword::Layout);
+                    if (rust_style_value->contain.has_style)
+                        append_keyword(values, Keyword::Style);
+                    if (rust_style_value->contain.has_paint)
+                        append_keyword(values, Keyword::Paint);
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+                }
+                break;
+            }
+            case FFI::CssStyleValueKind::ContainerType: {
+                auto append_keyword = [](StyleValueVector& values, Keyword keyword) {
+                    values.append(KeywordStyleValue::create(keyword));
+                };
+                StyleValueVector values;
+                switch (rust_style_value->container_type) {
+                case FFI::CssContainerTypeValueKind::Invalid:
+                    break;
+                case FFI::CssContainerTypeValueKind::Normal:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                case FFI::CssContainerTypeValueKind::Size:
+                    append_keyword(values, Keyword::Size);
+                    break;
+                case FFI::CssContainerTypeValueKind::InlineSize:
+                    append_keyword(values, Keyword::InlineSize);
+                    break;
+                case FFI::CssContainerTypeValueKind::ScrollState:
+                    append_keyword(values, Keyword::ScrollState);
+                    break;
+                case FFI::CssContainerTypeValueKind::SizeAndScrollState:
+                    append_keyword(values, Keyword::Size);
+                    append_keyword(values, Keyword::ScrollState);
+                    break;
+                case FFI::CssContainerTypeValueKind::InlineSizeAndScrollState:
+                    append_keyword(values, Keyword::InlineSize);
+                    append_keyword(values, Keyword::ScrollState);
+                    break;
+                }
+                if (!values.is_empty()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+                }
+                break;
+            }
             case FFI::CssStyleValueKind::GridAutoFlow: {
                 auto axis = rust_style_value->grid_auto_flow_axis == 1
                     ? GridAutoFlowStyleValue::Axis::Column
@@ -562,6 +714,58 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 generated_transaction.commit();
                 return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
             }
+            case FFI::CssStyleValueKind::PaintOrder:
+                switch (rust_style_value->paint_order.kind) {
+                case FFI::CssPaintOrderValueKind::Invalid:
+                    break;
+                case FFI::CssPaintOrderValueKind::Normal:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                case FFI::CssPaintOrderValueKind::Keyword:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(paint_order_keyword_from_rust(rust_style_value->paint_order.first)) };
+                case FFI::CssPaintOrderValueKind::Pair:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id,
+                        StyleValueList::create({
+                                                   KeywordStyleValue::create(paint_order_keyword_from_rust(rust_style_value->paint_order.first)),
+                                                   KeywordStyleValue::create(paint_order_keyword_from_rust(rust_style_value->paint_order.second)),
+                                               },
+                            StyleValueList::Separator::Space) };
+                }
+                break;
+            case FFI::CssStyleValueKind::PositionTryOrder:
+                if (auto keyword = position_try_order_keyword_from_rust(rust_style_value->position_try_order); keyword.has_value()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(keyword.release_value()) };
+                }
+                break;
+            case FFI::CssStyleValueKind::PositionVisibility:
+                switch (rust_style_value->position_visibility.kind) {
+                case FFI::CssPositionVisibilityValueKind::Invalid:
+                    break;
+                case FFI::CssPositionVisibilityValueKind::Always:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Always) };
+                case FFI::CssPositionVisibilityValueKind::List: {
+                    StyleValueVector values;
+                    if (rust_style_value->position_visibility.has_anchors_valid)
+                        values.append(KeywordStyleValue::create(Keyword::AnchorsValid));
+                    if (rust_style_value->position_visibility.has_anchors_visible)
+                        values.append(KeywordStyleValue::create(Keyword::AnchorsVisible));
+                    if (rust_style_value->position_visibility.has_no_overflow)
+                        values.append(KeywordStyleValue::create(Keyword::NoOverflow));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+                }
+                }
+                break;
             case FFI::CssStyleValueKind::RepeatStyle:
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
@@ -596,6 +800,42 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges) };
                 }
                 break;
+            case FFI::CssStyleValueKind::TextWrap: {
+                if (rust_style_value->text_wrap.kind != FFI::CssTextWrapValueKind::Valid)
+                    break;
+                auto text_wrap_mode = property_initial_value(PropertyID::TextWrapMode);
+                if (auto keyword = text_wrap_mode_keyword_from_rust(rust_style_value->text_wrap.mode); keyword.has_value())
+                    text_wrap_mode = KeywordStyleValue::create(keyword.release_value());
+
+                auto text_wrap_style = property_initial_value(PropertyID::TextWrapStyle);
+                if (auto keyword = text_wrap_style_keyword_from_rust(rust_style_value->text_wrap.style); keyword.has_value())
+                    text_wrap_style = KeywordStyleValue::create(keyword.release_value());
+
+                Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+                longhand_values.append(text_wrap_mode);
+                longhand_values.append(text_wrap_style);
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id,
+                    ShorthandStyleValue::create(
+                        PropertyID::TextWrap,
+                        { PropertyID::TextWrapMode, PropertyID::TextWrapStyle },
+                        move(longhand_values)) };
+            }
+            case FFI::CssStyleValueKind::TextWrapMode:
+                if (auto keyword = text_wrap_mode_keyword_from_rust(rust_style_value->text_wrap_mode); keyword.has_value()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(keyword.release_value()) };
+                }
+                break;
+            case FFI::CssStyleValueKind::TextWrapStyle:
+                if (auto keyword = text_wrap_style_keyword_from_rust(rust_style_value->text_wrap_style); keyword.has_value()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(keyword.release_value()) };
+                }
+                break;
             case FFI::CssStyleValueKind::TextUnderlinePosition:
                 if (rust_style_value->text_underline_position_horizontal != FFI::CssTextUnderlinePositionHorizontal::Invalid
                     && rust_style_value->text_underline_position_vertical != FFI::CssTextUnderlinePositionVertical::Invalid) {
@@ -607,6 +847,33 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             horizontal_text_underline_position_from_rust(rust_style_value->text_underline_position_horizontal),
                             vertical_text_underline_position_from_rust(rust_style_value->text_underline_position_vertical))
                     };
+                }
+                break;
+            case FFI::CssStyleValueKind::TouchAction:
+                switch (rust_style_value->touch_action.kind) {
+                case FFI::CssTouchActionValueKind::Invalid:
+                    break;
+                case FFI::CssTouchActionValueKind::Auto:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
+                case FFI::CssTouchActionValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssTouchActionValueKind::Manipulation:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Manipulation) };
+                case FFI::CssTouchActionValueKind::List: {
+                    StyleValueVector values;
+                    values.append(KeywordStyleValue::create(touch_action_keyword_from_rust(rust_style_value->touch_action.first)));
+                    if (rust_style_value->touch_action.second != FFI::CssTouchActionKeyword::Invalid)
+                        values.append(KeywordStyleValue::create(touch_action_keyword_from_rust(rust_style_value->touch_action.second)));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::ViewTimelineInset:
@@ -623,6 +890,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     tokens.discard_a_token();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::WhiteSpaceTrim:
+                switch (rust_style_value->white_space_trim.kind) {
+                case FFI::CssWhiteSpaceTrimValueKind::Invalid:
+                    break;
+                case FFI::CssWhiteSpaceTrimValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssWhiteSpaceTrimValueKind::List: {
+                    StyleValueVector values;
+                    if (rust_style_value->white_space_trim.has_discard_before)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardBefore));
+                    if (rust_style_value->white_space_trim.has_discard_after)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardAfter));
+                    if (rust_style_value->white_space_trim.has_discard_inner)
+                        values.append(KeywordStyleValue::create(Keyword::DiscardInner));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::Primitive:
