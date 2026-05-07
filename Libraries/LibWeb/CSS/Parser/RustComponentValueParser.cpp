@@ -973,9 +973,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (offset < value_len)
                         ++offset;
                 }
+            } else if (kind == FFI::CssStyleValueKind::ColorScheme) {
+                value.color_scheme_kind = static_cast<FFI::CssColorSchemeValueKind>(color_red);
+                value.color_scheme_only = color_green != 0;
+                for (auto scheme : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.color_scheme_schemes.append(String::from_utf8_without_validation(scheme.bytes()));
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
-                           FFI::CssStyleValueKind::ColorScheme,
                            FFI::CssStyleValueKind::BorderRadius,
                            FFI::CssStyleValueKind::Columns,
                            FFI::CssStyleValueKind::Content,
@@ -998,15 +1002,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::PlaceSelf,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
-                           FFI::CssStyleValueKind::Quotes,
                            FFI::CssStyleValueKind::OverflowClipMargin,
                            FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside,
                            FFI::CssStyleValueKind::TextDecoration,
                            FFI::CssStyleValueKind::StrokeDasharray,
                            FFI::CssStyleValueKind::TransformLonghand,
-                           FFI::CssStyleValueKind::TransformOrigin,
-                           FFI::CssStyleValueKind::WillChange)) {
+                           FFI::CssStyleValueKind::TransformOrigin)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
@@ -1062,6 +1064,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .has_anchors_visible = static_cast<bool>(color_green & 2),
                     .has_no_overflow = static_cast<bool>(color_green & 4),
                 };
+            } else if (kind == FFI::CssStyleValueKind::Quotes) {
+                value.quotes_kind = static_cast<FFI::CssQuotesValueKind>(color_red);
+                for (auto string : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.quotes_strings.append(FlyString::from_utf8_without_validation(string.bytes()));
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
                 value.repeat_x = color_red;
                 value.repeat_y = color_green;
@@ -1139,6 +1145,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .has_discard_after = static_cast<bool>(color_green & 2),
                     .has_discard_inner = static_cast<bool>(color_green & 4),
                 };
+            } else if (kind == FFI::CssStyleValueKind::WillChange) {
+                value.will_change_kind = static_cast<FFI::CssWillChangeValueKind>(color_red);
+                for (size_t offset = 0; offset < value_len;) {
+                    auto feature_kind = static_cast<FFI::CssWillChangeFeatureKind>(value_ptr[offset++]);
+                    auto feature_start = offset;
+                    while (offset < value_len && value_ptr[offset] != 0)
+                        ++offset;
+                    value.will_change_feature_kinds.append(feature_kind);
+                    value.will_change_features.append(FlyString::from_utf8_without_validation({ value_ptr + feature_start, offset - feature_start }));
+                    if (offset < value_len)
+                        ++offset;
+                }
             } else if (kind == FFI::CssStyleValueKind::Primitive || kind == FFI::CssStyleValueKind::ValueType) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())

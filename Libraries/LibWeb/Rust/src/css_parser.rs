@@ -2342,7 +2342,6 @@ pub(crate) enum RustOwnedBackgroundSizeComponent {
 pub(crate) struct RustOwnedColorScheme {
     value: CssColorSchemeValue,
     schemes: Vec<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2438,7 +2437,6 @@ pub(crate) enum RustOwnedPositionComponent {
 pub(crate) struct RustOwnedQuotes {
     kind: CssQuotesValueKind,
     strings: Vec<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2581,7 +2579,6 @@ pub(crate) struct RustOwnedWillChangeFeature {
 pub(crate) struct RustOwnedWillChange {
     kind: CssWillChangeValueKind,
     features: Vec<RustOwnedWillChangeFeature>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3869,7 +3866,6 @@ fn rust_owned_color_scheme_style_value_kind(filtered_input: &[u8]) -> Option<Rus
     Some(RustOwnedStyleValueKind::ColorScheme(RustOwnedColorScheme {
         value,
         schemes,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4270,11 +4266,7 @@ fn rust_owned_quotes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwned
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::Quotes(RustOwnedQuotes {
-        kind,
-        strings,
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::Quotes(RustOwnedQuotes { kind, strings }))
 }
 
 fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4854,7 +4846,6 @@ fn rust_owned_will_change_style_value_kind(filtered_input: &[u8]) -> Option<Rust
     Some(RustOwnedStyleValueKind::WillChange(RustOwnedWillChange {
         kind,
         features,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -5585,7 +5576,22 @@ where
             callback_source_backed_style_value(callback, CssStyleValueKind::Content, property_id, source);
         }
         RustOwnedStyleValueKind::ColorScheme(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
+            let scheme_bytes = null_separated_string_list_bytes(&value.schemes);
+            callback(
+                CssStyleValueKind::ColorScheme,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.value.kind as u8,
+                u8::from(value.value.only),
+                0,
+                0,
+                &scheme_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::Contain(value) => callback(
             CssStyleValueKind::Contain,
@@ -5792,7 +5798,22 @@ where
             "",
         ),
         RustOwnedStyleValueKind::Quotes(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Quotes, property_id, &value.source);
+            let string_bytes = null_separated_string_list_bytes(&value.strings);
+            callback(
+                CssStyleValueKind::Quotes,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &string_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::RepeatStyle(value) => callback(
             CssStyleValueKind::RepeatStyle,
@@ -6084,7 +6105,22 @@ where
             "",
         ),
         RustOwnedStyleValueKind::WillChange(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::WillChange, property_id, &value.source);
+            let feature_bytes = null_terminated_will_change_feature_bytes(&value.features);
+            callback(
+                CssStyleValueKind::WillChange,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &feature_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::Angle(value)
         | RustOwnedStyleValueKind::Flex(value)
@@ -6524,6 +6560,16 @@ fn null_terminated_animation_name_item_bytes(items: &[RustOwnedAnimationNameItem
     for item in items {
         bytes.push(item.kind as u8);
         bytes.extend_from_slice(item.value.as_bytes());
+        bytes.push(0);
+    }
+    bytes
+}
+
+fn null_terminated_will_change_feature_bytes(features: &[RustOwnedWillChangeFeature]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for feature in features {
+        bytes.push(feature.kind as u8);
+        bytes.extend_from_slice(feature.value.as_bytes());
         bytes.push(0);
     }
     bytes

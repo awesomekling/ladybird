@@ -797,9 +797,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ColorScheme:
-                if (auto value = parse_color_scheme_value(tokens)) {
+                switch (rust_style_value->color_scheme_kind) {
+                case FFI::CssColorSchemeValueKind::Invalid:
+                    break;
+                case FFI::CssColorSchemeValueKind::Normal:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, ColorSchemeStyleValue::normal() };
+                case FFI::CssColorSchemeValueKind::List:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, ColorSchemeStyleValue::create(move(rust_style_value->color_scheme_schemes), rust_style_value->color_scheme_only) };
                 }
                 break;
             case FFI::CssStyleValueKind::Contain: {
@@ -1153,9 +1161,27 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Quotes:
-                if (auto value = parse_quotes_value(tokens)) {
+                switch (rust_style_value->quotes_kind) {
+                case FFI::CssQuotesValueKind::Invalid:
+                    break;
+                case FFI::CssQuotesValueKind::Auto:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
+                case FFI::CssQuotesValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssQuotesValueKind::List: {
+                    StyleValueVector string_values;
+                    string_values.ensure_capacity(rust_style_value->quotes_strings.size());
+                    for (auto const& string : rust_style_value->quotes_strings)
+                        string_values.unchecked_append(StringStyleValue::create(string));
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(string_values), StyleValueList::Separator::Space) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::OverflowClipMargin:
@@ -1502,9 +1528,35 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::WillChange:
-                if (auto value = parse_will_change_value(tokens)) {
+                switch (rust_style_value->will_change_kind) {
+                case FFI::CssWillChangeValueKind::Invalid:
+                    break;
+                case FFI::CssWillChangeValueKind::Auto:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
+                case FFI::CssWillChangeValueKind::List: {
+                    StyleValueVector features;
+                    VERIFY(rust_style_value->will_change_feature_kinds.size() == rust_style_value->will_change_features.size());
+                    features.ensure_capacity(rust_style_value->will_change_features.size());
+                    for (size_t i = 0; i < rust_style_value->will_change_features.size(); ++i) {
+                        switch (rust_style_value->will_change_feature_kinds[i]) {
+                        case FFI::CssWillChangeFeatureKind::ScrollPosition:
+                            features.unchecked_append(KeywordStyleValue::create(Keyword::ScrollPosition));
+                            break;
+                        case FFI::CssWillChangeFeatureKind::Contents:
+                            features.unchecked_append(KeywordStyleValue::create(Keyword::Contents));
+                            break;
+                        case FFI::CssWillChangeFeatureKind::CustomIdent:
+                            features.unchecked_append(CustomIdentStyleValue::create(rust_style_value->will_change_features[i]));
+                            break;
+                        }
+                    }
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(features), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::Primitive:

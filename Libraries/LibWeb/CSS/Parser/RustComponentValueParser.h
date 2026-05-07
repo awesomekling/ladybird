@@ -127,6 +127,9 @@ public:
         FFI::CssAnimationNameValueKind animation_name_kind { FFI::CssAnimationNameValueKind::Invalid };
         Vector<FFI::CssAnimationNameItemKind> animation_name_item_kinds;
         Vector<FlyString> animation_names;
+        FFI::CssColorSchemeValueKind color_scheme_kind { FFI::CssColorSchemeValueKind::Invalid };
+        bool color_scheme_only { false };
+        Vector<String> color_scheme_schemes;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
@@ -160,6 +163,11 @@ public:
         FFI::CssViewTransitionNameValueKind view_transition_name_kind { FFI::CssViewTransitionNameValueKind::Invalid };
         FlyString view_transition_name;
         FFI::CssWhiteSpaceTrimValue white_space_trim {};
+        FFI::CssQuotesValueKind quotes_kind { FFI::CssQuotesValueKind::Invalid };
+        Vector<FlyString> quotes_strings;
+        FFI::CssWillChangeValueKind will_change_kind { FFI::CssWillChangeValueKind::Invalid };
+        Vector<FFI::CssWillChangeFeatureKind> will_change_feature_kinds;
+        Vector<FlyString> will_change_features;
     };
 
     struct SimpleColor {
