@@ -3674,10 +3674,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_translate_value(tokens); });
     case PropertyID::Scale:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_scale_value(tokens); });
-    case PropertyID::ScrollTimeline:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_scroll_timeline_value(tokens); });
-    case PropertyID::ViewTimeline:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_view_timeline_value(tokens); });
     case PropertyID::ViewTimelineName:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_timeline_name_value(tokens); });
     case PropertyID::ViewTransitionName:
@@ -8059,76 +8055,6 @@ RefPtr<StyleValue const> Parser::parse_scale_value(TokenStream<ComponentValue>& 
     return TransformationStyleValue::create(PropertyID::Scale, TransformFunction::Scale3d, { maybe_x.release_nonnull(), maybe_y.release_nonnull(), maybe_z.release_nonnull() });
 }
 
-// https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-shorthand
-RefPtr<StyleValue const> Parser::parse_scroll_timeline_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <'scroll-timeline-name'> <'scroll-timeline-axis'>? ]#
-    StyleValueVector names;
-    StyleValueVector axes;
-
-    auto transaction = tokens.begin_transaction();
-
-    do {
-        static auto default_axis = property_initial_value(PropertyID::ScrollTimelineAxis)->as_value_list().values()[0];
-
-        tokens.discard_whitespace();
-
-        auto maybe_name = parse_specific_keyword_value(tokens, Keyword::None);
-        if (!maybe_name)
-            maybe_name = parse_dashed_ident_value(tokens);
-        if (!maybe_name)
-            return nullptr;
-
-        names.append(maybe_name.release_nonnull());
-
-        tokens.discard_whitespace();
-
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            axes.append(default_axis);
-            tokens.discard_a_token();
-
-            // Disallow trailing commas
-            if (!tokens.has_next_token())
-                return nullptr;
-
-            continue;
-        }
-
-        if (!tokens.has_next_token()) {
-            axes.append(default_axis);
-            break;
-        }
-
-        auto maybe_axis = parse_css_value_for_property(PropertyID::ScrollTimelineAxis, tokens);
-
-        if (!maybe_axis)
-            return nullptr;
-
-        axes.append(maybe_axis.release_nonnull());
-
-        tokens.discard_whitespace();
-
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            tokens.discard_a_token();
-
-            // Disallow trailing commas
-            if (!tokens.has_next_token())
-                return nullptr;
-
-            continue;
-        }
-
-        if (tokens.has_next_token())
-            return nullptr;
-    } while (tokens.has_next_token());
-
-    transaction.commit();
-
-    return ShorthandStyleValue::create(PropertyID::ScrollTimeline,
-        { PropertyID::ScrollTimelineName, PropertyID::ScrollTimelineAxis },
-        { StyleValueList::create(move(names), StyleValueList::Separator::Comma), StyleValueList::create(move(axes), StyleValueList::Separator::Comma) });
-}
-
 // https://drafts.csswg.org/css-scrollbars/#propdef-scrollbar-color
 RefPtr<StyleValue const> Parser::parse_scrollbar_color_value(TokenStream<ComponentValue>& tokens)
 {
@@ -9225,110 +9151,6 @@ RefPtr<StyleValue const> Parser::parse_white_space_shorthand(TokenStream<Compone
     }
 
     return make_whitespace_shorthand(white_space_collapse, text_wrap_mode, white_space_trim);
-}
-
-// https://drafts.csswg.org/scroll-animations-1/#view-timeline-shorthand
-RefPtr<StyleValue const> Parser::parse_view_timeline_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <'view-timeline-name'> [ <'view-timeline-axis'> || <'view-timeline-inset'> ]? ]#
-    StyleValueVector names;
-    StyleValueVector axes;
-    StyleValueVector insets;
-
-    auto transaction = tokens.begin_transaction();
-
-    do {
-        RefPtr<StyleValue const> name;
-        RefPtr<StyleValue const> axis;
-        RefPtr<StyleValue const> inset;
-
-        auto const append_entry = [&]() {
-            VERIFY(name);
-            names.append(name.release_nonnull());
-
-            static auto default_axis = property_initial_value(PropertyID::ViewTimelineAxis)->as_value_list().values()[0];
-            static auto default_inset = property_initial_value(PropertyID::ViewTimelineInset)->as_value_list().values()[0];
-
-            axes.append(axis ? axis.release_nonnull() : default_axis);
-            insets.append(inset ? inset.release_nonnull() : default_inset);
-        };
-
-        tokens.discard_whitespace();
-
-        auto maybe_name = parse_specific_keyword_value(tokens, Keyword::None);
-        if (!maybe_name)
-            maybe_name = parse_dashed_ident_value(tokens);
-        if (!maybe_name)
-            return nullptr;
-
-        name = maybe_name;
-
-        tokens.discard_whitespace();
-
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            tokens.discard_a_token();
-
-            // Disallow trailing commas
-            if (!tokens.has_next_token())
-                return nullptr;
-
-            append_entry();
-            continue;
-        }
-
-        auto remaining_longhands = Vector { PropertyID::ViewTimelineAxis, PropertyID::ViewTimelineInset };
-
-        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
-            tokens.discard_whitespace();
-
-            auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-
-            if (!property_and_value.has_value())
-                return nullptr;
-
-            remove_property(remaining_longhands, property_and_value->property);
-
-            switch (property_and_value->property) {
-            case PropertyID::ViewTimelineAxis:
-                if (axis)
-                    return nullptr;
-
-                axis = property_and_value->style_value;
-                break;
-            case PropertyID::ViewTimelineInset:
-                if (inset)
-                    return nullptr;
-
-                inset = property_and_value->style_value;
-                break;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }
-
-        append_entry();
-
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            tokens.discard_a_token();
-
-            // Disallow trailing commas
-            if (!tokens.has_next_token())
-                return nullptr;
-
-            continue;
-        }
-
-        if (tokens.has_next_token())
-            return nullptr;
-    } while (tokens.has_next_token());
-
-    transaction.commit();
-
-    return ShorthandStyleValue::create(PropertyID::ViewTimeline,
-        { PropertyID::ViewTimelineName, PropertyID::ViewTimelineAxis, PropertyID::ViewTimelineInset },
-        { StyleValueList::create(move(names), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(axes), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(insets), StyleValueList::Separator::Comma) });
 }
 
 // https://drafts.csswg.org/css-will-change/#will-change
