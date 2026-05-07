@@ -2382,6 +2382,16 @@ fn parse_rust_owned_generated_longhand_value(
         };
     }
 
+    if value_type == PropertyValueType::Image && parse_image_set_value(filtered_input) == CssImageSetValueKind::Valid {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::ImageSet(RustOwnedSourceBackedStyleValue {
+                value_type: Some(value_type),
+                source: filtered_input_to_string(filtered_input),
+            }),
+        };
+    }
+
     if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
         return RustOwnedStyleValue {
             property_id,
@@ -3716,6 +3726,7 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
             ValueTypeId::FontVariantPositionValue,
             filtered_input,
         ),
+        PropertyValueType::Image => parse_image_set_value(filtered_input) == CssImageSetValueKind::Valid,
         _ => false,
     }
 }
@@ -19584,6 +19595,16 @@ mod tests {
                     },
                     source: "symbols(\"*\" \"**\")".to_string(),
                 },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundImage,
+                value: RustOwnedStyleValueKind::ImageSet(RustOwnedSourceBackedStyleValue {
+                    value_type: Some(PropertyValueType::Image),
+                    source: "image-set(url(example.png) 2x)".to_string(),
+                }),
             })
         );
         assert_eq!(
