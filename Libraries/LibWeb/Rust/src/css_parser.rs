@@ -1845,6 +1845,7 @@ pub enum CssStyleValueKind {
     FontLanguageOverride,
     FontVariant,
     FontVariationSettings,
+    FilterValueList,
     BasicShape,
     Rect,
     AspectRatio,
@@ -1939,6 +1940,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
+    FilterValueList {
+        source: String,
+    },
     FontStyle(RustOwnedFontStyle),
     FontVariantAlternates {
         values: Vec<FontVariantAlternatesValue>,
@@ -2973,6 +2977,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
         PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
+        PropertyId::BackdropFilter | PropertyId::Filter => {
+            rust_owned_filter_value_list_style_value_kind(filtered_input)
+        }
         PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
         PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
         PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
@@ -3845,6 +3852,16 @@ fn rust_owned_color_scheme_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 
 fn rust_owned_display_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     parse_display_value(filtered_input).map(RustOwnedStyleValueKind::Display)
+}
+
+fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_filter_value_list_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::FilterValueList {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5551,6 +5568,9 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::FilterValueList { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FilterValueList, property_id, source);
+        }
         RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
             CssStyleValueKind::GridAutoFlow,
             property_id,
@@ -12859,6 +12879,201 @@ fn component_value_parse_as_list_style_type(component_value: &ComponentValue) ->
     parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String || {
         let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
         parser.parse_a_counter_style().is_some()
+    }
+}
+
+pub(crate) fn parse_filter_value_list_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    if component_values.is_empty() {
+        return false;
+    }
+
+    if component_values.len() == 1 && component_value_is_ident(component_values.first(), "none") {
+        return true;
+    }
+
+    // https://drafts.fxtf.org/filter-effects-1/#typedef-filter-value-list
+    // <filter-value-list> = [ <filter-function> | <url> ]+
+    //
+    // FIXME: <url>s are ignored by the style system for now.
+    for component_value in component_values {
+        let mut url_parser = ComponentValueParser::new(vec![component_value.clone()]);
+        if url_parser.parse_a_url_function().is_some() {
+            continue;
+        }
+
+        let ComponentValue::Function(function) = component_value else {
+            return false;
+        };
+
+        if !component_value_parse_as_filter_function(&function) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn component_value_parse_as_filter_function(function: &Function) -> bool {
+    // https://drafts.fxtf.org/filter-effects-1/#typedef-filter-function
+    // <blur()> | <brightness()> | <contrast()> | <drop-shadow()> | <grayscale()> | <hue-rotate()> | <invert()> | <opacity()> | <sepia()> | <saturate()>
+    if function.name.eq_ignore_ascii_case("blur") {
+        return component_values_parse_as_blur_function(&function.value);
+    }
+    if function.name.eq_ignore_ascii_case("drop-shadow") {
+        return component_values_parse_as_drop_shadow_function(&function.value);
+    }
+    if function.name.eq_ignore_ascii_case("hue-rotate") {
+        return component_values_parse_as_hue_rotate_function(&function.value);
+    }
+
+    if [
+        "brightness",
+        "contrast",
+        "grayscale",
+        "invert",
+        "opacity",
+        "saturate",
+        "sepia",
+    ]
+    .iter()
+    .any(|name| function.name.eq_ignore_ascii_case(name))
+    {
+        return component_values_parse_as_simple_filter_function(&function.value);
+    }
+
+    false
+}
+
+fn component_values_parse_as_blur_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-blur
+    // blur( <length>? )
+    let component_values = strip_whitespace(component_values);
+    match component_values {
+        [] => true,
+        [component_value] => component_value_parse_as_non_negative_length(component_value),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_drop_shadow_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-drop-shadow
+    // drop-shadow( [ <color>? && <length>{2,3} ] )
+    let component_values = strip_whitespace(component_values);
+    if component_values.is_empty() {
+        return false;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let has_color_before_lengths = consume_filter_drop_shadow_color(&mut parser);
+    if !consume_filter_drop_shadow_length(&mut parser) || !consume_filter_drop_shadow_length(&mut parser) {
+        return false;
+    }
+
+    let _has_blur_radius = consume_filter_drop_shadow_length(&mut parser);
+    let _has_color_after_lengths = if has_color_before_lengths {
+        false
+    } else {
+        consume_filter_drop_shadow_color(&mut parser)
+    };
+
+    !parser.has_next_component_value()
+}
+
+fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_color_value(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
+}
+
+fn consume_filter_drop_shadow_length(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+
+    if component_value_parse_as_length(component_value) {
+        parser.index += 1;
+        return true;
+    }
+
+    false
+}
+
+fn component_values_parse_as_hue_rotate_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-hue-rotate
+    // hue-rotate( [ <angle> | <zero> ]? )
+    let component_values = strip_whitespace(component_values);
+    match component_values {
+        [] => true,
+        [component_value] => {
+            component_value_parse_as_angle(component_value)
+                || matches!(
+                    component_value,
+                    ComponentValue::PreservedToken(Token {
+                        token_type: TokenType::Number { number },
+                        ..
+                    }) if number_is_integer(*number) && number.value() == 0.0
+                )
+        }
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_simple_filter_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-brightness
+    // brightness( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-contrast
+    // contrast( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-grayscale
+    // grayscale( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-invert
+    // invert( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-opacity
+    // opacity( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-sepia
+    // sepia( [ <number> | <percentage> ]? )
+    //
+    // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-saturate
+    // saturate( [ <number> | <percentage> ]? )
+    let component_values = strip_whitespace(component_values);
+    match component_values {
+        [] => true,
+        [component_value] => component_value_parse_as_non_negative_number_percentage(component_value),
+        _ => false,
+    }
+}
+
+fn component_value_parse_as_non_negative_number_percentage(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() >= 0.0,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => number.value() >= 0.0,
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
     }
 }
 
@@ -22289,13 +22504,13 @@ mod tests {
         parse_container_rule_prelude, parse_container_type_value, parse_coordinating_value_list_shorthand,
         parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
         parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
-        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
-        parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
-        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
-        parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
-        parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
+        parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
+        parse_filter_value_list_value, parse_fit_content_value, parse_font_feature_values_family_name_list,
+        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_generated_property_value,
+        parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value, parse_grid_track_placement_value,
+        parse_grid_track_size_list_value, parse_image_set_value, parse_length_descriptor, parse_list_style_value,
+        parse_math_depth_value, parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
         parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
         parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
         parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
@@ -23050,6 +23265,10 @@ mod tests {
 
     fn parse_list_style(input: &str) -> bool {
         parse_list_style_value(input.as_bytes())
+    }
+
+    fn parse_filter_value_list(input: &str) -> bool {
+        parse_filter_value_list_value(input.as_bytes())
     }
 
     fn parse_fit_content(input: &str) -> CssFitContentValueKind {
@@ -25407,6 +25626,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "inside url(marker.png) square".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Filter], "blur(10px) opacity(50%)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::FilterValueList,
+                property_id: PropertyId::Filter,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "blur(10px) opacity(50%)".to_string(),
                 value_type: String::new(),
             })
         );
@@ -28836,6 +29068,42 @@ mod tests {
         assert!(!parse_list_style("url(marker.png) linear-gradient(red, blue)"));
         assert!(!parse_list_style("none disc none"));
         assert!(!parse_list_style("symbols(numeric \"1\")"));
+    }
+
+    #[test]
+    fn parses_filter_value_list_values() {
+        assert!(parse_filter_value_list("none"));
+        assert!(parse_filter_value_list("url(filters.svg#blur)"));
+        assert!(parse_filter_value_list("blur()"));
+        assert!(parse_filter_value_list("blur(10px)"));
+        assert!(parse_filter_value_list("brightness()"));
+        assert!(parse_filter_value_list("brightness(0.5)"));
+        assert!(parse_filter_value_list("contrast(150%)"));
+        assert!(parse_filter_value_list("drop-shadow(1px 2px)"));
+        assert!(parse_filter_value_list("drop-shadow(red 1px 2px 3px)"));
+        assert!(parse_filter_value_list("drop-shadow(1px 2px 3px red)"));
+        assert!(parse_filter_value_list("hue-rotate()"));
+        assert!(parse_filter_value_list("hue-rotate(0)"));
+        assert!(parse_filter_value_list("hue-rotate(90deg)"));
+        assert!(parse_filter_value_list("sepia(1) saturate(120%) opacity(0.2)"));
+    }
+
+    #[test]
+    fn rejects_invalid_filter_value_list_values() {
+        assert!(!parse_filter_value_list(""));
+        assert!(!parse_filter_value_list("none blur(1px)"));
+        assert!(!parse_filter_value_list("auto"));
+        assert!(!parse_filter_value_list("blur(10)"));
+        assert!(!parse_filter_value_list("blur(-1px)"));
+        assert!(!parse_filter_value_list("brightness(-20)"));
+        assert!(!parse_filter_value_list("brightness(30px)"));
+        assert!(!parse_filter_value_list("drop-shadow(10 20)"));
+        assert!(!parse_filter_value_list("drop-shadow(10% 20%)"));
+        assert!(!parse_filter_value_list("drop-shadow(1px)"));
+        assert!(!parse_filter_value_list("drop-shadow(1px 2px 3px 4px)"));
+        assert!(!parse_filter_value_list("drop-shadow(rgb(4, 5, 6))"));
+        assert!(!parse_filter_value_list("drop-shadow()"));
+        assert!(!parse_filter_value_list("hue-rotate(90)"));
     }
 
     #[test]

@@ -908,6 +908,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::FilterValueList:
+                if (auto value = parse_filter_value_list_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::GridAutoFlow: {
                 auto axis = rust_style_value->grid_auto_flow_axis == 1
                     ? GridAutoFlowStyleValue::Axis::Column

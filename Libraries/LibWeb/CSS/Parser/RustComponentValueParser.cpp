@@ -965,6 +965,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::BorderRadius,
                            FFI::CssStyleValueKind::Columns,
                            FFI::CssStyleValueKind::Cursor,
+                           FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontFamily,
                            FFI::CssStyleValueKind::FontFeatureSettings,
                            FFI::CssStyleValueKind::FontLanguageOverride,
