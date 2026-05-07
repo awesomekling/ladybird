@@ -3327,6 +3327,17 @@ FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_track_si
         filtered_input_bytes.size());
 }
 
+FFI::CssPositionValueKind RustComponentValueParser::parse_position(StringView input, StringView encoding, bool allow_background_position_3_value_syntax)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    return FFI::rust_css_parse_position(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        allow_background_position_3_value_syntax);
+}
+
 FFI::CssTransformLonghandValueKind RustComponentValueParser::parse_translate(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

@@ -50,9 +50,9 @@ pub use css_parser::{
     CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
     CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector, CssPaintOrderKeyword,
     CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
-    CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
-    CssRectValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
+    CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
+    CssPrimitiveValueOptions, CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue,
+    CssRatioValueKind, CssRectValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
     CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
     CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
     CssSimpleSelectorKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
@@ -1439,6 +1439,25 @@ pub unsafe extern "C" fn rust_css_parse_grid_track_size_list(
             };
 
             css_parser::parse_grid_track_size_list_value(input)
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_position(
+    input: *const u8,
+    input_len: usize,
+    allow_background_position_3_value_syntax: bool,
+) -> CssPositionValueKind {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return CssPositionValueKind::Invalid;
+            };
+
+            css_parser::parse_position_value(input, allow_background_position_3_value_syntax)
         })
     }
 }

@@ -1114,6 +1114,13 @@ pub enum CssTransformLonghandValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPositionValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -4941,6 +4948,305 @@ fn parse_positive_integer_component_values(component_values: &[ComponentValue]) 
         return false;
     };
     component_value_parse_as_integer_in_range(component_value, 1.0, f64::INFINITY)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PositionEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Center,
+}
+
+pub(crate) fn parse_position_value(
+    filtered_input: &[u8],
+    allow_background_position_3_value_syntax: bool,
+) -> CssPositionValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    if component_values_parse_as_position(&component_values, allow_background_position_3_value_syntax) {
+        CssPositionValueKind::Valid
+    } else {
+        CssPositionValueKind::Invalid
+    }
+}
+
+fn component_values_parse_as_position(
+    component_values: &[ComponentValue],
+    allow_background_position_3_value_syntax: bool,
+) -> bool {
+    // https://www.w3.org/TR/css-values-4/#position
+    // <position> = [
+    //   [ left | center | right | top | bottom | <length-percentage> ]
+    // |
+    //   [ left | center | right ] && [ top | center | bottom ]
+    // |
+    //   [ left | center | right | <length-percentage> ]
+    //   [ top | center | bottom | <length-percentage> ]
+    // |
+    //   [ [ left | right ] <length-percentage> ] &&
+    //   [ [ top | bottom ] <length-percentage> ]
+    // ]
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+
+    // Note: The alternatives must be attempted in this order since shorter alternatives can match a prefix of longer ones.
+    if consume_position_alternative_4(&mut parser) {
+        return parser_has_no_remaining_component_values(&mut parser);
+    }
+
+    if allow_background_position_3_value_syntax && consume_position_alternative_5_for_background_position(&mut parser) {
+        return parser_has_no_remaining_component_values(&mut parser);
+    }
+
+    if consume_position_alternative_3(&mut parser) {
+        return parser_has_no_remaining_component_values(&mut parser);
+    }
+
+    if consume_position_alternative_2(&mut parser) {
+        return parser_has_no_remaining_component_values(&mut parser);
+    }
+
+    consume_position_alternative_1(&mut parser) && parser_has_no_remaining_component_values(&mut parser)
+}
+
+fn parser_has_no_remaining_component_values(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    !parser.has_next_component_value()
+}
+
+fn consume_position_alternative_1(parser: &mut ComponentValueParser) -> bool {
+    let start = parser.index;
+
+    // [ left | center | right | top | bottom | <length-percentage> ]
+    if consume_position_edge(parser).is_some() || consume_length_percentage_component_value(parser) {
+        return true;
+    }
+
+    parser.index = start;
+    false
+}
+
+fn consume_position_alternative_2(parser: &mut ComponentValueParser) -> bool {
+    let start = parser.index;
+
+    // [ left | center | right ] && [ top | center | bottom ]
+    let Some(mut first_edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    let Some(mut second_edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    // If 'left' or 'right' is given, that position is X and the other is Y.
+    // Conversely -
+    // If 'top' or 'bottom' is given, that position is Y and the other is X.
+    if is_vertical_position_edge(first_edge, false) || is_horizontal_position_edge(second_edge, false) {
+        std::mem::swap(&mut first_edge, &mut second_edge);
+    }
+
+    // [ left | center | right ] [ top | bottom | center ]
+    if is_horizontal_position_edge(first_edge, true) && is_vertical_position_edge(second_edge, true) {
+        return true;
+    }
+
+    parser.index = start;
+    false
+}
+
+fn consume_position_alternative_3(parser: &mut ComponentValueParser) -> bool {
+    let start = parser.index;
+
+    // [ left | center | right | <length-percentage> ]
+    if !consume_position_or_length(parser, PositionAxis::Horizontal) {
+        parser.index = start;
+        return false;
+    }
+
+    // [ top | center | bottom | <length-percentage> ]
+    if !consume_position_or_length(parser, PositionAxis::Vertical) {
+        parser.index = start;
+        return false;
+    }
+
+    true
+}
+
+fn consume_position_alternative_4(parser: &mut ComponentValueParser) -> bool {
+    let start = parser.index;
+
+    // [ [ left | right ] <length-percentage> ] &&
+    // [ [ top | bottom ] <length-percentage> ]
+    let Some(group1) = consume_position_and_length(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    let Some(group2) = consume_position_and_length(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    // [ [ left | right ] <length-percentage> ] [ [ top | bottom ] <length-percentage> ]
+    if is_horizontal_position_edge(group1, false) && is_vertical_position_edge(group2, false) {
+        return true;
+    }
+
+    // [ [ top | bottom ] <length-percentage> ] [ [ left | right ] <length-percentage> ]
+    if is_vertical_position_edge(group1, false) && is_horizontal_position_edge(group2, false) {
+        return true;
+    }
+
+    parser.index = start;
+    false
+}
+
+fn consume_position_alternative_5_for_background_position(parser: &mut ComponentValueParser) -> bool {
+    let start = parser.index;
+
+    // The extra 3-value syntax that's allowed for background-position:
+    // [ center | [ left | right ] <length-percentage>? ] &&
+    // [ center | [ top | bottom ] <length-percentage>? ]
+    let Some(mut group1) = consume_position_and_maybe_length(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    let Some(mut group2) = consume_position_and_maybe_length(parser) else {
+        parser.index = start;
+        return false;
+    };
+
+    // 2-value or 4-value if both <length-percentage>s are present or missing.
+    if group1.has_length == group2.has_length {
+        parser.index = start;
+        return false;
+    }
+
+    // If 'left' or 'right' is given, that position is X and the other is Y.
+    // Conversely -
+    // If 'top' or 'bottom' is given, that position is Y and the other is X.
+    if is_vertical_position_edge(group1.edge, false) || is_horizontal_position_edge(group2.edge, false) {
+        std::mem::swap(&mut group1, &mut group2);
+    }
+
+    // [ center | [ left | right ] ]
+    if !is_horizontal_position_edge(group1.edge, true) {
+        parser.index = start;
+        return false;
+    }
+
+    // [ center | [ top | bottom ] ]
+    if !is_vertical_position_edge(group2.edge, true) {
+        parser.index = start;
+        return false;
+    }
+
+    true
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PositionAxis {
+    Horizontal,
+    Vertical,
+}
+
+fn consume_position_or_length(parser: &mut ComponentValueParser, axis: PositionAxis) -> bool {
+    let start = parser.index;
+
+    if let Some(edge) = consume_position_edge(parser) {
+        let valid = match axis {
+            PositionAxis::Horizontal => is_horizontal_position_edge(edge, true),
+            PositionAxis::Vertical => is_vertical_position_edge(edge, true),
+        };
+        if valid {
+            return true;
+        }
+
+        parser.index = start;
+        return false;
+    }
+
+    consume_length_percentage_component_value(parser)
+}
+
+fn consume_position_and_length(parser: &mut ComponentValueParser) -> Option<PositionEdge> {
+    let start = parser.index;
+
+    let Some(position) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    if !consume_length_percentage_component_value(parser) {
+        parser.index = start;
+        return None;
+    }
+
+    Some(position)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PositionAndMaybeLength {
+    edge: PositionEdge,
+    has_length: bool,
+}
+
+fn consume_position_and_maybe_length(parser: &mut ComponentValueParser) -> Option<PositionAndMaybeLength> {
+    let start = parser.index;
+
+    let Some(edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    let has_length = consume_length_percentage_component_value(parser);
+    if has_length && edge == PositionEdge::Center {
+        parser.index = start;
+        return None;
+    }
+
+    Some(PositionAndMaybeLength { edge, has_length })
+}
+
+fn consume_position_edge(parser: &mut ComponentValueParser) -> Option<PositionEdge> {
+    parser.discard_whitespace();
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = parser.next_component_value()
+    else {
+        return None;
+    };
+
+    let edge = if value.eq_ignore_ascii_case("left") {
+        PositionEdge::Left
+    } else if value.eq_ignore_ascii_case("right") {
+        PositionEdge::Right
+    } else if value.eq_ignore_ascii_case("top") {
+        PositionEdge::Top
+    } else if value.eq_ignore_ascii_case("bottom") {
+        PositionEdge::Bottom
+    } else if value.eq_ignore_ascii_case("center") {
+        PositionEdge::Center
+    } else {
+        return None;
+    };
+
+    parser.index += 1;
+    Some(edge)
+}
+
+fn is_horizontal_position_edge(edge: PositionEdge, accept_center: bool) -> bool {
+    matches!(edge, PositionEdge::Left | PositionEdge::Right) || (accept_center && edge == PositionEdge::Center)
+}
+
+fn is_vertical_position_edge(edge: PositionEdge, accept_center: bool) -> bool {
+    matches!(edge, PositionEdge::Top | PositionEdge::Bottom) || (accept_center && edge == PositionEdge::Center)
 }
 
 pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
@@ -14076,7 +14382,7 @@ mod tests {
         CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind,
         CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
-        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionVisibilityValue,
+        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
         CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
         CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
@@ -14114,7 +14420,7 @@ mod tests {
         parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
-        parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value,
+        parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value_prefix,
         parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_rotate_value, parse_scale_value,
         parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
@@ -14727,6 +15033,14 @@ mod tests {
 
     fn parse_transform_function(input: &str) -> CssTransformFunctionValueKind {
         parse_transform_function_value(input.as_bytes())
+    }
+
+    fn parse_position(input: &str) -> CssPositionValueKind {
+        parse_position_value(input.as_bytes(), false)
+    }
+
+    fn parse_background_position(input: &str) -> CssPositionValueKind {
+        parse_position_value(input.as_bytes(), true)
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -17699,6 +18013,54 @@ mod tests {
         assert_eq!(parse_ratio_prefix("-1").kind, CssRatioValueKind::Invalid);
         assert_eq!(parse_ratio_prefix("1 /").kind, CssRatioValueKind::Invalid);
         assert_eq!(parse_ratio_prefix("1 / auto").kind, CssRatioValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_position_values() {
+        assert_eq!(parse_position("left"), CssPositionValueKind::Valid);
+        assert_eq!(parse_position("center center"), CssPositionValueKind::Valid);
+        assert_eq!(parse_position("20% 0%"), CssPositionValueKind::Valid);
+        assert_eq!(parse_position("left 12px top 13px"), CssPositionValueKind::Valid);
+        assert_eq!(parse_position("center 10px"), CssPositionValueKind::Valid);
+        assert_eq!(
+            parse_position("calc(10px + 0.5em) calc(10px - 0.5em)"),
+            CssPositionValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn parses_background_position_3_value_syntax() {
+        assert_eq!(
+            parse_background_position("center right 7%"),
+            CssPositionValueKind::Valid
+        );
+        assert_eq!(
+            parse_background_position("left 10px center"),
+            CssPositionValueKind::Valid
+        );
+        assert_eq!(
+            parse_background_position("top 15px center"),
+            CssPositionValueKind::Valid
+        );
+        assert_eq!(parse_background_position("right top 14%"), CssPositionValueKind::Valid);
+        assert_eq!(
+            parse_background_position("bottom 16% left"),
+            CssPositionValueKind::Valid
+        );
+        assert_eq!(parse_background_position("left center"), CssPositionValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_position_values() {
+        assert_eq!(parse_position(""), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("left right"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("top bottom"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("1% center 2px"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("right 7% 50%"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("50% top 8px"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("left 10px 50%"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("right 11% 100%"), CssPositionValueKind::Invalid);
+        assert_eq!(parse_position("left / cover"), CssPositionValueKind::Invalid);
     }
 
     #[test]

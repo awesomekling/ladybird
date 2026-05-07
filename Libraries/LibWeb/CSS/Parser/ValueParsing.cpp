@@ -2488,6 +2488,9 @@ RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& 
 // https://www.w3.org/TR/css-values-4/#position
 RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<ComponentValue>& tokens, PositionParsingMode position_parsing_mode)
 {
+    auto position_transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+
     auto parse_position_edge = [](TokenStream<ComponentValue>& tokens) -> Optional<PositionEdge> {
         auto transaction = tokens.begin_transaction();
         auto& token = tokens.consume_a_token();
@@ -2773,18 +2776,35 @@ RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<Compon
     };
 
     // Note: The alternatives must be attempted in this order since shorter alternatives can match a prefix of longer ones.
-    if (auto position = alternative_4())
+    auto validate_parsed_position = [&](RefPtr<PositionStyleValue const> position) -> RefPtr<PositionStyleValue const> {
+        if (!position)
+            return nullptr;
+
+        // AD-HOC: <position> is also used as a prefix in shorthands such as
+        // `background`, where `/ <background-size>` belongs to the caller. The
+        // Rust parser validates the exact token slice consumed by the C++
+        // materializer until Rust also owns the surrounding shorthand parser.
+        auto serialized_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        auto allow_background_position_3_value_syntax = position_parsing_mode == PositionParsingMode::BackgroundPosition;
+        if (RustComponentValueParser::parse_position(serialized_position.bytes_as_string_view(), "utf-8"sv, allow_background_position_3_value_syntax) == FFI::CssPositionValueKind::Invalid)
+            return nullptr;
+
+        position_transaction.commit();
         return position;
+    };
+
+    if (auto position = alternative_4())
+        return validate_parsed_position(position);
     if (position_parsing_mode == PositionParsingMode::BackgroundPosition) {
         if (auto position = alternative_5_for_background_position())
-            return position;
+            return validate_parsed_position(position);
     }
     if (auto position = alternative_3())
-        return position;
+        return validate_parsed_position(position);
     if (auto position = alternative_2())
-        return position;
+        return validate_parsed_position(position);
     if (auto position = alternative_1())
-        return position;
+        return validate_parsed_position(position);
     return nullptr;
 }
 
