@@ -2297,7 +2297,6 @@ pub(crate) struct RustOwnedFontStyle {
 pub(crate) struct RustOwnedAnchorNameOrScope {
     kind: CssAnchorNameOrScopeValueKind,
     names: Vec<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2310,7 +2309,6 @@ pub(crate) struct RustOwnedAnimationNameItem {
 pub(crate) struct RustOwnedAnimationName {
     kind: CssAnimationNameValueKind,
     names: Vec<RustOwnedAnimationNameItem>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2409,7 +2407,6 @@ pub(crate) struct RustOwnedPaintOrder {
 pub(crate) struct RustOwnedPositionAnchor {
     kind: CssPositionAnchorValueKind,
     name: Option<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2502,14 +2499,12 @@ pub(crate) struct RustOwnedTimelineNameItem {
 pub(crate) struct RustOwnedTimelineName {
     kind: CssTimelineNameValueKind,
     names: Vec<RustOwnedTimelineNameItem>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineScope {
     kind: CssTimelineScopeValueKind,
     names: Vec<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2568,7 +2563,6 @@ pub(crate) struct RustOwnedTransitionProperty {
 pub(crate) struct RustOwnedViewTransitionName {
     kind: CssViewTransitionNameValueKind,
     name: Option<String>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3844,7 +3838,6 @@ fn rust_owned_anchor_name_or_scope_style_value_kind(
     Some(RustOwnedStyleValueKind::AnchorNameOrScope(RustOwnedAnchorNameOrScope {
         kind,
         names,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -3863,7 +3856,6 @@ fn rust_owned_animation_name_style_value_kind(filtered_input: &[u8]) -> Option<R
     Some(RustOwnedStyleValueKind::AnimationName(RustOwnedAnimationName {
         kind,
         names,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4156,7 +4148,6 @@ fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<
     Some(RustOwnedStyleValueKind::PositionAnchor(RustOwnedPositionAnchor {
         kind,
         name,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4645,7 +4636,6 @@ fn rust_owned_timeline_name_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     Some(RustOwnedStyleValueKind::TimelineName(RustOwnedTimelineName {
         kind,
         names,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4659,7 +4649,6 @@ fn rust_owned_timeline_scope_style_value_kind(filtered_input: &[u8]) -> Option<R
     Some(RustOwnedStyleValueKind::TimelineScope(RustOwnedTimelineScope {
         kind,
         names,
-        source: filtered_input_to_string(filtered_input),
     }))
 }
 
@@ -4834,11 +4823,7 @@ fn rust_owned_view_transition_name_style_value_kind(filtered_input: &[u8]) -> Op
     }
 
     Some(RustOwnedStyleValueKind::ViewTransitionName(
-        RustOwnedViewTransitionName {
-            kind,
-            name,
-            source: filtered_input_to_string(filtered_input),
-        },
+        RustOwnedViewTransitionName { kind, name },
     ))
 }
 
@@ -5536,14 +5521,41 @@ where
                 PropertyValueType::FontStyle,
             );
         }
-        RustOwnedStyleValueKind::AnchorNameOrScope(value) => callback_source_backed_style_value(
-            callback,
-            CssStyleValueKind::AnchorNameOrScope,
-            property_id,
-            &value.source,
-        ),
+        RustOwnedStyleValueKind::AnchorNameOrScope(value) => {
+            let name_bytes = null_separated_string_list_bytes(&value.names);
+            callback(
+                CssStyleValueKind::AnchorNameOrScope,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &name_bytes,
+                "",
+            );
+        }
         RustOwnedStyleValueKind::AnimationName(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::AnimationName, property_id, &value.source);
+            let name_bytes = null_terminated_animation_name_item_bytes(&value.names);
+            callback(
+                CssStyleValueKind::AnimationName,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &name_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::AspectRatio { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::AspectRatio, property_id, source);
@@ -5723,9 +5735,21 @@ where
         RustOwnedStyleValueKind::PlaceSelf { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::PlaceSelf, property_id, source);
         }
-        RustOwnedStyleValueKind::PositionAnchor(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PositionAnchor, property_id, &value.source);
-        }
+        RustOwnedStyleValueKind::PositionAnchor(value) => callback(
+            CssStyleValueKind::PositionAnchor,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.kind as u8,
+            0,
+            0,
+            0,
+            value.name.as_ref().map_or(&[], |name| name.as_bytes()),
+            "",
+        ),
         RustOwnedStyleValueKind::PositionArea { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::PositionArea, property_id, source);
         }
@@ -5846,10 +5870,40 @@ where
             "",
         ),
         RustOwnedStyleValueKind::TimelineName(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::TimelineName, property_id, &value.source);
+            let name_bytes = null_terminated_timeline_name_item_bytes(&value.names);
+            callback(
+                CssStyleValueKind::TimelineName,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &name_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::TimelineScope(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::TimelineScope, property_id, &value.source);
+            let name_bytes = null_separated_string_list_bytes(&value.names);
+            callback(
+                CssStyleValueKind::TimelineScope,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                value.kind as u8,
+                0,
+                0,
+                0,
+                &name_bytes,
+                "",
+            );
         }
         RustOwnedStyleValueKind::TextWrap(value) => callback(
             CssStyleValueKind::TextWrap,
@@ -5997,11 +6051,20 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::ViewTransitionName(value) => callback_source_backed_style_value(
-            callback,
+        RustOwnedStyleValueKind::ViewTransitionName(value) => callback(
             CssStyleValueKind::ViewTransitionName,
             property_id,
-            &value.source,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.kind as u8,
+            0,
+            0,
+            0,
+            value.name.as_ref().map_or(&[], |name| name.as_bytes()),
+            "",
         ),
         RustOwnedStyleValueKind::WhiteSpaceTrim(value) => callback(
             CssStyleValueKind::WhiteSpaceTrim,
@@ -6433,6 +6496,37 @@ where
         source.as_bytes(),
         "",
     );
+}
+
+fn null_separated_string_list_bytes(strings: &[String]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (index, string) in strings.iter().enumerate() {
+        if index > 0 {
+            bytes.push(0);
+        }
+        bytes.extend_from_slice(string.as_bytes());
+    }
+    bytes
+}
+
+fn null_terminated_timeline_name_item_bytes(items: &[RustOwnedTimelineNameItem]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for item in items {
+        bytes.push(item.kind as u8);
+        bytes.extend_from_slice(item.name.as_bytes());
+        bytes.push(0);
+    }
+    bytes
+}
+
+fn null_terminated_animation_name_item_bytes(items: &[RustOwnedAnimationNameItem]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for item in items {
+        bytes.push(item.kind as u8);
+        bytes.extend_from_slice(item.value.as_bytes());
+        bytes.push(0);
+    }
+    bytes
 }
 
 pub(crate) fn parse_coordinating_value_list_shorthand<C>(
@@ -25518,7 +25612,6 @@ mod tests {
                             value: "Both".to_string(),
                         },
                     ],
-                    source: "foo, \"none\", Both".to_string(),
                 }),
             })
         );
@@ -25538,7 +25631,6 @@ mod tests {
                             name: "--track".to_string(),
                         },
                     ],
-                    source: "none, --track".to_string(),
                 }),
             })
         );
@@ -25552,7 +25644,6 @@ mod tests {
                         kind: CssTimelineNameItemKind::DashedIdent,
                         name: "--view".to_string(),
                     }],
-                    source: "--view".to_string(),
                 }),
             })
         );
@@ -26052,7 +26143,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "slide".to_string(),
+                value: "\u{1}slide\0".to_string(),
                 value_type: String::new(),
             })
         );
@@ -26195,7 +26286,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "\"slide\"".to_string(),
+                value: "\u{2}slide\0".to_string(),
                 value_type: String::new(),
             })
         );

@@ -122,9 +122,16 @@ public:
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };
         RustDisplayListItem display_list_item { RustDisplayListItem::No };
+        FFI::CssAnchorNameOrScopeValueKind anchor_name_or_scope_kind { FFI::CssAnchorNameOrScopeValueKind::Invalid };
+        Vector<FlyString> anchor_names;
+        FFI::CssAnimationNameValueKind animation_name_kind { FFI::CssAnimationNameValueKind::Invalid };
+        Vector<FFI::CssAnimationNameItemKind> animation_name_item_kinds;
+        Vector<FlyString> animation_names;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
+        FFI::CssPositionAnchorValueKind position_anchor_kind { FFI::CssPositionAnchorValueKind::Invalid };
+        FlyString position_anchor_name;
         FFI::CssPositionTryOrderValue position_try_order { FFI::CssPositionTryOrderValue::Invalid };
         FFI::CssPositionVisibilityValue position_visibility {};
         u8 repeat_x { 1 };
@@ -138,6 +145,11 @@ public:
         bool text_indent_has_each_line { false };
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
+        FFI::CssTimelineNameValueKind timeline_name_kind { FFI::CssTimelineNameValueKind::Invalid };
+        Vector<FFI::CssTimelineNameItemKind> timeline_name_item_kinds;
+        Vector<FlyString> timeline_names;
+        FFI::CssTimelineScopeValueKind timeline_scope_kind { FFI::CssTimelineScopeValueKind::Invalid };
+        Vector<FlyString> timeline_scope_names;
         FFI::CssTouchActionValue touch_action {};
         Vector<FFI::CssTransitionBehaviorItemKind> transition_behaviors;
         FFI::CssTransitionPropertyValueKind transition_property_kind { FFI::CssTransitionPropertyValueKind::Invalid };
@@ -145,6 +157,8 @@ public:
         size_t view_timeline_inset_count { 0 };
         FFI::CssViewFunctionInsetKind view_function_inset { FFI::CssViewFunctionInsetKind::None };
         FFI::CssViewFunctionInsetPosition view_function_inset_position { FFI::CssViewFunctionInsetPosition::None };
+        FFI::CssViewTransitionNameValueKind view_transition_name_kind { FFI::CssViewTransitionNameValueKind::Invalid };
+        FlyString view_transition_name;
         FFI::CssWhiteSpaceTrimValue white_space_trim {};
     };
 

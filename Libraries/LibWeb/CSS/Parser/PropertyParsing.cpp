@@ -739,15 +739,55 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::AnchorNameOrScope:
-                if (auto value = rust_style_value->property_id == PropertyID::AnchorScope ? parse_anchor_scope_value(tokens) : parse_anchor_name_value(tokens)) {
+                switch (rust_style_value->anchor_name_or_scope_kind) {
+                case FFI::CssAnchorNameOrScopeValueKind::Invalid:
+                    break;
+                case FFI::CssAnchorNameOrScopeValueKind::All:
+                    if (rust_style_value->property_id != PropertyID::AnchorScope)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::All) };
+                case FFI::CssAnchorNameOrScopeValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssAnchorNameOrScopeValueKind::List: {
+                    StyleValueVector names;
+                    names.ensure_capacity(rust_style_value->anchor_names.size());
+                    for (auto const& name : rust_style_value->anchor_names)
+                        names.unchecked_append(CustomIdentStyleValue::create(name));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(names), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::AnimationName:
-                if (auto value = parse_animation_name_value(tokens)) {
+                switch (rust_style_value->animation_name_kind) {
+                case FFI::CssAnimationNameValueKind::Invalid:
+                    break;
+                case FFI::CssAnimationNameValueKind::List: {
+                    StyleValueVector names;
+                    VERIFY(rust_style_value->animation_name_item_kinds.size() == rust_style_value->animation_names.size());
+                    names.ensure_capacity(rust_style_value->animation_names.size());
+                    for (size_t i = 0; i < rust_style_value->animation_names.size(); ++i) {
+                        switch (rust_style_value->animation_name_item_kinds[i]) {
+                        case FFI::CssAnimationNameItemKind::None:
+                            names.unchecked_append(KeywordStyleValue::create(Keyword::None));
+                            break;
+                        case FFI::CssAnimationNameItemKind::CustomIdent:
+                            names.unchecked_append(CustomIdentStyleValue::create(rust_style_value->animation_names[i]));
+                            break;
+                        case FFI::CssAnimationNameItemKind::String:
+                            names.unchecked_append(StringStyleValue::create(rust_style_value->animation_names[i]));
+                            break;
+                        }
+                    }
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(names), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::AspectRatio:
@@ -1050,9 +1090,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::PositionAnchor:
-                if (auto value = parse_position_anchor_value(tokens)) {
+                switch (rust_style_value->position_anchor_kind) {
+                case FFI::CssPositionAnchorValueKind::Invalid:
+                    break;
+                case FFI::CssPositionAnchorValueKind::Normal:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                case FFI::CssPositionAnchorValueKind::None:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssPositionAnchorValueKind::Auto:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
+                case FFI::CssPositionAnchorValueKind::AnchorName:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, CustomIdentStyleValue::create(rust_style_value->position_anchor_name) };
                 }
                 break;
             case FFI::CssStyleValueKind::PositionArea:
@@ -1215,15 +1271,50 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TimelineName:
-                if (auto value = parse_timeline_name_value(tokens)) {
+                switch (rust_style_value->timeline_name_kind) {
+                case FFI::CssTimelineNameValueKind::Invalid:
+                    break;
+                case FFI::CssTimelineNameValueKind::List: {
+                    StyleValueVector names;
+                    VERIFY(rust_style_value->timeline_name_item_kinds.size() == rust_style_value->timeline_names.size());
+                    names.ensure_capacity(rust_style_value->timeline_names.size());
+                    for (size_t i = 0; i < rust_style_value->timeline_names.size(); ++i) {
+                        switch (rust_style_value->timeline_name_item_kinds[i]) {
+                        case FFI::CssTimelineNameItemKind::None:
+                            names.unchecked_append(KeywordStyleValue::create(Keyword::None));
+                            break;
+                        case FFI::CssTimelineNameItemKind::DashedIdent:
+                            names.unchecked_append(CustomIdentStyleValue::create(rust_style_value->timeline_names[i]));
+                            break;
+                        }
+                    }
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(names), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::TimelineScope:
-                if (auto value = parse_timeline_scope_value(tokens)) {
+                switch (rust_style_value->timeline_scope_kind) {
+                case FFI::CssTimelineScopeValueKind::Invalid:
+                    break;
+                case FFI::CssTimelineScopeValueKind::None:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssTimelineScopeValueKind::All:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::All) };
+                case FFI::CssTimelineScopeValueKind::List: {
+                    StyleValueVector names;
+                    names.ensure_capacity(rust_style_value->timeline_scope_names.size());
+                    for (auto const& name : rust_style_value->timeline_scope_names)
+                        names.unchecked_append(CustomIdentStyleValue::create(name));
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(names), StyleValueList::Separator::Comma) };
+                }
                 }
                 break;
             case FFI::CssStyleValueKind::TextWrap: {
@@ -1375,9 +1466,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ViewTransitionName:
-                if (auto value = parse_view_transition_name_value(tokens)) {
+                switch (rust_style_value->view_transition_name_kind) {
+                case FFI::CssViewTransitionNameValueKind::Invalid:
+                    break;
+                case FFI::CssViewTransitionNameValueKind::None:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                case FFI::CssViewTransitionNameValueKind::CustomIdent:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, CustomIdentStyleValue::create(rust_style_value->view_transition_name) };
                 }
                 break;
             case FFI::CssStyleValueKind::WhiteSpaceTrim:

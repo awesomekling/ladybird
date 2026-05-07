@@ -957,9 +957,23 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::AnchorNameOrScope) {
+                value.anchor_name_or_scope_kind = static_cast<FFI::CssAnchorNameOrScopeValueKind>(color_red);
+                for (auto name : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.anchor_names.append(FlyString::from_utf8_without_validation(name.bytes()));
+            } else if (kind == FFI::CssStyleValueKind::AnimationName) {
+                value.animation_name_kind = static_cast<FFI::CssAnimationNameValueKind>(color_red);
+                for (size_t offset = 0; offset < value_len;) {
+                    auto item_kind = static_cast<FFI::CssAnimationNameItemKind>(value_ptr[offset++]);
+                    auto name_start = offset;
+                    while (offset < value_len && value_ptr[offset] != 0)
+                        ++offset;
+                    value.animation_name_item_kinds.append(item_kind);
+                    value.animation_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
+                    if (offset < value_len)
+                        ++offset;
+                }
             } else if (first_is_one_of(kind,
-                           FFI::CssStyleValueKind::AnchorNameOrScope,
-                           FFI::CssStyleValueKind::AnimationName,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::ColorScheme,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -983,7 +997,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::PlaceItems,
                            FFI::CssStyleValueKind::PlaceSelf,
                            FFI::CssStyleValueKind::PositionArea,
-                           FFI::CssStyleValueKind::PositionAnchor,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::Quotes,
                            FFI::CssStyleValueKind::OverflowClipMargin,
@@ -991,11 +1004,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::ShapeOutside,
                            FFI::CssStyleValueKind::TextDecoration,
                            FFI::CssStyleValueKind::StrokeDasharray,
-                           FFI::CssStyleValueKind::TimelineName,
-                           FFI::CssStyleValueKind::TimelineScope,
                            FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransformOrigin,
-                           FFI::CssStyleValueKind::ViewTransitionName,
                            FFI::CssStyleValueKind::WillChange)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
@@ -1040,6 +1050,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .first = static_cast<FFI::CssPaintOrderKeyword>(color_green),
                     .second = static_cast<FFI::CssPaintOrderKeyword>(color_blue),
                 };
+            } else if (kind == FFI::CssStyleValueKind::PositionAnchor) {
+                value.position_anchor_kind = static_cast<FFI::CssPositionAnchorValueKind>(color_red);
+                value.position_anchor_name = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::PositionTryOrder) {
                 value.position_try_order = static_cast<FFI::CssPositionTryOrderValue>(color_red);
             } else if (kind == FFI::CssStyleValueKind::PositionVisibility) {
@@ -1080,6 +1093,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::TextUnderlinePosition) {
                 value.text_underline_position_horizontal = static_cast<FFI::CssTextUnderlinePositionHorizontal>(color_red);
                 value.text_underline_position_vertical = static_cast<FFI::CssTextUnderlinePositionVertical>(color_green);
+            } else if (kind == FFI::CssStyleValueKind::TimelineName) {
+                value.timeline_name_kind = static_cast<FFI::CssTimelineNameValueKind>(color_red);
+                for (size_t offset = 0; offset < value_len;) {
+                    auto item_kind = static_cast<FFI::CssTimelineNameItemKind>(value_ptr[offset++]);
+                    auto name_start = offset;
+                    while (offset < value_len && value_ptr[offset] != 0)
+                        ++offset;
+                    value.timeline_name_item_kinds.append(item_kind);
+                    value.timeline_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
+                    if (offset < value_len)
+                        ++offset;
+                }
+            } else if (kind == FFI::CssStyleValueKind::TimelineScope) {
+                value.timeline_scope_kind = static_cast<FFI::CssTimelineScopeValueKind>(color_red);
+                for (auto name : StringView { value_ptr, value_len }.split_view('\0'))
+                    value.timeline_scope_names.append(FlyString::from_utf8_without_validation(name.bytes()));
             } else if (kind == FFI::CssStyleValueKind::TouchAction) {
                 value.touch_action = FFI::CssTouchActionValue {
                     .kind = static_cast<FFI::CssTouchActionValueKind>(color_red),
@@ -1100,6 +1129,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_red);
                 value.view_function_inset = static_cast<FFI::CssViewFunctionInsetKind>(color_green);
                 value.view_function_inset_position = static_cast<FFI::CssViewFunctionInsetPosition>(color_blue);
+            } else if (kind == FFI::CssStyleValueKind::ViewTransitionName) {
+                value.view_transition_name_kind = static_cast<FFI::CssViewTransitionNameValueKind>(color_red);
+                value.view_transition_name = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::WhiteSpaceTrim) {
                 value.white_space_trim = FFI::CssWhiteSpaceTrimValue {
                     .kind = static_cast<FFI::CssWhiteSpaceTrimValueKind>(color_red),
