@@ -16,7 +16,7 @@ use crate::generated_media_features::{
 use crate::generated_properties::{
     PropertyNumericRange, PropertyValueType, property_accepted_range_by_value_type, property_accepts_keyword,
     property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
-    property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name,
+    property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name, property_value_type_name,
     resolve_legacy_value_alias,
 };
 use crate::generated_pseudo_classes::{
@@ -1723,6 +1723,15 @@ pub enum CssValueTypeSyntaxKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssGeneratedPropertyValueKind {
+    Invalid,
+    Keyword,
+    CustomIdent,
+    ValueType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssSyntaxNodeKind {
     Invalid,
     Universal,
@@ -1867,6 +1876,238 @@ where
     }
 
     false
+}
+
+pub(crate) fn parse_generated_property_value<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(CssGeneratedPropertyValueKind, u16, &[u8], &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+    {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if property_accepts_keyword(property_id, value) {
+                let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
+                callback(
+                    CssGeneratedPropertyValueKind::Keyword,
+                    property_id as u16,
+                    resolved_keyword.as_bytes(),
+                    "",
+                );
+                return true;
+            }
+        }
+    }
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_value_type(property_id, PropertyValueType::CustomIdent) {
+            continue;
+        }
+
+        let mut parser = ComponentValueParser::new(component_values.to_vec());
+        if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
+            callback(
+                CssGeneratedPropertyValueKind::CustomIdent,
+                property_id as u16,
+                name.as_bytes(),
+                property_value_type_name(PropertyValueType::CustomIdent),
+            );
+            return true;
+        }
+    }
+
+    for value_type in generated_property_value_type_order() {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if !property_accepts_value_type(property_id, *value_type) {
+                continue;
+            }
+            if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+                continue;
+            }
+
+            callback(
+                CssGeneratedPropertyValueKind::ValueType,
+                property_id as u16,
+                &[],
+                property_value_type_name(*value_type),
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
+fn generated_property_value_type_order() -> &'static [PropertyValueType] {
+    // This follows Parser::parse_css_value_for_properties(), which is ordered to
+    // preserve CSS grammar precedence, for example <integer>/<number> before
+    // <length> so a unitless zero is not captured as a length when both are
+    // accepted.
+    &[
+        PropertyValueType::Color,
+        PropertyValueType::CornerShape,
+        PropertyValueType::Counter,
+        PropertyValueType::CounterStyle,
+        PropertyValueType::DashedIdent,
+        PropertyValueType::EasingFunction,
+        PropertyValueType::FontStyle,
+        PropertyValueType::FontKerningValue,
+        PropertyValueType::FontOpticalSizingValue,
+        PropertyValueType::FontWeightAbsolute,
+        PropertyValueType::FontWidthCss3,
+        PropertyValueType::FontVariantAlternates,
+        PropertyValueType::FontVariantCapsValue,
+        PropertyValueType::FontVariantEastAsian,
+        PropertyValueType::FontVariantEmojiValue,
+        PropertyValueType::FontVariantLigatures,
+        PropertyValueType::FontVariantNumeric,
+        PropertyValueType::FontVariantPositionValue,
+        PropertyValueType::Image,
+        PropertyValueType::Position,
+        PropertyValueType::BackgroundPosition,
+        PropertyValueType::BasicShape,
+        PropertyValueType::Ratio,
+        PropertyValueType::OpacityValue,
+        PropertyValueType::OpentypeTag,
+        PropertyValueType::Rect,
+        PropertyValueType::ScrollFunction,
+        PropertyValueType::String,
+        PropertyValueType::TransformList,
+        PropertyValueType::Url,
+        PropertyValueType::ViewFunction,
+        PropertyValueType::ViewTimelineInset,
+        PropertyValueType::Integer,
+        PropertyValueType::Number,
+        PropertyValueType::FitContent,
+        PropertyValueType::Length,
+        PropertyValueType::Time,
+        PropertyValueType::Percentage,
+        PropertyValueType::Paint,
+        PropertyValueType::Anchor,
+    ]
+}
+
+fn component_values_parse_as_property_value_type(value_type: PropertyValueType, filtered_input: &[u8]) -> bool {
+    match value_type {
+        PropertyValueType::Color => parse_color_value(filtered_input, false) == CssColorValueKind::Valid,
+        PropertyValueType::DashedIdent => parse_a_dashed_ident(filtered_input, |_| {}),
+        PropertyValueType::EasingFunction => parse_easing_value(filtered_input) == CssEasingValueKind::Valid,
+        PropertyValueType::FitContent => parse_fit_content_value(filtered_input) == CssFitContentValueKind::Valid,
+        PropertyValueType::BasicShape => parse_basic_shape_value(filtered_input) == CssBasicShapeValueKind::Valid,
+        PropertyValueType::Position => parse_position_value(filtered_input, false) == CssPositionValueKind::Valid,
+        PropertyValueType::BackgroundPosition => {
+            parse_position_value(filtered_input, true) == CssPositionValueKind::Valid
+        }
+        PropertyValueType::Ratio => parse_ratio_value_prefix(filtered_input).kind == CssRatioValueKind::Valid,
+        PropertyValueType::OpacityValue => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Opacity,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Opacity
+        }
+        PropertyValueType::OpentypeTag => parse_an_opentype_tag(filtered_input, |_| {}),
+        PropertyValueType::Rect => parse_rect_value(filtered_input) == CssRectValueKind::Valid,
+        PropertyValueType::ScrollFunction => {
+            parse_scroll_function_value(filtered_input).kind == CssScrollFunctionValueKind::Valid
+        }
+        PropertyValueType::String => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::String,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::String
+        }
+        // AD-HOC: Keep <url> on the C++ fallback path until Rust owns <image>
+        // materialization as well. Some properties accept both <image> and <url>,
+        // and C++ deliberately parses non-fragment url() values as images first.
+        PropertyValueType::Url => false,
+        PropertyValueType::ViewFunction => {
+            parse_view_function_value(filtered_input).kind == CssViewFunctionValueKind::Valid
+        }
+        PropertyValueType::ViewTimelineInset => {
+            parse_view_timeline_inset_value(filtered_input).kind == CssViewTimelineInsetValueKind::Valid
+        }
+        PropertyValueType::Integer => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Integer,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Integer
+        }
+        PropertyValueType::Number => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Number,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Number
+        }
+        PropertyValueType::Length => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Length,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Length
+        }
+        PropertyValueType::Time => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Time,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Time
+        }
+        PropertyValueType::Percentage => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Percentage,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Percentage
+        }
+        PropertyValueType::FontKerningValue => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontKerningValue, filtered_input)
+        }
+        PropertyValueType::FontOpticalSizingValue => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontOpticalSizingValue, filtered_input)
+        }
+        PropertyValueType::FontWeightAbsolute => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontWeightAbsolute, filtered_input)
+        }
+        PropertyValueType::FontWidthCss3 => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontWidthCss3, filtered_input)
+        }
+        PropertyValueType::FontVariantCapsValue => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontVariantCapsValue, filtered_input)
+        }
+        PropertyValueType::FontVariantEmojiValue => {
+            component_values_parse_as_generated_property_value_type(ValueTypeId::FontVariantEmojiValue, filtered_input)
+        }
+        PropertyValueType::FontVariantPositionValue => component_values_parse_as_generated_property_value_type(
+            ValueTypeId::FontVariantPositionValue,
+            filtered_input,
+        ),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_generated_property_value_type(value_type_id: ValueTypeId, filtered_input: &[u8]) -> bool {
+    parse_a_value_type(filtered_input, value_type_id as u8) != CssValueTypeSyntaxKind::Invalid
 }
 
 fn numeric_range_limit_to_f64(limit: Option<f64>, value_type: PropertyValueType, is_minimum: bool) -> f64 {
@@ -15617,9 +15858,9 @@ mod tests {
         CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind, CssFitContentValueKind,
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
-        CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaQuery, CssMediaTypeKind,
-        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+        CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind,
+        CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaQuery,
+        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
@@ -15658,20 +15899,21 @@ mod tests {
         parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
         parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
         parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
-        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
-        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
-        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
-        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_generated_property_value,
+        parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value, parse_grid_track_placement_value,
+        parse_grid_track_size_list_value, parse_image_set_value, parse_length_descriptor,
+        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
+        parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
+        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -16570,6 +16812,27 @@ mod tests {
         parsed_custom_ident
     }
 
+    fn parse_generated_property(
+        property_ids: &[PropertyId],
+        input: &str,
+    ) -> Option<(CssGeneratedPropertyValueKind, PropertyId, String, String)> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut parsed_value = None;
+        parse_generated_property_value(
+            &property_ids,
+            input.as_bytes(),
+            |kind, property_id, value, value_type| {
+                parsed_value = Some((
+                    kind,
+                    crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                    String::from_utf8(value.to_vec()).unwrap(),
+                    value_type.to_string(),
+                ));
+            },
+        );
+        parsed_value
+    }
+
     #[derive(Debug, PartialEq)]
     struct PropertyNumericMetadata {
         property_id: PropertyId,
@@ -16987,6 +17250,66 @@ mod tests {
         );
         assert_eq!(parse_property_custom_ident(&[PropertyId::AnimationName], "none"), None);
         assert_eq!(parse_property_custom_ident(&[PropertyId::Color], "slide"), None);
+    }
+
+    #[test]
+    fn parses_generated_property_values_with_generated_metadata() {
+        assert_eq!(
+            parse_generated_property(&[PropertyId::Color, PropertyId::Display], "block"),
+            Some((
+                CssGeneratedPropertyValueKind::Keyword,
+                PropertyId::Display,
+                "block".to_string(),
+                String::new()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::Overflow], "overlay"),
+            Some((
+                CssGeneratedPropertyValueKind::Keyword,
+                PropertyId::Overflow,
+                "auto".to_string(),
+                String::new()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::AnimationName], "slide"),
+            Some((
+                CssGeneratedPropertyValueKind::CustomIdent,
+                PropertyId::AnimationName,
+                "slide".to_string(),
+                "CustomIdent".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::Color], "red"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::Color,
+                String::new(),
+                "Color".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::FontWeight], "bold"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::FontWeight,
+                String::new(),
+                "FontWeightAbsolute".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::Color, PropertyId::BackgroundPositionX], "10px"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::BackgroundPositionX,
+                String::new(),
+                "Length".to_string()
+            ))
+        );
+        assert_eq!(parse_generated_property(&[PropertyId::MaskImage], "url(foo.png)"), None);
+        assert_eq!(parse_generated_property(&[PropertyId::Color], "10px"), None);
     }
 
     #[test]

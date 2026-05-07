@@ -820,6 +820,102 @@ Optional<RustComponentValueParser::PropertyCustomIdent> RustComponentValueParser
     return property_custom_ident;
 }
 
+static Optional<ValueType> value_type_from_rust_property_value_type_name(StringView name)
+{
+#define __TRY_VALUE_TYPE(value_type)                                                              \
+    do {                                                                                          \
+        if (name.equals_ignoring_ascii_case(StringView { #value_type, sizeof(#value_type) - 1 })) \
+            return ValueType::value_type;                                                         \
+    } while (false)
+
+    __TRY_VALUE_TYPE(Anchor);
+    __TRY_VALUE_TYPE(BackgroundPosition);
+    __TRY_VALUE_TYPE(BasicShape);
+    __TRY_VALUE_TYPE(Color);
+    __TRY_VALUE_TYPE(CornerShape);
+    __TRY_VALUE_TYPE(Counter);
+    __TRY_VALUE_TYPE(CounterStyle);
+    __TRY_VALUE_TYPE(CustomIdent);
+    __TRY_VALUE_TYPE(DashedIdent);
+    __TRY_VALUE_TYPE(EasingFunction);
+    __TRY_VALUE_TYPE(FitContent);
+    __TRY_VALUE_TYPE(FontKerningValue);
+    __TRY_VALUE_TYPE(FontOpticalSizingValue);
+    __TRY_VALUE_TYPE(FontStyle);
+    __TRY_VALUE_TYPE(FontVariantAlternates);
+    __TRY_VALUE_TYPE(FontVariantCapsValue);
+    __TRY_VALUE_TYPE(FontVariantEastAsian);
+    __TRY_VALUE_TYPE(FontVariantEmojiValue);
+    __TRY_VALUE_TYPE(FontVariantLigatures);
+    __TRY_VALUE_TYPE(FontVariantNumeric);
+    __TRY_VALUE_TYPE(FontVariantPositionValue);
+    __TRY_VALUE_TYPE(FontWeightAbsolute);
+    __TRY_VALUE_TYPE(FontWidthCss3);
+    __TRY_VALUE_TYPE(Image);
+    __TRY_VALUE_TYPE(Integer);
+    __TRY_VALUE_TYPE(Length);
+    __TRY_VALUE_TYPE(Number);
+    __TRY_VALUE_TYPE(OpacityValue);
+    __TRY_VALUE_TYPE(OpentypeTag);
+    __TRY_VALUE_TYPE(Paint);
+    __TRY_VALUE_TYPE(Percentage);
+    __TRY_VALUE_TYPE(Position);
+    __TRY_VALUE_TYPE(Ratio);
+    __TRY_VALUE_TYPE(Rect);
+    __TRY_VALUE_TYPE(ScrollFunction);
+    __TRY_VALUE_TYPE(String);
+    __TRY_VALUE_TYPE(Time);
+    __TRY_VALUE_TYPE(TransformList);
+    __TRY_VALUE_TYPE(Url);
+    __TRY_VALUE_TYPE(ViewFunction);
+    __TRY_VALUE_TYPE(ViewTimelineInset);
+
+#undef __TRY_VALUE_TYPE
+
+    return {};
+}
+
+Optional<RustComponentValueParser::GeneratedPropertyValue> RustComponentValueParser::parse_generated_property_value(ReadonlySpan<PropertyID> property_ids, StringView input)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<GeneratedPropertyValue> generated_property_value;
+    auto input_bytes = input.bytes();
+    FFI::rust_css_parse_generated_property_value(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        input_bytes.data(),
+        input_bytes.size(),
+        &generated_property_value,
+        [](void* raw_generated_property_value, FFI::CssGeneratedPropertyValueKind kind, u16 property_id, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
+            auto& generated_property_value = *static_cast<Optional<GeneratedPropertyValue>*>(raw_generated_property_value);
+            GeneratedPropertyValue value {
+                .kind = kind,
+                .property_id = static_cast<PropertyID>(property_id),
+            };
+
+            if (kind == FFI::CssGeneratedPropertyValueKind::Keyword) {
+                auto keyword = keyword_from_string({ value_ptr, value_len });
+                if (!keyword.has_value())
+                    return;
+                value.keyword = keyword.release_value();
+            } else if (kind == FFI::CssGeneratedPropertyValueKind::CustomIdent) {
+                value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssGeneratedPropertyValueKind::ValueType) {
+                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                if (!value_type.has_value())
+                    return;
+                value.value_type = value_type.release_value();
+            }
+
+            generated_property_value = move(value);
+        });
+
+    return generated_property_value;
+}
+
 Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

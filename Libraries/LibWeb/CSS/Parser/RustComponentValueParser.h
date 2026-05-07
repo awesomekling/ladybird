@@ -66,6 +66,14 @@ public:
         FlyString custom_ident;
     };
 
+    struct GeneratedPropertyValue {
+        FFI::CssGeneratedPropertyValueKind kind;
+        PropertyID property_id;
+        Optional<Keyword> keyword;
+        Optional<FlyString> custom_ident;
+        Optional<ValueType> value_type;
+    };
+
     struct PropertyNumericMetadata {
         PropertyID property_id;
         NumericRange range;
@@ -289,6 +297,7 @@ public:
     static bool property_accepts_keyword(PropertyID, Keyword);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
+    static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static Optional<SyntaxComponent> parse_syntax_component(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);

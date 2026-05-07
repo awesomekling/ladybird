@@ -45,10 +45,10 @@ pub use css_parser::{
     CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssEasingValueKind, CssFitContentValueKind,
     CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech,
     CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
-    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
+    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind,
+    CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind,
+    CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind,
+    CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
     CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
     CssPageSelector, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind,
     CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
@@ -491,6 +491,51 @@ pub unsafe extern "C" fn rust_css_parse_property_custom_ident_value(
 
             css_parser::parse_property_custom_ident_value(property_ids, input, |property_id, custom_ident| {
                 callback(ctx, property_id, custom_ident.as_ptr(), custom_ident.len());
+            })
+        })
+    }
+}
+
+/// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_generated_property_value(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssGeneratedPropertyValueKind,
+        property_id: u16,
+        value: *const u8,
+        value_len: usize,
+        value_type: *const u8,
+        value_type_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_generated_property_value(property_ids, input, |kind, property_id, value, value_type| {
+                callback(
+                    ctx,
+                    kind,
+                    property_id,
+                    value.as_ptr(),
+                    value.len(),
+                    value_type.as_ptr(),
+                    value_type.len(),
+                );
             })
         })
     }

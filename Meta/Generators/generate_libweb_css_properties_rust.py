@@ -264,6 +264,18 @@ pub(crate) fn property_accepts_value_type(property_id: PropertyId, value_type: P
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn property_value_type_name(value_type: PropertyValueType) -> &'static str {
+    match value_type {""")
+
+    for value_type in valid_types_for_properties(properties, enum_names):
+        out.write(f"""
+        PropertyValueType::{value_type_title(value_type)} => "{value_type_title(value_type)}",""")
+
+    out.write("""
+    }
+}
+
 """)
 
 

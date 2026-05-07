@@ -185,6 +185,75 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         return OptionalNone {};
     };
 
+    {
+        auto generated_transaction = tokens.begin_transaction();
+        auto component_value_source = peek_token.original_source_text();
+        auto source = component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
+        if (auto generated_value = RustComponentValueParser::parse_generated_property_value(property_ids, source.bytes_as_string_view()); generated_value.has_value()) {
+            switch (generated_value->kind) {
+            case FFI::CssGeneratedPropertyValueKind::Invalid:
+                break;
+            case FFI::CssGeneratedPropertyValueKind::Keyword:
+                if (generated_value->keyword.has_value()) {
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { generated_value->property_id, KeywordStyleValue::create(*generated_value->keyword) };
+                }
+                break;
+            case FFI::CssGeneratedPropertyValueKind::CustomIdent:
+                if (generated_value->custom_ident.has_value()) {
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { generated_value->property_id, CustomIdentStyleValue::create(*generated_value->custom_ident) };
+                }
+                break;
+            case FFI::CssGeneratedPropertyValueKind::ValueType:
+                if (generated_value->value_type.has_value()) {
+                    auto context_guard = push_temporary_value_parsing_context(generated_value->property_id);
+
+                    auto parse_generated_numeric_value = [&]() -> RefPtr<StyleValue const> {
+                        auto metadata = RustComponentValueParser::property_numeric_metadata({ &generated_value->property_id, 1 }, *generated_value->value_type);
+                        if (!metadata.has_value())
+                            return nullptr;
+
+                        switch (*generated_value->value_type) {
+                        case ValueType::Integer:
+                            return parse_integer_value(tokens, metadata->range);
+                        case ValueType::Number:
+                            return parse_number_value(tokens, metadata->range);
+                        case ValueType::Length:
+                            if (metadata->percentages_resolve_to_value_type) {
+                                VERIFY(metadata->percentage_range.has_value());
+                                return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                            }
+                            return parse_length_value(tokens, metadata->range);
+                        case ValueType::Time:
+                            if (metadata->percentages_resolve_to_value_type) {
+                                VERIFY(metadata->percentage_range.has_value());
+                                return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                            }
+                            return parse_time_value(tokens, metadata->range);
+                        case ValueType::Percentage:
+                            return parse_percentage_value(tokens, metadata->range);
+                        default:
+                            return nullptr;
+                        }
+                    };
+
+                    auto value_type_is_numeric = first_is_one_of(*generated_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage);
+                    auto maybe_parsed_value = value_type_is_numeric ? parse_generated_numeric_value() : RefPtr<StyleValue const> {};
+                    if (!maybe_parsed_value && !value_type_is_numeric)
+                        maybe_parsed_value = parse_value(*generated_value->value_type, tokens);
+                    if (maybe_parsed_value) {
+                        generated_transaction.commit();
+                        return PropertyAndValue { generated_value->property_id, maybe_parsed_value };
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     if (peek_token.is(Token::Type::Ident)) {
         // NOTE: We do not try to parse "CSS-wide keywords" here. https://www.w3.org/TR/css-values-4/#common-keywords
         //       These are only valid on their own, and so should be parsed directly in `parse_css_value()`.
