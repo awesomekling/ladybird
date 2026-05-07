@@ -1943,9 +1943,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     BorderRadius {
         source: String,
     },
-    Columns {
-        source: String,
-    },
+    Columns(RustOwnedColumns),
     Content {
         source: String,
     },
@@ -1957,9 +1955,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FlexShorthand {
         source: String,
     },
-    FlexFlow {
-        source: String,
-    },
+    FlexFlow(RustOwnedFlexFlow),
     FilterValueList {
         source: String,
     },
@@ -2393,8 +2389,21 @@ pub(crate) struct RustOwnedContainerType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedColumns {
+    column_count_source: Option<String>,
+    column_width_source: Option<String>,
+    column_height_source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPaintOrder {
     value: CssPaintOrderValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFlexFlow {
+    flex_direction_source: Option<String>,
+    flex_wrap_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3922,13 +3931,49 @@ fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<R
 }
 
 fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_flex_flow_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-flexbox-1/#flex-flow-property
+    // Value: <'flex-direction'> || <'flex-wrap'>
+    if component_values.is_empty() || component_values.len() > 2 {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::FlexFlow {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let mut flex_direction_source = None;
+    let mut flex_wrap_source = None;
+
+    for component_value in &component_values {
+        if component_value_parse_as_flex_direction(component_value) {
+            if flex_direction_source.is_some() {
+                return None;
+            }
+            flex_direction_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if component_value_parse_as_flex_wrap(component_value) {
+            if flex_wrap_source.is_some() {
+                return None;
+            }
+            flex_wrap_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::FlexFlow(RustOwnedFlexFlow {
+        flex_direction_source,
+        flex_wrap_source,
+    }))
 }
 
 fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4506,13 +4551,102 @@ fn rust_owned_border_radius_shorthand_style_value_kind(filtered_input: &[u8]) ->
 }
 
 fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_columns_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let slash_positions = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| component_value_is_delim(Some(component_value), '/').then_some(index))
+        .collect::<Vec<_>>();
+
+    if slash_positions.len() > 1 {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::Columns {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let (columns, column_height) = if let Some(slash_position) = slash_positions.first() {
+        (
+            &component_values[..*slash_position],
+            Some(&component_values[*slash_position + 1..]),
+        )
+    } else {
+        (component_values.as_slice(), None)
+    };
+
+    // https://drafts.csswg.org/css-multicol-2/#propdef-columns
+    // <'column-width'> || <'column-count'> [ / <'column-height'> ]?
+    if columns.is_empty() || columns.len() > 2 {
+        return None;
+    }
+
+    let column_height_source = if let Some(column_height) = column_height {
+        if column_height.len() != 1 {
+            return None;
+        }
+        if component_value_is_ident(column_height.first(), "auto") {
+            Some("auto".to_string())
+        } else if parse_single_column_component_value(PropertyId::ColumnHeight, column_height, filtered_input_string) {
+            Some(serialize_component_values_for_reparsing(
+                column_height,
+                filtered_input_string,
+            )?)
+        } else {
+            return None;
+        }
+    } else {
+        None
+    };
+
+    let mut found_autos = 0_u8;
+    let mut column_count_source = None;
+    let mut column_width_source = None;
+    for component_value in columns {
+        if component_value_is_ident(Some(component_value), "auto") {
+            found_autos += 1;
+            continue;
+        }
+
+        let component_values = std::slice::from_ref(component_value);
+        if column_count_source.is_none()
+            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
+        {
+            column_count_source = Some(serialize_component_values_for_reparsing(
+                component_values,
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        if column_width_source.is_none()
+            && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
+        {
+            column_width_source = Some(serialize_component_values_for_reparsing(
+                component_values,
+                filtered_input_string,
+            )?);
+            continue;
+        }
+
+        return None;
+    }
+
+    if found_autos > 2 {
+        return None;
+    }
+    if found_autos > 0 {
+        if column_count_source.is_none() {
+            column_count_source = Some("auto".to_string());
+        }
+        if column_width_source.is_none() {
+            column_width_source = Some("auto".to_string());
+        }
+    }
+
+    Some(RustOwnedStyleValueKind::Columns(RustOwnedColumns {
+        column_count_source,
+        column_width_source,
+        column_height_source,
+    }))
 }
 
 fn rust_owned_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5672,8 +5806,28 @@ where
         RustOwnedStyleValueKind::BorderRadius { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::BorderRadius, property_id, source);
         }
-        RustOwnedStyleValueKind::Columns { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Columns, property_id, source);
+        RustOwnedStyleValueKind::Columns(value) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Columns,
+                property_id,
+                0,
+                value.column_count_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Columns,
+                property_id,
+                1,
+                value.column_width_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Columns,
+                property_id,
+                2,
+                value.column_height_source.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::Content { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::Content, property_id, source);
@@ -5775,8 +5929,21 @@ where
         RustOwnedStyleValueKind::FlexShorthand { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::Flex, property_id, source);
         }
-        RustOwnedStyleValueKind::FlexFlow { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FlexFlow, property_id, source);
+        RustOwnedStyleValueKind::FlexFlow(value) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::FlexFlow,
+                property_id,
+                0,
+                value.flex_direction_source.as_ref(),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::FlexFlow,
+                property_id,
+                1,
+                value.flex_wrap_source.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::FilterValueList { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FilterValueList, property_id, source);
@@ -6827,6 +6994,34 @@ where
         source.as_bytes(),
         "",
     );
+}
+
+fn callback_optional_longhand_source<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    index: u8,
+    source: Option<&String>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    if let Some(source) = source {
+        callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            index,
+            0,
+            0,
+            0,
+            source.as_bytes(),
+            "",
+        );
+    }
 }
 
 fn callback_place_shorthand_style_value<C>(
@@ -23564,12 +23759,12 @@ mod tests {
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent,
-        RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind, RustOwnedContain,
+        RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind, RustOwnedColumns, RustOwnedContain,
         RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
         RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList,
+        RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
         RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
         RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
@@ -25321,9 +25516,21 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FlexFlow], "wrap row-reverse"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FlexFlow,
-                value: RustOwnedStyleValueKind::FlexFlow {
-                    source: "wrap row-reverse".to_string(),
-                },
+                value: RustOwnedStyleValueKind::FlexFlow(RustOwnedFlexFlow {
+                    flex_direction_source: Some("row-reverse".to_string()),
+                    flex_wrap_source: Some("wrap".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Columns], "3 12em / auto"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Columns,
+                value: RustOwnedStyleValueKind::Columns(RustOwnedColumns {
+                    column_count_source: Some("3".to_string()),
+                    column_width_source: Some("12em".to_string()),
+                    column_height_source: Some("auto".to_string()),
+                }),
             })
         );
         assert_eq!(
@@ -26732,7 +26939,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "3 12em / auto".to_string(),
+                value: "auto".to_string(),
                 value_type: String::new(),
             })
         );
@@ -26849,7 +27056,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "wrap row-reverse".to_string(),
+                value: "wrap".to_string(),
                 value_type: String::new(),
             })
         );

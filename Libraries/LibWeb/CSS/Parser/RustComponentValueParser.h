@@ -162,6 +162,11 @@ public:
         String place_align_source;
         String place_justify_source;
         String overflow_clip_margin_source;
+        Optional<String> column_count_source;
+        Optional<String> column_width_source;
+        Optional<String> column_height_source;
+        Optional<String> flex_direction_source;
+        Optional<String> flex_wrap_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

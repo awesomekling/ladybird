@@ -797,6 +797,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return TupleStyleValue::create(tuple);
             };
+            auto parse_rust_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_css_value_for_property(property_id, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -1232,11 +1241,31 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Columns:
-                if (auto value = parse_columns_value(tokens)) {
+                if (rust_style_value->column_count_source.has_value() || rust_style_value->column_width_source.has_value() || rust_style_value->column_height_source.has_value()) {
+                    auto column_count = rust_style_value->column_count_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ColumnCount, *rust_style_value->column_count_source)
+                        : property_initial_value(PropertyID::ColumnCount);
+                    auto column_width = rust_style_value->column_width_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ColumnWidth, *rust_style_value->column_width_source)
+                        : property_initial_value(PropertyID::ColumnWidth);
+                    auto column_height = rust_style_value->column_height_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::ColumnHeight, *rust_style_value->column_height_source)
+                        : property_initial_value(PropertyID::ColumnHeight);
+                    if (!column_count || !column_width || !column_height)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::Columns,
+                            { PropertyID::ColumnCount, PropertyID::ColumnWidth, PropertyID::ColumnHeight },
+                            { column_count.release_nonnull(), column_width.release_nonnull(), column_height.release_nonnull() }) };
                 }
-                break;
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id,
+                    ShorthandStyleValue::create(PropertyID::Columns,
+                        { PropertyID::ColumnCount, PropertyID::ColumnWidth, PropertyID::ColumnHeight },
+                        { property_initial_value(PropertyID::ColumnCount), property_initial_value(PropertyID::ColumnWidth), property_initial_value(PropertyID::ColumnHeight) }) };
             case FFI::CssStyleValueKind::Content:
                 if (auto value = parse_content_value(tokens)) {
                     generated_transaction.commit();
@@ -1256,9 +1285,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FlexFlow:
-                if (auto value = parse_flex_flow_value(tokens)) {
+                if (rust_style_value->flex_direction_source.has_value() || rust_style_value->flex_wrap_source.has_value()) {
+                    auto flex_direction = rust_style_value->flex_direction_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::FlexDirection, *rust_style_value->flex_direction_source)
+                        : property_initial_value(PropertyID::FlexDirection);
+                    auto flex_wrap = rust_style_value->flex_wrap_source.has_value()
+                        ? parse_rust_source_as_property(PropertyID::FlexWrap, *rust_style_value->flex_wrap_source)
+                        : property_initial_value(PropertyID::FlexWrap);
+                    if (!flex_direction || !flex_wrap)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::FlexFlow,
+                            { PropertyID::FlexDirection, PropertyID::FlexWrap },
+                            { flex_direction.release_nonnull(), flex_wrap.release_nonnull() }) };
                 }
                 break;
             case FFI::CssStyleValueKind::FilterValueList:

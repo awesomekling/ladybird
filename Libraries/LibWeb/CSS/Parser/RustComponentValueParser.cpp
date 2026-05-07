@@ -1107,14 +1107,40 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             } else if (kind == FFI::CssStyleValueKind::OverflowClipMargin) {
                 value.overflow_clip_margin_source = string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Columns) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Columns);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->column_count_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1)
+                    style_value->column_width_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->column_height_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
+            } else if (kind == FFI::CssStyleValueKind::FlexFlow) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FlexFlow);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->flex_direction_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->flex_wrap_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
-                           FFI::CssStyleValueKind::Columns,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
                            FFI::CssStyleValueKind::Flex,
-                           FFI::CssStyleValueKind::FlexFlow,
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
