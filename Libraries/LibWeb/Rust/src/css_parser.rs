@@ -1100,6 +1100,20 @@ pub enum CssGridAutoFlowValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssGridAutoFlowAxis {
+    Row,
+    Column,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssGridAutoFlowDense {
+    No,
+    Yes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssGridTrackPlacementValueKind {
     Invalid,
     Valid,
@@ -1138,6 +1152,15 @@ pub enum CssBackgroundSizeValueKind {
 pub enum CssRepeatStyleValueKind {
     Invalid,
     Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssRepeatStyleRepetition {
+    NoRepeat,
+    Repeat,
+    Round,
+    Space,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1759,7 +1782,11 @@ pub enum CssStyleValueKind {
     FitContent,
     BasicShape,
     Rect,
+    GridAutoFlow,
+    RepeatStyle,
     ScrollFunction,
+    ScrollbarGutter,
+    TextUnderlinePosition,
     ViewTimelineInset,
     ViewFunction,
     ValueType,
@@ -1817,7 +1844,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Frequency(RustOwnedDimensionStyleValue),
     Function(RustOwnedFunctionStyleValue),
-    GridAutoFlow(RustOwnedSourceBackedStyleValue),
+    GridAutoFlow(RustOwnedGridAutoFlow),
     GridTemplateArea(RustOwnedSourceBackedStyleValue),
     GridTrackPlacement(RustOwnedSourceBackedStyleValue),
     GridTrackSizeList(RustOwnedSourceBackedStyleValue),
@@ -1859,10 +1886,10 @@ pub(crate) enum RustOwnedStyleValueKind {
         has_denominator: bool,
         value_type: PropertyValueType,
     },
-    RepeatStyle(RustOwnedSourceBackedStyleValue),
+    RepeatStyle(RustOwnedRepeatStyle),
     Resolution(RustOwnedDimensionStyleValue),
     ScrollbarColor(RustOwnedSourceBackedStyleValue),
-    ScrollbarGutter(RustOwnedSourceBackedStyleValue),
+    ScrollbarGutter(RustOwnedScrollbarGutter),
     Shadow(RustOwnedSourceBackedStyleValue),
     Shorthand(RustOwnedStyleValueList),
     String {
@@ -1871,7 +1898,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Superellipse(RustOwnedSourceBackedStyleValue),
     TextIndent(RustOwnedSourceBackedStyleValue),
-    TextUnderlinePosition(RustOwnedSourceBackedStyleValue),
+    TextUnderlinePosition(RustOwnedTextUnderlinePosition),
     Time(RustOwnedDimensionStyleValue),
     Transformation(RustOwnedSourceBackedStyleValue),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
@@ -2020,6 +2047,32 @@ pub(crate) struct RustOwnedRect {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontStyle {
     value: FontStyle,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGridAutoFlow {
+    axis: CssGridAutoFlowAxis,
+    dense: CssGridAutoFlowDense,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedRepeatStyle {
+    repeat_x: CssRepeatStyleRepetition,
+    repeat_y: CssRepeatStyleRepetition,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedScrollbarGutter {
+    value: CssScrollbarGutterValueKind,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTextUnderlinePosition {
+    value: CssTextUnderlinePositionValue,
     source: String,
 }
 
@@ -2285,6 +2338,15 @@ pub(crate) fn parse_rust_owned_style_value_for_property(
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
 
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
+            return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
+        }
+    }
+
     if let [
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
@@ -2353,6 +2415,21 @@ pub(crate) fn parse_rust_owned_style_value_for_property(
     }
 
     RustOwnedStyleValueParseResult::Invalid
+}
+
+fn parse_rust_owned_property_specific_longhand_value(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    match property_id {
+        PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
+        PropertyId::BackgroundRepeat | PropertyId::MaskRepeat => {
+            rust_owned_repeat_style_style_value_kind(filtered_input)
+        }
+        PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
+        _ => None,
+    }
 }
 
 fn parse_rust_owned_generated_longhand_value(
@@ -2737,6 +2814,136 @@ fn parse_all_component_values<T>(
 fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let value = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_style)?;
     Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
+}
+
+fn rust_owned_grid_auto_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property
+    // grid-auto-flow = [ row | column ] || dense
+    let axis = consume_optional_grid_auto_flow_axis_value(&mut parser);
+    let dense = consume_optional_ident_matching(&mut parser, "dense");
+    let axis_after_dense = if axis.is_some() {
+        None
+    } else {
+        consume_optional_grid_auto_flow_axis_value(&mut parser)
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() || (axis.is_none() && !dense && axis_after_dense.is_none()) {
+        return None;
+    }
+
+    let axis = axis.or(axis_after_dense).unwrap_or(CssGridAutoFlowAxis::Row);
+    let dense = if dense {
+        CssGridAutoFlowDense::Yes
+    } else {
+        CssGridAutoFlowDense::No
+    };
+
+    Some(RustOwnedStyleValueKind::GridAutoFlow(RustOwnedGridAutoFlow {
+        axis,
+        dense,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn consume_optional_grid_auto_flow_axis_value(parser: &mut ComponentValueParser) -> Option<CssGridAutoFlowAxis> {
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("row") {
+        return Some(CssGridAutoFlowAxis::Row);
+    }
+    if parser.consume_ident_matching("column") {
+        return Some(CssGridAutoFlowAxis::Column);
+    }
+    None
+}
+
+fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-backgrounds-3/#typedef-repeat-style
+    // <repeat-style> = repeat-x | repeat-y | [ repeat | space | round | no-repeat ]{1,2}
+    if consume_optional_ident_matching(&mut parser, "repeat-x") && parser_has_no_remaining_component_values(&mut parser)
+    {
+        return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+            repeat_x: CssRepeatStyleRepetition::Repeat,
+            repeat_y: CssRepeatStyleRepetition::NoRepeat,
+            source: filtered_input_to_string(filtered_input),
+        }));
+    }
+
+    if consume_optional_ident_matching(&mut parser, "repeat-y") && parser_has_no_remaining_component_values(&mut parser)
+    {
+        return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+            repeat_x: CssRepeatStyleRepetition::NoRepeat,
+            repeat_y: CssRepeatStyleRepetition::Repeat,
+            source: filtered_input_to_string(filtered_input),
+        }));
+    }
+
+    let repeat_x = consume_non_directional_repeat_style_value_kind(&mut parser)?;
+    let repeat_y = consume_non_directional_repeat_style_value_kind(&mut parser).unwrap_or(repeat_x);
+    if !parser_has_no_remaining_component_values(&mut parser) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+        repeat_x,
+        repeat_y,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn consume_non_directional_repeat_style_value_kind(
+    parser: &mut ComponentValueParser,
+) -> Option<CssRepeatStyleRepetition> {
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("repeat") {
+        return Some(CssRepeatStyleRepetition::Repeat);
+    }
+    if parser.consume_ident_matching("space") {
+        return Some(CssRepeatStyleRepetition::Space);
+    }
+    if parser.consume_ident_matching("round") {
+        return Some(CssRepeatStyleRepetition::Round);
+    }
+    if parser.consume_ident_matching("no-repeat") {
+        return Some(CssRepeatStyleRepetition::NoRepeat);
+    }
+    None
+}
+
+fn rust_owned_scrollbar_gutter_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_scrollbar_gutter_value(filtered_input);
+    if value == CssScrollbarGutterValueKind::Invalid {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ScrollbarGutter(RustOwnedScrollbarGutter {
+        value,
+        source: filtered_input_to_string(filtered_input),
+    }))
+}
+
+fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let value = parse_text_underline_position_value(filtered_input);
+    if value.horizontal == CssTextUnderlinePositionHorizontal::Invalid
+        || value.vertical == CssTextUnderlinePositionVertical::Invalid
+    {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::TextUnderlinePosition(
+        RustOwnedTextUnderlinePosition {
+            value,
+            source: filtered_input_to_string(filtered_input),
+        },
+    ))
 }
 
 fn rust_owned_font_variant_alternates_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
@@ -3320,7 +3527,6 @@ where
         | RustOwnedStyleValueKind::Edge(value)
         | RustOwnedStyleValueKind::FilterValueList(value)
         | RustOwnedStyleValueKind::FontSource(value)
-        | RustOwnedStyleValueKind::GridAutoFlow(value)
         | RustOwnedStyleValueKind::GridTemplateArea(value)
         | RustOwnedStyleValueKind::GridTrackPlacement(value)
         | RustOwnedStyleValueKind::GridTrackSizeList(value)
@@ -3332,13 +3538,10 @@ where
         | RustOwnedStyleValueKind::RadialGradient(value)
         | RustOwnedStyleValueKind::RadialSize(value)
         | RustOwnedStyleValueKind::RandomValueSharing(value)
-        | RustOwnedStyleValueKind::RepeatStyle(value)
         | RustOwnedStyleValueKind::ScrollbarColor(value)
-        | RustOwnedStyleValueKind::ScrollbarGutter(value)
         | RustOwnedStyleValueKind::Shadow(value)
         | RustOwnedStyleValueKind::Superellipse(value)
         | RustOwnedStyleValueKind::TextIndent(value)
-        | RustOwnedStyleValueKind::TextUnderlinePosition(value)
         | RustOwnedStyleValueKind::Transformation(value)
         | RustOwnedStyleValueKind::UnicodeRange(value) => {
             if let Some(value_type) = value.value_type {
@@ -3361,6 +3564,66 @@ where
                 PropertyValueType::FontStyle,
             );
         }
+        RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
+            CssStyleValueKind::GridAutoFlow,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.axis as u8,
+            value.dense as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::RepeatStyle(value) => callback(
+            CssStyleValueKind::RepeatStyle,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.repeat_x as u8,
+            value.repeat_y as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::ScrollbarGutter(value) => callback(
+            CssStyleValueKind::ScrollbarGutter,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::TextUnderlinePosition(value) => callback(
+            CssStyleValueKind::TextUnderlinePosition,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.value.horizontal as u8,
+            value.value.vertical as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
         RustOwnedStyleValueKind::Angle(value)
         | RustOwnedStyleValueKind::Flex(value)
         | RustOwnedStyleValueKind::Frequency(value)
@@ -18463,34 +18726,36 @@ mod tests {
         CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind, CssFitContentValueKind,
         CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
         CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-        CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind,
-        CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaQuery,
-        CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
-        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
-        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind,
-        CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-        CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
-        CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
-        CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
-        CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
-        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
-        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
-        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
-        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis, CssGridAutoFlowDense,
+        CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind,
+        CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
+        CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue,
+        CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
+        CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
+        CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
+        CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
+        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+        CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
+        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
+        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextUnderlinePosition, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
@@ -20306,6 +20571,51 @@ mod tests {
                 value: RustOwnedStyleValueKind::Position(RustOwnedSourceBackedStyleValue {
                     value_type: Some(PropertyValueType::BackgroundPosition),
                     source: "left 10px top".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::GridAutoFlow], "dense column"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::GridAutoFlow,
+                value: RustOwnedStyleValueKind::GridAutoFlow(RustOwnedGridAutoFlow {
+                    axis: CssGridAutoFlowAxis::Column,
+                    dense: CssGridAutoFlowDense::Yes,
+                    source: "dense column".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundRepeat], "repeat space"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundRepeat,
+                value: RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+                    repeat_x: CssRepeatStyleRepetition::Repeat,
+                    repeat_y: CssRepeatStyleRepetition::Space,
+                    source: "repeat space".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ScrollbarGutter], "stable both-edges"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ScrollbarGutter,
+                value: RustOwnedStyleValueKind::ScrollbarGutter(RustOwnedScrollbarGutter {
+                    value: CssScrollbarGutterValueKind::BothEdges,
+                    source: "stable both-edges".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TextUnderlinePosition], "under right"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TextUnderlinePosition,
+                value: RustOwnedStyleValueKind::TextUnderlinePosition(RustOwnedTextUnderlinePosition {
+                    value: CssTextUnderlinePositionValue {
+                        horizontal: CssTextUnderlinePositionHorizontal::Under,
+                        vertical: CssTextUnderlinePositionVertical::Right,
+                    },
+                    source: "under right".to_string(),
                 }),
             })
         );

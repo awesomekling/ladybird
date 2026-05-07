@@ -424,6 +424,52 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return FunctionStyleValue::create("view"_fly_string, TupleStyleValue::create(move(tuple)));
             };
+            auto discard_rust_owned_property_value_tokens = [&] {
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+            };
+            auto repetition_from_rust = [](u8 repetition) {
+                switch (repetition) {
+                case 0:
+                    return Repetition::NoRepeat;
+                case 1:
+                    return Repetition::Repeat;
+                case 2:
+                    return Repetition::Round;
+                case 3:
+                    return Repetition::Space;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
+            auto horizontal_text_underline_position_from_rust = [](FFI::CssTextUnderlinePositionHorizontal horizontal) {
+                switch (horizontal) {
+                case FFI::CssTextUnderlinePositionHorizontal::Invalid:
+                    break;
+                case FFI::CssTextUnderlinePositionHorizontal::Auto:
+                    return TextUnderlinePositionHorizontal::Auto;
+                case FFI::CssTextUnderlinePositionHorizontal::FromFont:
+                    return TextUnderlinePositionHorizontal::FromFont;
+                case FFI::CssTextUnderlinePositionHorizontal::Under:
+                    return TextUnderlinePositionHorizontal::Under;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
+            auto vertical_text_underline_position_from_rust = [](FFI::CssTextUnderlinePositionVertical vertical) {
+                switch (vertical) {
+                case FFI::CssTextUnderlinePositionVertical::Invalid:
+                    break;
+                case FFI::CssTextUnderlinePositionVertical::Auto:
+                    return TextUnderlinePositionVertical::Auto;
+                case FFI::CssTextUnderlinePositionVertical::Left:
+                    return TextUnderlinePositionVertical::Left;
+                case FFI::CssTextUnderlinePositionVertical::Right:
+                    return TextUnderlinePositionVertical::Right;
+                }
+
+                VERIFY_NOT_REACHED();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -505,11 +551,62 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::GridAutoFlow: {
+                auto axis = rust_style_value->grid_auto_flow_axis == 1
+                    ? GridAutoFlowStyleValue::Axis::Column
+                    : GridAutoFlowStyleValue::Axis::Row;
+                auto dense = rust_style_value->grid_auto_flow_dense == 1
+                    ? GridAutoFlowStyleValue::Dense::Yes
+                    : GridAutoFlowStyleValue::Dense::No;
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
+            }
+            case FFI::CssStyleValueKind::RepeatStyle:
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue {
+                    rust_style_value->property_id,
+                    RepeatStyleStyleValue::create(
+                        repetition_from_rust(rust_style_value->repeat_x),
+                        repetition_from_rust(rust_style_value->repeat_y))
+                };
             case FFI::CssStyleValueKind::ScrollFunction:
                 if (auto value = materialize_rust_scroll_function_value()) {
                     tokens.discard_a_token();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::ScrollbarGutter:
+                switch (rust_style_value->scrollbar_gutter) {
+                case FFI::CssScrollbarGutterValueKind::Invalid:
+                    break;
+                case FFI::CssScrollbarGutterValueKind::Auto:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::Auto) };
+                case FFI::CssScrollbarGutterValueKind::Stable:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::Stable) };
+                case FFI::CssScrollbarGutterValueKind::BothEdges:
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges) };
+                }
+                break;
+            case FFI::CssStyleValueKind::TextUnderlinePosition:
+                if (rust_style_value->text_underline_position_horizontal != FFI::CssTextUnderlinePositionHorizontal::Invalid
+                    && rust_style_value->text_underline_position_vertical != FFI::CssTextUnderlinePositionVertical::Invalid) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue {
+                        rust_style_value->property_id,
+                        TextUnderlinePositionStyleValue::create(
+                            horizontal_text_underline_position_from_rust(rust_style_value->text_underline_position_horizontal),
+                            vertical_text_underline_position_from_rust(rust_style_value->text_underline_position_vertical))
+                    };
                 }
                 break;
             case FFI::CssStyleValueKind::ViewTimelineInset:
@@ -4586,6 +4683,31 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
 {
     auto transaction = tokens.begin_transaction();
     auto start = tokens.current_index();
+
+    auto repetition_from_rust = [](u8 repetition) {
+        switch (repetition) {
+        case 0:
+            return Repetition::NoRepeat;
+        case 1:
+            return Repetition::Repeat;
+        case 2:
+            return Repetition::Round;
+        case 3:
+            return Repetition::Space;
+        }
+
+        VERIFY_NOT_REACHED();
+    };
+
+    auto serialized_repeat_style = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property, 1 }, serialized_repeat_style.bytes_as_string_view()); rust_style_value.has_value() && rust_style_value->kind == FFI::CssStyleValueKind::RepeatStyle) {
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+        transaction.commit();
+        return RepeatStyleStyleValue::create(
+            repetition_from_rust(rust_style_value->repeat_x),
+            repetition_from_rust(rust_style_value->repeat_y));
+    }
 
     auto validate_parsed_repeat_style = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
         if (!value)

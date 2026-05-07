@@ -959,6 +959,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_green);
+            } else if (kind == FFI::CssStyleValueKind::GridAutoFlow) {
+                value.grid_auto_flow_axis = color_red;
+                value.grid_auto_flow_dense = color_green;
+            } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
+                value.repeat_x = color_red;
+                value.repeat_y = color_green;
+            } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
+                value.scrollbar_gutter = static_cast<FFI::CssScrollbarGutterValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::TextUnderlinePosition) {
+                value.text_underline_position_horizontal = static_cast<FFI::CssTextUnderlinePositionHorizontal>(color_red);
+                value.text_underline_position_vertical = static_cast<FFI::CssTextUnderlinePositionVertical>(color_green);
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
                 value.view_timeline_inset_count = color_red;
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {
