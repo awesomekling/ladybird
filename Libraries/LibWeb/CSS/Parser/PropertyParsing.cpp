@@ -80,6 +80,23 @@ static void remove_property(Vector<PropertyID>& properties, PropertyID property_
     properties.remove_first_matching([&](auto it) { return it == property_to_remove; });
 }
 
+static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
+{
+    switch (font_style) {
+    case FFI::CssFontStyleKind::Normal:
+        return FontStyleKeyword::Normal;
+    case FFI::CssFontStyleKind::Italic:
+        return FontStyleKeyword::Italic;
+    case FFI::CssFontStyleKind::Left:
+        return FontStyleKeyword::Left;
+    case FFI::CssFontStyleKind::Right:
+        return FontStyleKeyword::Right;
+    case FFI::CssFontStyleKind::Oblique:
+        return FontStyleKeyword::Oblique;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 RefPtr<StyleValue const> Parser::parse_all_as_single_keyword_value(TokenStream<ComponentValue>& tokens, Keyword keyword)
 {
     auto transaction = tokens.begin_transaction();
@@ -1093,9 +1110,48 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FontFeatureSettings:
-                if (auto value = parse_font_feature_settings_value(tokens)) {
+                if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::Normal) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                }
+                if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::TagValues) {
+                    StyleValueVector feature_tags;
+                    feature_tags.ensure_capacity(rust_style_value->open_type_tag_values.size());
+                    for (auto const& tag_value : rust_style_value->open_type_tag_values) {
+                        RefPtr<StyleValue const> value;
+                        switch (tag_value.value_kind) {
+                        case FFI::CssOpenTypeTaggedValueKind::Implicit:
+                        case FFI::CssOpenTypeTaggedValueKind::On:
+                            // "If the value is omitted, a value of 1 is assumed."
+                            // A value of on is synonymous with 1 and off is synonymous with 0.
+                            value = IntegerStyleValue::create(1);
+                            break;
+                        case FFI::CssOpenTypeTaggedValueKind::Off:
+                            // A value of on is synonymous with 1 and off is synonymous with 0.
+                            value = IntegerStyleValue::create(0);
+                            break;
+                        case FFI::CssOpenTypeTaggedValueKind::Value: {
+                            VERIFY(tag_value.value.has_value());
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            value = parse_integer_value(value_tokens, non_negative_integer_range);
+                            value_tokens.discard_whitespace();
+                            if (!value || value_tokens.has_next_token())
+                                break;
+                            break;
+                        }
+                        }
+                        if (!value)
+                            break;
+
+                        feature_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, tag_value.tag, value.release_nonnull()));
+                    }
+                    if (feature_tags.size() != rust_style_value->open_type_tag_values.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(feature_tags), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::FontLanguageOverride:
@@ -1113,6 +1169,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     break;
                 }
                 break;
+            case FFI::CssStyleValueKind::FontStyle: {
+                auto font_style_keyword = font_style_keyword_from_rust(rust_style_value->font_style.kind);
+                if (rust_style_value->font_style.has_angle) {
+                    if (!rust_style_value->font_style_angle.has_value())
+                        break;
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*rust_style_value->font_style_angle, "utf-8"sv);
+                    TokenStream angle_tokens { component_values };
+                    auto angle_value = parse_angle_value(angle_tokens, { .min = -90, .max = 90 });
+                    angle_tokens.discard_whitespace();
+                    if (!angle_value || angle_tokens.has_next_token())
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, FontStyleStyleValue::create(font_style_keyword, angle_value.release_nonnull()) };
+                }
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, FontStyleStyleValue::create(font_style_keyword) };
+            }
             case FFI::CssStyleValueKind::FontVariant:
                 if (auto value = parse_font_variant(tokens)) {
                     generated_transaction.commit();
@@ -1120,9 +1195,32 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FontVariationSettings:
-                if (auto value = parse_font_variation_settings_value(tokens)) {
+                if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::Normal) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                }
+                if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::TagValues) {
+                    StyleValueVector axis_tags;
+                    axis_tags.ensure_capacity(rust_style_value->open_type_tag_values.size());
+                    for (auto const& tag_value : rust_style_value->open_type_tag_values) {
+                        if (tag_value.value_kind != FFI::CssOpenTypeTaggedValueKind::Value || !tag_value.value.has_value())
+                            break;
+
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+                        TokenStream value_tokens { component_values };
+                        auto number = parse_number_value(value_tokens, infinite_range);
+                        value_tokens.discard_whitespace();
+                        if (!number || value_tokens.has_next_token())
+                            break;
+
+                        axis_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontVariationSettings, tag_value.tag, number.release_nonnull()));
+                    }
+                    if (axis_tags.size() != rust_style_value->open_type_tag_values.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(axis_tags), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::BorderRadius:

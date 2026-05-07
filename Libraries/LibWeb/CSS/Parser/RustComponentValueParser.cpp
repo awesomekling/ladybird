@@ -1050,6 +1050,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.font_language_override_kind = static_cast<FFI::CssFontLanguageOverrideKind>(color_red);
                 if (value_len > 0)
                     value.font_language_override = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::FontStyle) {
+                value.font_style = FontStyle {
+                    .kind = static_cast<FFI::CssFontStyleKind>(color_red),
+                    .has_angle = color_green != 0,
+                };
+                if (value_len > 0)
+                    value.font_style_angle = string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::FontFeatureSettings || kind == FFI::CssStyleValueKind::FontVariationSettings) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == kind);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->open_type_settings_kind = static_cast<FFI::CssOpenTypeSettingsKind>(color_red);
+                if (value_len > 0) {
+                    VERIFY(value_len >= 4);
+                    Optional<String> tag_value;
+                    if (color_green == static_cast<u8>(FFI::CssOpenTypeTaggedValueKind::Value))
+                        tag_value = string_from_ffi_bytes(value_ptr + 4, value_len - 4);
+                    style_value->open_type_tag_values.append(OpenTypeTaggedValue {
+                        .tag = fly_string_from_ffi_bytes(value_ptr, 4),
+                        .value_kind = static_cast<FFI::CssOpenTypeTaggedValueKind>(color_green),
+                        .value = move(tag_value),
+                    });
+                }
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1059,9 +1087,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Flex,
                            FFI::CssStyleValueKind::FlexFlow,
                            FFI::CssStyleValueKind::FilterValueList,
-                           FFI::CssStyleValueKind::FontFeatureSettings,
                            FFI::CssStyleValueKind::FontVariant,
-                           FFI::CssStyleValueKind::FontVariationSettings,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackPlacement,
                            FFI::CssStyleValueKind::GridTrackSizeList,

@@ -128,6 +128,17 @@ public:
         bool is_string { false };
     };
 
+    struct FontStyle {
+        FFI::CssFontStyleKind kind;
+        bool has_angle { false };
+    };
+
+    struct OpenTypeTaggedValue {
+        FlyString tag;
+        FFI::CssOpenTypeTaggedValueKind value_kind;
+        Optional<String> value;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -164,6 +175,10 @@ public:
         Vector<FontFamilyValue> font_family;
         FFI::CssFontLanguageOverrideKind font_language_override_kind { FFI::CssFontLanguageOverrideKind::Normal };
         Optional<FlyString> font_language_override;
+        FontStyle font_style;
+        Optional<String> font_style_angle;
+        FFI::CssOpenTypeSettingsKind open_type_settings_kind { FFI::CssOpenTypeSettingsKind::Normal };
+        Vector<OpenTypeTaggedValue> open_type_tag_values;
         Vector<FontVariantAlternatesValue> font_variant_alternates;
         Vector<FontVariantEastAsianValue> font_variant_east_asian;
         Vector<FontVariantLigaturesValue> font_variant_ligatures;
@@ -263,11 +278,6 @@ public:
         Vector<FontTech> tech;
     };
 
-    struct FontStyle {
-        FFI::CssFontStyleKind kind;
-        bool has_angle { false };
-    };
-
     struct FontVariant {
         bool ligatures_none { false };
         Optional<Vector<FontVariantAlternatesValue>> alternates;
@@ -277,12 +287,6 @@ public:
         Optional<Vector<FontVariantLigaturesValue>> ligatures;
         Optional<Vector<FontVariantNumericValue>> numeric;
         Optional<FlyString> position;
-    };
-
-    struct OpenTypeTaggedValue {
-        FlyString tag;
-        FFI::CssOpenTypeTaggedValueKind value_kind;
-        Optional<String> value;
     };
 
     struct OpenTypeSettings {

@@ -1843,6 +1843,7 @@ pub enum CssStyleValueKind {
     FontFamily,
     FontFeatureSettings,
     FontLanguageOverride,
+    FontStyle,
     FontVariant,
     FontVariantAlternates,
     FontVariantEastAsian,
@@ -2102,7 +2103,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         values: Vec<FontFamilyValue>,
     },
     FontFeatureSettings {
-        source: String,
+        value: RustOwnedOpenTypeSettings,
     },
     FontLanguageOverride {
         kind: CssFontLanguageOverrideKind,
@@ -2112,7 +2113,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     FontVariationSettings {
-        source: String,
+        value: RustOwnedOpenTypeSettings,
     },
     BasicShape(RustOwnedBasicShape),
     Rect(RustOwnedRect),
@@ -2291,7 +2292,13 @@ pub(crate) struct RustOwnedRect {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontStyle {
     value: FontStyle,
-    source: String,
+    angle: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedOpenTypeSettings {
+    kind: CssOpenTypeSettingsKind,
+    tag_values: Vec<OpenTypeTaggedValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2912,6 +2919,9 @@ fn parse_rust_owned_style_value_for_property_with_mode(
                 continue;
             };
             if !property_accepts_value_type(property_id, *value_type) {
+                continue;
+            }
+            if property_ids.len() != 1 && *value_type == PropertyValueType::FontStyle {
                 continue;
             }
             let value_type_matches = if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
@@ -3758,8 +3768,29 @@ fn parse_all_component_values<T>(
 }
 
 fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
-    let value = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_style)?;
-    Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, source }))
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(source.as_bytes());
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let value = parser.parse_a_font_style()?;
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    let angle = if matches!(value, FontStyle::Oblique { has_angle: true }) {
+        let angle_component_value = strip_whitespace(&parser.component_values)
+            .iter()
+            .filter(|component_value| !is_whitespace_component_value(component_value))
+            .nth(1)?;
+        Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(angle_component_value),
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle { value, angle }))
 }
 
 fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -3771,11 +3802,19 @@ fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<Rust
 }
 
 fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_a_font_feature_settings(filtered_input, |_| {}, |_| {}) {
+    let mut kind = CssOpenTypeSettingsKind::Normal;
+    let mut tag_values = Vec::new();
+    if !parse_a_font_feature_settings(
+        filtered_input,
+        |parsed_kind| kind = parsed_kind,
+        |value| {
+            tag_values.push(value.clone());
+        },
+    ) {
         return None;
     }
     Some(RustOwnedStyleValueKind::FontFeatureSettings {
-        source: filtered_input_to_string(filtered_input),
+        value: RustOwnedOpenTypeSettings { kind, tag_values },
     })
 }
 
@@ -3801,11 +3840,19 @@ fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 }
 
 fn rust_owned_font_variation_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_a_font_variation_settings(filtered_input, |_| {}, |_| {}) {
+    let mut kind = CssOpenTypeSettingsKind::Normal;
+    let mut tag_values = Vec::new();
+    if !parse_a_font_variation_settings(
+        filtered_input,
+        |parsed_kind| kind = parsed_kind,
+        |value| {
+            tag_values.push(value.clone());
+        },
+    ) {
         return None;
     }
     Some(RustOwnedStyleValueKind::FontVariationSettings {
-        source: filtered_input_to_string(filtered_input),
+        value: RustOwnedOpenTypeSettings { kind, tag_values },
     })
 }
 
@@ -5452,14 +5499,21 @@ where
                 PropertyValueType::Image,
             );
         }
-        RustOwnedStyleValueKind::FontStyle(_) => {
-            callback_style_value_type(
-                callback,
-                CssStyleValueKind::ValueType,
-                property_id,
-                PropertyValueType::FontStyle,
-            );
-        }
+        RustOwnedStyleValueKind::FontStyle(value) => callback(
+            CssStyleValueKind::FontStyle,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            css_font_style_kind(value.value) as u8,
+            u8::from(value.angle.is_some()),
+            0,
+            0,
+            value.angle.as_ref().map_or(&[], |angle| angle.as_bytes()),
+            property_value_type_name(PropertyValueType::FontStyle),
+        ),
         RustOwnedStyleValueKind::AnchorNameOrScope(value) => {
             let name_bytes = null_separated_string_list_bytes(&value.names);
             callback(
@@ -6404,8 +6458,13 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::FontFeatureSettings { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FontFeatureSettings, property_id, source);
+        RustOwnedStyleValueKind::FontFeatureSettings { value } => {
+            callback_open_type_settings_style_value(
+                callback,
+                CssStyleValueKind::FontFeatureSettings,
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::FontLanguageOverride { kind, value } => callback(
             CssStyleValueKind::FontLanguageOverride,
@@ -6425,8 +6484,13 @@ where
         RustOwnedStyleValueKind::FontVariant { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FontVariant, property_id, source);
         }
-        RustOwnedStyleValueKind::FontVariationSettings { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FontVariationSettings, property_id, source);
+        RustOwnedStyleValueKind::FontVariationSettings { value } => {
+            callback_open_type_settings_style_value(
+                callback,
+                CssStyleValueKind::FontVariationSettings,
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::BasicShape(_) => callback_style_value_type(
             callback,
@@ -6546,6 +6610,63 @@ fn callback_style_value_type<C>(
         &[],
         property_value_type_name(value_type),
     );
+}
+
+fn callback_open_type_settings_style_value<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    value: &RustOwnedOpenTypeSettings,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        value.kind as u8,
+        0,
+        0,
+        0,
+        &[],
+        "",
+    );
+
+    for tag_value in &value.tag_values {
+        let mut tag_and_value = tag_value.tag.as_bytes().to_vec();
+        if let Some(value) = &tag_value.value {
+            tag_and_value.extend_from_slice(value.as_bytes());
+        }
+        callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            value.kind as u8,
+            tag_value.value_kind as u8,
+            0,
+            0,
+            &tag_and_value,
+            "",
+        );
+    }
+}
+
+fn css_font_style_kind(value: FontStyle) -> CssFontStyleKind {
+    match value {
+        FontStyle::Normal => CssFontStyleKind::Normal,
+        FontStyle::Italic => CssFontStyleKind::Italic,
+        FontStyle::Left => CssFontStyleKind::Left,
+        FontStyle::Right => CssFontStyleKind::Right,
+        FontStyle::Oblique { .. } => CssFontStyleKind::Oblique,
+    }
 }
 
 fn callback_source_backed_style_value<C>(callback: &mut C, kind: CssStyleValueKind, property_id: u16, source: &str)
@@ -23270,14 +23391,14 @@ mod tests {
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
         RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
         RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition, RustOwnedPositionComponent,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPosition,
+        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecorationLine,
+        RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
+        RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
+        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
@@ -25073,7 +25194,14 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontFeatureSettings,
                 value: RustOwnedStyleValueKind::FontFeatureSettings {
-                    source: "\"kern\" on".to_string(),
+                    value: RustOwnedOpenTypeSettings {
+                        kind: CssOpenTypeSettingsKind::TagValues,
+                        tag_values: vec![OpenTypeTaggedValue {
+                            tag: "kern".to_string(),
+                            value_kind: CssOpenTypeTaggedValueKind::On,
+                            value: None,
+                        }],
+                    },
                 },
             })
         );
@@ -25101,7 +25229,14 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariationSettings,
                 value: RustOwnedStyleValueKind::FontVariationSettings {
-                    source: "\"wght\" 700".to_string(),
+                    value: RustOwnedOpenTypeSettings {
+                        kind: CssOpenTypeSettingsKind::TagValues,
+                        tag_values: vec![OpenTypeTaggedValue {
+                            tag: "wght".to_string(),
+                            value_kind: CssOpenTypeTaggedValueKind::Value,
+                            value: Some("700".to_string()),
+                        }],
+                    },
                 },
             })
         );
@@ -25921,7 +26056,7 @@ mod tests {
                 property_id: PropertyId::FontStyle,
                 value: RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle {
                     value: FontStyle::Oblique { has_angle: true },
-                    source: "oblique 10deg".to_string(),
+                    angle: Some("10deg".to_string()),
                 }),
             })
         );
@@ -26066,7 +26201,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "\"kern\"".to_string(),
+                value: "kern".to_string(),
                 value_type: String::new(),
             })
         );
