@@ -952,6 +952,114 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 VERIFY_NOT_REACHED();
             };
+            auto parse_rust_source_as_grid_track_breadth = [&](String const& source) -> Optional<GridSize> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_grid_track_breadth(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value.has_value() || value_tokens.has_next_token())
+                    return {};
+                return value.release_value();
+            };
+            auto parse_rust_source_as_grid_fixed_breadth = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_grid_fixed_breadth(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto materialize_rust_grid_track_size = [&](RustComponentValueParser::RustGridTrackSizeListEvent const& event) -> Optional<ExplicitGridTrack> {
+                switch (event.kind) {
+                case RustComponentValueParser::RustGridTrackSizeListEventKind::Breadth: {
+                    auto value = parse_rust_source_as_grid_track_breadth(event.source);
+                    if (!value.has_value())
+                        return {};
+                    return ExplicitGridTrack(value.release_value());
+                }
+                case RustComponentValueParser::RustGridTrackSizeListEventKind::MinMax: {
+                    auto min_value = parse_rust_source_as_grid_track_breadth(event.source);
+                    auto max_value = parse_rust_source_as_grid_track_breadth(event.secondary_source);
+                    if (!min_value.has_value() || !max_value.has_value())
+                        return {};
+                    return ExplicitGridTrack(GridMinMax(min_value.release_value(), max_value.release_value()));
+                }
+                case RustComponentValueParser::RustGridTrackSizeListEventKind::FitContent: {
+                    auto length_percentage = parse_rust_source_as_grid_fixed_breadth(event.source);
+                    if (!length_percentage)
+                        return {};
+                    return ExplicitGridTrack(GridSize(FunctionStyleValue::create("fit-content"_fly_string, length_percentage.release_nonnull())));
+                }
+                default:
+                    return {};
+                }
+            };
+            auto materialize_rust_grid_track_size_list = [&](auto& materialize_rust_grid_track_size_list, Vector<RustComponentValueParser::RustGridTrackSizeListEvent> const& events, size_t& index, bool stop_at_repeat_end) -> Optional<GridTrackSizeList> {
+                GridTrackSizeList grid_track_size_list;
+
+                while (index < events.size()) {
+                    auto const& event = events[index++];
+                    switch (event.kind) {
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::None:
+                        return {};
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::LineNames: {
+                        GridLineNames line_names;
+                        for (auto name : event.source.bytes_as_string_view().split_view('\0')) {
+                            if (!name.is_empty())
+                                line_names.append(FlyString::from_utf8_without_validation(name.bytes()));
+                        }
+                        if (!line_names.is_empty())
+                            grid_track_size_list.append(move(line_names));
+                        break;
+                    }
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::Breadth:
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::MinMax:
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::FitContent: {
+                        auto explicit_grid_track = materialize_rust_grid_track_size(event);
+                        if (!explicit_grid_track.has_value())
+                            return {};
+                        grid_track_size_list.append(explicit_grid_track.release_value());
+                        break;
+                    }
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::RepeatBegin: {
+                        auto repeat_type = [&] {
+                            switch (event.repeat_type) {
+                            case RustComponentValueParser::RustGridRepeatType::AutoFill:
+                                return GridRepeatType::AutoFill;
+                            case RustComponentValueParser::RustGridRepeatType::AutoFit:
+                                return GridRepeatType::AutoFit;
+                            case RustComponentValueParser::RustGridRepeatType::Fixed:
+                                return GridRepeatType::Fixed;
+                            }
+                            VERIFY_NOT_REACHED();
+                        }();
+
+                        RefPtr<StyleValue const> repeat_count;
+                        if (repeat_type == GridRepeatType::Fixed) {
+                            repeat_count = parse_rust_source_as_integer(event.source);
+                            if (!repeat_count)
+                                return {};
+                        }
+
+                        auto nested_list = materialize_rust_grid_track_size_list(materialize_rust_grid_track_size_list, events, index, true);
+                        if (!nested_list.has_value())
+                            return {};
+
+                        grid_track_size_list.append(ExplicitGridTrack(GridRepeat(nested_list.release_value(), GridRepeatParams { repeat_type, repeat_count })));
+                        break;
+                    }
+                    case RustComponentValueParser::RustGridTrackSizeListEventKind::RepeatEnd:
+                        if (stop_at_repeat_end)
+                            return grid_track_size_list;
+                        return {};
+                    }
+                }
+
+                if (stop_at_repeat_end)
+                    return {};
+                return grid_track_size_list;
+            };
             auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1615,9 +1723,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
             }
             case FFI::CssStyleValueKind::GridAutoTrackSizes:
-                if (auto value = parse_grid_auto_track_sizes(tokens)) {
+                if (!rust_style_value->grid_track_size_list_is_none || !rust_style_value->grid_track_size_list_events.is_empty()) {
+                    size_t event_index = 0;
+                    auto value = rust_style_value->grid_track_size_list_is_none
+                        ? Optional<GridTrackSizeList> { GridTrackSizeList {} }
+                        : materialize_rust_grid_track_size_list(materialize_rust_grid_track_size_list, rust_style_value->grid_track_size_list_events, event_index, false);
+                    if (!value.has_value() || event_index != rust_style_value->grid_track_size_list_events.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, GridTrackSizeListStyleValue::create(value.release_value()) };
                 }
                 break;
             case FFI::CssStyleValueKind::GridTrackPlacement:
@@ -1631,9 +1746,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::GridTrackSizeList:
-                if (auto value = parse_grid_track_size_list(tokens)) {
+                if (rust_style_value->grid_track_size_list_is_none || !rust_style_value->grid_track_size_list_events.is_empty()) {
+                    size_t event_index = 0;
+                    auto value = rust_style_value->grid_track_size_list_is_none
+                        ? Optional<GridTrackSizeList> { GridTrackSizeList::make_none() }
+                        : materialize_rust_grid_track_size_list(materialize_rust_grid_track_size_list, rust_style_value->grid_track_size_list_events, event_index, false);
+                    if (!value.has_value() || event_index != rust_style_value->grid_track_size_list_events.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, GridTrackSizeListStyleValue::create(value.release_value()) };
                 }
                 break;
             case FFI::CssStyleValueKind::ListStyle:

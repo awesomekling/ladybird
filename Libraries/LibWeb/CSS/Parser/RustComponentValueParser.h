@@ -184,6 +184,29 @@ public:
         Optional<String> name;
     };
 
+    enum class RustGridTrackSizeListEventKind : u8 {
+        None,
+        LineNames,
+        Breadth,
+        MinMax,
+        FitContent,
+        RepeatBegin,
+        RepeatEnd,
+    };
+
+    enum class RustGridRepeatType : u8 {
+        AutoFill,
+        AutoFit,
+        Fixed,
+    };
+
+    struct RustGridTrackSizeListEvent {
+        RustGridTrackSizeListEventKind kind { RustGridTrackSizeListEventKind::None };
+        RustGridRepeatType repeat_type { RustGridRepeatType::AutoFill };
+        String source;
+        String secondary_source;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -280,6 +303,8 @@ public:
         bool position_try_fallbacks_is_none { false };
         Vector<RustPositionTryFallback> position_try_fallbacks;
         Optional<RustGridTrackPlacement> grid_track_placement;
+        bool grid_track_size_list_is_none { false };
+        Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
         bool transform_longhand_is_none { false };
         FlyString transform_longhand_function_name;
         Vector<String> transform_longhand_arguments;

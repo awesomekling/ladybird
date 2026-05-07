@@ -1300,10 +1300,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Cursor,
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
-                           FFI::CssStyleValueKind::GridAutoTrackSizes,
-                           FFI::CssStyleValueKind::GridTrackSizeList,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (first_is_one_of(kind,
+                           FFI::CssStyleValueKind::GridAutoTrackSizes,
+                           FFI::CssStyleValueKind::GridTrackSizeList)) {
+                enum : u8 {
+                    None,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == kind);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == None) {
+                    style_value->grid_track_size_list_is_none = true;
+                    return;
+                }
+
+                style_value->grid_track_size_list_events.append(RustGridTrackSizeListEvent {
+                    .kind = static_cast<RustGridTrackSizeListEventKind>(color_red),
+                    .repeat_type = static_cast<RustGridRepeatType>(color_green),
+                    .source = string_from_ffi_bytes(value_ptr, value_len),
+                    .secondary_source = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::GridTrackPlacement) {
                 value.grid_track_placement = RustGridTrackPlacement {
                     .kind = static_cast<RustGridTrackPlacementKind>(color_red),
