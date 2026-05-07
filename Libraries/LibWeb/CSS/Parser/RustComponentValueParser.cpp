@@ -1248,6 +1248,53 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->transform_longhand_function_name = fly_string_from_ffi_bytes(value_type_ptr, value_type_len);
                 style_value->transform_longhand_arguments.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
+            } else if (kind == FFI::CssStyleValueKind::Shadow) {
+                enum : u8 {
+                    None,
+                    BeginShadow,
+                    Color,
+                    OffsetX,
+                    OffsetY,
+                    BlurRadius,
+                    SpreadDistance,
+                };
+                enum : u8 {
+                    Outer,
+                    Inner,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Shadow);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == None) {
+                    style_value->shadow_is_none = true;
+                    return;
+                }
+
+                if (color_red == BeginShadow) {
+                    style_value->shadows.append(RustShadow {
+                        .placement = color_green == Inner ? RustShadowPlacement::Inner : RustShadowPlacement::Outer,
+                    });
+                    return;
+                }
+
+                VERIFY(!style_value->shadows.is_empty());
+                auto& shadow = style_value->shadows.last();
+                if (color_red == Color)
+                    shadow.color_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == OffsetX)
+                    shadow.offset_x_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == OffsetY)
+                    shadow.offset_y_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == BlurRadius)
+                    shadow.blur_radius_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == SpreadDistance)
+                    shadow.spread_distance_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
@@ -1258,7 +1305,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridTrackSizeList,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
-                           FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {

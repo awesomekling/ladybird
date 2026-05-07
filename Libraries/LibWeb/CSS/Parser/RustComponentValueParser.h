@@ -139,6 +139,20 @@ public:
         Optional<String> value;
     };
 
+    enum class RustShadowPlacement : u8 {
+        Outer,
+        Inner,
+    };
+
+    struct RustShadow {
+        Optional<String> color_source;
+        String offset_x_source;
+        String offset_y_source;
+        Optional<String> blur_radius_source;
+        Optional<String> spread_distance_source;
+        RustShadowPlacement placement { RustShadowPlacement::Outer };
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -228,6 +242,8 @@ public:
         bool text_indent_has_each_line { false };
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
+        bool shadow_is_none { false };
+        Vector<RustShadow> shadows;
         bool transform_longhand_is_none { false };
         FlyString transform_longhand_function_name;
         Vector<String> transform_longhand_arguments;

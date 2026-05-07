@@ -842,6 +842,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_color = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_color_value(value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -855,6 +864,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_non_negative_length = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_length_value(value_tokens, non_negative_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -1976,9 +1994,53 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto shadow_type = rust_style_value->property_id == PropertyID::TextShadow
                     ? ShadowStyleValue::ShadowType::Text
                     : ShadowStyleValue::ShadowType::Normal;
-                if (auto value = parse_shadow_value(tokens, shadow_type)) {
+                if (rust_style_value->shadow_is_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (!rust_style_value->shadows.is_empty()) {
+                    StyleValueVector shadows;
+                    shadows.ensure_capacity(rust_style_value->shadows.size());
+                    for (auto const& shadow : rust_style_value->shadows) {
+                        if (shadow.offset_x_source.is_empty() || shadow.offset_y_source.is_empty())
+                            break;
+
+                        RefPtr<StyleValue const> color;
+                        if (shadow.color_source.has_value()) {
+                            color = parse_rust_source_as_color(*shadow.color_source);
+                            if (!color)
+                                break;
+                        }
+
+                        auto offset_x = parse_rust_source_as_length(shadow.offset_x_source);
+                        auto offset_y = parse_rust_source_as_length(shadow.offset_y_source);
+                        if (!offset_x || !offset_y)
+                            break;
+
+                        RefPtr<StyleValue const> blur_radius;
+                        if (shadow.blur_radius_source.has_value()) {
+                            blur_radius = parse_rust_source_as_non_negative_length(*shadow.blur_radius_source);
+                            if (!blur_radius)
+                                break;
+                        }
+
+                        RefPtr<StyleValue const> spread_distance;
+                        if (shadow.spread_distance_source.has_value()) {
+                            spread_distance = parse_rust_source_as_length(*shadow.spread_distance_source);
+                            if (!spread_distance)
+                                break;
+                        }
+
+                        auto placement = shadow.placement == RustComponentValueParser::RustShadowPlacement::Inner ? ShadowPlacement::Inner : ShadowPlacement::Outer;
+                        shadows.append(ShadowStyleValue::create(shadow_type, color, offset_x.release_nonnull(), offset_y.release_nonnull(), blur_radius, spread_distance, placement));
+                    }
+                    if (shadows.size() != rust_style_value->shadows.size())
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(shadows), StyleValueList::Separator::Comma) };
                 }
                 break;
             }

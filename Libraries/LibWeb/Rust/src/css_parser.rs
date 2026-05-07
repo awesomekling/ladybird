@@ -2025,9 +2025,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     OverflowClipMargin {
         length_source: String,
     },
-    Shadow {
-        source: String,
-    },
+    Shadow(RustOwnedShadow),
     ShapeOutside {
         source: String,
     },
@@ -2485,6 +2483,28 @@ pub(crate) enum RustOwnedScrollbarColor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollbarGutter {
     value: CssScrollbarGutterValueKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedShadow {
+    None,
+    Shadows(Vec<RustOwnedSingleShadow>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedSingleShadow {
+    color_source: Option<String>,
+    offset_x_source: String,
+    offset_y_source: String,
+    blur_radius_source: Option<String>,
+    spread_distance_source: Option<String>,
+    placement: RustOwnedShadowPlacement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedShadowPlacement {
+    Outer,
+    Inner,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5066,13 +5086,10 @@ fn rust_owned_shadow_style_value_kind(
     property_id: PropertyId,
     filtered_input: &[u8],
 ) -> Option<RustOwnedStyleValueKind> {
-    if !parse_shadow_value(property_id, filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::Shadow {
-        source: filtered_input_to_string(filtered_input),
-    })
+    Some(RustOwnedStyleValueKind::Shadow(parse_rust_owned_shadow_value(
+        property_id,
+        filtered_input,
+    )?))
 }
 
 fn rust_owned_shape_outside_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6831,8 +6848,8 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::Shadow { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Shadow, property_id, source);
+        RustOwnedStyleValueKind::Shadow(value) => {
+            callback_shadow_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::ShapeOutside { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ShapeOutside, property_id, source);
@@ -7755,6 +7772,63 @@ fn callback_optional_longhand_source<C>(
             source.as_bytes(),
             "",
         );
+    }
+}
+
+const SHADOW_CALLBACK_NONE: u8 = 0;
+const SHADOW_CALLBACK_BEGIN_SHADOW: u8 = 1;
+const SHADOW_CALLBACK_COLOR: u8 = 2;
+const SHADOW_CALLBACK_OFFSET_X: u8 = 3;
+const SHADOW_CALLBACK_OFFSET_Y: u8 = 4;
+const SHADOW_CALLBACK_BLUR_RADIUS: u8 = 5;
+const SHADOW_CALLBACK_SPREAD_DISTANCE: u8 = 6;
+const SHADOW_PLACEMENT_OUTER: u8 = 0;
+const SHADOW_PLACEMENT_INNER: u8 = 1;
+
+fn callback_shadow_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedShadow)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let mut callback_shadow_component = |component: u8, placement: u8, source: &str| {
+        callback(
+            CssStyleValueKind::Shadow,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            component,
+            placement,
+            0,
+            0,
+            source.as_bytes(),
+            "",
+        );
+    };
+
+    match value {
+        RustOwnedShadow::None => callback_shadow_component(SHADOW_CALLBACK_NONE, 0, ""),
+        RustOwnedShadow::Shadows(shadows) => {
+            for shadow in shadows {
+                let placement = match shadow.placement {
+                    RustOwnedShadowPlacement::Outer => SHADOW_PLACEMENT_OUTER,
+                    RustOwnedShadowPlacement::Inner => SHADOW_PLACEMENT_INNER,
+                };
+                callback_shadow_component(SHADOW_CALLBACK_BEGIN_SHADOW, placement, "");
+                if let Some(color_source) = &shadow.color_source {
+                    callback_shadow_component(SHADOW_CALLBACK_COLOR, 0, color_source);
+                }
+                callback_shadow_component(SHADOW_CALLBACK_OFFSET_X, 0, &shadow.offset_x_source);
+                callback_shadow_component(SHADOW_CALLBACK_OFFSET_Y, 0, &shadow.offset_y_source);
+                if let Some(blur_radius_source) = &shadow.blur_radius_source {
+                    callback_shadow_component(SHADOW_CALLBACK_BLUR_RADIUS, 0, blur_radius_source);
+                }
+                if let Some(spread_distance_source) = &shadow.spread_distance_source {
+                    callback_shadow_component(SHADOW_CALLBACK_SPREAD_DISTANCE, 0, spread_distance_source);
+                }
+            }
+        }
     }
 }
 
@@ -14392,25 +14466,28 @@ pub(crate) fn parse_cursor_value(filtered_input: &[u8]) -> bool {
 }
 
 pub(crate) fn parse_shadow_value(property_id: PropertyId, filtered_input: &[u8]) -> bool {
+    parse_rust_owned_shadow_value(property_id, filtered_input).is_some()
+}
+
+fn parse_rust_owned_shadow_value(property_id: PropertyId, filtered_input: &[u8]) -> Option<RustOwnedShadow> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input_string = filtered_input_to_string(filtered_input);
 
     // https://drafts.csswg.org/css-backgrounds-3/#typedef-shadow
     // <shadow> = <color>? && [<length>{2} <length [0,∞]>? <length>?] && inset?
     let component_values_without_whitespace = strip_whitespace(&component_values);
     if matches!(&component_values_without_whitespace, [component_value] if component_value_is_ident(Some(component_value), "none"))
     {
-        return true;
+        return Some(RustOwnedShadow::None);
     }
 
     let is_box_shadow = property_id == PropertyId::BoxShadow;
-    let Some(shadows) = parse_comma_separated_component_values(component_values, |component_values| {
-        parse_single_shadow_value(component_values, is_box_shadow).then_some(())
-    }) else {
-        return false;
-    };
+    let shadows = parse_comma_separated_component_values(component_values, |component_values| {
+        parse_single_shadow_value(component_values, &filtered_input_string, is_box_shadow)
+    })?;
 
-    !shadows.is_empty()
+    (!shadows.is_empty()).then_some(RustOwnedShadow::Shadows(shadows))
 }
 
 pub(crate) fn parse_overflow_clip_margin_value(filtered_input: &[u8]) -> bool {
@@ -15097,43 +15174,91 @@ fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> bool
     }
 }
 
-fn parse_single_shadow_value(component_values: Vec<ComponentValue>, is_box_shadow: bool) -> bool {
+fn parse_single_shadow_value(
+    component_values: Vec<ComponentValue>,
+    filtered_input_string: &str,
+    is_box_shadow: bool,
+) -> Option<RustOwnedSingleShadow> {
     let mut parser = ComponentValueParser::new(component_values);
     parser.discard_whitespace();
 
-    let mut has_color = false;
-    let mut has_offsets = false;
+    let mut color_source = None;
+    let mut offset_x_source = None;
+    let mut offset_y_source = None;
+    let mut blur_radius_source = None;
+    let mut spread_distance_source = None;
+    let mut placement = RustOwnedShadowPlacement::Outer;
     let mut has_placement = false;
 
     while parser.has_next_component_value() {
-        if !has_color && component_value_parse_as_color_value(parser.next_component_value().unwrap()) {
+        let component_value = parser.next_component_value().unwrap();
+        if color_source.is_none() && component_value_parse_as_color_value(component_value) {
+            color_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?);
             parser.index += 1;
-            has_color = true;
             continue;
         }
 
-        if !has_offsets && consume_length_component_value(&mut parser) {
-            if !consume_length_component_value(&mut parser) {
-                return false;
-            }
-
-            if consume_non_negative_length_component_value(&mut parser) && is_box_shadow {
-                consume_length_component_value(&mut parser);
-            }
-
-            has_offsets = true;
-            continue;
-        }
-
-        if is_box_shadow && !has_placement && parser.consume_ident_matching("inset") {
+        if is_box_shadow
+            && !has_placement
+            && let ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { .. },
+                ..
+            }) = component_value
+            && parser.consume_ident_matching("inset")
+        {
+            placement = RustOwnedShadowPlacement::Inner;
             has_placement = true;
             continue;
         }
 
-        return false;
+        if offset_x_source.is_none() {
+            let offset_x = consume_component_value_source_matching(
+                &mut parser,
+                filtered_input_string,
+                component_value_parse_as_length,
+            )?;
+            let offset_y = consume_component_value_source_matching(
+                &mut parser,
+                filtered_input_string,
+                component_value_parse_as_length,
+            )?;
+
+            let blur_radius = consume_component_value_source_matching(
+                &mut parser,
+                filtered_input_string,
+                component_value_parse_as_non_negative_length,
+            );
+            let spread_distance = if blur_radius.is_some() && is_box_shadow {
+                consume_component_value_source_matching(
+                    &mut parser,
+                    filtered_input_string,
+                    component_value_parse_as_length,
+                )
+            } else {
+                None
+            };
+
+            offset_x_source = Some(offset_x);
+            offset_y_source = Some(offset_y);
+            blur_radius_source = blur_radius;
+            spread_distance_source = spread_distance;
+            continue;
+        }
+
+        return None;
     }
 
-    has_offsets
+    Some(RustOwnedSingleShadow {
+        color_source,
+        offset_x_source: offset_x_source?,
+        offset_y_source: offset_y_source?,
+        blur_radius_source,
+        spread_distance_source,
+        placement,
+    })
 }
 
 fn consume_transform_origin_component(parser: &mut ComponentValueParser) -> Option<TransformOriginComponent> {
@@ -24690,12 +24815,13 @@ mod tests {
         RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
         RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
+        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
@@ -26739,9 +26865,14 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BoxShadow], "inset 1px 2px 3px red"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BoxShadow,
-                value: RustOwnedStyleValueKind::Shadow {
-                    source: "inset 1px 2px 3px red".to_string(),
-                },
+                value: RustOwnedStyleValueKind::Shadow(RustOwnedShadow::Shadows(vec![RustOwnedSingleShadow {
+                    color_source: Some("red".to_string()),
+                    offset_x_source: "1px".to_string(),
+                    offset_y_source: "2px".to_string(),
+                    blur_radius_source: Some("3px".to_string()),
+                    spread_distance_source: None,
+                    placement: RustOwnedShadowPlacement::Inner,
+                }])),
             })
         );
         assert_eq!(
