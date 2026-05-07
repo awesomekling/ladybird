@@ -1868,6 +1868,7 @@ pub enum CssStyleValueKind {
     ScrollFunction,
     ScrollbarColor,
     ScrollbarGutter,
+    StrokeDasharray,
     TimelineName,
     TimelineScope,
     TextWrap,
@@ -2032,6 +2033,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     BasicShape(RustOwnedBasicShape),
     Rect(RustOwnedRect),
+    StrokeDasharray {
+        source: String,
+    },
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
     ScrollFunction {
         scroller: CssScrollFunctionScrollerKind,
@@ -2895,6 +2899,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
         PropertyId::TimelineScope => rust_owned_timeline_scope_style_value_kind(filtered_input),
         PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
         PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
@@ -4213,6 +4218,15 @@ fn rust_owned_scrollbar_gutter_style_value_kind(filtered_input: &[u8]) -> Option
         value,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_stroke_dasharray_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_stroke_dasharray_value(filtered_input) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::StrokeDasharray {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5593,6 +5607,9 @@ where
             value.as_bytes(),
             *value_type,
         ),
+        RustOwnedStyleValueKind::StrokeDasharray { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::StrokeDasharray, property_id, source);
+        }
         RustOwnedStyleValueKind::Time(value) => callback_primitive_style_value(
             callback,
             property_id,
@@ -12954,6 +12971,54 @@ pub(crate) fn parse_scrollbar_gutter_value(filtered_input: &[u8]) -> CssScrollba
     } else {
         CssScrollbarGutterValueKind::Stable
     }
+}
+
+pub(crate) fn parse_stroke_dasharray_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://svgwg.org/svg2-draft/painting.html#StrokeDashing
+    // Value: none | <dasharray>
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("none") {
+        parser.discard_whitespace();
+        return !parser.has_next_component_value();
+    }
+
+    // https://svgwg.org/svg2-draft/painting.html#DataTypeDasharray
+    // <dasharray> = [ [ <length-percentage> | <number> ]+ ]#
+    let mut saw_value = false;
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        // A <dasharray> is a list of comma and/or white space separated <number> or <length-percentage> values. A <number> value represents a value in user units.
+        // If any value in the list is negative, the <dasharray> value is invalid.
+        if !component_value_parse_as_non_negative_number(component_value)
+            && !component_value_parse_as_non_negative_length_percentage(component_value)
+        {
+            return false;
+        }
+
+        parser.index += 1;
+        saw_value = true;
+
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+        if parser.consume_a_comma() {
+            parser.discard_whitespace();
+            if !parser.has_next_component_value() {
+                return false;
+            }
+        }
+    }
+
+    saw_value
 }
 
 pub(crate) fn parse_quotes_value<S>(filtered_input: &[u8], mut string_callback: S) -> CssQuotesValueKind
@@ -20996,12 +21061,13 @@ mod tests {
         parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
         parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
         parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
-        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
-        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_stroke_dasharray_value, parse_style_value_for_property, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -21781,6 +21847,10 @@ mod tests {
 
     fn parse_scrollbar_gutter(input: &str) -> CssScrollbarGutterValueKind {
         parse_scrollbar_gutter_value(input.as_bytes())
+    }
+
+    fn parse_stroke_dasharray(input: &str) -> bool {
+        parse_stroke_dasharray_value(input.as_bytes())
     }
 
     fn parse_quotes(input: &str) -> (CssQuotesValueKind, Vec<String>) {
@@ -23142,6 +23212,15 @@ mod tests {
                     value: CssScrollbarGutterValueKind::BothEdges,
                     source: "stable both-edges".to_string(),
                 }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::StrokeDasharray], "2 3px, calc(4%)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::StrokeDasharray,
+                value: RustOwnedStyleValueKind::StrokeDasharray {
+                    source: "2 3px, calc(4%)".to_string(),
+                },
             })
         );
         assert_eq!(
@@ -27377,6 +27456,24 @@ mod tests {
             parse_scrollbar_gutter("stable, both-edges"),
             CssScrollbarGutterValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_stroke_dasharray_values() {
+        assert!(parse_stroke_dasharray("none"));
+        assert!(parse_stroke_dasharray("2 3px, 4%"));
+        assert!(parse_stroke_dasharray("calc(4)"));
+        assert!(parse_stroke_dasharray("calc(4%) 2"));
+    }
+
+    #[test]
+    fn rejects_invalid_stroke_dasharray_values() {
+        assert!(!parse_stroke_dasharray(""));
+        assert!(!parse_stroke_dasharray("auto"));
+        assert!(!parse_stroke_dasharray("none 10px"));
+        assert!(!parse_stroke_dasharray("-40px"));
+        assert!(!parse_stroke_dasharray("20px / 30px"));
+        assert!(!parse_stroke_dasharray("2,"));
     }
 
     #[test]

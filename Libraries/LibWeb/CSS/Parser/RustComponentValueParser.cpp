@@ -971,6 +971,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridTrackSizeList,
                            FFI::CssStyleValueKind::PositionAnchor,
                            FFI::CssStyleValueKind::Quotes,
+                           FFI::CssStyleValueKind::StrokeDasharray,
                            FFI::CssStyleValueKind::TimelineName,
                            FFI::CssStyleValueKind::TimelineScope,
                            FFI::CssStyleValueKind::TransformLonghand,

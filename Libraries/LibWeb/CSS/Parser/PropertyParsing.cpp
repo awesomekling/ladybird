@@ -1041,6 +1041,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, ScrollbarGutterStyleValue::create(ScrollbarGutter::BothEdges) };
                 }
                 break;
+            case FFI::CssStyleValueKind::StrokeDasharray:
+                if (auto value = parse_stroke_dasharray_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::TimelineName:
                 if (auto value = parse_timeline_name_value(tokens)) {
                     generated_transaction.commit();
