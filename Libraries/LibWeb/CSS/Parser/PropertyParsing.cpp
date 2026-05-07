@@ -806,6 +806,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_integer = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_integer_value(value_tokens, infinite_integer_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -1359,9 +1368,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::MathDepth:
-                if (auto value = parse_math_depth_value(tokens)) {
+                if (rust_style_value->color_red == 0) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::AutoAdd) };
+                }
+                if (rust_style_value->math_depth_integer_source.has_value()) {
+                    auto integer_value = parse_rust_source_as_integer(*rust_style_value->math_depth_integer_source);
+                    if (!integer_value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    if (rust_style_value->color_red == 1) {
+                        return PropertyAndValue { rust_style_value->property_id,
+                            FunctionStyleValue::create("add"_fly_string, integer_value.release_nonnull()) };
+                    }
+                    return PropertyAndValue { rust_style_value->property_id, integer_value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::TransformLonghand:

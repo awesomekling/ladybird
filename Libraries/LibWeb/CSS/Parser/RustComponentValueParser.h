@@ -174,6 +174,7 @@ public:
         Optional<String> list_style_position_source;
         Optional<String> list_style_image_source;
         Optional<String> list_style_type_source;
+        Optional<String> math_depth_integer_source;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

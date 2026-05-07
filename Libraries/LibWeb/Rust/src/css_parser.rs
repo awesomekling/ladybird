@@ -1999,9 +1999,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: f64,
         value_type: PropertyValueType,
     },
-    MathDepth {
-        source: String,
-    },
+    MathDepth(RustOwnedMathDepth),
     OpacityValue {
         primitive_kind: CssPrimitiveValueKind,
         value: f64,
@@ -2227,6 +2225,13 @@ pub(crate) struct RustOwnedListStyle {
     position_source: Option<String>,
     image_source: Option<String>,
     type_source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedMathDepth {
+    AutoAdd,
+    Add { integer_source: String },
+    Integer { integer_source: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4238,13 +4243,41 @@ fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustO
 }
 
 fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_math_depth_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://w3c.github.io/mathml-core/#propdef-math-depth
+    // Value: auto-add | add(<integer>) | <integer>
+    if let [component_value] = component_values.as_slice()
+        && component_value_is_ident(Some(component_value), "auto-add")
+    {
+        return Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::AutoAdd));
+    }
+
+    if let [ComponentValue::Function(function)] = component_values.as_slice()
+        && function.name.eq_ignore_ascii_case("add")
+    {
+        let integer_source = serialize_component_values_for_reparsing(&function.value, filtered_input_string)?;
+        if !component_values_parse_as_property_value_type(PropertyValueType::Integer, integer_source.as_bytes()) {
+            return None;
+        }
+        return Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add {
+            integer_source,
+        }));
+    }
+
+    if component_values.len() != 1 {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::MathDepth {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let integer_source = serialize_component_values_for_reparsing(&component_values, filtered_input_string)?;
+    if !component_values_parse_as_property_value_type(PropertyValueType::Integer, integer_source.as_bytes()) {
+        return None;
+    }
+    Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Integer {
+        integer_source,
+    }))
 }
 
 fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6143,9 +6176,53 @@ where
                 value.type_source.as_ref(),
             );
         }
-        RustOwnedStyleValueKind::MathDepth { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::MathDepth, property_id, source);
-        }
+        RustOwnedStyleValueKind::MathDepth(value) => match value {
+            RustOwnedMathDepth::AutoAdd => callback(
+                CssStyleValueKind::MathDepth,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                0,
+                0,
+                0,
+                0,
+                &[],
+                "",
+            ),
+            RustOwnedMathDepth::Add { integer_source } => callback(
+                CssStyleValueKind::MathDepth,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                1,
+                0,
+                0,
+                0,
+                integer_source.as_bytes(),
+                "",
+            ),
+            RustOwnedMathDepth::Integer { integer_source } => callback(
+                CssStyleValueKind::MathDepth,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                2,
+                0,
+                0,
+                0,
+                integer_source.as_bytes(),
+                "",
+            ),
+        },
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
             property_id,
@@ -23951,7 +24028,7 @@ mod tests {
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow,
         RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList,
         RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedListStyle, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
         RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
         RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue,
@@ -26300,9 +26377,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::MathDepth], "add(-2)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MathDepth,
-                value: RustOwnedStyleValueKind::MathDepth {
-                    source: "add(-2)".to_string(),
-                },
+                value: RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add {
+                    integer_source: "-2".to_string(),
+                }),
             })
         );
         assert_eq!(
