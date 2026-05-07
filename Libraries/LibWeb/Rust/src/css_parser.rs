@@ -2099,13 +2099,14 @@ pub(crate) enum RustOwnedStyleValueKind {
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedFitContent),
     FontFamily {
-        source: String,
+        values: Vec<FontFamilyValue>,
     },
     FontFeatureSettings {
         source: String,
     },
     FontLanguageOverride {
-        source: String,
+        kind: CssFontLanguageOverrideKind,
+        value: Option<String>,
     },
     FontVariant {
         source: String,
@@ -3762,12 +3763,11 @@ fn rust_owned_font_style_style_value_kind(source: String) -> Option<RustOwnedSty
 }
 
 fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_a_font_family_value(filtered_input, |_| {}) {
+    let mut values = Vec::new();
+    if !parse_a_font_family_value(filtered_input, |value| values.push(value.clone())) {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontFamily {
-        source: filtered_input_to_string(filtered_input),
-    })
+    Some(RustOwnedStyleValueKind::FontFamily { values })
 }
 
 fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -3780,12 +3780,15 @@ fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> O
 }
 
 fn rust_owned_font_language_override_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_a_font_language_override(filtered_input, |_, _| {}) {
+    let mut kind = CssFontLanguageOverrideKind::Normal;
+    let mut value = None;
+    if !parse_a_font_language_override(filtered_input, |parsed_kind, parsed_value| {
+        kind = parsed_kind;
+        value = parsed_value.map(ToString::to_string);
+    }) {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontLanguageOverride {
-        source: filtered_input_to_string(filtered_input),
-    })
+    Some(RustOwnedStyleValueKind::FontLanguageOverride { kind, value })
 }
 
 fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6376,15 +6379,49 @@ where
             property_id,
             PropertyValueType::FitContent,
         ),
-        RustOwnedStyleValueKind::FontFamily { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FontFamily, property_id, source);
+        RustOwnedStyleValueKind::FontFamily { values } => {
+            for value in values {
+                let (kind, family_name, is_string) = match value {
+                    FontFamilyValue::Generic(value) => (CssFontFamilyValueKind::Generic, value, false),
+                    FontFamilyValue::FamilyName(value) => {
+                        (CssFontFamilyValueKind::FamilyName, &value.name, value.is_string)
+                    }
+                };
+                callback(
+                    CssStyleValueKind::FontFamily,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    kind as u8,
+                    u8::from(is_string),
+                    0,
+                    0,
+                    family_name.as_bytes(),
+                    "",
+                );
+            }
         }
         RustOwnedStyleValueKind::FontFeatureSettings { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FontFeatureSettings, property_id, source);
         }
-        RustOwnedStyleValueKind::FontLanguageOverride { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FontLanguageOverride, property_id, source);
-        }
+        RustOwnedStyleValueKind::FontLanguageOverride { kind, value } => callback(
+            CssStyleValueKind::FontLanguageOverride,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *kind as u8,
+            0,
+            0,
+            0,
+            value.as_ref().map_or(&[], |value| value.as_bytes()),
+            "",
+        ),
         RustOwnedStyleValueKind::FontVariant { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FontVariant, property_id, source);
         }
@@ -25021,7 +25058,13 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontFamily,
                 value: RustOwnedStyleValueKind::FontFamily {
-                    source: "serif, \"Bongo Sans\"".to_string(),
+                    values: vec![
+                        FontFamilyValue::Generic("serif".to_string()),
+                        FontFamilyValue::FamilyName(FamilyName {
+                            name: "Bongo Sans".to_string(),
+                            is_string: true,
+                        }),
+                    ],
                 },
             })
         );
@@ -25039,7 +25082,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontLanguageOverride,
                 value: RustOwnedStyleValueKind::FontLanguageOverride {
-                    source: "\"KSW\"".to_string(),
+                    kind: CssFontLanguageOverrideKind::String,
+                    value: Some("KSW".to_string()),
                 },
             })
         );

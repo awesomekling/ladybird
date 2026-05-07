@@ -1032,6 +1032,24 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .value = fly_string_from_ffi_bytes(value_ptr, value_len),
                 });
                 return;
+            } else if (kind == FFI::CssStyleValueKind::FontFamily) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontFamily);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->font_family.append(FontFamilyValue {
+                    .kind = static_cast<FFI::CssFontFamilyValueKind>(color_red),
+                    .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    .is_string = color_green != 0,
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::FontLanguageOverride) {
+                value.font_language_override_kind = static_cast<FFI::CssFontLanguageOverrideKind>(color_red);
+                if (value_len > 0)
+                    value.font_language_override = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1041,9 +1059,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Flex,
                            FFI::CssStyleValueKind::FlexFlow,
                            FFI::CssStyleValueKind::FilterValueList,
-                           FFI::CssStyleValueKind::FontFamily,
                            FFI::CssStyleValueKind::FontFeatureSettings,
-                           FFI::CssStyleValueKind::FontLanguageOverride,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::FontVariationSettings,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,

@@ -1065,9 +1065,31 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FontFamily:
-                if (auto value = parse_font_family_value(tokens)) {
+                if (!rust_style_value->font_family.is_empty()) {
+                    StyleValueVector values;
+                    values.ensure_capacity(rust_style_value->font_family.size());
+                    for (auto const& family_value : rust_style_value->font_family) {
+                        switch (family_value.kind) {
+                        case FFI::CssFontFamilyValueKind::Generic: {
+                            auto maybe_keyword = keyword_from_string(family_value.value);
+                            if (!maybe_keyword.has_value() || !keyword_to_generic_font_family(*maybe_keyword).has_value())
+                                break;
+                            values.append(KeywordStyleValue::create(*maybe_keyword));
+                            break;
+                        }
+                        case FFI::CssFontFamilyValueKind::FamilyName:
+                            if (family_value.is_string)
+                                values.append(StringStyleValue::create(family_value.value));
+                            else
+                                values.append(CustomIdentStyleValue::create(family_value.value));
+                            break;
+                        }
+                    }
+                    if (values.size() != rust_style_value->font_family.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::FontFeatureSettings:
@@ -1077,9 +1099,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FontLanguageOverride:
-                if (auto value = parse_font_language_override_value(tokens)) {
+                switch (rust_style_value->font_language_override_kind) {
+                case FFI::CssFontLanguageOverrideKind::Normal:
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Normal) };
+                case FFI::CssFontLanguageOverrideKind::String:
+                    if (rust_style_value->font_language_override.has_value()) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, StringStyleValue::create(rust_style_value->font_language_override.release_value()) };
+                    }
+                    break;
                 }
                 break;
             case FFI::CssStyleValueKind::FontVariant:

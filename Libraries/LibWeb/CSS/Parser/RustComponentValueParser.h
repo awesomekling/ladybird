@@ -117,6 +117,17 @@ public:
         FlyString value;
     };
 
+    struct FontLanguageOverride {
+        FFI::CssFontLanguageOverrideKind kind;
+        Optional<FlyString> value;
+    };
+
+    struct FontFamilyValue {
+        FFI::CssFontFamilyValueKind kind;
+        FlyString value;
+        bool is_string { false };
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -150,6 +161,9 @@ public:
         FFI::CssColorSchemeValueKind color_scheme_kind { FFI::CssColorSchemeValueKind::Invalid };
         bool color_scheme_only { false };
         Vector<String> color_scheme_schemes;
+        Vector<FontFamilyValue> font_family;
+        FFI::CssFontLanguageOverrideKind font_language_override_kind { FFI::CssFontLanguageOverrideKind::Normal };
+        Optional<FlyString> font_language_override;
         Vector<FontVariantAlternatesValue> font_variant_alternates;
         Vector<FontVariantEastAsianValue> font_variant_east_asian;
         Vector<FontVariantLigaturesValue> font_variant_ligatures;
@@ -247,17 +261,6 @@ public:
         Variant<FamilyName, URL> source;
         Optional<FlyString> format;
         Vector<FontTech> tech;
-    };
-
-    struct FontLanguageOverride {
-        FFI::CssFontLanguageOverrideKind kind;
-        Optional<FlyString> value;
-    };
-
-    struct FontFamilyValue {
-        FFI::CssFontFamilyValueKind kind;
-        FlyString value;
-        bool is_string { false };
     };
 
     struct FontStyle {
