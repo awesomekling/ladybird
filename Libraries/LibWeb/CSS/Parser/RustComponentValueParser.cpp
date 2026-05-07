@@ -1297,9 +1297,64 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
-                           FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::FontVariant) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontVariant);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                switch (static_cast<RustFontVariantEventKind>(color_red)) {
+                case RustFontVariantEventKind::Normal:
+                    break;
+                case RustFontVariantEventKind::Simple:
+                    switch (static_cast<FFI::CssFontVariantSimpleValueKind>(color_green)) {
+                    case FFI::CssFontVariantSimpleValueKind::LigaturesNone:
+                        style_value->font_variant_ligatures_none = true;
+                        break;
+                    case FFI::CssFontVariantSimpleValueKind::Caps:
+                        style_value->font_variant_caps = fly_string_from_ffi_bytes(value_ptr, value_len);
+                        break;
+                    case FFI::CssFontVariantSimpleValueKind::Emoji:
+                        style_value->font_variant_emoji = fly_string_from_ffi_bytes(value_ptr, value_len);
+                        break;
+                    case FFI::CssFontVariantSimpleValueKind::Position:
+                        style_value->font_variant_position = fly_string_from_ffi_bytes(value_ptr, value_len);
+                        break;
+                    }
+                    break;
+                case RustFontVariantEventKind::AlternatesValue:
+                    style_value->font_variant_alternates.append({
+                        .kind = static_cast<FFI::CssFontVariantAlternatesValueKind>(color_green),
+                    });
+                    break;
+                case RustFontVariantEventKind::AlternatesFeatureValueName:
+                    VERIFY(!style_value->font_variant_alternates.is_empty());
+                    style_value->font_variant_alternates.last().feature_value_names.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+                    break;
+                case RustFontVariantEventKind::EastAsianValue:
+                    style_value->font_variant_east_asian.append({
+                        .kind = static_cast<FFI::CssFontVariantEastAsianValueKind>(color_green),
+                        .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                case RustFontVariantEventKind::NumericValue:
+                    style_value->font_variant_numeric.append({
+                        .kind = static_cast<FFI::CssFontVariantNumericValueKind>(color_green),
+                        .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                case RustFontVariantEventKind::LigaturesValue:
+                    style_value->font_variant_ligatures.append({
+                        .kind = static_cast<FFI::CssFontVariantLigaturesValueKind>(color_green),
+                        .value = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::FilterValueList) {
                 enum : u8 {
                     None,

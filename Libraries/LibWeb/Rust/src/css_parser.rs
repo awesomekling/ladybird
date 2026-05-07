@@ -2078,7 +2078,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: Option<String>,
     },
     FontVariant {
-        source: String,
+        value: FontVariant,
     },
     FontVariationSettings {
         value: RustOwnedOpenTypeSettings,
@@ -4018,12 +4018,17 @@ fn rust_owned_font_language_override_style_value_kind(filtered_input: &[u8]) -> 
 }
 
 fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_a_font_variant(filtered_input, |_, _| {}, |_| {}, |_| {}, |_| {}, |_| {}, |_| {}) {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let font_variant = parser.parse_a_font_variant()?;
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontVariant {
-        source: filtered_input_to_string(filtered_input),
-    })
+
+    Some(RustOwnedStyleValueKind::FontVariant { value: font_variant })
 }
 
 fn rust_owned_font_variation_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -7614,8 +7619,8 @@ where
             value.as_ref().map_or(&[], |value| value.as_bytes()),
             "",
         ),
-        RustOwnedStyleValueKind::FontVariant { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FontVariant, property_id, source);
+        RustOwnedStyleValueKind::FontVariant { value } => {
+            callback_font_variant_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::FontVariationSettings { value } => {
             callback_open_type_settings_style_value(
@@ -8088,6 +8093,13 @@ const SIMPLE_FILTER_FUNCTION_INVERT: u8 = 3;
 const SIMPLE_FILTER_FUNCTION_OPACITY: u8 = 4;
 const SIMPLE_FILTER_FUNCTION_SATURATE: u8 = 5;
 const SIMPLE_FILTER_FUNCTION_SEPIA: u8 = 6;
+const FONT_VARIANT_CALLBACK_NORMAL: u8 = 0;
+const FONT_VARIANT_CALLBACK_SIMPLE: u8 = 1;
+const FONT_VARIANT_CALLBACK_ALTERNATES_VALUE: u8 = 2;
+const FONT_VARIANT_CALLBACK_ALTERNATES_FEATURE_VALUE_NAME: u8 = 3;
+const FONT_VARIANT_CALLBACK_EAST_ASIAN_VALUE: u8 = 4;
+const FONT_VARIANT_CALLBACK_NUMERIC_VALUE: u8 = 5;
+const FONT_VARIANT_CALLBACK_LIGATURES_VALUE: u8 = 6;
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
 where
@@ -8258,6 +8270,171 @@ fn callback_optional_filter_source<C>(
         u8::from(source.is_some()),
         0,
         source.map_or(&[], |source| source.as_bytes()),
+        "",
+    );
+}
+
+fn callback_font_variant_style_value<C>(callback: &mut C, property_id: u16, value: &FontVariant)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    if !value.has_any_value() {
+        callback(
+            CssStyleValueKind::FontVariant,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            FONT_VARIANT_CALLBACK_NORMAL,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        );
+        return;
+    }
+
+    if value.ligatures_none {
+        callback_font_variant_simple_value(
+            callback,
+            property_id,
+            CssFontVariantSimpleValueKind::LigaturesNone,
+            None,
+        );
+    }
+    if let Some(alternates) = &value.alternates {
+        for value in alternates {
+            callback(
+                CssStyleValueKind::FontVariant,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                FONT_VARIANT_CALLBACK_ALTERNATES_VALUE,
+                value.kind as u8,
+                0,
+                0,
+                &[],
+                "",
+            );
+            for feature_value_name in &value.feature_value_names {
+                callback(
+                    CssStyleValueKind::FontVariant,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    FONT_VARIANT_CALLBACK_ALTERNATES_FEATURE_VALUE_NAME,
+                    0,
+                    0,
+                    0,
+                    feature_value_name.as_bytes(),
+                    "",
+                );
+            }
+        }
+    }
+    if let Some(caps) = &value.caps {
+        callback_font_variant_simple_value(callback, property_id, CssFontVariantSimpleValueKind::Caps, Some(caps));
+    }
+    if let Some(east_asian) = &value.east_asian {
+        for value in east_asian {
+            callback(
+                CssStyleValueKind::FontVariant,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                FONT_VARIANT_CALLBACK_EAST_ASIAN_VALUE,
+                value.kind as u8,
+                0,
+                0,
+                value.value.as_bytes(),
+                "",
+            );
+        }
+    }
+    if let Some(emoji) = &value.emoji {
+        callback_font_variant_simple_value(callback, property_id, CssFontVariantSimpleValueKind::Emoji, Some(emoji));
+    }
+    if let Some(ligatures) = &value.ligatures {
+        for value in ligatures {
+            callback(
+                CssStyleValueKind::FontVariant,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                FONT_VARIANT_CALLBACK_LIGATURES_VALUE,
+                value.kind as u8,
+                0,
+                0,
+                value.value.as_bytes(),
+                "",
+            );
+        }
+    }
+    if let Some(numeric) = &value.numeric {
+        for value in numeric {
+            callback(
+                CssStyleValueKind::FontVariant,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                FONT_VARIANT_CALLBACK_NUMERIC_VALUE,
+                value.kind as u8,
+                0,
+                0,
+                value.value.as_bytes(),
+                "",
+            );
+        }
+    }
+    if let Some(position) = &value.position {
+        callback_font_variant_simple_value(
+            callback,
+            property_id,
+            CssFontVariantSimpleValueKind::Position,
+            Some(position),
+        );
+    }
+}
+
+fn callback_font_variant_simple_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: CssFontVariantSimpleValueKind,
+    value: Option<&String>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::FontVariant,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        FONT_VARIANT_CALLBACK_SIMPLE,
+        kind as u8,
+        0,
+        0,
+        value.map_or(&[], |value| value.as_bytes()),
         "",
     );
 }
@@ -27653,7 +27830,14 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariant,
                 value: RustOwnedStyleValueKind::FontVariant {
-                    source: "small-caps tabular-nums".to_string(),
+                    value: FontVariant {
+                        caps: Some("small-caps".to_string()),
+                        numeric: Some(vec![FontVariantNumericValue {
+                            kind: CssFontVariantNumericValueKind::Spacing,
+                            value: "tabular-nums".to_string(),
+                        }]),
+                        ..FontVariant::default()
+                    },
                 },
             })
         );

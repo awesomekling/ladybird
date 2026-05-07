@@ -797,6 +797,82 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return TupleStyleValue::create(tuple);
             };
+            auto materialize_rust_font_variant_value = [&]() -> RefPtr<StyleValue const> {
+                RefPtr<StyleValue const> alternates_value;
+                RefPtr<StyleValue const> caps_value;
+                RefPtr<StyleValue const> emoji_value;
+                RefPtr<StyleValue const> position_value;
+                RefPtr<StyleValue const> east_asian_value;
+                RefPtr<StyleValue const> ligatures_value;
+                RefPtr<StyleValue const> numeric_value;
+
+                auto keyword_style_value_from_string = [](FlyString const& value) -> RefPtr<StyleValue const> {
+                    auto maybe_keyword = keyword_from_string(value);
+                    if (!maybe_keyword.has_value())
+                        return nullptr;
+                    return KeywordStyleValue::create(*maybe_keyword);
+                };
+
+                if (!rust_style_value->font_variant_alternates.is_empty())
+                    alternates_value = materialize_rust_font_variant_alternates_value();
+                if (rust_style_value->font_variant_caps.has_value())
+                    caps_value = keyword_style_value_from_string(*rust_style_value->font_variant_caps);
+                if (rust_style_value->font_variant_emoji.has_value())
+                    emoji_value = keyword_style_value_from_string(*rust_style_value->font_variant_emoji);
+                if (rust_style_value->font_variant_position.has_value())
+                    position_value = keyword_style_value_from_string(*rust_style_value->font_variant_position);
+                if (rust_style_value->font_variant_ligatures_none)
+                    ligatures_value = KeywordStyleValue::create(Keyword::None);
+                if (!rust_style_value->font_variant_east_asian.is_empty())
+                    east_asian_value = materialize_rust_font_variant_east_asian_value();
+                if (!rust_style_value->font_variant_ligatures.is_empty())
+                    ligatures_value = materialize_rust_font_variant_ligatures_value();
+                if (!rust_style_value->font_variant_numeric.is_empty())
+                    numeric_value = materialize_rust_font_variant_numeric_value();
+
+                if ((rust_style_value->font_variant_caps.has_value() && !caps_value)
+                    || (rust_style_value->font_variant_emoji.has_value() && !emoji_value)
+                    || (rust_style_value->font_variant_position.has_value() && !position_value)
+                    || (!rust_style_value->font_variant_alternates.is_empty() && !alternates_value)
+                    || (!rust_style_value->font_variant_east_asian.is_empty() && !east_asian_value)
+                    || (!rust_style_value->font_variant_ligatures.is_empty() && !ligatures_value)
+                    || (!rust_style_value->font_variant_numeric.is_empty() && !numeric_value))
+                    return nullptr;
+
+                auto normal_value = KeywordStyleValue::create(Keyword::Normal);
+                if (!alternates_value)
+                    alternates_value = normal_value;
+                if (!caps_value)
+                    caps_value = normal_value;
+                if (!emoji_value)
+                    emoji_value = normal_value;
+                if (!position_value)
+                    position_value = normal_value;
+                if (!east_asian_value)
+                    east_asian_value = normal_value;
+                if (!ligatures_value)
+                    ligatures_value = normal_value;
+                if (!numeric_value)
+                    numeric_value = normal_value;
+
+                return ShorthandStyleValue::create(PropertyID::FontVariant,
+                    { PropertyID::FontVariantAlternates,
+                        PropertyID::FontVariantCaps,
+                        PropertyID::FontVariantEastAsian,
+                        PropertyID::FontVariantEmoji,
+                        PropertyID::FontVariantLigatures,
+                        PropertyID::FontVariantNumeric,
+                        PropertyID::FontVariantPosition },
+                    {
+                        alternates_value.release_nonnull(),
+                        caps_value.release_nonnull(),
+                        east_asian_value.release_nonnull(),
+                        emoji_value.release_nonnull(),
+                        ligatures_value.release_nonnull(),
+                        numeric_value.release_nonnull(),
+                        position_value.release_nonnull(),
+                    });
+            };
             auto parse_rust_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1536,7 +1612,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return PropertyAndValue { rust_style_value->property_id, FontStyleStyleValue::create(font_style_keyword) };
             }
             case FFI::CssStyleValueKind::FontVariant:
-                if (auto value = parse_font_variant(tokens)) {
+                if (auto value = materialize_rust_font_variant_value()) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }

@@ -232,6 +232,16 @@ public:
         Sepia,
     };
 
+    enum class RustFontVariantEventKind : u8 {
+        Normal,
+        Simple,
+        AlternatesValue,
+        AlternatesFeatureValueName,
+        EastAsianValue,
+        NumericValue,
+        LigaturesValue,
+    };
+
     struct RustFilterValueListEvent {
         RustFilterValueListEventKind kind { RustFilterValueListEventKind::None };
         RustSimpleFilterFunction simple_function { RustSimpleFilterFunction::Brightness };
@@ -312,6 +322,10 @@ public:
         Vector<FontVariantEastAsianValue> font_variant_east_asian;
         Vector<FontVariantLigaturesValue> font_variant_ligatures;
         Vector<FontVariantNumericValue> font_variant_numeric;
+        Optional<FlyString> font_variant_caps;
+        Optional<FlyString> font_variant_emoji;
+        Optional<FlyString> font_variant_position;
+        bool font_variant_ligatures_none { false };
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
