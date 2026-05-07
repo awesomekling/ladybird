@@ -481,6 +481,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, CounterStyleStyleValue::create(counter_style_name) };
                 }
                 break;
+            case FFI::CssStyleValueKind::EasingFunction:
+                if (auto value = parse_easing_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::FitContent:
+                if (auto value = parse_fit_content_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::BasicShape:
+                if (auto value = parse_basic_shape_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::Rect:
+                if (auto value = parse_rect_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::ScrollFunction:
                 if (auto value = materialize_rust_scroll_function_value()) {
                     tokens.discard_a_token();

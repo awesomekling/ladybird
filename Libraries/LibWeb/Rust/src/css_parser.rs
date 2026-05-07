@@ -1755,6 +1755,10 @@ pub enum CssStyleValueKind {
     Color,
     Url,
     CounterStyleName,
+    EasingFunction,
+    FitContent,
+    BasicShape,
+    Rect,
     ScrollFunction,
     ViewTimelineInset,
     ViewFunction,
@@ -2218,6 +2222,82 @@ where
                     0,
                     0,
                     filtered_input,
+                    property_value_type_name(*value_type),
+                );
+                return true;
+            }
+
+            if *value_type == PropertyValueType::EasingFunction {
+                callback(
+                    CssStyleValueKind::EasingFunction,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &[],
+                    property_value_type_name(*value_type),
+                );
+                return true;
+            }
+
+            if *value_type == PropertyValueType::FitContent {
+                callback(
+                    CssStyleValueKind::FitContent,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &[],
+                    property_value_type_name(*value_type),
+                );
+                return true;
+            }
+
+            if *value_type == PropertyValueType::BasicShape {
+                callback(
+                    CssStyleValueKind::BasicShape,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &[],
+                    property_value_type_name(*value_type),
+                );
+                return true;
+            }
+
+            if *value_type == PropertyValueType::Rect {
+                callback(
+                    CssStyleValueKind::Rect,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &[],
                     property_value_type_name(*value_type),
                 );
                 return true;
@@ -18719,6 +18799,58 @@ mod tests {
                 color: None,
                 value: "url(image.png)".to_string(),
                 value_type: "Url".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::EasingFunction,
+                property_id: PropertyId::TransitionTimingFunction,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "EasingFunction".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Width], "fit-content(10px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::FitContent,
+                property_id: PropertyId::Width,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "FitContent".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ClipPath], "inset(10px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::BasicShape,
+                property_id: PropertyId::ClipPath,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "BasicShape".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Clip], "rect(1px, auto, 2px, 3px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Rect,
+                property_id: PropertyId::Clip,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "Rect".to_string(),
             })
         );
         assert_eq!(
