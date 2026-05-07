@@ -914,6 +914,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::Flex:
+                if (auto value = parse_flex_shorthand_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::FlexFlow:
+                if (auto value = parse_flex_flow_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::FilterValueList:
                 if (auto value = parse_filter_value_list_value(tokens)) {
                     generated_transaction.commit();
@@ -3792,7 +3804,12 @@ RefPtr<StyleValue const> Parser::parse_flex_shorthand_value(TokenStream<Componen
 
     if (tokens.remaining_token_count() == 1) {
         // One-value syntax: <flex-grow> | <flex-basis> | none
-        auto properties = Array { PropertyID::FlexGrow, PropertyID::FlexBasis, PropertyID::Flex };
+        if (parse_all_as_single_keyword_value(tokens, Keyword::None)) {
+            auto zero = NumberStyleValue::create(0);
+            return make_flex_shorthand(zero, zero, KeywordStyleValue::create(Keyword::Auto));
+        }
+
+        auto properties = Array { PropertyID::FlexGrow, PropertyID::FlexBasis };
         auto property_and_value = parse_css_value_for_properties(properties, tokens);
         if (!property_and_value.has_value())
             return nullptr;
@@ -3809,13 +3826,6 @@ RefPtr<StyleValue const> Parser::parse_flex_shorthand_value(TokenStream<Componen
         case PropertyID::FlexBasis: {
             auto one = NumberStyleValue::create(1);
             return make_flex_shorthand(one, one, *value);
-        }
-        case PropertyID::Flex: {
-            if (value->is_keyword() && value->to_keyword() == Keyword::None) {
-                auto zero = NumberStyleValue::create(0);
-                return make_flex_shorthand(zero, zero, KeywordStyleValue::create(Keyword::Auto));
-            }
-            break;
         }
         default:
             VERIFY_NOT_REACHED();

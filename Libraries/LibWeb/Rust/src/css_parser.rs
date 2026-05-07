@@ -1861,6 +1861,8 @@ pub enum CssStyleValueKind {
     Content,
     Cursor,
     Display,
+    Flex,
+    FlexFlow,
     GridAutoFlow,
     GridAutoTrackSizes,
     GridTrackPlacement,
@@ -1944,6 +1946,12 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
+    FlexShorthand {
+        source: String,
+    },
+    FlexFlow {
+        source: String,
+    },
     FilterValueList {
         source: String,
     },
@@ -2982,6 +2990,8 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
         PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
         PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
+        PropertyId::Flex => rust_owned_flex_shorthand_style_value_kind(filtered_input),
+        PropertyId::FlexFlow => rust_owned_flex_flow_style_value_kind(filtered_input),
         PropertyId::BackdropFilter | PropertyId::Filter => {
             rust_owned_filter_value_list_style_value_kind(filtered_input)
         }
@@ -3857,6 +3867,26 @@ fn rust_owned_color_scheme_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 
 fn rust_owned_display_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     parse_display_value(filtered_input).map(RustOwnedStyleValueKind::Display)
+}
+
+fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_flex_shorthand_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::FlexShorthand {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_flex_flow_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::FlexFlow {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5586,6 +5616,12 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::FlexShorthand { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::Flex, property_id, source);
+        }
+        RustOwnedStyleValueKind::FlexFlow { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::FlexFlow, property_id, source);
+        }
         RustOwnedStyleValueKind::FilterValueList { source } => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FilterValueList, property_id, source);
         }
@@ -10284,6 +10320,114 @@ fn component_value_parse_as_non_negative_flex(component_value: &ComponentValue) 
         ComponentValue::Function(function) => is_math_function_name(&function.name),
         _ => false,
     }
+}
+
+pub(crate) fn parse_flex_shorthand_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-flexbox-1/#flex-property
+    // Value: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
+    match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "none") => return true,
+        [] => return false,
+        _ if component_values.len() > 3 => return false,
+        _ => {}
+    }
+
+    flex_shorthand_component_values_match(&component_values, &["flex-grow"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-basis"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-grow", "flex-shrink"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-grow", "flex-basis"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-basis", "flex-grow"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-grow", "flex-shrink", "flex-basis"])
+        || flex_shorthand_component_values_match(&component_values, &["flex-basis", "flex-grow", "flex-shrink"])
+}
+
+fn flex_shorthand_component_values_match(component_values: &[ComponentValue], pattern: &[&str]) -> bool {
+    component_values.len() == pattern.len()
+        && component_values
+            .iter()
+            .zip(pattern)
+            .all(|(component_value, pattern)| match *pattern {
+                "flex-grow" | "flex-shrink" => component_value_parse_as_non_negative_number(component_value),
+                "flex-basis" => component_value_parse_as_flex_basis(component_value),
+                _ => false,
+            })
+}
+
+fn component_value_parse_as_flex_basis(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-flexbox-1/#flex-basis-property
+    // Value: content | <'width'>
+    //
+    // https://drafts.csswg.org/css-sizing-3/#propdef-width
+    // Value: auto | <length-percentage [0,∞]> | min-content | max-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+    component_value_is_ident(Some(component_value), "auto")
+        || component_value_is_ident(Some(component_value), "content")
+        || component_value_is_ident(Some(component_value), "fit-content")
+        || component_value_is_ident(Some(component_value), "min-content")
+        || component_value_is_ident(Some(component_value), "max-content")
+        || component_value_parse_as_non_negative_length_percentage(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::Function(function)
+                if function.name.eq_ignore_ascii_case("fit-content")
+                    || function.name.eq_ignore_ascii_case("calc-size")
+        )
+}
+
+pub(crate) fn parse_flex_flow_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-flexbox-1/#flex-flow-property
+    // Value: <'flex-direction'> || <'flex-wrap'>
+    if component_values.is_empty() || component_values.len() > 2 {
+        return false;
+    }
+
+    let mut has_flex_direction = false;
+    let mut has_flex_wrap = false;
+
+    for component_value in &component_values {
+        if component_value_parse_as_flex_direction(component_value) {
+            if has_flex_direction {
+                return false;
+            }
+            has_flex_direction = true;
+            continue;
+        }
+
+        if component_value_parse_as_flex_wrap(component_value) {
+            if has_flex_wrap {
+                return false;
+            }
+            has_flex_wrap = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    true
+}
+
+fn component_value_parse_as_flex_direction(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-flexbox-1/#flex-direction-property
+    // Value: row | row-reverse | column | column-reverse
+    ["row", "row-reverse", "column", "column-reverse"]
+        .iter()
+        .any(|keyword| component_value_is_ident(Some(component_value), keyword))
+}
+
+fn component_value_parse_as_flex_wrap(component_value: &ComponentValue) -> bool {
+    // https://drafts.csswg.org/css-flexbox-1/#flex-wrap-property
+    // Value: nowrap | wrap | wrap-reverse
+    ["nowrap", "wrap", "wrap-reverse"]
+        .iter()
+        .any(|keyword| component_value_is_ident(Some(component_value), keyword))
 }
 
 fn parse_positive_integer_component_values(component_values: &[ComponentValue]) -> bool {
@@ -22621,12 +22765,13 @@ mod tests {
         parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
         parse_crop_or_cross, parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
-        parse_filter_value_list_value, parse_fit_content_value, parse_font_feature_values_family_name_list,
-        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_generated_property_value,
-        parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value, parse_grid_track_placement_value,
-        parse_grid_track_size_list_value, parse_image_set_value, parse_length_descriptor, parse_list_style_value,
-        parse_math_depth_value, parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
+        parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
+        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+        parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
+        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
+        parse_image_set_value, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
+        parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
+        parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
         parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
         parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
         parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
@@ -23385,6 +23530,14 @@ mod tests {
 
     fn parse_content(input: &str) -> bool {
         parse_content_value(input.as_bytes())
+    }
+
+    fn parse_flex_shorthand(input: &str) -> bool {
+        parse_flex_shorthand_value(input.as_bytes())
+    }
+
+    fn parse_flex_flow(input: &str) -> bool {
+        parse_flex_flow_value(input.as_bytes())
     }
 
     fn parse_filter_value_list(input: &str) -> bool {
@@ -24304,6 +24457,24 @@ mod tests {
                 property_id: PropertyId::Content,
                 value: RustOwnedStyleValueKind::Content {
                     source: "counter(section, upper-roman)".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Flex], "1 1 10em"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Flex,
+                value: RustOwnedStyleValueKind::FlexShorthand {
+                    source: "1 1 10em".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FlexFlow], "wrap row-reverse"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FlexFlow,
+                value: RustOwnedStyleValueKind::FlexFlow {
+                    source: "wrap row-reverse".to_string(),
                 },
             })
         );
@@ -25761,6 +25932,32 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "\"(\" counter(item) \")\"".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Flex], "1 1 10em"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Flex,
+                property_id: PropertyId::Flex,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "1 1 10em".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FlexFlow], "wrap row-reverse"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::FlexFlow,
+                property_id: PropertyId::FlexFlow,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "wrap row-reverse".to_string(),
                 value_type: String::new(),
             })
         );
@@ -29230,6 +29427,50 @@ mod tests {
         assert!(!parse_content("counters(counter-name)"));
         assert!(!parse_content("counter()"));
         assert!(!parse_content("attr()"));
+    }
+
+    #[test]
+    fn parses_flex_shorthand_values() {
+        assert!(parse_flex_shorthand("none"));
+        assert!(parse_flex_shorthand("1"));
+        assert!(parse_flex_shorthand("2 3"));
+        assert!(parse_flex_shorthand("4 5 6px"));
+        assert!(parse_flex_shorthand("6px 4 5"));
+        assert!(parse_flex_shorthand("6px 4"));
+        assert!(parse_flex_shorthand("6px"));
+        assert!(parse_flex_shorthand("7% 8"));
+        assert!(parse_flex_shorthand("8 auto"));
+        assert!(parse_flex_shorthand("1 1 calc(10em)"));
+        assert!(parse_flex_shorthand("calc(-1) calc(-1) 0"));
+    }
+
+    #[test]
+    fn rejects_invalid_flex_shorthand_values() {
+        assert!(!parse_flex_shorthand(""));
+        assert!(!parse_flex_shorthand("none 1"));
+        assert!(!parse_flex_shorthand("5px 7%"));
+        assert!(!parse_flex_shorthand("9 none"));
+        assert!(!parse_flex_shorthand("1 2 3 4"));
+    }
+
+    #[test]
+    fn parses_flex_flow_values() {
+        assert!(parse_flex_flow("column nowrap"));
+        assert!(parse_flex_flow("nowrap column"));
+        assert!(parse_flex_flow("wrap row-reverse"));
+        assert!(parse_flex_flow("nowrap"));
+        assert!(parse_flex_flow("row nowrap"));
+        assert!(parse_flex_flow("wrap"));
+        assert!(parse_flex_flow("row wrap"));
+    }
+
+    #[test]
+    fn rejects_invalid_flex_flow_values() {
+        assert!(!parse_flex_flow(""));
+        assert!(!parse_flex_flow("nowrap row nowrap"));
+        assert!(!parse_flex_flow("column wrap column"));
+        assert!(!parse_flex_flow("row column"));
+        assert!(!parse_flex_flow("wrap nowrap"));
     }
 
     #[test]

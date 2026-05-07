@@ -966,6 +966,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Columns,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
+                           FFI::CssStyleValueKind::Flex,
+                           FFI::CssStyleValueKind::FlexFlow,
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontFamily,
                            FFI::CssStyleValueKind::FontFeatureSettings,
