@@ -2011,6 +2011,12 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
         PropertyValueType::EasingFunction => parse_easing_value(filtered_input) == CssEasingValueKind::Valid,
         PropertyValueType::FitContent => parse_fit_content_value(filtered_input) == CssFitContentValueKind::Valid,
         PropertyValueType::BasicShape => parse_basic_shape_value(filtered_input) == CssBasicShapeValueKind::Valid,
+        PropertyValueType::CounterStyle => parse_a_counter_style(filtered_input, |_, _, _| {}, |_| {}),
+        PropertyValueType::FontStyle => parse_a_font_style(filtered_input, |_| {}),
+        PropertyValueType::FontVariantAlternates => parse_a_font_variant_alternates(filtered_input, |_| {}, |_| {}),
+        PropertyValueType::FontVariantEastAsian => parse_a_font_variant_east_asian(filtered_input, |_| {}),
+        PropertyValueType::FontVariantLigatures => parse_a_font_variant_ligatures(filtered_input, |_| {}),
+        PropertyValueType::FontVariantNumeric => parse_a_font_variant_numeric(filtered_input, |_| {}),
         PropertyValueType::Position => parse_position_value(filtered_input, false) == CssPositionValueKind::Valid,
         PropertyValueType::BackgroundPosition => {
             parse_position_value(filtered_input, true) == CssPositionValueKind::Valid
@@ -2035,6 +2041,7 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
                 CssPrimitiveValueOptions::default(),
             ) == CssPrimitiveValueKind::String
         }
+        PropertyValueType::TransformList => parse_transform_list_value(filtered_input),
         // AD-HOC: Keep <url> on the C++ fallback path until Rust owns <image>
         // materialization as well. Some properties accept both <image> and <url>,
         // and C++ deliberately parses non-fragment url() values as images first.
@@ -2108,6 +2115,53 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
 
 fn component_values_parse_as_generated_property_value_type(value_type_id: ValueTypeId, filtered_input: &[u8]) -> bool {
     parse_a_value_type(filtered_input, value_type_id as u8) != CssValueTypeSyntaxKind::Invalid
+}
+
+fn parse_transform_list_value(filtered_input: &[u8]) -> bool {
+    // https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
+    // <transform-list> = <transform-function>+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    if component_values.is_empty() {
+        return false;
+    }
+
+    component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .all(|component_value| {
+            let ComponentValue::Function(function) = component_value else {
+                return false;
+            };
+            component_value_parse_as_transform_function(function)
+        })
+}
+
+fn component_value_parse_as_transform_function(function: &Function) -> bool {
+    let Some(parameters) = transform_function_parameters_from_name(&function.name) else {
+        return false;
+    };
+
+    let Some(arguments) = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        Some(component_value.clone())
+    }) else {
+        return false;
+    };
+
+    if arguments.len() > parameters.len() {
+        return false;
+    }
+    if arguments.len() < parameters.len() && parameters[arguments.len()].required {
+        return false;
+    }
+
+    arguments.iter().zip(parameters).all(|(argument, parameter)| {
+        component_value_matches_transform_function_parameter(argument, parameter.parameter_type)
+    })
 }
 
 fn numeric_range_limit_to_f64(limit: Option<f64>, value_type: PropertyValueType, is_minimum: bool) -> f64 {
@@ -17306,6 +17360,42 @@ mod tests {
                 PropertyId::BackgroundPositionX,
                 String::new(),
                 "Length".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::FontStyle], "oblique 10deg"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::FontStyle,
+                String::new(),
+                "FontStyle".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::FontVariantNumeric], "oldstyle-nums tabular-nums"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::FontVariantNumeric,
+                String::new(),
+                "FontVariantNumeric".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::ListStyleType,
+                String::new(),
+                "CounterStyle".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::Transform], "translateX(10px) scale(2)"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::Transform,
+                String::new(),
+                "TransformList".to_string()
             ))
         );
         assert_eq!(parse_generated_property(&[PropertyId::MaskImage], "url(foo.png)"), None);

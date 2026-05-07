@@ -187,8 +187,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
     {
         auto generated_transaction = tokens.begin_transaction();
-        auto component_value_source = peek_token.original_source_text();
-        auto source = component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
+        auto source = property_ids.size() == 1
+            ? serialize_component_values_for_reparsing(tokens.remaining_tokens())
+            : [&] {
+                  auto component_value_source = peek_token.original_source_text();
+                  return component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
+              }();
         if (auto generated_value = RustComponentValueParser::parse_generated_property_value(property_ids, source.bytes_as_string_view()); generated_value.has_value()) {
             switch (generated_value->kind) {
             case FFI::CssGeneratedPropertyValueKind::Invalid:
