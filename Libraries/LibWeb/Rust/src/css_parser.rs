@@ -1765,6 +1765,60 @@ pub enum CssStyleValueKind {
     ValueType,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedStyleValue {
+    property_id: PropertyId,
+    value: RustOwnedStyleValueKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedStyleValueKind {
+    Keyword(String),
+    CustomIdent {
+        value: String,
+        value_type: PropertyValueType,
+    },
+    Primitive {
+        primitive_kind: CssPrimitiveValueKind,
+        numeric_value: Option<f64>,
+        secondary_numeric_value: Option<f64>,
+        value: String,
+        value_type: PropertyValueType,
+    },
+    Color {
+        red: u8,
+        green: u8,
+        blue: u8,
+        alpha: u8,
+        name: Option<String>,
+    },
+    Url(String),
+    CounterStyleName(String),
+    EasingFunction,
+    FitContent,
+    BasicShape,
+    Rect,
+    ScrollFunction {
+        scroller: CssScrollFunctionScrollerKind,
+        axis: CssScrollFunctionAxisKind,
+    },
+    ViewTimelineInset {
+        count: usize,
+    },
+    ViewFunction {
+        axis: CssScrollFunctionAxisKind,
+        inset: CssViewFunctionInsetKind,
+        inset_position: CssViewFunctionInsetPosition,
+    },
+    ValueType(PropertyValueType),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedStyleValueParseResult {
+    Parsed(RustOwnedStyleValue),
+    Invalid,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum CssSyntaxNodeKind {
@@ -1990,10 +2044,10 @@ where
     false
 }
 
-pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
-where
-    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
-{
+pub(crate) fn parse_rust_owned_style_value_for_property(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+) -> RustOwnedStyleValueParseResult {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
@@ -2011,22 +2065,10 @@ where
             };
             if property_accepts_keyword(property_id, value) {
                 let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
-                callback(
-                    CssStyleValueKind::Keyword,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    resolved_keyword.as_bytes(),
-                    "",
-                );
-                return true;
+                return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::Keyword(resolved_keyword.to_string()),
+                });
             }
         }
     }
@@ -2041,22 +2083,13 @@ where
 
         let mut parser = ComponentValueParser::new(component_values.to_vec());
         if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
-            callback(
-                CssStyleValueKind::CustomIdent,
-                property_id as u16,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                0,
-                0,
-                0,
-                0,
-                name.as_bytes(),
-                property_value_type_name(PropertyValueType::CustomIdent),
-            );
-            return true;
+            return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::CustomIdent {
+                    value: name,
+                    value_type: PropertyValueType::CustomIdent,
+                },
+            });
         }
     }
 
@@ -2077,367 +2110,471 @@ where
                 continue;
             }
 
-            if *value_type == PropertyValueType::Color
-                && let [component_value] = component_values
-                && let Some(color) = simple_color_from_component_value(component_value, false)
-            {
-                match color {
-                    ParsedSimpleColor::Rgba {
-                        red,
-                        green,
-                        blue,
-                        alpha,
-                        name,
-                    } => {
-                        callback(
-                            CssStyleValueKind::Color,
-                            property_id as u16,
-                            CssPrimitiveValueKind::Invalid,
-                            false,
-                            0.0,
-                            false,
-                            0.0,
-                            red,
-                            green,
-                            blue,
-                            alpha,
-                            name.unwrap_or("").as_bytes(),
-                            "",
-                        );
-                        return true;
-                    }
-                    ParsedSimpleColor::Keyword { name } => {
-                        callback(
-                            CssStyleValueKind::Primitive,
-                            property_id as u16,
-                            CssPrimitiveValueKind::Keyword,
-                            false,
-                            0.0,
-                            false,
-                            0.0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            name.as_bytes(),
-                            property_value_type_name(*value_type),
-                        );
-                        return true;
-                    }
-                }
-            }
-
-            if *value_type == PropertyValueType::DashedIdent {
-                let mut name = None;
-                if parse_a_dashed_ident(filtered_input, |parsed_name| {
-                    name = Some(parsed_name.to_string());
-                }) && let Some(name) = name
-                {
-                    callback(
-                        CssStyleValueKind::Primitive,
-                        property_id as u16,
-                        CssPrimitiveValueKind::CustomIdent,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        name.as_bytes(),
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            if *value_type == PropertyValueType::OpentypeTag {
-                let mut tag = None;
-                if parse_an_opentype_tag(filtered_input, |parsed_tag| {
-                    tag = Some(parsed_tag.to_string());
-                }) && let Some(tag) = tag
-                {
-                    callback(
-                        CssStyleValueKind::Primitive,
-                        property_id as u16,
-                        CssPrimitiveValueKind::String,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        tag.as_bytes(),
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            if *value_type == PropertyValueType::CounterStyle {
-                let mut counter_style_name = None;
-                if parse_a_counter_style(
-                    filtered_input,
-                    |kind, _, parsed_name| {
-                        if kind == CssCounterStyleKind::Name {
-                            counter_style_name = parsed_name.map(ToString::to_string);
-                        }
-                    },
-                    |_| {},
-                ) && let Some(counter_style_name) = counter_style_name
-                {
-                    callback(
-                        CssStyleValueKind::CounterStyleName,
-                        property_id as u16,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        counter_style_name.as_bytes(),
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
-                callback(
-                    CssStyleValueKind::Url,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    filtered_input,
-                    property_value_type_name(*value_type),
-                );
-                return true;
-            }
-
-            if *value_type == PropertyValueType::EasingFunction {
-                callback(
-                    CssStyleValueKind::EasingFunction,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    &[],
-                    property_value_type_name(*value_type),
-                );
-                return true;
-            }
-
-            if *value_type == PropertyValueType::FitContent {
-                callback(
-                    CssStyleValueKind::FitContent,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    &[],
-                    property_value_type_name(*value_type),
-                );
-                return true;
-            }
-
-            if *value_type == PropertyValueType::BasicShape {
-                callback(
-                    CssStyleValueKind::BasicShape,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    &[],
-                    property_value_type_name(*value_type),
-                );
-                return true;
-            }
-
-            if *value_type == PropertyValueType::Rect {
-                callback(
-                    CssStyleValueKind::Rect,
-                    property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    &[],
-                    property_value_type_name(*value_type),
-                );
-                return true;
-            }
-
-            if *value_type == PropertyValueType::ScrollFunction {
-                let scroll_function = parse_scroll_function_value(filtered_input);
-                if scroll_function.kind == CssScrollFunctionValueKind::Valid {
-                    callback(
-                        CssStyleValueKind::ScrollFunction,
-                        property_id as u16,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        scroll_function.scroller as u8,
-                        scroll_function.axis as u8,
-                        0,
-                        0,
-                        &[],
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            if *value_type == PropertyValueType::ViewTimelineInset {
-                let view_timeline_inset = parse_view_timeline_inset_value(filtered_input);
-                if view_timeline_inset.kind == CssViewTimelineInsetValueKind::Valid {
-                    callback(
-                        CssStyleValueKind::ViewTimelineInset,
-                        property_id as u16,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        view_timeline_inset.count as u8,
-                        0,
-                        0,
-                        0,
-                        &[],
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            if *value_type == PropertyValueType::ViewFunction {
-                let view_function = parse_view_function_value(filtered_input);
-                if view_function.kind == CssViewFunctionValueKind::Valid {
-                    callback(
-                        CssStyleValueKind::ViewFunction,
-                        property_id as u16,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        view_function.axis as u8,
-                        view_function.inset as u8,
-                        view_function.inset_position as u8,
-                        0,
-                        &[],
-                        property_value_type_name(*value_type),
-                    );
-                    return true;
-                }
-            }
-
-            let generated_style_value =
-                generated_value_type_id_for_property_value_type(*value_type).and_then(|value_type_id| {
-                    let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
-                    let style_value = generated_value_type_style_value(syntax_kind, component_values);
-                    if style_value.kind == GeneratedValueTypeStyleValueKind::Invalid {
-                        None
-                    } else {
-                        Some(style_value)
-                    }
-                });
-            let primitive_kind = if let Some(generated_style_value) = generated_style_value {
-                match generated_style_value.kind {
-                    GeneratedValueTypeStyleValueKind::Invalid => CssPrimitiveValueKind::Invalid,
-                    GeneratedValueTypeStyleValueKind::Keyword => CssPrimitiveValueKind::Keyword,
-                    GeneratedValueTypeStyleValueKind::Number => CssPrimitiveValueKind::Number,
-                    GeneratedValueTypeStyleValueKind::String => CssPrimitiveValueKind::String,
-                    GeneratedValueTypeStyleValueKind::CustomIdent => CssPrimitiveValueKind::CustomIdent,
-                }
-            } else {
-                style_value_primitive_kind(*value_type, component_values)
-            };
-            let numeric_value = generated_style_value
-                .and_then(|style_value| style_value.numeric_value)
-                .or_else(|| style_value_numeric_value(*value_type, component_values));
-            let secondary_numeric_value = style_value_secondary_numeric_value(*value_type, component_values);
-            let value = if let Some(generated_style_value) = generated_style_value
-                && let Some(value) = generated_style_value.value
-            {
-                value.as_bytes()
-            } else if primitive_kind == CssPrimitiveValueKind::Ratio {
-                if style_value_ratio_has_denominator(*value_type, component_values) {
-                    "has-denominator".as_bytes()
-                } else {
-                    &[]
-                }
-            } else if primitive_kind == CssPrimitiveValueKind::String {
-                string_token_value(component_values).unwrap_or("").as_bytes()
-            } else if first_is_one_of(property_value_type_name(*value_type), &["Length", "Time"]) {
-                style_value_dimension_unit(*value_type, component_values)
-                    .unwrap_or("")
-                    .as_bytes()
-            } else {
-                &[]
-            };
-
-            callback(
-                if primitive_kind == CssPrimitiveValueKind::Invalid {
-                    CssStyleValueKind::ValueType
-                } else {
-                    CssStyleValueKind::Primitive
-                },
-                property_id as u16,
-                primitive_kind,
-                numeric_value.is_some(),
-                numeric_value.unwrap_or(0.0),
-                secondary_numeric_value.is_some(),
-                secondary_numeric_value.unwrap_or(0.0),
-                0,
-                0,
-                0,
-                0,
-                value,
-                property_value_type_name(*value_type),
-            );
-            return true;
+            return RustOwnedStyleValueParseResult::Parsed(parse_rust_owned_generated_longhand_value(
+                property_id,
+                *value_type,
+                filtered_input,
+                component_values,
+            ));
         }
     }
 
-    false
+    RustOwnedStyleValueParseResult::Invalid
+}
+
+fn parse_rust_owned_generated_longhand_value(
+    property_id: PropertyId,
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+    component_values: &[ComponentValue],
+) -> RustOwnedStyleValue {
+    if value_type == PropertyValueType::Color
+        && let [component_value] = component_values
+        && let Some(color) = simple_color_from_component_value(component_value, false)
+    {
+        return match color {
+            ParsedSimpleColor::Rgba {
+                red,
+                green,
+                blue,
+                alpha,
+                name,
+            } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Color {
+                    red,
+                    green,
+                    blue,
+                    alpha,
+                    name: name.map(ToString::to_string),
+                },
+            },
+            ParsedSimpleColor::Keyword { name } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::Keyword,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: name.to_string(),
+                    value_type,
+                },
+            },
+        };
+    }
+
+    if value_type == PropertyValueType::DashedIdent {
+        let mut name = None;
+        if parse_a_dashed_ident(filtered_input, |parsed_name| {
+            name = Some(parsed_name.to_string());
+        }) && let Some(name) = name
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::CustomIdent,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: name,
+                    value_type,
+                },
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::OpentypeTag {
+        let mut tag = None;
+        if parse_an_opentype_tag(filtered_input, |parsed_tag| {
+            tag = Some(parsed_tag.to_string());
+        }) && let Some(tag) = tag
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::String,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: tag,
+                    value_type,
+                },
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::CounterStyle {
+        let mut counter_style_name = None;
+        if parse_a_counter_style(
+            filtered_input,
+            |kind, _, parsed_name| {
+                if kind == CssCounterStyleKind::Name {
+                    counter_style_name = parsed_name.map(ToString::to_string);
+                }
+            },
+            |_| {},
+        ) && let Some(counter_style_name) = counter_style_name
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::CounterStyleName(counter_style_name),
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::Url(String::from_utf8_lossy(filtered_input).to_string()),
+        };
+    }
+
+    match value_type {
+        PropertyValueType::EasingFunction => {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::EasingFunction,
+            };
+        }
+        PropertyValueType::FitContent => {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::FitContent,
+            };
+        }
+        PropertyValueType::BasicShape => {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::BasicShape,
+            };
+        }
+        PropertyValueType::Rect => {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Rect,
+            };
+        }
+        PropertyValueType::ScrollFunction => {
+            let scroll_function = parse_scroll_function_value(filtered_input);
+            if scroll_function.kind == CssScrollFunctionValueKind::Valid {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ScrollFunction {
+                        scroller: scroll_function.scroller,
+                        axis: scroll_function.axis,
+                    },
+                };
+            }
+        }
+        PropertyValueType::ViewTimelineInset => {
+            let view_timeline_inset = parse_view_timeline_inset_value(filtered_input);
+            if view_timeline_inset.kind == CssViewTimelineInsetValueKind::Valid {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ViewTimelineInset {
+                        count: view_timeline_inset.count,
+                    },
+                };
+            }
+        }
+        PropertyValueType::ViewFunction => {
+            let view_function = parse_view_function_value(filtered_input);
+            if view_function.kind == CssViewFunctionValueKind::Valid {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ViewFunction {
+                        axis: view_function.axis,
+                        inset: view_function.inset,
+                        inset_position: view_function.inset_position,
+                    },
+                };
+            }
+        }
+        _ => {}
+    }
+
+    let generated_style_value = generated_value_type_id_for_property_value_type(value_type).and_then(|value_type_id| {
+        let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
+        let style_value = generated_value_type_style_value(syntax_kind, component_values);
+        if style_value.kind == GeneratedValueTypeStyleValueKind::Invalid {
+            None
+        } else {
+            Some(style_value)
+        }
+    });
+    let primitive_kind = if let Some(generated_style_value) = generated_style_value.as_ref() {
+        match generated_style_value.kind {
+            GeneratedValueTypeStyleValueKind::Invalid => CssPrimitiveValueKind::Invalid,
+            GeneratedValueTypeStyleValueKind::Keyword => CssPrimitiveValueKind::Keyword,
+            GeneratedValueTypeStyleValueKind::Number => CssPrimitiveValueKind::Number,
+            GeneratedValueTypeStyleValueKind::String => CssPrimitiveValueKind::String,
+            GeneratedValueTypeStyleValueKind::CustomIdent => CssPrimitiveValueKind::CustomIdent,
+        }
+    } else {
+        style_value_primitive_kind(value_type, component_values)
+    };
+    let numeric_value = generated_style_value
+        .as_ref()
+        .and_then(|style_value| style_value.numeric_value)
+        .or_else(|| style_value_numeric_value(value_type, component_values));
+    let secondary_numeric_value = style_value_secondary_numeric_value(value_type, component_values);
+    let value = if let Some(generated_style_value) = generated_style_value.as_ref()
+        && let Some(value) = generated_style_value.value
+    {
+        value.to_string()
+    } else if primitive_kind == CssPrimitiveValueKind::Ratio {
+        if style_value_ratio_has_denominator(value_type, component_values) {
+            "has-denominator".to_string()
+        } else {
+            String::new()
+        }
+    } else if primitive_kind == CssPrimitiveValueKind::String {
+        string_token_value(component_values).unwrap_or("").to_string()
+    } else if first_is_one_of(property_value_type_name(value_type), &["Length", "Time"]) {
+        style_value_dimension_unit(value_type, component_values)
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    if primitive_kind == CssPrimitiveValueKind::Invalid {
+        RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::ValueType(value_type),
+        }
+    } else {
+        RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::Primitive {
+                primitive_kind,
+                numeric_value,
+                secondary_numeric_value,
+                value,
+                value_type,
+            },
+        }
+    }
+}
+
+pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let RustOwnedStyleValueParseResult::Parsed(style_value) =
+        parse_rust_owned_style_value_for_property(property_ids, filtered_input)
+    else {
+        return false;
+    };
+
+    emit_rust_owned_style_value(&style_value, &mut callback);
+    true
+}
+
+fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, callback: &mut C)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let property_id = style_value.property_id as u16;
+    match &style_value.value {
+        RustOwnedStyleValueKind::Keyword(value) => callback(
+            CssStyleValueKind::Keyword,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            "",
+        ),
+        RustOwnedStyleValueKind::CustomIdent { value, value_type } => callback(
+            CssStyleValueKind::CustomIdent,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(*value_type),
+        ),
+        RustOwnedStyleValueKind::Primitive {
+            primitive_kind,
+            numeric_value,
+            secondary_numeric_value,
+            value,
+            value_type,
+        } => callback(
+            CssStyleValueKind::Primitive,
+            property_id,
+            *primitive_kind,
+            numeric_value.is_some(),
+            numeric_value.unwrap_or(0.0),
+            secondary_numeric_value.is_some(),
+            secondary_numeric_value.unwrap_or(0.0),
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(*value_type),
+        ),
+        RustOwnedStyleValueKind::Color {
+            red,
+            green,
+            blue,
+            alpha,
+            name,
+        } => callback(
+            CssStyleValueKind::Color,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *red,
+            *green,
+            *blue,
+            *alpha,
+            name.as_deref().unwrap_or("").as_bytes(),
+            "",
+        ),
+        RustOwnedStyleValueKind::Url(value) => callback(
+            CssStyleValueKind::Url,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(PropertyValueType::Url),
+        ),
+        RustOwnedStyleValueKind::CounterStyleName(value) => callback(
+            CssStyleValueKind::CounterStyleName,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(PropertyValueType::CounterStyle),
+        ),
+        RustOwnedStyleValueKind::EasingFunction => callback_style_value_type(
+            callback,
+            CssStyleValueKind::EasingFunction,
+            property_id,
+            PropertyValueType::EasingFunction,
+        ),
+        RustOwnedStyleValueKind::FitContent => callback_style_value_type(
+            callback,
+            CssStyleValueKind::FitContent,
+            property_id,
+            PropertyValueType::FitContent,
+        ),
+        RustOwnedStyleValueKind::BasicShape => callback_style_value_type(
+            callback,
+            CssStyleValueKind::BasicShape,
+            property_id,
+            PropertyValueType::BasicShape,
+        ),
+        RustOwnedStyleValueKind::Rect => {
+            callback_style_value_type(callback, CssStyleValueKind::Rect, property_id, PropertyValueType::Rect);
+        }
+        RustOwnedStyleValueKind::ScrollFunction { scroller, axis } => callback(
+            CssStyleValueKind::ScrollFunction,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *scroller as u8,
+            *axis as u8,
+            0,
+            0,
+            &[],
+            property_value_type_name(PropertyValueType::ScrollFunction),
+        ),
+        RustOwnedStyleValueKind::ViewTimelineInset { count } => callback(
+            CssStyleValueKind::ViewTimelineInset,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *count as u8,
+            0,
+            0,
+            0,
+            &[],
+            property_value_type_name(PropertyValueType::ViewTimelineInset),
+        ),
+        RustOwnedStyleValueKind::ViewFunction {
+            axis,
+            inset,
+            inset_position,
+        } => callback(
+            CssStyleValueKind::ViewFunction,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *axis as u8,
+            *inset as u8,
+            *inset_position as u8,
+            0,
+            &[],
+            property_value_type_name(PropertyValueType::ViewFunction),
+        ),
+        RustOwnedStyleValueKind::ValueType(value_type) => {
+            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
+        }
+    }
+}
+
+fn callback_style_value_type<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    value_type: PropertyValueType,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        &[],
+        property_value_type_name(value_type),
+    );
 }
 
 pub(crate) fn parse_coordinating_value_list_shorthand<C>(
@@ -17148,7 +17285,8 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -17175,8 +17313,8 @@ mod tests {
         parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
+        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_style_value_for_property, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
         parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
         parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
         parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
@@ -18169,6 +18307,14 @@ mod tests {
         parsed_value
     }
 
+    fn parse_rust_owned_style_value(property_ids: &[PropertyId], input: &str) -> Option<RustOwnedStyleValue> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        match parse_rust_owned_style_value_for_property(&property_ids, input.as_bytes()) {
+            RustOwnedStyleValueParseResult::Parsed(value) => Some(value),
+            RustOwnedStyleValueParseResult::Invalid => None,
+        }
+    }
+
     fn parse_coordinating_shorthand(
         property_ids: &[PropertyId],
         input: &str,
@@ -18710,6 +18856,50 @@ mod tests {
 
     #[test]
     fn parses_style_values_with_rust_owned_ast() {
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Color], "red"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Color,
+                value: RustOwnedStyleValueKind::Color {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                    alpha: 255,
+                    name: Some("red".to_string()),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransitionTimingFunction,
+                value: RustOwnedStyleValueKind::EasingFunction,
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::AnimationTimeline], "scroll(root y)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::AnimationTimeline,
+                value: RustOwnedStyleValueKind::ScrollFunction {
+                    scroller: CssScrollFunctionScrollerKind::Root,
+                    axis: CssScrollFunctionAxisKind::Y,
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::MarginLeft], "12px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::MarginLeft,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::Length,
+                    numeric_value: Some(12.0),
+                    secondary_numeric_value: None,
+                    value: "px".to_string(),
+                    value_type: PropertyValueType::Length,
+                },
+            })
+        );
+
         assert_eq!(
             parse_style_value(&[PropertyId::Color], "red"),
             Some(ParsedStyleValue {
