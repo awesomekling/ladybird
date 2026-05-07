@@ -1786,6 +1786,10 @@ pub(crate) enum RustOwnedStyleValueKind {
     ConicGradient(RustOwnedSourceBackedStyleValue),
     Content(RustOwnedSourceBackedStyleValue),
     Counter(RustOwnedSourceBackedStyleValue),
+    CounterStyle {
+        value: CounterStyle,
+        source: String,
+    },
     CounterDefinitions(RustOwnedSourceBackedStyleValue),
     CounterStyleSystem(RustOwnedSourceBackedStyleValue),
     Cursor(RustOwnedSourceBackedStyleValue),
@@ -2359,23 +2363,23 @@ fn parse_rust_owned_generated_longhand_value(
         }
     }
 
-    if value_type == PropertyValueType::CounterStyle {
-        let mut counter_style_name = None;
-        if parse_a_counter_style(
-            filtered_input,
-            |kind, _, parsed_name| {
-                if kind == CssCounterStyleKind::Name {
-                    counter_style_name = parsed_name.map(ToString::to_string);
-                }
-            },
-            |_| {},
-        ) && let Some(counter_style_name) = counter_style_name
-        {
-            return RustOwnedStyleValue {
+    if value_type == PropertyValueType::CounterStyle
+        && let Some(counter_style) =
+            parse_all_component_values(filtered_input, ComponentValueParser::parse_a_counter_style)
+    {
+        return match counter_style {
+            CounterStyle::Name(counter_style_name) => RustOwnedStyleValue {
                 property_id,
                 value: RustOwnedStyleValueKind::CounterStyleName(counter_style_name),
-            };
-        }
+            },
+            CounterStyle::SymbolsFunction { .. } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::CounterStyle {
+                    value: counter_style,
+                    source: filtered_input_to_string(filtered_input),
+                },
+            },
+        };
     }
 
     if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
@@ -2959,6 +2963,12 @@ where
         RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             let _ = function;
         }
+        RustOwnedStyleValueKind::CounterStyle { .. } => callback_style_value_type(
+            callback,
+            CssStyleValueKind::ValueType,
+            property_id,
+            PropertyValueType::CounterStyle,
+        ),
         RustOwnedStyleValueKind::FontVariantAlternates { .. } => callback_style_value_type(
             callback,
             CssStyleValueKind::ValueType,
@@ -17931,7 +17941,7 @@ fn is_animation_property_disallowed_in_keyframe(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
+        BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CounterStyle,
         CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
         CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValueKind,
         CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
@@ -19560,6 +19570,19 @@ mod tests {
                     blue: 0,
                     alpha: 255,
                     name: Some("red".to_string()),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ListStyleType,
+                value: RustOwnedStyleValueKind::CounterStyle {
+                    value: CounterStyle::SymbolsFunction {
+                        symbols_type: CssCounterStyleSymbolsType::Symbolic,
+                        symbols: vec!["*".to_string(), "**".to_string()],
+                    },
+                    source: "symbols(\"*\" \"**\")".to_string(),
                 },
             })
         );
