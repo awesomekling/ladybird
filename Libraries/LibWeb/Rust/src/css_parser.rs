@@ -2050,9 +2050,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
     TransformLonghand(RustOwnedTransformLonghand),
-    TransformOrigin {
-        source: String,
-    },
+    TransformOrigin(RustOwnedTransformOrigin),
     Transformation(RustOwnedTransformation),
     TreeCountingFunction(RustOwnedFunctionStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
@@ -2516,6 +2514,13 @@ pub(crate) struct RustOwnedTextDecoration {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformLonghand {
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedTransformOrigin {
+    x_source: String,
+    y_source: String,
+    z_source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5404,12 +5409,114 @@ fn rust_owned_touch_action_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 }
 
 fn rust_owned_transform_origin_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if parse_transform_origin_value(filtered_input) == CssTransformLonghandValueKind::Invalid {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://www.w3.org/TR/css-transforms-1/#propdef-transform-origin
+    // transform-origin =
+    //     [ left | center | right | top | bottom | <length-percentage> ] |
+    //     [ left | center | right | <length-percentage> ]
+    //     [ top | center | bottom | <length-percentage> ] <length>? |
+    //     [[ center | left | right ] && [ center | top | bottom ]] <length>?
+    let [first_value] = component_values.as_slice() else {
+        return rust_owned_transform_origin_two_or_three_value_kind(&component_values, filtered_input_string)
+            .map(RustOwnedStyleValueKind::TransformOrigin);
+    };
+
+    let first_value = transform_origin_component(first_value, filtered_input_string)?;
+
+    let value = match first_value.axis {
+        Some(TransformOriginAxis::Y) => RustOwnedTransformOrigin {
+            x_source: "center".to_string(),
+            y_source: first_value.source,
+            z_source: "0px".to_string(),
+        },
+        Some(TransformOriginAxis::X) | None => RustOwnedTransformOrigin {
+            x_source: first_value.source,
+            y_source: "center".to_string(),
+            z_source: "0px".to_string(),
+        },
+    };
+
+    Some(RustOwnedStyleValueKind::TransformOrigin(value))
+}
+
+fn rust_owned_transform_origin_two_or_three_value_kind(
+    component_values: &[ComponentValue],
+    filtered_input_string: &str,
+) -> Option<RustOwnedTransformOrigin> {
+    let (first_value, second_value, z_source) = match component_values {
+        [first_value, second_value] => (first_value, second_value, "0px".to_string()),
+        [first_value, second_value, third_value] => {
+            if !component_value_parse_as_length(third_value) {
+                return None;
+            }
+            (
+                first_value,
+                second_value,
+                serialize_component_values_for_reparsing(std::slice::from_ref(third_value), filtered_input_string)?,
+            )
+        }
+        _ => return None,
+    };
+
+    let first_value = transform_origin_component(first_value, filtered_input_string)?;
+    let second_value = transform_origin_component(second_value, filtered_input_string)?;
+
+    if (first_value.is_offset && second_value.axis == Some(TransformOriginAxis::X))
+        || (second_value.is_offset && first_value.axis == Some(TransformOriginAxis::Y))
+    {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::TransformOrigin {
-        source: filtered_input_to_string(filtered_input),
+    let mut x_source = if first_value.axis == Some(TransformOriginAxis::X) {
+        Some(first_value.source.clone())
+    } else {
+        None
+    };
+    let mut y_source = if first_value.axis == Some(TransformOriginAxis::Y) {
+        Some(first_value.source.clone())
+    } else {
+        None
+    };
+
+    match second_value.axis {
+        Some(TransformOriginAxis::X) => {
+            if x_source.is_some() {
+                return None;
+            }
+            x_source = Some(second_value.source.clone());
+            y_source = Some(first_value.source.clone());
+        }
+        Some(TransformOriginAxis::Y) => {
+            if y_source.is_some() {
+                return None;
+            }
+            y_source = Some(second_value.source.clone());
+            x_source = Some(first_value.source.clone());
+        }
+        None => {
+            if x_source.is_some() {
+                y_source = Some(second_value.source.clone());
+            } else {
+                x_source = Some(second_value.source.clone());
+            }
+        }
+    }
+
+    // If two or more values are defined and either no value is a keyword, or the only used keyword is center,
+    // then the first value represents the horizontal position (or offset) and the second represents the vertical position (or offset).
+    // A third value always represents the Z position (or offset) and must be of type <length>.
+    if first_value.axis.is_none() && second_value.axis.is_none() {
+        x_source = Some(first_value.source);
+        y_source = Some(second_value.source);
+    }
+
+    Some(RustOwnedTransformOrigin {
+        x_source: x_source?,
+        y_source: y_source?,
+        z_source,
     })
 }
 
@@ -6888,8 +6995,28 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::TransformOrigin { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::TransformOrigin, property_id, source);
+        RustOwnedStyleValueKind::TransformOrigin(value) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TransformOrigin,
+                property_id,
+                0,
+                Some(&value.x_source),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TransformOrigin,
+                property_id,
+                1,
+                Some(&value.y_source),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::TransformOrigin,
+                property_id,
+                2,
+                Some(&value.z_source),
+            );
         }
         RustOwnedStyleValueKind::TransformLonghand(value) => callback_source_backed_style_value(
             callback,
@@ -13803,6 +13930,53 @@ enum TransformOriginAxis {
 struct TransformOriginComponent {
     axis: Option<TransformOriginAxis>,
     is_offset: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RustOwnedTransformOriginComponent {
+    axis: Option<TransformOriginAxis>,
+    is_offset: bool,
+    source: String,
+}
+
+fn transform_origin_component(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedTransformOriginComponent> {
+    if component_value_parse_as_length_percentage(component_value) {
+        return Some(RustOwnedTransformOriginComponent {
+            axis: None,
+            is_offset: true,
+            source: serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                filtered_input_string,
+            )?,
+        });
+    }
+
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+
+    let axis = if value.eq_ignore_ascii_case("left") || value.eq_ignore_ascii_case("right") {
+        Some(TransformOriginAxis::X)
+    } else if value.eq_ignore_ascii_case("top") || value.eq_ignore_ascii_case("bottom") {
+        Some(TransformOriginAxis::Y)
+    } else if value.eq_ignore_ascii_case("center") {
+        None
+    } else {
+        return None;
+    };
+
+    Some(RustOwnedTransformOriginComponent {
+        axis,
+        is_offset: false,
+        source: serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?,
+    })
 }
 
 pub(crate) fn parse_transform_origin_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
@@ -24400,7 +24574,7 @@ mod tests {
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
@@ -26837,9 +27011,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::TransformOrigin], "right 25% 3px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TransformOrigin,
-                value: RustOwnedStyleValueKind::TransformOrigin {
-                    source: "right 25% 3px".to_string(),
-                },
+                value: RustOwnedStyleValueKind::TransformOrigin(RustOwnedTransformOrigin {
+                    x_source: "right".to_string(),
+                    y_source: "25%".to_string(),
+                    z_source: "3px".to_string(),
+                }),
             })
         );
         assert_eq!(

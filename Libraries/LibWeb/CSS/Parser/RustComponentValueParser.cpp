@@ -1217,6 +1217,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->border_radius_vertical_sources.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
+            } else if (kind == FFI::CssStyleValueKind::TransformOrigin) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::TransformOrigin);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->transform_origin_x_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1)
+                    style_value->transform_origin_y_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->transform_origin_z_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
@@ -1229,8 +1244,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside,
-                           FFI::CssStyleValueKind::TransformLonghand,
-                           FFI::CssStyleValueKind::TransformOrigin)) {
+                           FFI::CssStyleValueKind::TransformLonghand)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);

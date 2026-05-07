@@ -833,6 +833,41 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+
+                RefPtr<StyleValue const> value;
+                if (auto keyword_value = parse_keyword_value(value_tokens)) {
+                    switch (keyword_value->to_keyword()) {
+                    case Keyword::Bottom:
+                    case Keyword::Center:
+                    case Keyword::Left:
+                    case Keyword::Right:
+                    case Keyword::Top:
+                        value = keyword_value;
+                        break;
+                    default:
+                        return nullptr;
+                    }
+                } else {
+                    value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
+                }
+
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_length_value(value_tokens, infinite_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -1543,9 +1578,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TransformOrigin:
-                if (auto value = parse_transform_origin_value(tokens)) {
+                if (rust_style_value->transform_origin_x_source.has_value() && rust_style_value->transform_origin_y_source.has_value() && rust_style_value->transform_origin_z_source.has_value()) {
+                    auto x_value = parse_rust_source_as_transform_origin_component(*rust_style_value->transform_origin_x_source);
+                    auto y_value = parse_rust_source_as_transform_origin_component(*rust_style_value->transform_origin_y_source);
+                    auto z_value = parse_rust_source_as_length(*rust_style_value->transform_origin_z_source);
+                    if (!x_value || !y_value || !z_value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        StyleValueList::create(
+                            StyleValueVector { x_value.release_nonnull(), y_value.release_nonnull(), z_value.release_nonnull() },
+                            StyleValueList::Separator::Space) };
                 }
                 break;
             case FFI::CssStyleValueKind::PaintOrder:
