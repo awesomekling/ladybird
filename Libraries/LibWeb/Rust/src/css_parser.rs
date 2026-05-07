@@ -2026,7 +2026,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedFitContent),
-    BasicShape(RustOwnedSourceBackedStyleValue),
+    BasicShape(RustOwnedBasicShape),
     Rect(RustOwnedRect),
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
     ScrollFunction {
@@ -2084,6 +2084,24 @@ pub(crate) struct RustOwnedMathFunction {
 pub(crate) struct RustOwnedSourceBackedStyleValue {
     value_type: Option<PropertyValueType>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBasicShape {
+    kind: RustOwnedBasicShapeKind,
+    argument_groups: Vec<String>,
+    source: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedBasicShapeKind {
+    Inset,
+    Xywh,
+    Rect,
+    Circle,
+    Ellipse,
+    Polygon,
+    Path,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2961,12 +2979,18 @@ fn parse_rust_owned_generated_longhand_value(
             };
         }
         PropertyValueType::BasicShape => {
+            if let Some(value) =
+                rust_owned_basic_shape_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::BasicShape(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(value_type),
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type,
                     source: filtered_input_to_string(filtered_input),
-                }),
+                },
             };
         }
         PropertyValueType::Rect => {
@@ -3171,6 +3195,49 @@ fn rust_owned_transform_list_style_value_kind(
         separator: RustOwnedStyleValueListSeparator::Space,
         value_type: Some(PropertyValueType::TransformList),
         source: Some(filtered_input_string.to_string()),
+    }))
+}
+
+fn rust_owned_basic_shape_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return None;
+    };
+
+    // https://drafts.csswg.org/css-shapes-1/#typedef-basic-shape
+    // <basic-shape> = <inset()> | <circle()> | <ellipse()> | <polygon()> | <path()> | <rect()> | <xywh()>
+    let kind = if function.name.eq_ignore_ascii_case("inset") {
+        parse_inset_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Inset)
+    } else if function.name.eq_ignore_ascii_case("xywh") {
+        parse_xywh_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Xywh)
+    } else if function.name.eq_ignore_ascii_case("rect") {
+        parse_rect_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Rect)
+    } else if function.name.eq_ignore_ascii_case("circle") {
+        parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Circle)
+            .then_some(RustOwnedBasicShapeKind::Circle)
+    } else if function.name.eq_ignore_ascii_case("ellipse") {
+        parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Ellipse)
+            .then_some(RustOwnedBasicShapeKind::Ellipse)
+    } else if function.name.eq_ignore_ascii_case("polygon") {
+        parse_polygon_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Polygon)
+    } else if function.name.eq_ignore_ascii_case("path") {
+        parse_path_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Path)
+    } else {
+        None
+    }?;
+
+    let argument_groups = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        serialize_component_values_for_reparsing(strip_whitespace(&component_values), filtered_input_string)
+    })?;
+
+    Some(RustOwnedStyleValueKind::BasicShape(RustOwnedBasicShape {
+        kind,
+        argument_groups,
+        source: filtered_input_string.to_string(),
     }))
 }
 
@@ -20359,15 +20426,16 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedBackgroundSize,
-        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
-        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
-        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
+        RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay,
+        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPosition,
+        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
@@ -22118,8 +22186,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::ClipPath], "inset(10px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ClipPath,
-                value: RustOwnedStyleValueKind::BasicShape(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::BasicShape),
+                value: RustOwnedStyleValueKind::BasicShape(RustOwnedBasicShape {
+                    kind: RustOwnedBasicShapeKind::Inset,
+                    argument_groups: vec!["10px".to_string()],
                     source: "inset(10px)".to_string(),
                 }),
             })
