@@ -643,6 +643,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
                 break;
+            case FFI::CssStyleValueKind::BackgroundSize:
+                break;
             case FFI::CssStyleValueKind::Keyword:
                 if (rust_style_value->keyword.has_value()) {
                     tokens.discard_a_token();

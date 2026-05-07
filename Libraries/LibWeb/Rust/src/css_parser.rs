@@ -1844,6 +1844,7 @@ pub enum CssStyleValueKind {
     Rect,
     AnimationName,
     AnchorNameOrScope,
+    BackgroundSize,
     ColorScheme,
     Contain,
     ContainerType,
@@ -1890,7 +1891,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     AnchorSize(RustOwnedSourceBackedStyleValue),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
-    BackgroundSize(RustOwnedSourceBackedStyleValue),
+    BackgroundSize(RustOwnedBackgroundSizeList),
     BorderImageSlice(RustOwnedSourceBackedStyleValue),
     BorderRadius(RustOwnedSourceBackedStyleValue),
     BorderRadiusRect(RustOwnedSourceBackedStyleValue),
@@ -2173,6 +2174,33 @@ pub(crate) struct RustOwnedAnimationName {
     kind: CssAnimationNameValueKind,
     names: Vec<RustOwnedAnimationNameItem>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBackgroundSizeList {
+    values: Vec<RustOwnedBackgroundSize>,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedBackgroundSize {
+    Cover {
+        source: String,
+    },
+    Contain {
+        source: String,
+    },
+    Explicit {
+        width: RustOwnedBackgroundSizeComponent,
+        height: Option<RustOwnedBackgroundSizeComponent>,
+        source: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedBackgroundSizeComponent {
+    Auto { source: String },
+    LengthPercentage { source: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2729,6 +2757,9 @@ fn parse_rust_owned_property_specific_longhand_value(
     match property_id {
         PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
         PropertyId::AnchorScope => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, true),
+        PropertyId::BackgroundSize | PropertyId::MaskSize => {
+            rust_owned_background_size_style_value_kind(filtered_input)
+        }
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
@@ -3454,6 +3485,91 @@ fn consume_non_directional_repeat_style_value_kind(
     if parser.consume_ident_matching("no-repeat") {
         return Some(CssRepeatStyleRepetition::NoRepeat);
     }
+    None
+}
+
+fn rust_owned_background_size_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    // https://drafts.csswg.org/css-backgrounds-3/#typedef-bg-size
+    // <bg-size> = [ <length-percentage [0,∞]> | auto ]{1,2} | cover | contain
+    let values = parse_comma_separated_component_values(component_values, |component_values| {
+        rust_owned_background_size_from_component_values(component_values, &source)
+    })?;
+
+    if values.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList {
+        values,
+        source,
+    }))
+}
+
+fn rust_owned_background_size_from_component_values(
+    component_values: Vec<ComponentValue>,
+    source: &str,
+) -> Option<RustOwnedBackgroundSize> {
+    let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), source)?;
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values.as_slice()
+    {
+        if value.eq_ignore_ascii_case("cover") {
+            return Some(RustOwnedBackgroundSize::Cover { source: value_source });
+        }
+        if value.eq_ignore_ascii_case("contain") {
+            return Some(RustOwnedBackgroundSize::Contain { source: value_source });
+        }
+    }
+
+    let [width] = component_values.as_slice() else {
+        let [width, height] = component_values.as_slice() else {
+            return None;
+        };
+        let width = rust_owned_background_size_component_from_component_value(width, source)?;
+        let height = rust_owned_background_size_component_from_component_value(height, source)?;
+        return Some(RustOwnedBackgroundSize::Explicit {
+            width,
+            height: Some(height),
+            source: value_source,
+        });
+    };
+
+    Some(RustOwnedBackgroundSize::Explicit {
+        width: rust_owned_background_size_component_from_component_value(width, source)?,
+        height: None,
+        source: value_source,
+    })
+}
+
+fn rust_owned_background_size_component_from_component_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedBackgroundSizeComponent> {
+    let value_source = serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?;
+
+    if let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+        && value.eq_ignore_ascii_case("auto")
+    {
+        return Some(RustOwnedBackgroundSizeComponent::Auto { source: value_source });
+    }
+
+    if component_value_parse_as_non_negative_length_percentage(component_value) {
+        return Some(RustOwnedBackgroundSizeComponent::LengthPercentage { source: value_source });
+    }
+
     None
 }
 
@@ -4314,7 +4430,6 @@ where
     match &style_value.value {
         RustOwnedStyleValueKind::Anchor(value)
         | RustOwnedStyleValueKind::AnchorSize(value)
-        | RustOwnedStyleValueKind::BackgroundSize(value)
         | RustOwnedStyleValueKind::BorderImageSlice(value)
         | RustOwnedStyleValueKind::BorderRadius(value)
         | RustOwnedStyleValueKind::BorderRadiusRect(value)
@@ -4371,6 +4486,21 @@ where
         RustOwnedStyleValueKind::AnimationName(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::AnimationName, property_id, &value.source);
         }
+        RustOwnedStyleValueKind::BackgroundSize(_) => callback(
+            CssStyleValueKind::Invalid,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
         RustOwnedStyleValueKind::ColorScheme(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::ColorScheme, property_id, &value.source);
         }
@@ -20100,15 +20230,16 @@ mod tests {
         FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedBackgroundSize,
+        RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedContain, RustOwnedContainerType,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
+        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedMathFunction, RustOwnedPaintOrder,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
         SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
@@ -21758,6 +21889,38 @@ mod tests {
                     ],
                     source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
                         .to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundSize], "cover, auto 10px, 2% calc(3px + 4%)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundSize,
+                value: RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList {
+                    values: vec![
+                        RustOwnedBackgroundSize::Cover {
+                            source: "cover".to_string(),
+                        },
+                        RustOwnedBackgroundSize::Explicit {
+                            width: RustOwnedBackgroundSizeComponent::Auto {
+                                source: "auto".to_string(),
+                            },
+                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage {
+                                source: "10px".to_string(),
+                            }),
+                            source: "auto 10px".to_string(),
+                        },
+                        RustOwnedBackgroundSize::Explicit {
+                            width: RustOwnedBackgroundSizeComponent::LengthPercentage {
+                                source: "2%".to_string(),
+                            },
+                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage {
+                                source: "calc(3px + 4%)".to_string(),
+                            }),
+                            source: "2% calc(3px + 4%)".to_string(),
+                        },
+                    ],
+                    source: "cover, auto 10px, 2% calc(3px + 4%)".to_string(),
                 }),
             })
         );
