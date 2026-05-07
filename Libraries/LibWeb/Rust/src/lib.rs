@@ -610,6 +610,45 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
 
 /// # Safety
 /// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_coordinating_value_list_shorthand(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        layer_index: usize,
+        property_id: u16,
+        value: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_coordinating_value_list_shorthand(
+                property_ids,
+                input,
+                |layer_index, property_id, value| {
+                    callback(ctx, layer_index, property_id, value.as_ptr(), value.len());
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
 /// - `value_type` and `value_type_len` must point to a valid string
 /// - Parameters provided to `callback` must be valid pointers
 #[unsafe(no_mangle)]

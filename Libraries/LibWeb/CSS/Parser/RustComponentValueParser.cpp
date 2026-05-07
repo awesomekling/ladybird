@@ -976,6 +976,33 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
     return style_value;
 }
 
+Optional<Vector<RustComponentValueParser::CoordinatingValueListShorthandItem>> RustComponentValueParser::parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID> property_ids, StringView input)
+{
+    Vector<u16, 8> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Vector<CoordinatingValueListShorthandItem> items;
+    auto input_bytes = input.bytes();
+    if (!FFI::rust_css_parse_coordinating_value_list_shorthand(
+            ffi_property_ids.data(),
+            ffi_property_ids.size(),
+            input_bytes.data(),
+            input_bytes.size(),
+            &items,
+            [](void* raw_items, size_t layer_index, u16 property_id, u8 const* value_ptr, size_t value_len) {
+                auto& items = *static_cast<Vector<CoordinatingValueListShorthandItem>*>(raw_items);
+                items.append(CoordinatingValueListShorthandItem {
+                    .layer_index = layer_index,
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = String::from_utf8_without_validation({ value_ptr, value_len }),
+                });
+            }))
+        return {};
+
+    return items;
+}
+
 Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

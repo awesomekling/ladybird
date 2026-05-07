@@ -107,6 +107,54 @@ RefPtr<StyleValueList const> Parser::parse_simple_comma_separated_value_list(Pro
 
 RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenStream<ComponentValue>& tokens, PropertyID shorthand_id, Vector<PropertyID> const& longhand_ids, Vector<PropertyID> const& reset_only_longhand_ids = {})
 {
+    {
+        auto rust_transaction = tokens.begin_transaction();
+        auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+        if (auto rust_items = RustComponentValueParser::parse_coordinating_value_list_shorthand(longhand_ids, source.bytes_as_string_view()); rust_items.has_value()) {
+            Vector<HashMap<PropertyID, NonnullRefPtr<StyleValue const>>> parsed_layers;
+
+            for (auto const& item : rust_items.value()) {
+                if (item.layer_index >= parsed_layers.size())
+                    parsed_layers.resize(item.layer_index + 1);
+
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                TokenStream<ComponentValue> value_tokens { component_values };
+                auto parsed_value = parse_css_value_for_property(item.property_id, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!parsed_value || value_tokens.has_next_token())
+                    return {};
+
+                parsed_layers[item.layer_index].set(item.property_id, parsed_value.release_nonnull());
+            }
+
+            if (parsed_layers.is_empty())
+                return {};
+
+            StyleValueVector longhand_values {};
+            for (auto const& longhand_id : longhand_ids) {
+                StyleValueVector layer_values;
+                for (auto const& parsed_layer : parsed_layers) {
+                    layer_values.append(*parsed_layer.get(longhand_id).value_or_lazy_evaluated([&]() -> ValueComparingNonnullRefPtr<StyleValue const> {
+                        return property_initial_value(longhand_id)->as_value_list().values()[0];
+                    }));
+                }
+                longhand_values.append(StyleValueList::create(move(layer_values), StyleValueList::Separator::Comma));
+            }
+
+            Vector<PropertyID> longhand_ids_including_reset_only_longhands;
+            longhand_ids_including_reset_only_longhands.extend(longhand_ids);
+            longhand_ids_including_reset_only_longhands.extend(reset_only_longhand_ids);
+
+            for (auto reset_only_longhand_id : reset_only_longhand_ids)
+                longhand_values.append(property_initial_value(reset_only_longhand_id));
+
+            while (tokens.has_next_token())
+                tokens.discard_a_token();
+            rust_transaction.commit();
+            return ShorthandStyleValue::create(shorthand_id, longhand_ids_including_reset_only_longhands, longhand_values);
+        }
+    }
+
     HashMap<PropertyID, StyleValueVector> longhand_vectors;
 
     auto transaction = tokens.begin_transaction();

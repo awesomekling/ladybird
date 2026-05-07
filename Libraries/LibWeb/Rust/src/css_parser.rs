@@ -2112,6 +2112,94 @@ where
     false
 }
 
+pub(crate) fn parse_coordinating_value_list_shorthand<C>(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+    mut callback: C,
+) -> bool
+where
+    C: FnMut(usize, u16, &str),
+{
+    if property_ids.is_empty() {
+        return false;
+    }
+
+    if !property_ids
+        .iter()
+        .all(|property_id| property_id_from_u16(*property_id).is_some())
+    {
+        return false;
+    }
+
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut layer_index = 0;
+
+    // https://drafts.csswg.org/css-values-4/#comb-comma
+    // A hash mark (#) indicates that the preceding type, word, or group occurs
+    // one or more times, separated by comma tokens (which may optionally be
+    // surrounded by white space and/or comments).
+    loop {
+        let mut remaining_property_ids = property_ids.to_vec();
+        let mut parsed_any_value = false;
+
+        loop {
+            parser.discard_whitespace();
+            if matches!(
+                parser.next_component_value(),
+                None | Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Comma,
+                    ..
+                }))
+            ) {
+                break;
+            }
+
+            let start = parser.index;
+            parser.index += 1;
+            let Some(serialized_value) = serialize_component_values_for_reparsing(
+                &parser.component_values[start..parser.index],
+                filtered_input_string,
+            ) else {
+                return false;
+            };
+
+            let mut matched_property_id = None;
+            if !parse_style_value_for_property(
+                &remaining_property_ids,
+                serialized_value.as_bytes(),
+                |_, property_id, _, _, _, _, _, _, _| {
+                    matched_property_id = Some(property_id);
+                },
+            ) {
+                return false;
+            }
+            let Some(matched_property_id) = matched_property_id else {
+                return false;
+            };
+
+            remaining_property_ids.retain(|property_id| *property_id != matched_property_id);
+            callback(layer_index, matched_property_id, &serialized_value);
+            parsed_any_value = true;
+        }
+
+        if !parsed_any_value {
+            return false;
+        }
+
+        parser.discard_whitespace();
+        if !parser.consume_a_comma() {
+            break;
+        }
+
+        layer_index += 1;
+    }
+
+    parser.discard_whitespace();
+    !parser.has_next_component_value()
+}
+
 fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
     if value_type == PropertyValueType::Ratio {
         return style_value_ratio_values(value_type, component_values).map(|(numerator, _)| numerator);
@@ -16345,24 +16433,24 @@ mod tests {
         parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
         parse_background_size_value, parse_basic_shape_value, parse_color_function_value, parse_color_scheme_value,
         parse_color_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
-        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
-        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
-        parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
-        parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_generated_property_value,
-        parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value, parse_grid_track_placement_value,
-        parse_grid_track_size_list_value, parse_image_set_value, parse_length_descriptor,
-        parse_optional_declaration_value_descriptor, parse_page_size_descriptor, parse_paint_order_value,
-        parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_style_value_for_property,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
+        parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
+        parse_crop_or_cross, parse_easing_value, parse_empty_prelude, parse_fit_content_value,
+        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+        parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
+        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
+        parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
+        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
+        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
+        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -17322,6 +17410,22 @@ mod tests {
         parsed_value
     }
 
+    fn parse_coordinating_shorthand(
+        property_ids: &[PropertyId],
+        input: &str,
+    ) -> Option<Vec<(usize, PropertyId, String)>> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut items = Vec::new();
+        parse_coordinating_value_list_shorthand(&property_ids, input.as_bytes(), |layer_index, property_id, value| {
+            items.push((
+                layer_index,
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                value.to_string(),
+            ));
+        })
+        .then_some(items)
+    }
+
     #[derive(Debug, PartialEq)]
     struct PropertyNumericMetadata {
         property_id: PropertyId,
@@ -18008,6 +18112,71 @@ mod tests {
             })
         );
         assert_eq!(parse_style_value(&[PropertyId::Color], "10px"), None);
+    }
+
+    #[test]
+    fn parses_coordinating_value_list_shorthands() {
+        assert_eq!(
+            parse_coordinating_shorthand(
+                &[
+                    PropertyId::TransitionProperty,
+                    PropertyId::TransitionDuration,
+                    PropertyId::TransitionTimingFunction,
+                    PropertyId::TransitionDelay,
+                    PropertyId::TransitionBehavior,
+                ],
+                "opacity 1s ease-in 250ms allow-discrete, transform 2s"
+            ),
+            Some(vec![
+                (0, PropertyId::TransitionProperty, "opacity".to_string()),
+                (0, PropertyId::TransitionDuration, "1s".to_string()),
+                (0, PropertyId::TransitionTimingFunction, "ease-in".to_string()),
+                (0, PropertyId::TransitionDelay, "250ms".to_string()),
+                (0, PropertyId::TransitionBehavior, "allow-discrete".to_string()),
+                (1, PropertyId::TransitionProperty, "transform".to_string()),
+                (1, PropertyId::TransitionDuration, "2s".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_coordinating_shorthand(
+                &[
+                    PropertyId::AnimationDuration,
+                    PropertyId::AnimationTimingFunction,
+                    PropertyId::AnimationDelay,
+                    PropertyId::AnimationIterationCount,
+                    PropertyId::AnimationDirection,
+                    PropertyId::AnimationFillMode,
+                    PropertyId::AnimationPlayState,
+                    PropertyId::AnimationName,
+                ],
+                "1s ease-in 250ms 2 reverse both paused slide, 2s fade"
+            ),
+            Some(vec![
+                (0, PropertyId::AnimationDuration, "1s".to_string()),
+                (0, PropertyId::AnimationTimingFunction, "ease-in".to_string()),
+                (0, PropertyId::AnimationDelay, "250ms".to_string()),
+                (0, PropertyId::AnimationIterationCount, "2".to_string()),
+                (0, PropertyId::AnimationDirection, "reverse".to_string()),
+                (0, PropertyId::AnimationFillMode, "both".to_string()),
+                (0, PropertyId::AnimationPlayState, "paused".to_string()),
+                (0, PropertyId::AnimationName, "slide".to_string()),
+                (1, PropertyId::AnimationDuration, "2s".to_string()),
+                (1, PropertyId::AnimationName, "fade".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_coordinating_shorthand(
+                &[
+                    PropertyId::TransitionProperty,
+                    PropertyId::TransitionDuration,
+                    PropertyId::TransitionTimingFunction,
+                    PropertyId::TransitionDelay,
+                    PropertyId::TransitionBehavior,
+                ],
+                "opacity,"
+            ),
+            None
+        );
     }
 
     #[test]
