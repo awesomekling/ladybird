@@ -2512,8 +2512,12 @@ pub(crate) struct RustOwnedTextDecoration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedTransformLonghand {
-    source: String,
+pub(crate) enum RustOwnedTransformLonghand {
+    None,
+    Function {
+        function_name: String,
+        arguments: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5525,18 +5529,12 @@ fn rust_owned_transform_longhand_style_value_kind(
     filtered_input: &[u8],
 ) -> Option<RustOwnedStyleValueKind> {
     let value = match property_id {
-        PropertyId::Rotate => parse_rotate_value(filtered_input),
-        PropertyId::Scale => parse_scale_value(filtered_input),
-        PropertyId::Translate => parse_translate_value(filtered_input),
+        PropertyId::Rotate => parse_rust_owned_rotate_value(filtered_input),
+        PropertyId::Scale => parse_rust_owned_scale_value(filtered_input),
+        PropertyId::Translate => parse_rust_owned_translate_value(filtered_input),
         _ => unreachable!(),
     };
-    if value == CssTransformLonghandValueKind::Invalid {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
-        source: filtered_input_to_string(filtered_input),
-    }))
+    Some(RustOwnedStyleValueKind::TransformLonghand(value?))
 }
 
 fn rust_owned_transition_behavior_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -7018,12 +7016,9 @@ where
                 Some(&value.z_source),
             );
         }
-        RustOwnedStyleValueKind::TransformLonghand(value) => callback_source_backed_style_value(
-            callback,
-            CssStyleValueKind::TransformLonghand,
-            property_id,
-            &value.source,
-        ),
+        RustOwnedStyleValueKind::TransformLonghand(value) => {
+            callback_transform_longhand_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::Transformation(_) => {}
         RustOwnedStyleValueKind::TouchAction(value) => callback(
             CssStyleValueKind::TouchAction,
@@ -7760,6 +7755,51 @@ fn callback_optional_longhand_source<C>(
             source.as_bytes(),
             "",
         );
+    }
+}
+
+fn callback_transform_longhand_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedTransformLonghand)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedTransformLonghand::None => callback(
+            CssStyleValueKind::TransformLonghand,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedTransformLonghand::Function {
+            function_name,
+            arguments,
+        } => {
+            for (index, argument) in arguments.iter().enumerate() {
+                callback(
+                    CssStyleValueKind::TransformLonghand,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    u8::try_from(index + 1).expect("transform longhands have fewer than 255 arguments"),
+                    0,
+                    0,
+                    0,
+                    argument.as_bytes(),
+                    function_name,
+                );
+            }
+        }
     }
 }
 
@@ -13783,141 +13823,234 @@ fn is_hue_interpolation_method(input: &str) -> bool {
 }
 
 pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    if parse_rust_owned_translate_value(filtered_input).is_some() {
+        CssTransformLonghandValueKind::Valid
+    } else {
+        CssTransformLonghandValueKind::Invalid
+    }
+}
+
+fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTransformLonghand> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
+    let filtered_input_string = filtered_input_to_string(filtered_input);
 
     // https://drafts.csswg.org/css-transforms-2/#propdef-translate
     // translate = none | <length-percentage> [ <length-percentage> <length>? ]?
     if consume_optional_ident_matching(&mut parser, "none") {
         parser.discard_whitespace();
-        return if parser.has_next_component_value() {
-            CssTransformLonghandValueKind::Invalid
-        } else {
-            CssTransformLonghandValueKind::Valid
-        };
+        return (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::None);
     }
 
-    if !consume_length_percentage_component_value(&mut parser) {
-        return CssTransformLonghandValueKind::Invalid;
-    }
+    let x = consume_component_value_source_matching(
+        &mut parser,
+        &filtered_input_string,
+        component_value_parse_as_length_percentage,
+    )?;
 
     parser.discard_whitespace();
     if !parser.has_next_component_value() {
-        return CssTransformLonghandValueKind::Valid;
+        return Some(RustOwnedTransformLonghand::Function {
+            function_name: "translate".to_string(),
+            arguments: vec![x, "0px".to_string()],
+        });
     }
 
-    if !consume_length_percentage_component_value(&mut parser) {
-        return CssTransformLonghandValueKind::Invalid;
-    }
+    let y = consume_component_value_source_matching(
+        &mut parser,
+        &filtered_input_string,
+        component_value_parse_as_length_percentage,
+    )?;
 
     parser.discard_whitespace();
     if !parser.has_next_component_value() {
-        return CssTransformLonghandValueKind::Valid;
+        return Some(RustOwnedTransformLonghand::Function {
+            function_name: "translate".to_string(),
+            arguments: vec![x, y],
+        });
     }
 
-    if !consume_length_component_value(&mut parser) {
-        return CssTransformLonghandValueKind::Invalid;
-    }
+    let z =
+        consume_component_value_source_matching(&mut parser, &filtered_input_string, component_value_parse_as_length)?;
 
     parser.discard_whitespace();
-    if parser.has_next_component_value() {
-        CssTransformLonghandValueKind::Invalid
-    } else {
-        CssTransformLonghandValueKind::Valid
-    }
+    (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::Function {
+        function_name: "translate3d".to_string(),
+        arguments: vec![x, y, z],
+    })
 }
 
 pub(crate) fn parse_scale_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    if parse_rust_owned_scale_value(filtered_input).is_some() {
+        CssTransformLonghandValueKind::Valid
+    } else {
+        CssTransformLonghandValueKind::Invalid
+    }
+}
+
+fn parse_rust_owned_scale_value(filtered_input: &[u8]) -> Option<RustOwnedTransformLonghand> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
+    let filtered_input_string = filtered_input_to_string(filtered_input);
 
     // https://drafts.csswg.org/css-transforms-2/#propdef-scale
     // scale = none | [ <number> | <percentage> ]{1,3}
     if consume_optional_ident_matching(&mut parser, "none") {
         parser.discard_whitespace();
-        return if parser.has_next_component_value() {
-            CssTransformLonghandValueKind::Invalid
-        } else {
-            CssTransformLonghandValueKind::Valid
-        };
+        return (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::None);
     }
 
-    for component_count in 1..=3 {
-        if !consume_number_percentage_component_value(&mut parser) {
-            return CssTransformLonghandValueKind::Invalid;
-        }
+    let mut arguments = Vec::new();
+    for _ in 0..3 {
+        let argument = consume_component_value_source_matching(
+            &mut parser,
+            &filtered_input_string,
+            component_value_parse_as_number_percentage,
+        )?;
+        arguments.push(argument);
         parser.discard_whitespace();
         if !parser.has_next_component_value() {
-            return CssTransformLonghandValueKind::Valid;
-        }
-        if component_count == 3 {
-            return CssTransformLonghandValueKind::Invalid;
+            if arguments.len() == 1 {
+                arguments.push(arguments[0].clone());
+            }
+            return Some(RustOwnedTransformLonghand::Function {
+                function_name: if arguments.len() == 3 { "scale3d" } else { "scale" }.to_string(),
+                arguments,
+            });
         }
     }
 
-    CssTransformLonghandValueKind::Invalid
+    None
 }
 
 pub(crate) fn parse_rotate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
+    if parse_rust_owned_rotate_value(filtered_input).is_some() {
+        CssTransformLonghandValueKind::Valid
+    } else {
+        CssTransformLonghandValueKind::Invalid
+    }
+}
+
+fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTransformLonghand> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
+    let filtered_input_string = filtered_input_to_string(filtered_input);
 
     // https://drafts.csswg.org/css-transforms-2/#propdef-rotate
     // rotate = none | <angle> | [ x | y | z | <number>{3} ] && <angle>
     if consume_optional_ident_matching(&mut parser, "none") {
         parser.discard_whitespace();
-        return if parser.has_next_component_value() {
-            CssTransformLonghandValueKind::Invalid
-        } else {
-            CssTransformLonghandValueKind::Valid
-        };
+        return (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::None);
     }
 
-    let angle = consume_rotate_angle_component_value(&mut parser);
+    let angle = consume_component_value_source_matching(
+        &mut parser,
+        &filtered_input_string,
+        component_value_parse_as_angle_for_transform_longhand,
+    );
     parser.discard_whitespace();
-    if angle && !parser.has_next_component_value() {
-        return CssTransformLonghandValueKind::Valid;
+    if let Some(angle) = angle.clone()
+        && !parser.has_next_component_value()
+    {
+        return Some(RustOwnedTransformLonghand::Function {
+            function_name: "rotate".to_string(),
+            arguments: vec![angle],
+        });
     }
 
-    if consume_rotate_axis(&mut parser) {
+    if let Some(axis) = consume_rotate_axis(&mut parser) {
         parser.discard_whitespace();
-        if angle || consume_rotate_angle_component_value(&mut parser) {
+        let angle = angle.or_else(|| {
+            consume_component_value_source_matching(
+                &mut parser,
+                &filtered_input_string,
+                component_value_parse_as_angle_for_transform_longhand,
+            )
+        });
+        if let Some(angle) = angle {
             parser.discard_whitespace();
-            return if parser.has_next_component_value() {
-                CssTransformLonghandValueKind::Invalid
-            } else {
-                CssTransformLonghandValueKind::Valid
-            };
+            if parser.has_next_component_value() {
+                return None;
+            }
+            return Some(RustOwnedTransformLonghand::Function {
+                function_name: match axis {
+                    RotateAxis::X => "rotateX",
+                    RotateAxis::Y => "rotateY",
+                    RotateAxis::Z => "rotateZ",
+                }
+                .to_string(),
+                arguments: vec![angle],
+            });
         }
-        return CssTransformLonghandValueKind::Invalid;
+        return None;
     }
 
+    let mut numbers = Vec::new();
     for _ in 0..3 {
-        if !consume_number_component_value(&mut parser) {
-            return CssTransformLonghandValueKind::Invalid;
-        }
+        numbers.push(consume_component_value_source_matching(
+            &mut parser,
+            &filtered_input_string,
+            component_value_parse_as_number_prefix,
+        )?);
     }
 
     parser.discard_whitespace();
-    if !angle && !consume_rotate_angle_component_value(&mut parser) {
-        return CssTransformLonghandValueKind::Invalid;
-    }
+    let angle = angle.or_else(|| {
+        consume_component_value_source_matching(
+            &mut parser,
+            &filtered_input_string,
+            component_value_parse_as_angle_for_transform_longhand,
+        )
+    })?;
 
     parser.discard_whitespace();
     if parser.has_next_component_value() {
-        CssTransformLonghandValueKind::Invalid
-    } else {
-        CssTransformLonghandValueKind::Valid
+        return None;
     }
+
+    numbers.push(angle);
+    Some(RustOwnedTransformLonghand::Function {
+        function_name: "rotate3d".to_string(),
+        arguments: numbers,
+    })
 }
 
-fn consume_rotate_axis(parser: &mut ComponentValueParser) -> bool {
-    consume_optional_ident_matching(parser, "x")
-        || consume_optional_ident_matching(parser, "y")
-        || consume_optional_ident_matching(parser, "z")
+fn consume_component_value_source_matching(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+    predicate: fn(&ComponentValue) -> bool,
+) -> Option<String> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if !predicate(component_value) {
+        return None;
+    }
+    let source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    parser.index += 1;
+    Some(source)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RotateAxis {
+    X,
+    Y,
+    Z,
+}
+
+fn consume_rotate_axis(parser: &mut ComponentValueParser) -> Option<RotateAxis> {
+    if consume_optional_ident_matching(parser, "x") {
+        Some(RotateAxis::X)
+    } else if consume_optional_ident_matching(parser, "y") {
+        Some(RotateAxis::Y)
+    } else if consume_optional_ident_matching(parser, "z") {
+        Some(RotateAxis::Z)
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15078,18 +15211,6 @@ fn consume_number_percentage_component_value(parser: &mut ComponentValueParser) 
         return false;
     };
     if !component_value_parse_as_number_percentage(component_value) {
-        return false;
-    }
-    parser.index += 1;
-    true
-}
-
-fn consume_rotate_angle_component_value(parser: &mut ComponentValueParser) -> bool {
-    parser.discard_whitespace();
-    let Some(component_value) = parser.next_component_value() else {
-        return false;
-    };
-    if !component_value_parse_as_angle_for_transform_longhand(component_value) {
         return false;
     }
     parser.index += 1;
@@ -27300,8 +27421,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Translate], "10px 20% 1em"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Translate,
-                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
-                    source: "10px 20% 1em".to_string(),
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
+                    function_name: "translate3d".to_string(),
+                    arguments: vec!["10px".to_string(), "20%".to_string(), "1em".to_string()],
                 }),
             })
         );
@@ -27309,8 +27431,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Scale], "1 50% 2"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Scale,
-                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
-                    source: "1 50% 2".to_string(),
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
+                    function_name: "scale3d".to_string(),
+                    arguments: vec!["1".to_string(), "50%".to_string(), "2".to_string()],
                 }),
             })
         );
@@ -27318,8 +27441,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Rotate], "1 0 0 45deg"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
-                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand {
-                    source: "1 0 0 45deg".to_string(),
+                value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
+                    function_name: "rotate3d".to_string(),
+                    arguments: vec!["1".to_string(), "0".to_string(), "0".to_string(), "45deg".to_string()],
                 }),
             })
         );

@@ -815,6 +815,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_number = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_number_value(value_tokens, infinite_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -824,10 +833,37 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_number_percentage_value(value_tokens, infinite_range, infinite_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
             auto parse_rust_source_as_non_negative_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_angle = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_angle_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -1554,27 +1590,96 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TransformLonghand:
-                switch (rust_style_value->property_id) {
-                case PropertyID::Rotate:
-                    if (auto value = parse_rotate_value(tokens)) {
+                if (rust_style_value->transform_longhand_is_none) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (!rust_style_value->transform_longhand_function_name.is_empty()) {
+                    auto const& arguments = rust_style_value->transform_longhand_arguments;
+                    auto materialize_rotation = [&](TransformFunction function) -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 1)
+                            return nullptr;
+                        auto angle = parse_rust_source_as_angle(arguments[0]);
+                        if (!angle)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, function, { angle.release_nonnull() });
+                    };
+                    auto materialize_translate = [&]() -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 2)
+                            return nullptr;
+                        auto x = parse_rust_source_as_length_percentage(arguments[0]);
+                        auto y = parse_rust_source_as_length_percentage(arguments[1]);
+                        if (!x || !y)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Translate, { x.release_nonnull(), y.release_nonnull() });
+                    };
+                    auto materialize_translate3d = [&]() -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 3)
+                            return nullptr;
+                        auto x = parse_rust_source_as_length_percentage(arguments[0]);
+                        auto y = parse_rust_source_as_length_percentage(arguments[1]);
+                        auto z = parse_rust_source_as_length(arguments[2]);
+                        if (!x || !y || !z)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Translate3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull() });
+                    };
+                    auto materialize_scale = [&]() -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 2)
+                            return nullptr;
+                        auto x = parse_rust_source_as_number_percentage(arguments[0]);
+                        auto y = parse_rust_source_as_number_percentage(arguments[1]);
+                        if (!x || !y)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Scale, { x.release_nonnull(), y.release_nonnull() });
+                    };
+                    auto materialize_scale3d = [&]() -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 3)
+                            return nullptr;
+                        auto x = parse_rust_source_as_number_percentage(arguments[0]);
+                        auto y = parse_rust_source_as_number_percentage(arguments[1]);
+                        auto z = parse_rust_source_as_number_percentage(arguments[2]);
+                        if (!x || !y || !z)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Scale3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull() });
+                    };
+                    auto materialize_rotate3d = [&]() -> RefPtr<StyleValue const> {
+                        if (arguments.size() != 4)
+                            return nullptr;
+                        auto x = parse_rust_source_as_number(arguments[0]);
+                        auto y = parse_rust_source_as_number(arguments[1]);
+                        auto z = parse_rust_source_as_number(arguments[2]);
+                        auto angle = parse_rust_source_as_angle(arguments[3]);
+                        if (!x || !y || !z || !angle)
+                            return nullptr;
+                        return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Rotate3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull(), angle.release_nonnull() });
+                    };
+
+                    RefPtr<StyleValue const> value;
+                    if (rust_style_value->transform_longhand_function_name == "rotate"sv)
+                        value = materialize_rotation(TransformFunction::Rotate);
+                    else if (rust_style_value->transform_longhand_function_name == "rotateX"sv)
+                        value = materialize_rotation(TransformFunction::RotateX);
+                    else if (rust_style_value->transform_longhand_function_name == "rotateY"sv)
+                        value = materialize_rotation(TransformFunction::RotateY);
+                    else if (rust_style_value->transform_longhand_function_name == "rotateZ"sv)
+                        value = materialize_rotation(TransformFunction::RotateZ);
+                    else if (rust_style_value->transform_longhand_function_name == "rotate3d"sv)
+                        value = materialize_rotate3d();
+                    else if (rust_style_value->transform_longhand_function_name == "translate"sv)
+                        value = materialize_translate();
+                    else if (rust_style_value->transform_longhand_function_name == "translate3d"sv)
+                        value = materialize_translate3d();
+                    else if (rust_style_value->transform_longhand_function_name == "scale"sv)
+                        value = materialize_scale();
+                    else if (rust_style_value->transform_longhand_function_name == "scale3d"sv)
+                        value = materialize_scale3d();
+
+                    if (value) {
+                        discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, value };
                     }
-                    break;
-                case PropertyID::Scale:
-                    if (auto value = parse_scale_value(tokens)) {
-                        generated_transaction.commit();
-                        return PropertyAndValue { rust_style_value->property_id, value };
-                    }
-                    break;
-                case PropertyID::Translate:
-                    if (auto value = parse_translate_value(tokens)) {
-                        generated_transaction.commit();
-                        return PropertyAndValue { rust_style_value->property_id, value };
-                    }
-                    break;
-                default:
-                    break;
                 }
                 break;
             case FFI::CssStyleValueKind::TransformOrigin:

@@ -1232,6 +1232,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->transform_origin_z_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::TransformLonghand) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::TransformLonghand);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0) {
+                    style_value->transform_longhand_is_none = true;
+                    return;
+                }
+
+                style_value->transform_longhand_function_name = fly_string_from_ffi_bytes(value_type_ptr, value_type_len);
+                style_value->transform_longhand_arguments.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
@@ -1243,8 +1259,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::Shadow,
-                           FFI::CssStyleValueKind::ShapeOutside,
-                           FFI::CssStyleValueKind::TransformLonghand)) {
+                           FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);

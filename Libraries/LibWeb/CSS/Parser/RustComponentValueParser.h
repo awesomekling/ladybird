@@ -228,6 +228,9 @@ public:
         bool text_indent_has_each_line { false };
         FFI::CssTextUnderlinePositionHorizontal text_underline_position_horizontal { FFI::CssTextUnderlinePositionHorizontal::Invalid };
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
+        bool transform_longhand_is_none { false };
+        FlyString transform_longhand_function_name;
+        Vector<String> transform_longhand_arguments;
         Optional<String> transform_origin_x_source;
         Optional<String> transform_origin_y_source;
         Optional<String> transform_origin_z_source;
