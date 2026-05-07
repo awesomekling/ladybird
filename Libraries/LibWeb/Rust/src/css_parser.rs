@@ -1949,7 +1949,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FlexShorthand(RustOwnedFlexShorthand),
     FlexFlow(RustOwnedFlexFlow),
     FilterValueList {
-        source: String,
+        value: RustOwnedFilterValueList,
     },
     FontStyle(RustOwnedFontStyle),
     FontVariantAlternates {
@@ -2397,6 +2397,44 @@ pub(crate) struct RustOwnedCursorImage {
     image_source: String,
     x_source: Option<String>,
     y_source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedFilterValueList {
+    None,
+    Filters(Vec<RustOwnedFilterValue>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedFilterValue {
+    Url(String),
+    Blur {
+        radius_source: Option<String>,
+    },
+    DropShadow {
+        color_source: Option<String>,
+        offset_x_source: String,
+        offset_y_source: String,
+        radius_source: Option<String>,
+    },
+    HueRotate {
+        angle_source: Option<String>,
+    },
+    Simple {
+        function: RustOwnedSimpleFilterFunction,
+        amount_source: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedSimpleFilterFunction {
+    Brightness,
+    Contrast,
+    Grayscale,
+    Invert,
+    Opacity,
+    Saturate,
+    Sepia,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4230,13 +4268,8 @@ fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOw
 }
 
 fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_filter_value_list_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::FilterValueList {
-        source: filtered_input_to_string(filtered_input),
-    })
+    parse_rust_owned_filter_value_list_value(filtered_input)
+        .map(|value| RustOwnedStyleValueKind::FilterValueList { value })
 }
 
 fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6630,8 +6663,8 @@ where
                 value.flex_wrap_source.as_ref(),
             );
         }
-        RustOwnedStyleValueKind::FilterValueList { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FilterValueList, property_id, source);
+        RustOwnedStyleValueKind::FilterValueList { value } => {
+            callback_filter_value_list_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
             CssStyleValueKind::GridAutoFlow,
@@ -8041,6 +8074,20 @@ where
 
 const CURSOR_CALLBACK_IMAGE: u8 = 0;
 const CURSOR_CALLBACK_PREDEFINED: u8 = 1;
+const FILTER_VALUE_LIST_CALLBACK_NONE: u8 = 0;
+const FILTER_VALUE_LIST_CALLBACK_URL: u8 = 1;
+const FILTER_VALUE_LIST_CALLBACK_BLUR: u8 = 2;
+const FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW: u8 = 3;
+const FILTER_VALUE_LIST_CALLBACK_HUE_ROTATE: u8 = 4;
+const FILTER_VALUE_LIST_CALLBACK_SIMPLE: u8 = 5;
+
+const SIMPLE_FILTER_FUNCTION_BRIGHTNESS: u8 = 0;
+const SIMPLE_FILTER_FUNCTION_CONTRAST: u8 = 1;
+const SIMPLE_FILTER_FUNCTION_GRAYSCALE: u8 = 2;
+const SIMPLE_FILTER_FUNCTION_INVERT: u8 = 3;
+const SIMPLE_FILTER_FUNCTION_OPACITY: u8 = 4;
+const SIMPLE_FILTER_FUNCTION_SATURATE: u8 = 5;
+const SIMPLE_FILTER_FUNCTION_SEPIA: u8 = 6;
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
 where
@@ -8081,6 +8128,136 @@ where
         0,
         0,
         value.predefined.as_bytes(),
+        "",
+    );
+}
+
+fn callback_filter_value_list_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedFilterValueList)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedFilterValueList::None => callback(
+            CssStyleValueKind::FilterValueList,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            FILTER_VALUE_LIST_CALLBACK_NONE,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedFilterValueList::Filters(filters) => {
+            for filter in filters {
+                match filter {
+                    RustOwnedFilterValue::Url(source) => callback(
+                        CssStyleValueKind::FilterValueList,
+                        property_id,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        FILTER_VALUE_LIST_CALLBACK_URL,
+                        0,
+                        0,
+                        0,
+                        source.as_bytes(),
+                        "",
+                    ),
+                    RustOwnedFilterValue::Blur { radius_source } => callback_optional_filter_source(
+                        callback,
+                        property_id,
+                        FILTER_VALUE_LIST_CALLBACK_BLUR,
+                        0,
+                        radius_source.as_ref(),
+                    ),
+                    RustOwnedFilterValue::DropShadow {
+                        color_source,
+                        offset_x_source,
+                        offset_y_source,
+                        radius_source,
+                    } => {
+                        let secondary_source = format!(
+                            "{}\0{}\0{}",
+                            offset_y_source,
+                            radius_source.as_deref().unwrap_or(""),
+                            color_source.as_deref().unwrap_or("")
+                        );
+                        callback(
+                            CssStyleValueKind::FilterValueList,
+                            property_id,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW,
+                            u8::from(radius_source.is_some()),
+                            u8::from(color_source.is_some()),
+                            0,
+                            offset_x_source.as_bytes(),
+                            &secondary_source,
+                        );
+                    }
+                    RustOwnedFilterValue::HueRotate { angle_source } => callback_optional_filter_source(
+                        callback,
+                        property_id,
+                        FILTER_VALUE_LIST_CALLBACK_HUE_ROTATE,
+                        0,
+                        angle_source.as_ref(),
+                    ),
+                    RustOwnedFilterValue::Simple {
+                        function,
+                        amount_source,
+                    } => callback_optional_filter_source(
+                        callback,
+                        property_id,
+                        FILTER_VALUE_LIST_CALLBACK_SIMPLE,
+                        match function {
+                            RustOwnedSimpleFilterFunction::Brightness => SIMPLE_FILTER_FUNCTION_BRIGHTNESS,
+                            RustOwnedSimpleFilterFunction::Contrast => SIMPLE_FILTER_FUNCTION_CONTRAST,
+                            RustOwnedSimpleFilterFunction::Grayscale => SIMPLE_FILTER_FUNCTION_GRAYSCALE,
+                            RustOwnedSimpleFilterFunction::Invert => SIMPLE_FILTER_FUNCTION_INVERT,
+                            RustOwnedSimpleFilterFunction::Opacity => SIMPLE_FILTER_FUNCTION_OPACITY,
+                            RustOwnedSimpleFilterFunction::Saturate => SIMPLE_FILTER_FUNCTION_SATURATE,
+                            RustOwnedSimpleFilterFunction::Sepia => SIMPLE_FILTER_FUNCTION_SEPIA,
+                        },
+                        amount_source.as_ref(),
+                    ),
+                }
+            }
+        }
+    }
+}
+
+fn callback_optional_filter_source<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    source: Option<&String>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::FilterValueList,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        secondary_kind,
+        u8::from(source.is_some()),
+        0,
+        source.map_or(&[], |source| source.as_bytes()),
         "",
     );
 }
@@ -15478,155 +15655,195 @@ fn component_value_parse_as_list_style_type(component_value: &ComponentValue) ->
 }
 
 pub(crate) fn parse_filter_value_list_value(filtered_input: &[u8]) -> bool {
-    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    parse_rust_owned_filter_value_list_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_filter_value_list_value(filtered_input: &[u8]) -> Option<RustOwnedFilterValueList> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = remove_whitespace_component_values(&component_values);
 
     if component_values.is_empty() {
-        return false;
+        return None;
     }
 
     if component_values.len() == 1 && component_value_is_ident(component_values.first(), "none") {
-        return true;
+        return Some(RustOwnedFilterValueList::None);
     }
 
     // https://drafts.fxtf.org/filter-effects-1/#typedef-filter-value-list
     // <filter-value-list> = [ <filter-function> | <url> ]+
-    //
-    // FIXME: <url>s are ignored by the style system for now.
+    let mut filters = Vec::new();
     for component_value in component_values {
         let mut url_parser = ComponentValueParser::new(vec![component_value.clone()]);
         if url_parser.parse_a_url_function().is_some() {
+            filters.push(RustOwnedFilterValue::Url(serialize_component_values_for_reparsing(
+                std::slice::from_ref(&component_value),
+                filtered_input_string,
+            )?));
             continue;
         }
 
         let ComponentValue::Function(function) = component_value else {
-            return false;
+            return None;
         };
 
-        if !component_value_parse_as_filter_function(&function) {
-            return false;
-        }
+        filters.push(component_value_parse_as_filter_function(
+            &function,
+            filtered_input_string,
+        )?);
     }
 
-    true
+    Some(RustOwnedFilterValueList::Filters(filters))
 }
 
-fn component_value_parse_as_filter_function(function: &Function) -> bool {
+fn component_value_parse_as_filter_function(function: &Function, source: &str) -> Option<RustOwnedFilterValue> {
     // https://drafts.fxtf.org/filter-effects-1/#typedef-filter-function
     // <blur()> | <brightness()> | <contrast()> | <drop-shadow()> | <grayscale()> | <hue-rotate()> | <invert()> | <opacity()> | <sepia()> | <saturate()>
     if function.name.eq_ignore_ascii_case("blur") {
-        return component_values_parse_as_blur_function(&function.value);
+        return component_values_parse_as_blur_function(&function.value, source);
     }
     if function.name.eq_ignore_ascii_case("drop-shadow") {
-        return component_values_parse_as_drop_shadow_function(&function.value);
+        return component_values_parse_as_drop_shadow_function(&function.value, source);
     }
     if function.name.eq_ignore_ascii_case("hue-rotate") {
-        return component_values_parse_as_hue_rotate_function(&function.value);
+        return component_values_parse_as_hue_rotate_function(&function.value, source);
     }
 
-    if [
-        "brightness",
-        "contrast",
-        "grayscale",
-        "invert",
-        "opacity",
-        "saturate",
-        "sepia",
-    ]
-    .iter()
-    .any(|name| function.name.eq_ignore_ascii_case(name))
-    {
-        return component_values_parse_as_simple_filter_function(&function.value);
-    }
+    let simple_function = if function.name.eq_ignore_ascii_case("brightness") {
+        RustOwnedSimpleFilterFunction::Brightness
+    } else if function.name.eq_ignore_ascii_case("contrast") {
+        RustOwnedSimpleFilterFunction::Contrast
+    } else if function.name.eq_ignore_ascii_case("grayscale") {
+        RustOwnedSimpleFilterFunction::Grayscale
+    } else if function.name.eq_ignore_ascii_case("invert") {
+        RustOwnedSimpleFilterFunction::Invert
+    } else if function.name.eq_ignore_ascii_case("opacity") {
+        RustOwnedSimpleFilterFunction::Opacity
+    } else if function.name.eq_ignore_ascii_case("saturate") {
+        RustOwnedSimpleFilterFunction::Saturate
+    } else if function.name.eq_ignore_ascii_case("sepia") {
+        RustOwnedSimpleFilterFunction::Sepia
+    } else {
+        return None;
+    };
 
-    false
+    component_values_parse_as_simple_filter_function(&function.value, simple_function, source)
 }
 
-fn component_values_parse_as_blur_function(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_blur_function(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<RustOwnedFilterValue> {
     // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-blur
     // blur( <length>? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => true,
-        [component_value] => component_value_parse_as_non_negative_length(component_value),
-        _ => false,
+        [] => Some(RustOwnedFilterValue::Blur { radius_source: None }),
+        [component_value] if component_value_parse_as_non_negative_length(component_value) => {
+            Some(RustOwnedFilterValue::Blur {
+                radius_source: Some(serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    source,
+                )?),
+            })
+        }
+        _ => None,
     }
 }
 
-fn component_values_parse_as_drop_shadow_function(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_drop_shadow_function(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<RustOwnedFilterValue> {
     // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-drop-shadow
     // drop-shadow( [ <color>? && <length>{2,3} ] )
     let component_values = strip_whitespace(component_values);
     if component_values.is_empty() {
-        return false;
+        return None;
     }
 
     let mut parser = ComponentValueParser::new(component_values.to_vec());
-    let has_color_before_lengths = consume_filter_drop_shadow_color(&mut parser);
-    if !consume_filter_drop_shadow_length(&mut parser) || !consume_filter_drop_shadow_length(&mut parser) {
-        return false;
-    }
+    let color_source_before_lengths = consume_filter_drop_shadow_color(&mut parser, source);
+    let offset_x_source = consume_filter_drop_shadow_length(&mut parser, source)?;
+    let offset_y_source = consume_filter_drop_shadow_length(&mut parser, source)?;
 
-    let _has_blur_radius = consume_filter_drop_shadow_length(&mut parser);
-    let _has_color_after_lengths = if has_color_before_lengths {
-        false
+    let radius_source = consume_filter_drop_shadow_length(&mut parser, source);
+    let color_source = if color_source_before_lengths.is_some() {
+        color_source_before_lengths
     } else {
-        consume_filter_drop_shadow_color(&mut parser)
+        consume_filter_drop_shadow_color(&mut parser, source)
     };
 
-    !parser.has_next_component_value()
+    (!parser.has_next_component_value()).then_some(RustOwnedFilterValue::DropShadow {
+        color_source,
+        offset_x_source,
+        offset_y_source,
+        radius_source,
+    })
 }
 
-fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser) -> bool {
+fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser, source: &str) -> Option<String> {
     parser.discard_whitespace();
-    let Some(component_value) = parser.next_component_value() else {
-        return false;
-    };
+    let component_value = parser.next_component_value().cloned()?;
 
-    if component_value_parse_as_color_value(component_value) {
+    if component_value_parse_as_color_value(&component_value) {
         parser.index += 1;
-        return true;
+        return serialize_component_values_for_reparsing(std::slice::from_ref(&component_value), source);
     }
 
-    false
+    None
 }
 
-fn consume_filter_drop_shadow_length(parser: &mut ComponentValueParser) -> bool {
+fn consume_filter_drop_shadow_length(parser: &mut ComponentValueParser, source: &str) -> Option<String> {
     parser.discard_whitespace();
-    let Some(component_value) = parser.next_component_value() else {
-        return false;
-    };
+    let component_value = parser.next_component_value().cloned()?;
 
-    if component_value_parse_as_length(component_value) {
+    if component_value_parse_as_length(&component_value) {
         parser.index += 1;
-        return true;
+        return serialize_component_values_for_reparsing(std::slice::from_ref(&component_value), source);
     }
 
-    false
+    None
 }
 
-fn component_values_parse_as_hue_rotate_function(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_hue_rotate_function(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<RustOwnedFilterValue> {
     // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-hue-rotate
     // hue-rotate( [ <angle> | <zero> ]? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => true,
+        [] => Some(RustOwnedFilterValue::HueRotate { angle_source: None }),
         [component_value] => {
-            component_value_parse_as_angle(component_value)
-                || matches!(
-                    component_value,
-                    ComponentValue::PreservedToken(Token {
-                        token_type: TokenType::Number { number },
-                        ..
-                    }) if number_is_integer(*number) && number.value() == 0.0
-                )
+            if component_value_parse_as_angle(component_value) {
+                return Some(RustOwnedFilterValue::HueRotate {
+                    angle_source: Some(serialize_component_values_for_reparsing(
+                        std::slice::from_ref(component_value),
+                        source,
+                    )?),
+                });
+            }
+
+            matches!(
+                component_value,
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Number { number },
+                    ..
+                }) if number_is_integer(*number) && number.value() == 0.0
+            )
+            .then_some(RustOwnedFilterValue::HueRotate { angle_source: None })
         }
-        _ => false,
+        _ => None,
     }
 }
 
-fn component_values_parse_as_simple_filter_function(component_values: &[ComponentValue]) -> bool {
+fn component_values_parse_as_simple_filter_function(
+    component_values: &[ComponentValue],
+    function: RustOwnedSimpleFilterFunction,
+    source: &str,
+) -> Option<RustOwnedFilterValue> {
     // https://drafts.fxtf.org/filter-effects-1/#funcdef-filter-brightness
     // brightness( [ <number> | <percentage> ]? )
     //
@@ -15649,9 +15866,20 @@ fn component_values_parse_as_simple_filter_function(component_values: &[Componen
     // saturate( [ <number> | <percentage> ]? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => true,
-        [component_value] => component_value_parse_as_non_negative_number_percentage(component_value),
-        _ => false,
+        [] => Some(RustOwnedFilterValue::Simple {
+            function,
+            amount_source: None,
+        }),
+        [component_value] if component_value_parse_as_non_negative_number_percentage(component_value) => {
+            Some(RustOwnedFilterValue::Simple {
+                function,
+                amount_source: Some(serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    source,
+                )?),
+            })
+        }
+        _ => None,
     }
 }
 
@@ -25510,16 +25738,17 @@ mod tests {
         RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
         RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
         RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
@@ -27362,6 +27591,23 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Filter], "blur(10px) opacity(50%)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Filter,
+                value: RustOwnedStyleValueKind::FilterValueList {
+                    value: RustOwnedFilterValueList::Filters(vec![
+                        RustOwnedFilterValue::Blur {
+                            radius_source: Some("10px".to_string()),
+                        },
+                        RustOwnedFilterValue::Simple {
+                            function: RustOwnedSimpleFilterFunction::Opacity,
+                            amount_source: Some("50%".to_string()),
+                        },
+                    ]),
+                },
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif, \"Bongo Sans\""),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontFamily,
@@ -28884,7 +29130,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "blur(10px) opacity(50%)".to_string(),
+                value: "50%".to_string(),
                 value_type: String::new(),
             })
         );

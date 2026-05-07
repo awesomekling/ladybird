@@ -833,6 +833,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_url = [&](String const& source) -> Optional<URL> {
+                return RustComponentValueParser::parse_a_url_function(source.bytes_as_string_view(), "utf-8"sv);
+            };
             auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -864,6 +867,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
+            auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_length_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -1069,6 +1081,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return {};
                 return grid_track_size_list;
             };
+            auto materialize_rust_simple_filter_function = [](RustComponentValueParser::RustSimpleFilterFunction function) {
+                switch (function) {
+                case RustComponentValueParser::RustSimpleFilterFunction::Brightness:
+                    return Gfx::ColorFilterType::Brightness;
+                case RustComponentValueParser::RustSimpleFilterFunction::Contrast:
+                    return Gfx::ColorFilterType::Contrast;
+                case RustComponentValueParser::RustSimpleFilterFunction::Grayscale:
+                    return Gfx::ColorFilterType::Grayscale;
+                case RustComponentValueParser::RustSimpleFilterFunction::Invert:
+                    return Gfx::ColorFilterType::Invert;
+                case RustComponentValueParser::RustSimpleFilterFunction::Opacity:
+                    return Gfx::ColorFilterType::Opacity;
+                case RustComponentValueParser::RustSimpleFilterFunction::Saturate:
+                    return Gfx::ColorFilterType::Saturate;
+                case RustComponentValueParser::RustSimpleFilterFunction::Sepia:
+                    return Gfx::ColorFilterType::Sepia;
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1095,16 +1126,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_length_value(value_tokens, infinite_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
-
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
                 break;
@@ -1748,9 +1769,97 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FilterValueList:
-                if (auto value = parse_filter_value_list_value(tokens)) {
+                if (rust_style_value->filter_value_list_is_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (!rust_style_value->filter_value_list_events.is_empty()) {
+                    Vector<FilterValue> filter_value_list;
+                    filter_value_list.ensure_capacity(rust_style_value->filter_value_list_events.size());
+                    for (auto const& event : rust_style_value->filter_value_list_events) {
+                        switch (event.kind) {
+                        case RustComponentValueParser::RustFilterValueListEventKind::None:
+                            break;
+                        case RustComponentValueParser::RustFilterValueListEventKind::Url: {
+                            auto url = parse_rust_source_as_url(event.source);
+                            if (!url.has_value())
+                                break;
+                            filter_value_list.append(url.release_value());
+                            break;
+                        }
+                        case RustComponentValueParser::RustFilterValueListEventKind::Blur: {
+                            auto radius = event.has_value
+                                ? parse_rust_source_as_non_negative_length(event.source)
+                                : LengthStyleValue::create(Length::make_px(0));
+                            if (!radius)
+                                break;
+                            filter_value_list.append(FilterOperation::Blur { radius.release_nonnull() });
+                            break;
+                        }
+                        case RustComponentValueParser::RustFilterValueListEventKind::DropShadow: {
+                            auto secondary_sources = event.secondary_source.bytes_as_string_view().split_view('\0');
+                            if (secondary_sources.size() != 3)
+                                break;
+
+                            auto offset_x = parse_rust_source_as_length(event.source);
+                            auto offset_y = parse_rust_source_as_length(String::from_utf8_without_validation(secondary_sources[0].bytes()));
+                            if (!offset_x || !offset_y)
+                                break;
+
+                            RefPtr<StyleValue const> radius;
+                            if (event.has_value) {
+                                radius = parse_rust_source_as_length(String::from_utf8_without_validation(secondary_sources[1].bytes()));
+                                if (!radius)
+                                    break;
+                            }
+
+                            RefPtr<StyleValue const> color;
+                            if (event.has_secondary_value) {
+                                color = parse_rust_source_as_color(String::from_utf8_without_validation(secondary_sources[2].bytes()));
+                                if (!color)
+                                    break;
+                            }
+
+                            filter_value_list.append(FilterOperation::DropShadow { offset_x.release_nonnull(), offset_y.release_nonnull(), radius, color });
+                            break;
+                        }
+                        case RustComponentValueParser::RustFilterValueListEventKind::HueRotate: {
+                            auto angle = event.has_value
+                                ? parse_rust_source_as_angle(event.source)
+                                : AngleStyleValue::create(Angle::make_degrees(0));
+                            if (!angle)
+                                break;
+                            filter_value_list.append(FilterOperation::HueRotate { angle.release_nonnull() });
+                            break;
+                        }
+                        case RustComponentValueParser::RustFilterValueListEventKind::Simple: {
+                            auto amount = event.has_value
+                                ? parse_rust_source_as_number_percentage(event.source)
+                                : NumberStyleValue::create(1);
+                            if (!amount)
+                                break;
+
+                            auto operation = materialize_rust_simple_filter_function(event.simple_function);
+                            if (first_is_one_of(operation, Gfx::ColorFilterType::Grayscale, Gfx::ColorFilterType::Invert, Gfx::ColorFilterType::Opacity, Gfx::ColorFilterType::Sepia)) {
+                                if (amount->is_percentage() && amount->as_percentage().percentage().value() > 100)
+                                    amount = PercentageStyleValue::create(Percentage { 100 });
+                                if (amount->is_number() && amount->as_number().number() > 1)
+                                    amount = NumberStyleValue::create(1);
+                            }
+
+                            filter_value_list.append(FilterOperation::Color { operation, amount.release_nonnull() });
+                            break;
+                        }
+                        }
+                    }
+
+                    if (filter_value_list.size() != rust_style_value->filter_value_list_events.size())
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, FilterValueListStyleValue::create(move(filter_value_list)) };
                 }
                 break;
             case FFI::CssStyleValueKind::GridAutoFlow: {

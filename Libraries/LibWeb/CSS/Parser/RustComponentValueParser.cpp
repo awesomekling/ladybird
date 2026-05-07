@@ -1297,10 +1297,35 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
-                           FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::FilterValueList) {
+                enum : u8 {
+                    None,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FilterValueList);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == None) {
+                    style_value->filter_value_list_is_none = true;
+                    return;
+                }
+
+                style_value->filter_value_list_events.append(RustFilterValueListEvent {
+                    .kind = static_cast<RustFilterValueListEventKind>(color_red),
+                    .simple_function = static_cast<RustSimpleFilterFunction>(color_green),
+                    .has_value = color_blue != 0,
+                    .has_secondary_value = color_alpha != 0,
+                    .source = string_from_ffi_bytes(value_ptr, value_len),
+                    .secondary_source = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::Cursor) {
                 enum : u8 {
                     Image,

@@ -213,6 +213,34 @@ public:
         Optional<String> y_source;
     };
 
+    enum class RustFilterValueListEventKind : u8 {
+        None,
+        Url,
+        Blur,
+        DropShadow,
+        HueRotate,
+        Simple,
+    };
+
+    enum class RustSimpleFilterFunction : u8 {
+        Brightness,
+        Contrast,
+        Grayscale,
+        Invert,
+        Opacity,
+        Saturate,
+        Sepia,
+    };
+
+    struct RustFilterValueListEvent {
+        RustFilterValueListEventKind kind { RustFilterValueListEventKind::None };
+        RustSimpleFilterFunction simple_function { RustSimpleFilterFunction::Brightness };
+        bool has_value { false };
+        bool has_secondary_value { false };
+        String source;
+        String secondary_source;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -306,6 +334,8 @@ public:
         Vector<RustShadow> shadows;
         Vector<RustCursorImage> cursor_images;
         Optional<FlyString> cursor_predefined;
+        bool filter_value_list_is_none { false };
+        Vector<RustFilterValueListEvent> filter_value_list_events;
         bool position_area_is_none { false };
         Optional<RustPositionArea> position_area;
         bool position_try_fallbacks_is_none { false };
