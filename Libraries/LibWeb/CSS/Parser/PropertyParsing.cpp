@@ -372,6 +372,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         ColorSyntax::Legacy,
                         rust_style_value->string)
                 };
+            case FFI::CssStyleValueKind::Url:
+                if (rust_style_value->string.has_value()) {
+                    auto maybe_url = RustComponentValueParser::parse_a_url_function(rust_style_value->string->bytes_as_string_view(), "utf-8"sv);
+                    if (maybe_url.has_value()) {
+                        tokens.discard_a_token();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(maybe_url.release_value()) };
+                    }
+                }
+                break;
             case FFI::CssStyleValueKind::Primitive:
             case FFI::CssStyleValueKind::ValueType:
                 if (rust_style_value->value_type.has_value()) {

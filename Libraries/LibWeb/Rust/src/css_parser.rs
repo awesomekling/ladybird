@@ -14,10 +14,11 @@ use crate::generated_media_features::{
     media_feature_id_from_string, media_feature_type_is_range,
 };
 use crate::generated_properties::{
-    PropertyNumericRange, PropertyValueType, longhands_for_shorthand, property_accepted_range_by_value_type,
-    property_accepts_keyword, property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
-    property_is_positional_value_list_shorthand, property_resolves_percentages_relative_to,
-    property_value_type_from_css_value_type_name, property_value_type_name, resolve_legacy_value_alias,
+    PropertyId, PropertyNumericRange, PropertyValueType, longhands_for_shorthand,
+    property_accepted_range_by_value_type, property_accepts_keyword, property_accepts_value_type,
+    property_custom_ident_blacklist, property_id_from_u16, property_is_positional_value_list_shorthand,
+    property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name, property_value_type_name,
+    resolve_legacy_value_alias,
 };
 use crate::generated_pseudo_classes::{
     PseudoClassId, PseudoClassParameterType, pseudo_class_id_from_string, pseudo_class_metadata,
@@ -1752,6 +1753,7 @@ pub enum CssStyleValueKind {
     CustomIdent,
     Primitive,
     Color,
+    Url,
     ValueType,
 }
 
@@ -2058,7 +2060,12 @@ where
             if !property_accepts_value_type(property_id, *value_type) {
                 continue;
             }
-            if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+            let value_type_matches = if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
+                parse_a_url_function(filtered_input, |_| {}, |_| {})
+            } else {
+                component_values_parse_as_property_value_type(*value_type, filtered_input)
+            };
+            if !value_type_matches {
                 continue;
             }
 
@@ -2110,6 +2117,75 @@ where
                         return true;
                     }
                 }
+            }
+
+            if *value_type == PropertyValueType::DashedIdent {
+                let mut name = None;
+                if parse_a_dashed_ident(filtered_input, |parsed_name| {
+                    name = Some(parsed_name.to_string());
+                }) && let Some(name) = name
+                {
+                    callback(
+                        CssStyleValueKind::Primitive,
+                        property_id as u16,
+                        CssPrimitiveValueKind::CustomIdent,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        name.as_bytes(),
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
+            }
+
+            if *value_type == PropertyValueType::OpentypeTag {
+                let mut tag = None;
+                if parse_an_opentype_tag(filtered_input, |parsed_tag| {
+                    tag = Some(parsed_tag.to_string());
+                }) && let Some(tag) = tag
+                {
+                    callback(
+                        CssStyleValueKind::Primitive,
+                        property_id as u16,
+                        CssPrimitiveValueKind::String,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        tag.as_bytes(),
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
+            }
+
+            if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
+                callback(
+                    CssStyleValueKind::Url,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    filtered_input,
+                    property_value_type_name(*value_type),
+                );
+                return true;
             }
 
             let generated_style_value =
@@ -18490,6 +18566,45 @@ mod tests {
                 color: None,
                 value: "currentColor".to_string(),
                 value_type: "Color".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnchorName], "--anchor"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::AnchorName,
+                primitive_kind: CssPrimitiveValueKind::CustomIdent,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "--anchor".to_string(),
+                value_type: "DashedIdent".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FontFeatureSettings], "\"kern\""),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::FontFeatureSettings,
+                primitive_kind: CssPrimitiveValueKind::String,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "kern".to_string(),
+                value_type: "OpentypeTag".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ClipPath], "url(image.png)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Url,
+                property_id: PropertyId::ClipPath,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "url(image.png)".to_string(),
+                value_type: "Url".to_string(),
             })
         );
         assert_eq!(
