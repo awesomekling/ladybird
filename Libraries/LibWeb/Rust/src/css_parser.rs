@@ -1894,6 +1894,7 @@ pub enum CssStyleValueKind {
     ScrollbarColor,
     ScrollbarGutter,
     StrokeDasharray,
+    ScrollTimeline,
     TimelineName,
     TimelineScope,
     TextWrap,
@@ -2023,6 +2024,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextDecorationLine(RustOwnedTextDecorationLine),
     ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
+    ScrollTimeline(RustOwnedScrollTimeline),
     Shorthand(RustOwnedStyleValueList),
     String {
         value: String,
@@ -2715,6 +2717,12 @@ pub(crate) struct RustOwnedTimelineName {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedScrollTimeline {
+    names: Vec<RustOwnedTimelineNameItem>,
+    axes: Vec<CssScrollFunctionAxisKind>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineScope {
     kind: CssTimelineScopeValueKind,
     names: Vec<String>,
@@ -3265,6 +3273,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
         PropertyId::ShapeOutside => rust_owned_shape_outside_style_value_kind(filtered_input),
+        PropertyId::ScrollTimeline => rust_owned_scroll_timeline_style_value_kind(filtered_input),
         PropertyId::TextDecoration => rust_owned_text_decoration_style_value_kind(filtered_input),
         PropertyId::TextDecorationLine => rust_owned_text_decoration_line_style_value_kind(filtered_input),
         PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
@@ -5425,6 +5434,87 @@ fn rust_owned_timeline_name_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     }))
 }
 
+fn rust_owned_scroll_timeline_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut names = Vec::new();
+    let mut axes = Vec::new();
+
+    // https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-shorthand
+    // <'scroll-timeline'> = [ <'scroll-timeline-name'> <'scroll-timeline-axis'>? ]#
+    loop {
+        parser.discard_whitespace();
+        names.push(consume_scroll_timeline_name_item(&mut parser)?);
+        parser.discard_whitespace();
+
+        if parser.consume_a_comma() {
+            axes.push(CssScrollFunctionAxisKind::Block);
+            parser.discard_whitespace();
+            if !parser.has_next_component_value() {
+                return None;
+            }
+            continue;
+        }
+
+        if !parser.has_next_component_value() {
+            axes.push(CssScrollFunctionAxisKind::Block);
+            break;
+        }
+
+        let axis = parser.consume_an_ident()?;
+        axes.push(scroll_function_axis_from_string(&axis)?);
+        parser.discard_whitespace();
+
+        if parser.consume_a_comma() {
+            parser.discard_whitespace();
+            if !parser.has_next_component_value() {
+                return None;
+            }
+            continue;
+        }
+
+        if parser.has_next_component_value() {
+            return None;
+        }
+        break;
+    }
+
+    if names.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ScrollTimeline(RustOwnedScrollTimeline {
+        names,
+        axes,
+    }))
+}
+
+fn consume_scroll_timeline_name_item(parser: &mut ComponentValueParser) -> Option<RustOwnedTimelineNameItem> {
+    // https://drafts.csswg.org/scroll-animations-1/#scroll-timeline-name
+    // <'scroll-timeline-name'> = [ none | <dashed-ident> ]#
+    if parser.consume_ident_matching("none") {
+        return Some(RustOwnedTimelineNameItem {
+            kind: CssTimelineNameItemKind::None,
+            name: String::new(),
+        });
+    }
+
+    let name = match parser.next_component_value()? {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.starts_with("--") && is_valid_custom_ident(value, &[]) => value.clone(),
+        _ => return None,
+    };
+    parser.index += 1;
+
+    Some(RustOwnedTimelineNameItem {
+        kind: CssTimelineNameItemKind::DashedIdent,
+        name,
+    })
+}
+
 fn rust_owned_timeline_scope_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let mut names = Vec::new();
     let kind = parse_timeline_scope_value(filtered_input, |name| names.push(name.to_string()));
@@ -7003,6 +7093,25 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::ScrollTimeline(value) => {
+            let name_bytes = null_terminated_timeline_name_item_bytes(&value.names);
+            let axis_bytes: Vec<u8> = value.axes.iter().map(|axis| *axis as u8).collect();
+            callback(
+                CssStyleValueKind::ScrollTimeline,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                0,
+                0,
+                0,
+                0,
+                &name_bytes,
+                std::str::from_utf8(&axis_bytes).unwrap(),
+            );
+        }
         RustOwnedStyleValueKind::TimelineName(value) => {
             let name_bytes = null_terminated_timeline_name_item_bytes(&value.names);
             callback(
@@ -26198,14 +26307,14 @@ mod tests {
         RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
         RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
         RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
@@ -28842,6 +28951,25 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ScrollTimeline], "--track inline, none"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ScrollTimeline,
+                value: RustOwnedStyleValueKind::ScrollTimeline(RustOwnedScrollTimeline {
+                    names: vec![
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::DashedIdent,
+                            name: "--track".to_string(),
+                        },
+                        RustOwnedTimelineNameItem {
+                            kind: CssTimelineNameItemKind::None,
+                            name: String::new(),
+                        },
+                    ],
+                    axes: vec![CssScrollFunctionAxisKind::Inline, CssScrollFunctionAxisKind::Block],
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::ViewTimelineName], "--view"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ViewTimelineName,
@@ -29316,6 +29444,19 @@ mod tests {
                 color: None,
                 value: "1px\02px".to_string(),
                 value_type: "ViewTimelineInset".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ScrollTimeline], "--track inline, none"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ScrollTimeline,
+                property_id: PropertyId::ScrollTimeline,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "\u{1}--track\0\u{0}\0".to_string(),
+                value_type: "\u{2}\u{1}".to_string(),
             })
         );
         assert_eq!(

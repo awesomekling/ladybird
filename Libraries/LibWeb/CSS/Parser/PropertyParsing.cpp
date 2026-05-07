@@ -461,6 +461,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return FunctionStyleValue::create("view"_fly_string, TupleStyleValue::create(move(tuple)));
             };
+            auto keyword_from_scroll_function_axis = [](FFI::CssScrollFunctionAxisKind axis) -> Optional<Keyword> {
+                switch (axis) {
+                case FFI::CssScrollFunctionAxisKind::None:
+                    return {};
+                case FFI::CssScrollFunctionAxisKind::Block:
+                    return Keyword::Block;
+                case FFI::CssScrollFunctionAxisKind::Inline:
+                    return Keyword::Inline;
+                case FFI::CssScrollFunctionAxisKind::X:
+                    return Keyword::X;
+                case FFI::CssScrollFunctionAxisKind::Y:
+                    return Keyword::Y;
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto discard_rust_owned_property_value_tokens = [&] {
                 if (property_ids.size() > 1) {
                     tokens.discard_a_token();
@@ -2773,6 +2788,42 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
                 }
                 break;
+            case FFI::CssStyleValueKind::ScrollTimeline: {
+                VERIFY(rust_style_value->timeline_name_item_kinds.size() == rust_style_value->timeline_names.size());
+                VERIFY(rust_style_value->timeline_names.size() == rust_style_value->scroll_timeline_axes.size());
+
+                StyleValueVector names;
+                names.ensure_capacity(rust_style_value->timeline_names.size());
+                for (size_t i = 0; i < rust_style_value->timeline_names.size(); ++i) {
+                    switch (rust_style_value->timeline_name_item_kinds[i]) {
+                    case FFI::CssTimelineNameItemKind::None:
+                        names.unchecked_append(KeywordStyleValue::create(Keyword::None));
+                        break;
+                    case FFI::CssTimelineNameItemKind::DashedIdent:
+                        names.unchecked_append(CustomIdentStyleValue::create(rust_style_value->timeline_names[i]));
+                        break;
+                    }
+                }
+
+                StyleValueVector axes;
+                axes.ensure_capacity(rust_style_value->scroll_timeline_axes.size());
+                for (auto axis : rust_style_value->scroll_timeline_axes) {
+                    auto keyword = keyword_from_scroll_function_axis(axis);
+                    if (!keyword.has_value())
+                        break;
+                    axes.unchecked_append(KeywordStyleValue::create(keyword.release_value()));
+                }
+
+                if (axes.size() != rust_style_value->scroll_timeline_axes.size())
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { PropertyID::ScrollTimeline,
+                    ShorthandStyleValue::create(PropertyID::ScrollTimeline,
+                        { PropertyID::ScrollTimelineName, PropertyID::ScrollTimelineAxis },
+                        { StyleValueList::create(move(names), StyleValueList::Separator::Comma), StyleValueList::create(move(axes), StyleValueList::Separator::Comma) }) };
+            }
             case FFI::CssStyleValueKind::TimelineName:
                 switch (rust_style_value->timeline_name_kind) {
                 case FFI::CssTimelineNameValueKind::Invalid:

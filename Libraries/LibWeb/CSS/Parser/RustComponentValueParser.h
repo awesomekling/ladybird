@@ -395,6 +395,7 @@ public:
         FFI::CssTimelineNameValueKind timeline_name_kind { FFI::CssTimelineNameValueKind::Invalid };
         Vector<FFI::CssTimelineNameItemKind> timeline_name_item_kinds;
         Vector<FlyString> timeline_names;
+        Vector<FFI::CssScrollFunctionAxisKind> scroll_timeline_axes;
         FFI::CssTimelineScopeValueKind timeline_scope_kind { FFI::CssTimelineScopeValueKind::Invalid };
         Vector<FlyString> timeline_scope_names;
         FFI::CssTouchActionValue touch_action {};

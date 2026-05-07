@@ -1610,6 +1610,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.scrollbar_color_kind = color_red;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
                 value.scrollbar_gutter = static_cast<FFI::CssScrollbarGutterValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::ScrollTimeline) {
+                for (size_t offset = 0; offset < value_len;) {
+                    auto item_kind = static_cast<FFI::CssTimelineNameItemKind>(value_ptr[offset++]);
+                    auto name_start = offset;
+                    while (offset < value_len && value_ptr[offset] != 0)
+                        ++offset;
+                    value.timeline_name_item_kinds.append(item_kind);
+                    value.timeline_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
+                    if (offset < value_len)
+                        ++offset;
+                }
+                value.scroll_timeline_axes.ensure_capacity(value_type_len);
+                for (size_t i = 0; i < value_type_len; ++i)
+                    value.scroll_timeline_axes.unchecked_append(static_cast<FFI::CssScrollFunctionAxisKind>(value_type_ptr[i]));
             } else if (kind == FFI::CssStyleValueKind::TextWrap) {
                 value.text_wrap = FFI::CssTextWrapValue {
                     .kind = FFI::CssTextWrapValueKind::Valid,
