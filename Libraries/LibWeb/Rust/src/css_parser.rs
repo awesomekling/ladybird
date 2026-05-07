@@ -1135,6 +1135,13 @@ pub enum CssRepeatStyleValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssColorFunctionValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -5383,6 +5390,584 @@ fn consume_non_directional_repeat_style_value(parser: &mut ComponentValueParser)
         || consume_optional_ident_matching(parser, "space")
         || consume_optional_ident_matching(parser, "round")
         || consume_optional_ident_matching(parser, "no-repeat")
+}
+
+pub(crate) fn parse_color_function_value(filtered_input: &[u8]) -> CssColorFunctionValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [ComponentValue::Function(function)] = component_values else {
+        return CssColorFunctionValueKind::Invalid;
+    };
+
+    if component_value_parse_as_color_function(function) {
+        CssColorFunctionValueKind::Valid
+    } else {
+        CssColorFunctionValueKind::Invalid
+    }
+}
+
+fn component_value_parse_as_color_function(function: &Function) -> bool {
+    match function.name.to_ascii_lowercase().as_str() {
+        "rgb" | "rgba" => component_values_parse_as_rgb_color_function(&function.value),
+        "hsl" | "hsla" => component_values_parse_as_hsl_color_function(&function.value),
+        "hwb" => component_values_parse_as_hwb_color_function(&function.value),
+        "lab" | "oklab" => component_values_parse_as_lab_like_color_function(&function.value),
+        "lch" | "oklch" => component_values_parse_as_lch_like_color_function(&function.value),
+        "color" => component_values_parse_as_color_color_function(&function.value),
+        "color-mix" => component_values_parse_as_color_mix_function(&function.value),
+        "light-dark" => component_values_parse_as_light_dark_color_function(&function.value),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_rgb_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-rgb
+    // rgb() = [ <legacy-rgb-syntax> | <modern-rgb-syntax> ]
+    // rgba() = [ <legacy-rgba-syntax> | <modern-rgba-syntax> ]
+    // <legacy-rgb-syntax> = rgb( <percentage>#{3} , <alpha-value>? ) |
+    //                       rgb( <number>#{3} , <alpha-value>? )
+    // <legacy-rgba-syntax> = rgba( <percentage>#{3} , <alpha-value>? ) |
+    //                        rgba( <number>#{3} , <alpha-value>? )
+    // <modern-rgb-syntax> = rgb(
+    //     [ <number> | <percentage> | none]{3}
+    //     [ / [<alpha-value> | none] ]?  )
+    // <modern-rgba-syntax> = rgba(
+    //     [ <number> | <percentage> | none]{3}
+    //     [ / [<alpha-value> | none] ]?  )
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+    let first_channel_is_none = matches!(
+        parser.next_component_value(),
+        Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) if value.eq_ignore_ascii_case("none")
+    );
+    let Some(first_channel_is_percentage) =
+        consume_number_percentage_none_component_value_with_percentage_kind(&mut parser)
+    else {
+        return false;
+    };
+    parser.discard_whitespace();
+
+    if parser.consume_a_comma() {
+        if first_channel_is_none {
+            return false;
+        }
+        return component_values_parse_as_legacy_rgb_color_function_after_first_comma(
+            &mut parser,
+            first_channel_is_percentage,
+        );
+    }
+
+    for _ in 0..2 {
+        if !consume_number_percentage_none_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_legacy_rgb_color_function_after_first_comma(
+    parser: &mut ComponentValueParser,
+    first_channel_is_percentage: Option<bool>,
+) -> bool {
+    let mut channel_is_percentage = Vec::new();
+    channel_is_percentage.push(first_channel_is_percentage);
+    parser.discard_whitespace();
+    let Some(is_green_percentage) = consume_color_number_percentage_component_value_with_percentage_kind(parser) else {
+        return false;
+    };
+    channel_is_percentage.push(is_green_percentage);
+
+    for _ in 0..1 {
+        parser.discard_whitespace();
+        if !parser.consume_a_comma() {
+            return false;
+        }
+        parser.discard_whitespace();
+        let Some(is_percentage) = consume_color_number_percentage_component_value_with_percentage_kind(parser) else {
+            return false;
+        };
+        channel_is_percentage.push(is_percentage);
+    }
+
+    parser.discard_whitespace();
+    if parser.consume_a_comma() && !consume_number_percentage_component_value(parser) {
+        return false;
+    }
+
+    let mut concrete_channel_kinds = channel_is_percentage.iter().flatten();
+    let first_concrete_channel_kind = concrete_channel_kinds.next().copied();
+    !parser.has_next_component_value()
+        && concrete_channel_kinds.all(|value| Some(*value) == first_concrete_channel_kind)
+}
+
+fn component_values_parse_as_hsl_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-hsl
+    // hsl() = [ <legacy-hsl-syntax> | <modern-hsl-syntax> ]
+    // hsla() = [ <legacy-hsla-syntax> | <modern-hsla-syntax> ]
+    // <modern-hsl-syntax> = hsl(
+    //     [<hue> | none]
+    //     [<percentage> | <number> | none]
+    //     [<percentage> | <number> | none]
+    //     [ / [<alpha-value> | none] ]? )
+    // <modern-hsla-syntax> = hsla(
+    //     [<hue> | none]
+    //     [<percentage> | <number> | none]
+    //     [<percentage> | <number> | none]
+    //     [ / [<alpha-value> | none] ]? )
+    // <legacy-hsl-syntax> = hsl( <hue>, <percentage>, <percentage>, <alpha-value>? )
+    // <legacy-hsla-syntax> = hsla( <hue>, <percentage>, <percentage>, <alpha-value>? )
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+    if !consume_hue_none_component_value(&mut parser) {
+        return false;
+    }
+    parser.discard_whitespace();
+
+    if parser.consume_a_comma() {
+        for component_count in 0..2 {
+            parser.discard_whitespace();
+            if !consume_percentage_component_value(&mut parser) {
+                return false;
+            }
+            parser.discard_whitespace();
+            if component_count == 0 && !parser.consume_a_comma() {
+                return false;
+            }
+        }
+        parser.discard_whitespace();
+        if parser.consume_a_comma() && !consume_number_percentage_component_value(&mut parser) {
+            return false;
+        }
+        return !parser.has_next_component_value();
+    }
+
+    for _ in 0..2 {
+        if !consume_number_percentage_none_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_hwb_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-hwb
+    // hwb() = hwb(
+    //     [<hue> | none]
+    //     [<percentage> | <number> | none]
+    //     [<percentage> | <number> | none]
+    //     [ / [<alpha-value> | none] ]? )
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    if !consume_hue_none_component_value(&mut parser) {
+        return false;
+    }
+    if !consume_number_percentage_none_component_value(&mut parser) {
+        return false;
+    }
+    if !consume_number_percentage_none_component_value(&mut parser) {
+        return false;
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_lab_like_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-lab
+    // lab() = lab( [<percentage> | <number> | none]
+    //      [ <percentage> | <number> | none]
+    //      [ <percentage> | <number> | none]
+    //      [ / [<alpha-value> | none] ]? )
+    // https://www.w3.org/TR/css-color-4/#funcdef-oklab
+    // oklab() = oklab( [ <percentage> | <number> | none]
+    //     [ <percentage> | <number> | none]
+    //     [ <percentage> | <number> | none]
+    //     [ / [<alpha-value> | none] ]? )
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    for _ in 0..3 {
+        if !consume_number_percentage_none_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_lch_like_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-lch
+    // lch() = lch( [<percentage> | <number> | none]
+    //      [ <percentage> | <number> | none]
+    //      [ <hue> | none]
+    //      [ / [<alpha-value> | none] ]? )
+    // https://www.w3.org/TR/css-color-4/#funcdef-oklch
+    // oklch() = oklch( [ <percentage> | <number> | none]
+    //     [ <percentage> | <number> | none]
+    //     [ <hue> | none]
+    //     [ / [<alpha-value> | none] ]? )
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    if !consume_number_percentage_none_component_value(&mut parser) {
+        return false;
+    }
+    if !consume_number_percentage_none_component_value(&mut parser) {
+        return false;
+    }
+    if !consume_hue_none_component_value(&mut parser) {
+        return false;
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_color_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://www.w3.org/TR/css-color-4/#funcdef-color
+    // color() = color( <colorspace-params> [ / [ <alpha-value> | none ] ]? )
+    //     <colorspace-params> = [ <predefined-rgb-params> | <xyz-params>]
+    //     <predefined-rgb-params> = <predefined-rgb> [ <number> | <percentage> | none ]{3}
+    //     <predefined-rgb> = srgb | srgb-linear | display-p3 | a98-rgb | prophoto-rgb | rec2020
+    //     <xyz-params> = <xyz-space> [ <number> | <percentage> | none ]{3}
+    //     <xyz-space> = xyz | xyz-d50 | xyz-d65
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    parser.discard_whitespace();
+    let Some(color_space) = parser.consume_an_ident() else {
+        return false;
+    };
+    if !is_color_function_color_space(&color_space) {
+        return false;
+    }
+
+    for _ in 0..3 {
+        if !consume_number_percentage_none_component_value(&mut parser) {
+            return false;
+        }
+    }
+
+    consume_optional_solidus_and_alpha_value(&mut parser) && !parser.has_next_component_value()
+}
+
+fn component_values_parse_as_color_mix_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-color-5/#color-mix
+    // color-mix() = color-mix( <color-interpolation-method>? , [ <color> && <percentage [0,100]>? ]#)
+    // FIXME: Update color-mix to accept 1+ colors instead of exactly 2.
+    let Some(groups) = parse_comma_separated_component_values(component_values.to_vec(), |component_values| {
+        Some(component_values.to_vec())
+    }) else {
+        return false;
+    };
+
+    if groups.len() != 2 && groups.len() != 3 {
+        return false;
+    }
+
+    let color_groups = if groups.len() == 3 {
+        if !component_values_parse_as_color_interpolation_method(&groups[0]) {
+            return false;
+        }
+        &groups[1..]
+    } else {
+        &groups[..]
+    };
+
+    color_groups
+        .iter()
+        .all(|group| component_values_parse_as_color_mix_component(group))
+}
+
+fn component_values_parse_as_light_dark_color_function(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-color-5/#funcdef-light-dark
+    // light-dark() = light-dark( <color>, <color> )
+    let Some(groups) = parse_comma_separated_component_values(component_values.to_vec(), |component_values| {
+        Some(component_values.to_vec())
+    }) else {
+        return false;
+    };
+
+    let [light, dark] = groups.as_slice() else {
+        return false;
+    };
+
+    component_values_parse_as_color_value(light) && component_values_parse_as_color_value(dark)
+}
+
+fn component_values_parse_as_color_mix_component(component_values: &[ComponentValue]) -> bool {
+    let mut component_values = strip_whitespace(component_values);
+    let mut percentage_count = 0;
+
+    if let Some((first, rest)) = component_values.split_first()
+        && component_value_parse_as_percentage_prefix(first)
+    {
+        percentage_count += 1;
+        component_values = strip_whitespace(rest);
+    }
+
+    let [color] = component_values else {
+        if let Some((last, rest)) = component_values.split_last()
+            && component_value_parse_as_percentage_prefix(last)
+        {
+            percentage_count += 1;
+            component_values = strip_whitespace(rest);
+        }
+        let [color] = component_values else {
+            return false;
+        };
+        return percentage_count <= 1 && component_value_parse_as_color_value(color);
+    };
+
+    percentage_count <= 1 && component_value_parse_as_color_value(color)
+}
+
+fn component_values_parse_as_color_interpolation_method(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-color-5/#color-interpolation-method
+    // <rectangular-color-space> = srgb | srgb-linear | display-p3 | display-p3-linear | a98-rgb | prophoto-rgb | rec2020 | lab | oklab | <xyz-space>
+    // <polar-color-space> = hsl | hwb | lch | oklch
+    // <custom-color-space> = <dashed-ident>
+    // <hue-interpolation-method> = [ shorter | longer | increasing | decreasing ] hue
+    // <color-interpolation-method> = in [ <rectangular-color-space> | <polar-color-space> <hue-interpolation-method>? | <custom-color-space> ]
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    if !consume_optional_ident_matching(&mut parser, "in") {
+        return false;
+    }
+    parser.discard_whitespace();
+    let Some(color_space) = parser.consume_an_ident() else {
+        return false;
+    };
+
+    if is_rectangular_color_space(&color_space) {
+        return !parser.has_next_component_value();
+    }
+
+    if is_polar_color_space(&color_space) {
+        if !parser.has_next_component_value() {
+            return true;
+        }
+        parser.discard_whitespace();
+        let Some(hue_interpolation_method) = parser.consume_an_ident() else {
+            return false;
+        };
+        if !is_hue_interpolation_method(&hue_interpolation_method) {
+            return false;
+        }
+        consume_optional_ident_matching(&mut parser, "hue") && !parser.has_next_component_value()
+    } else {
+        false
+    }
+}
+
+fn component_values_parse_as_color_value(component_values: &[ComponentValue]) -> bool {
+    let component_values = strip_whitespace(component_values);
+    let [component_value] = component_values else {
+        return false;
+    };
+
+    component_value_parse_as_color_value(component_value)
+}
+
+fn component_value_parse_as_color_value(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::Function(function) => component_value_parse_as_color_function(function),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Hash { value, .. },
+            ..
+        }) => matches!(value.len(), 3 | 4 | 6 | 8) && value.chars().all(|c| c.is_ascii_hexdigit()),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { .. },
+            ..
+        }) => {
+            // AD-HOC: Named colors and system colors are still materialized by C++.
+            // Accept identifier-shaped colors here so recursive color functions
+            // do not reject values that the C++ side already accepted.
+            true
+        }
+        _ => false,
+    }
+}
+
+fn consume_number_percentage_none_component_value(parser: &mut ComponentValueParser) -> bool {
+    consume_number_percentage_none_component_value_with_percentage_kind(parser).is_some()
+}
+
+fn consume_number_percentage_none_component_value_with_percentage_kind(
+    parser: &mut ComponentValueParser,
+) -> Option<Option<bool>> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    let percentage_kind = match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("none") => None,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        }) => Some(false),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => Some(true),
+        ComponentValue::Function(function) if is_math_function_name(&function.name) => None,
+        _ => return None,
+    };
+    parser.index += 1;
+    Some(percentage_kind)
+}
+
+fn consume_color_number_percentage_component_value_with_percentage_kind(
+    parser: &mut ComponentValueParser,
+) -> Option<Option<bool>> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    let is_percentage = match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        }) => Some(false),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => Some(true),
+        ComponentValue::Function(function) if is_math_function_name(&function.name) => None,
+        _ => return None,
+    };
+    parser.index += 1;
+    Some(is_percentage)
+}
+
+fn consume_percentage_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if component_value_parse_as_percentage_prefix(component_value) {
+        parser.index += 1;
+        return true;
+    }
+    false
+}
+
+fn consume_hue_none_component_value(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if component_value_parse_as_hue_none(component_value) {
+        parser.index += 1;
+        return true;
+    }
+    false
+}
+
+fn consume_optional_solidus_and_alpha_value(parser: &mut ComponentValueParser) -> bool {
+    // https://www.w3.org/TR/css-color-4/#typedef-color-alpha-value
+    // [ / [<alpha-value> | none] ]?
+    // <alpha-value> = <number> | <percentage>
+    parser.discard_whitespace();
+    if !parser.has_next_component_value() {
+        return true;
+    }
+
+    if !parser.consume_a_delim('/') {
+        return false;
+    }
+
+    parser.discard_whitespace();
+    consume_number_percentage_none_component_value(parser)
+}
+
+fn component_value_parse_as_number_percentage_none(component_value: &ComponentValue) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("none")
+    ) || matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. } | TokenType::Percentage { .. },
+            ..
+        })
+    ) || matches!(component_value, ComponentValue::Function(function) if is_math_function_name(&function.name))
+}
+
+fn component_value_parse_as_hue_none(component_value: &ComponentValue) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("none")
+    ) || matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        })
+    ) || matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Angle))
+    ) || matches!(component_value, ComponentValue::Function(function) if is_math_function_name(&function.name))
+}
+
+fn component_value_parse_as_percentage_prefix(component_value: &ComponentValue) -> bool {
+    matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        })
+    ) || matches!(component_value, ComponentValue::Function(function) if is_math_function_name(&function.name))
+}
+
+fn is_color_function_color_space(input: &str) -> bool {
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "srgb"
+            | "srgb-linear"
+            | "display-p3"
+            | "display-p3-linear"
+            | "a98-rgb"
+            | "prophoto-rgb"
+            | "rec2020"
+            | "xyz"
+            | "xyz-d50"
+            | "xyz-d65"
+    )
+}
+
+fn is_rectangular_color_space(input: &str) -> bool {
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "srgb"
+            | "srgb-linear"
+            | "display-p3"
+            | "display-p3-linear"
+            | "a98-rgb"
+            | "prophoto-rgb"
+            | "rec2020"
+            | "lab"
+            | "oklab"
+            | "xyz"
+            | "xyz-d50"
+            | "xyz-d65"
+    )
+}
+
+fn is_polar_color_space(input: &str) -> bool {
+    matches!(input.to_ascii_lowercase().as_str(), "hsl" | "hwb" | "lch" | "oklch")
+}
+
+fn is_hue_interpolation_method(input: &str) -> bool {
+    matches!(
+        input.to_ascii_lowercase().as_str(),
+        "shorter" | "longer" | "increasing" | "decreasing"
+    )
 }
 
 pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
@@ -14509,52 +15094,52 @@ mod tests {
     use super::{
         BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser,
         CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
-        CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorSchemeValueKind, CssContainValue,
-        CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount,
-        CssCounterStyleRangeKind, CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind,
-        CssEasingValueKind, CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-        CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-        CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind,
-        CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind,
-        CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
-        CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
-        CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
-        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
-        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
-        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
-        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValueKind,
+        CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
+        CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+        CssCounterStyleSystemKind, CssCropOrCrossKind, CssEasingValueKind, CssFitContentValueKind,
+        CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
+        CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+        CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
+        CssGridTrackSizeListValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+        CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
+        CssPaintOrderValue, CssPaintOrderValueKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
+        CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
+        CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
+        CssRectValueKind, CssRepeatStyleValueKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind,
+        CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind,
+        CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
+        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
+        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
+        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
+        CssTransformFunctionValueKind, CssTransformLonghandValueKind, CssTransitionBehaviorItemKind,
+        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
+        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
+        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
+        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
+        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
         parse_anchor_name_or_scope_value, parse_animation_name_value, parse_background_position_longhand_value,
-        parse_background_size_value, parse_basic_shape_value, parse_color_scheme_value, parse_contain_value,
-        parse_container_rule_prelude, parse_container_type_value, parse_counter_style_additive_symbols,
-        parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol,
-        parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross, parse_easing_value,
-        parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
+        parse_background_size_value, parse_basic_shape_value, parse_color_function_value, parse_color_scheme_value,
+        parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
+        parse_counter_style_additive_symbols, parse_counter_style_negative, parse_counter_style_range,
+        parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system, parse_crop_or_cross,
+        parse_easing_value, parse_empty_prelude, parse_fit_content_value, parse_font_feature_values_family_name_list,
         parse_font_feature_values_feature_value, parse_font_weight_absolute_pair, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
@@ -15195,6 +15780,10 @@ mod tests {
 
     fn parse_repeat_style(input: &str) -> CssRepeatStyleValueKind {
         parse_repeat_style_value(input.as_bytes())
+    }
+
+    fn parse_color_function(input: &str) -> CssColorFunctionValueKind {
+        parse_color_function_value(input.as_bytes())
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -18315,6 +18904,83 @@ mod tests {
         assert_eq!(
             parse_repeat_style("repeat space round"),
             CssRepeatStyleValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_color_function_values() {
+        assert_eq!(parse_color_function("rgb(1 2 3)"), CssColorFunctionValueKind::Valid);
+        assert_eq!(
+            parse_color_function("rgb(1, 2, 3, 50%)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("hsl(90deg 50% 50% / none)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("hwb(90 10% 20%)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("lab(10% 20 30 / 40%)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("lch(10% 20 30deg)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("oklab(10% 20 30)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("oklch(10% 20 30)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("color(display-p3 1 0.5 0 / 80%)"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("color-mix(in oklab, red 40%, rgb(0 0 255))"),
+            CssColorFunctionValueKind::Valid
+        );
+        assert_eq!(
+            parse_color_function("light-dark(Canvas, color(srgb 1 1 1))"),
+            CssColorFunctionValueKind::Valid
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_color_function_values() {
+        assert_eq!(parse_color_function(""), CssColorFunctionValueKind::Invalid);
+        assert_eq!(parse_color_function("red"), CssColorFunctionValueKind::Invalid);
+        assert_eq!(parse_color_function("rgb(1 2)"), CssColorFunctionValueKind::Invalid);
+        assert_eq!(
+            parse_color_function("rgb(none, 2, 3)"),
+            CssColorFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_color_function("rgb(1%, 2, 3)"),
+            CssColorFunctionValueKind::Invalid
+        );
+        assert_eq!(parse_color_function("hsl(1, 2, 3)"), CssColorFunctionValueKind::Invalid);
+        assert_eq!(
+            parse_color_function("color(display-p3 1 2)"),
+            CssColorFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_color_function("color(unknown 1 2 3)"),
+            CssColorFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_color_function("color-mix(in bogus, red, blue)"),
+            CssColorFunctionValueKind::Invalid
+        );
+        assert_eq!(
+            parse_color_function("light-dark(red blue)"),
+            CssColorFunctionValueKind::Invalid
         );
     }
 

@@ -1878,27 +1878,39 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
     }
 
     // Functions
-    if (auto color = parse_color_function(tokens))
+    auto start = tokens.current_index();
+    auto validate_parsed_color_function = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
+        if (!value)
+            return nullptr;
+
+        auto serialized_color_function = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        if (RustComponentValueParser::parse_color_function(serialized_color_function.bytes_as_string_view(), "utf-8"sv) == FFI::CssColorFunctionValueKind::Invalid)
+            return nullptr;
+
+        return value;
+    };
+
+    if (auto color = validate_parsed_color_function(parse_color_function(tokens)))
         return color;
 
-    if (auto color = parse_color_mix_function(tokens))
+    if (auto color = validate_parsed_color_function(parse_color_mix_function(tokens)))
         return color;
 
-    if (auto rgb = parse_rgb_color_value(tokens))
+    if (auto rgb = validate_parsed_color_function(parse_rgb_color_value(tokens)))
         return rgb;
-    if (auto hsl = parse_hsl_color_value(tokens))
+    if (auto hsl = validate_parsed_color_function(parse_hsl_color_value(tokens)))
         return hsl;
-    if (auto hwb = parse_hwb_color_value(tokens))
+    if (auto hwb = validate_parsed_color_function(parse_hwb_color_value(tokens)))
         return hwb;
-    if (auto lab = parse_lab_color_value(tokens))
+    if (auto lab = validate_parsed_color_function(parse_lab_color_value(tokens)))
         return lab;
-    if (auto lch = parse_lch_color_value(tokens))
+    if (auto lch = validate_parsed_color_function(parse_lch_color_value(tokens)))
         return lch;
-    if (auto oklab = parse_oklab_color_value(tokens))
+    if (auto oklab = validate_parsed_color_function(parse_oklab_color_value(tokens)))
         return oklab;
-    if (auto oklch = parse_oklch_color_value(tokens))
+    if (auto oklch = validate_parsed_color_function(parse_oklch_color_value(tokens)))
         return oklch;
-    if (auto light_dark = parse_light_dark_color_value(tokens))
+    if (auto light_dark = validate_parsed_color_function(parse_light_dark_color_value(tokens)))
         return light_dark;
 
     auto transaction = tokens.begin_transaction();

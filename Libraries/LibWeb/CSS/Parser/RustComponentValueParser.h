@@ -380,6 +380,7 @@ public:
     static FFI::CssPositionValueKind parse_background_position_longhand(StringView input, StringView encoding, bool is_horizontal);
     static FFI::CssBackgroundSizeValueKind parse_background_size(StringView input, StringView encoding);
     static FFI::CssRepeatStyleValueKind parse_repeat_style(StringView input, StringView encoding);
+    static FFI::CssColorFunctionValueKind parse_color_function(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_translate(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_scale(StringView input, StringView encoding);
     static FFI::CssTransformLonghandValueKind parse_rotate(StringView input, StringView encoding);
