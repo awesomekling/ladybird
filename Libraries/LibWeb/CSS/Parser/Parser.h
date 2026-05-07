@@ -392,7 +392,6 @@ private:
     RefPtr<StyleValue const> parse_coordinating_value_list_shorthand(TokenStream<ComponentValue>&, PropertyID shorthand_id, Vector<PropertyID> const& longhand_ids, Vector<PropertyID> const& reset_only_longhand_ids);
     RefPtr<StyleValue const> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
 
-    RefPtr<StyleValue const> parse_aspect_ratio_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_animation_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_position_value(TokenStream<ComponentValue>&);
@@ -401,16 +400,9 @@ private:
     RefPtr<StyleValue const> parse_border_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_border_image_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_border_image_slice_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_border_radius_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_border_radius_shorthand_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_columns_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_increment_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_reset_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_set_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_cursor_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_display_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_flex_shorthand_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_flex_flow_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_family_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_style_value(TokenStream<ComponentValue>&);

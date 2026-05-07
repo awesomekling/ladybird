@@ -3241,11 +3241,26 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
         PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
+            | PropertyId::AspectRatio
+            | PropertyId::BorderBottomLeftRadius
+            | PropertyId::BorderBottomRightRadius
+            | PropertyId::BorderEndEndRadius
+            | PropertyId::BorderEndStartRadius
+            | PropertyId::BorderRadius
+            | PropertyId::BorderStartEndRadius
+            | PropertyId::BorderStartStartRadius
+            | PropertyId::BorderTopLeftRadius
+            | PropertyId::BorderTopRightRadius
             | PropertyId::BoxShadow
             | PropertyId::ColorScheme
+            | PropertyId::Columns
             | PropertyId::Contain
             | PropertyId::ContainerType
             | PropertyId::Content
+            | PropertyId::Cursor
+            | PropertyId::Display
+            | PropertyId::Flex
+            | PropertyId::FlexFlow
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
             | PropertyId::FontLanguageOverride
@@ -4324,7 +4339,7 @@ fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<R
             }
         }
         [flex_basis, flex_grow]
-            if component_value_parse_as_flex_basis(flex_basis)
+            if component_value_parse_as_flex_basis_before_flex_factors(flex_basis)
                 && component_value_parse_as_non_negative_number(flex_grow) =>
         {
             RustOwnedFlexShorthand::Longhands {
@@ -4360,7 +4375,7 @@ fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<R
             }
         }
         [flex_basis, flex_grow, flex_shrink]
-            if component_value_parse_as_flex_basis(flex_basis)
+            if component_value_parse_as_flex_basis_before_flex_factors(flex_basis)
                 && component_value_parse_as_non_negative_number(flex_grow)
                 && component_value_parse_as_non_negative_number(flex_shrink) =>
         {
@@ -5255,20 +5270,20 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         }
 
         let component_values = std::slice::from_ref(component_value);
-        if column_count_source.is_none()
-            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
+        if column_width_source.is_none()
+            && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
         {
-            column_count_source = Some(serialize_component_values_for_reparsing(
+            column_width_source = Some(serialize_component_values_for_reparsing(
                 component_values,
                 filtered_input_string,
             )?);
             continue;
         }
 
-        if column_width_source.is_none()
-            && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
+        if column_count_source.is_none()
+            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
         {
-            column_width_source = Some(serialize_component_values_for_reparsing(
+            column_count_source = Some(serialize_component_values_for_reparsing(
                 component_values,
                 filtered_input_string,
             )?);
@@ -13672,9 +13687,15 @@ fn flex_shorthand_component_values_match(component_values: &[ComponentValue], pa
         && component_values
             .iter()
             .zip(pattern)
-            .all(|(component_value, pattern)| match *pattern {
+            .all(|(component_value, component_pattern)| match *component_pattern {
                 "flex-grow" | "flex-shrink" => component_value_parse_as_non_negative_number(component_value),
-                "flex-basis" => component_value_parse_as_flex_basis(component_value),
+                "flex-basis" => {
+                    if pattern.first() == Some(&"flex-basis") && component_values.len() > 1 {
+                        component_value_parse_as_flex_basis_before_flex_factors(component_value)
+                    } else {
+                        component_value_parse_as_flex_basis(component_value)
+                    }
+                }
                 _ => false,
             })
 }
@@ -13697,6 +13718,19 @@ fn component_value_parse_as_flex_basis(component_value: &ComponentValue) -> bool
                 if function.name.eq_ignore_ascii_case("fit-content")
                     || function.name.eq_ignore_ascii_case("calc-size")
         )
+}
+
+fn component_value_parse_as_flex_basis_before_flex_factors(component_value: &ComponentValue) -> bool {
+    // NOTE: Unitless zero can be a <length-percentage>, but the legacy flex
+    // shorthand parser gives flex factors precedence for numeric prefixes.
+    // https://drafts.csswg.org/css-flexbox-1/#flex-property
+    !matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { .. },
+            ..
+        })
+    ) && component_value_parse_as_flex_basis(component_value)
 }
 
 pub(crate) fn parse_flex_flow_value(filtered_input: &[u8]) -> bool {
@@ -16129,17 +16163,17 @@ pub(crate) fn parse_columns_value(filtered_input: &[u8]) -> bool {
         }
 
         let component_values = std::slice::from_ref(component_value);
-        if !has_column_count
-            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
-        {
-            has_column_count = true;
-            continue;
-        }
-
         if !has_column_width
             && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
         {
             has_column_width = true;
+            continue;
+        }
+
+        if !has_column_count
+            && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
+        {
+            has_column_count = true;
             continue;
         }
 
@@ -33995,6 +34029,7 @@ mod tests {
         assert!(!parse_flex_shorthand("none 1"));
         assert!(!parse_flex_shorthand("5px 7%"));
         assert!(!parse_flex_shorthand("9 none"));
+        assert!(!parse_flex_shorthand("0 1 1"));
         assert!(!parse_flex_shorthand("1 2 3 4"));
     }
 

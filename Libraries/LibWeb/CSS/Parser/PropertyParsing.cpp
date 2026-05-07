@@ -266,11 +266,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::AnchorName:
         case PropertyID::AnchorScope:
         case PropertyID::AnimationName:
+        case PropertyID::AspectRatio:
+        case PropertyID::BorderBottomLeftRadius:
+        case PropertyID::BorderBottomRightRadius:
+        case PropertyID::BorderEndEndRadius:
+        case PropertyID::BorderEndStartRadius:
+        case PropertyID::BorderRadius:
+        case PropertyID::BorderStartEndRadius:
+        case PropertyID::BorderStartStartRadius:
+        case PropertyID::BorderTopLeftRadius:
+        case PropertyID::BorderTopRightRadius:
         case PropertyID::BoxShadow:
         case PropertyID::ColorScheme:
+        case PropertyID::Columns:
         case PropertyID::Contain:
         case PropertyID::ContainerType:
         case PropertyID::Content:
+        case PropertyID::Cursor:
+        case PropertyID::Display:
+        case PropertyID::Flex:
+        case PropertyID::FlexFlow:
         case PropertyID::FontFamily:
         case PropertyID::FontFeatureSettings:
         case PropertyID::FontLanguageOverride:
@@ -2165,6 +2180,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto flex_grow = parse_rust_source_as_property(PropertyID::FlexGrow, *rust_style_value->flex_grow_source);
                     auto flex_shrink = parse_rust_source_as_property(PropertyID::FlexShrink, *rust_style_value->flex_shrink_source);
                     auto flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, *rust_style_value->flex_basis_source);
+                    if (!flex_grow && *rust_style_value->flex_shrink_source == "1"sv && *rust_style_value->flex_basis_source == "0%"sv) {
+                        // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
+                        // https://github.com/w3c/csswg-drafts/issues/5742
+                        flex_grow = NumberStyleValue::create(1);
+                        flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, *rust_style_value->flex_grow_source);
+                    }
                     if (!flex_grow || !flex_shrink || !flex_basis)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -3566,7 +3587,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::AnchorScope:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::AspectRatio:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_aspect_ratio_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Animation:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_animation_value(tokens); });
     case PropertyID::BackdropFilter:
@@ -3605,15 +3626,14 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BorderEndStartRadius:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_border_radius_value(tokens); });
     case PropertyID::BorderRadius:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_border_radius_shorthand_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BoxShadow:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::ColorScheme:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Columns:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_columns_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Content:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::CounterIncrement:
@@ -3623,13 +3643,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::CounterSet:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_counter_set_value(tokens); });
     case PropertyID::Cursor:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_cursor_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Display:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_display_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Flex:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_flex_shorthand_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::FlexFlow:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_flex_flow_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Font:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_font_value(tokens); });
     case PropertyID::FontFamily:
@@ -3978,123 +3998,6 @@ RefPtr<StyleValue const> Parser::parse_counter_set_value(TokenStream<ComponentVa
         return none;
 
     return parse_counter_definitions_value(tokens, AllowReversed::No, 0);
-}
-
-// https://drafts.csswg.org/css-ui-4/#cursor
-RefPtr<StyleValue const> Parser::parse_cursor_value(TokenStream<ComponentValue>& tokens)
-{
-    // [<cursor-image>,]* <cursor-predefined>
-    // <cursor-image> = <url> <number>{2}?
-    // So, any number of custom cursor definitions, and then a mandatory cursor name keyword, all comma-separated.
-
-    auto transaction = tokens.begin_transaction();
-
-    StyleValueVector cursors;
-
-    auto parts = parse_a_comma_separated_list_of_component_values(tokens);
-    for (auto i = 0u; i < parts.size(); ++i) {
-        auto& part = parts[i];
-        TokenStream part_tokens { part };
-
-        if (i == parts.size() - 1) {
-            // Cursor keyword
-            part_tokens.discard_whitespace();
-            auto keyword_value = parse_keyword_value(part_tokens);
-            if (!keyword_value || !keyword_to_cursor_predefined(keyword_value->to_keyword()).has_value())
-                return {};
-
-            part_tokens.discard_whitespace();
-            if (part_tokens.has_next_token())
-                return {};
-
-            cursors.append(keyword_value.release_nonnull());
-        } else {
-            // Custom cursor definition
-            // <cursor-image> = <url> <number>{2}?
-            // "Conforming user agents may, instead of <url>, support <image> which is a superset."
-
-            part_tokens.discard_whitespace();
-            auto image_value = parse_image_value(part_tokens);
-            if (!image_value)
-                return {};
-
-            part_tokens.discard_whitespace();
-
-            if (part_tokens.has_next_token()) {
-                // <number>{2}, which are the x and y coordinates of the hotspot
-                auto x = parse_number_value(part_tokens, infinite_range);
-                part_tokens.discard_whitespace();
-                auto y = parse_number_value(part_tokens, infinite_range);
-                part_tokens.discard_whitespace();
-                if (!x || !y || part_tokens.has_next_token())
-                    return nullptr;
-
-                cursors.append(CursorStyleValue::create(image_value.release_nonnull(), x, y));
-                continue;
-            }
-
-            cursors.append(CursorStyleValue::create(image_value.release_nonnull(), {}, {}));
-        }
-    }
-
-    if (cursors.is_empty())
-        return nullptr;
-
-    transaction.commit();
-    if (cursors.size() == 1)
-        return *cursors.first();
-
-    return StyleValueList::create(move(cursors), StyleValueList::Separator::Comma);
-}
-
-// https://www.w3.org/TR/css-sizing-4/#aspect-ratio
-RefPtr<StyleValue const> Parser::parse_aspect_ratio_value(TokenStream<ComponentValue>& tokens)
-{
-    // `auto || <ratio>`
-    RefPtr<StyleValue const> auto_value;
-    RefPtr<StyleValue const> ratio_value;
-
-    auto transaction = tokens.begin_transaction();
-    while (tokens.has_next_token()) {
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-
-        if (auto maybe_ratio_value = parse_ratio_value(tokens)) {
-            if (ratio_value)
-                return nullptr;
-            ratio_value = maybe_ratio_value.release_nonnull();
-            continue;
-        }
-
-        if (auto maybe_auto_value = parse_specific_keyword_value(tokens, Keyword::Auto)) {
-            if (auto_value)
-                return nullptr;
-            auto_value = maybe_auto_value.release_nonnull();
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    if (auto_value && ratio_value) {
-        transaction.commit();
-        return StyleValueList::create(
-            StyleValueVector { auto_value.release_nonnull(), ratio_value.release_nonnull() },
-            StyleValueList::Separator::Space);
-    }
-
-    if (ratio_value) {
-        transaction.commit();
-        return ratio_value.release_nonnull();
-    }
-
-    if (auto_value) {
-        transaction.commit();
-        return auto_value.release_nonnull();
-    }
-
-    return nullptr;
 }
 
 // https://drafts.csswg.org/css-animations-1/#animation
@@ -4725,417 +4628,6 @@ RefPtr<StyleValue const> Parser::parse_border_image_slice_value(TokenStream<Comp
         bottom.release_nonnull(),
         left.release_nonnull(),
         fill);
-}
-
-// https://drafts.csswg.org/css-borders-4/#typedef-border-radius
-RefPtr<StyleValue const> Parser::parse_border_radius_value(TokenStream<ComponentValue>& tokens)
-{
-    // <border-radius> = <slash-separated-border-radius-syntax> | <legacy-border-radius-syntax>
-    // <slash-separated-border-radius-syntax> = <length-percentage [0,∞]> [ / <length-percentage [0,∞]> ]?
-    // <legacy-border-radius-syntax> = <length-percentage [0,∞]>{1,2}
-    // NB: So, 1 or 2 `<length-percentage>`s, optionally separated with a `/`.
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    auto horizontal = parse_length_percentage_value(tokens, non_negative_range, non_negative_range);
-    tokens.discard_whitespace();
-
-    if (tokens.next_token().is_delim('/')) {
-        tokens.discard_a_token(); // '/'
-        tokens.discard_whitespace();
-    }
-
-    auto vertical = parse_length_percentage_value(tokens, non_negative_range, non_negative_range);
-    if (horizontal && vertical) {
-        transaction.commit();
-        return BorderRadiusStyleValue::create(horizontal.release_nonnull(), vertical.release_nonnull());
-    }
-    if (horizontal) {
-        transaction.commit();
-        return BorderRadiusStyleValue::create(*horizontal, *horizontal);
-    }
-    return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_border_radius_shorthand_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-
-    auto const& border_radius_rect = parse_border_radius_rect_value(tokens);
-
-    if (!border_radius_rect)
-        return nullptr;
-
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::BorderRadius,
-        { PropertyID::BorderTopLeftRadius, PropertyID::BorderTopRightRadius, PropertyID::BorderBottomRightRadius, PropertyID::BorderBottomLeftRadius },
-        { border_radius_rect->top_left(), border_radius_rect->top_right(), border_radius_rect->bottom_right(), border_radius_rect->bottom_left() });
-}
-
-RefPtr<StyleValue const> Parser::parse_columns_value(TokenStream<ComponentValue>& tokens)
-{
-    RefPtr<StyleValue const> column_count;
-    RefPtr<StyleValue const> column_width;
-    RefPtr<StyleValue const> column_height;
-
-    Vector<PropertyID> remaining_longhands { PropertyID::ColumnCount, PropertyID::ColumnWidth };
-    int found_autos = 0;
-    int values_read = 0;
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is_delim('/')) {
-            if (values_read == 0)
-                return nullptr;
-            tokens.discard_a_token(); // /
-            tokens.discard_whitespace();
-
-            auto value = parse_css_value_for_property(PropertyID::ColumnHeight, tokens);
-            if (!value)
-                return nullptr;
-            column_height = value.release_nonnull();
-
-            tokens.discard_whitespace();
-            if (tokens.has_next_token())
-                return nullptr;
-            break;
-        }
-        if (values_read == 2)
-            return nullptr;
-        values_read++;
-
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        tokens.discard_whitespace();
-        if (!property_and_value.has_value())
-            return nullptr;
-        auto& value = property_and_value->style_value;
-
-        // since the values can be in either order, we want to skip over autos
-        if (value->has_auto()) {
-            found_autos++;
-            continue;
-        }
-
-        remove_property(remaining_longhands, property_and_value->property);
-
-        switch (property_and_value->property) {
-        case PropertyID::ColumnCount: {
-            VERIFY(!column_count);
-            column_count = value.release_nonnull();
-            continue;
-        }
-        case PropertyID::ColumnWidth: {
-            VERIFY(!column_width);
-            column_width = value.release_nonnull();
-            continue;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    if (found_autos == 2) {
-        column_count = KeywordStyleValue::create(Keyword::Auto);
-        column_width = KeywordStyleValue::create(Keyword::Auto);
-    }
-
-    if (found_autos == 1) {
-        if (!column_count)
-            column_count = KeywordStyleValue::create(Keyword::Auto);
-        if (!column_width)
-            column_width = KeywordStyleValue::create(Keyword::Auto);
-    }
-
-    if (!column_count)
-        column_count = property_initial_value(PropertyID::ColumnCount);
-    if (!column_width)
-        column_width = property_initial_value(PropertyID::ColumnWidth);
-    if (!column_height)
-        column_height = property_initial_value(PropertyID::ColumnHeight);
-
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::Columns,
-        { PropertyID::ColumnCount, PropertyID::ColumnWidth, PropertyID::ColumnHeight },
-        { column_count.release_nonnull(), column_width.release_nonnull(), column_height.release_nonnull() });
-}
-
-// https://www.w3.org/TR/css-display-3/#the-display-properties
-RefPtr<StyleValue const> Parser::parse_display_value(TokenStream<ComponentValue>& tokens)
-{
-    auto parse_single_component_display = [this](TokenStream<ComponentValue>& tokens) -> Optional<Display> {
-        auto transaction = tokens.begin_transaction();
-        if (auto keyword_value = parse_keyword_value(tokens)) {
-            auto keyword = keyword_value->to_keyword();
-            if (keyword == Keyword::ListItem) {
-                transaction.commit();
-                return Display::from_short(Display::Short::ListItem);
-            }
-
-            if (auto display_outside = keyword_to_display_outside(keyword); display_outside.has_value()) {
-                transaction.commit();
-                switch (display_outside.value()) {
-                case DisplayOutside::Block:
-                    return Display::from_short(Display::Short::Block);
-                case DisplayOutside::Inline:
-                    return Display::from_short(Display::Short::Inline);
-                case DisplayOutside::RunIn:
-                    return Display::from_short(Display::Short::RunIn);
-                }
-            }
-
-            if (auto display_inside = keyword_to_display_inside(keyword); display_inside.has_value()) {
-                transaction.commit();
-                switch (display_inside.value()) {
-                case DisplayInside::Flow:
-                    return Display::from_short(Display::Short::Flow);
-                case DisplayInside::FlowRoot:
-                    return Display::from_short(Display::Short::FlowRoot);
-                case DisplayInside::Table:
-                    return Display::from_short(Display::Short::Table);
-                case DisplayInside::Flex:
-                    return Display::from_short(Display::Short::Flex);
-                case DisplayInside::Grid:
-                    return Display::from_short(Display::Short::Grid);
-                case DisplayInside::Ruby:
-                    return Display::from_short(Display::Short::Ruby);
-                case DisplayInside::Math:
-                    return Display::from_short(Display::Short::Math);
-                }
-            }
-
-            if (auto display_internal = keyword_to_display_internal(keyword); display_internal.has_value()) {
-                transaction.commit();
-                return Display { display_internal.value() };
-            }
-
-            if (auto display_box = keyword_to_display_box(keyword); display_box.has_value()) {
-                transaction.commit();
-                switch (display_box.value()) {
-                case DisplayBox::Contents:
-                    return Display::from_short(Display::Short::Contents);
-                case DisplayBox::None:
-                    return Display::from_short(Display::Short::None);
-                }
-            }
-
-            if (auto display_legacy = keyword_to_display_legacy(keyword); display_legacy.has_value()) {
-                transaction.commit();
-                switch (display_legacy.value()) {
-                case DisplayLegacy::InlineBlock:
-                    return Display::from_short(Display::Short::InlineBlock);
-                case DisplayLegacy::InlineTable:
-                    return Display::from_short(Display::Short::InlineTable);
-                case DisplayLegacy::InlineFlex:
-                    return Display::from_short(Display::Short::InlineFlex);
-                case DisplayLegacy::InlineGrid:
-                    return Display::from_short(Display::Short::InlineGrid);
-                }
-            }
-        }
-        return OptionalNone {};
-    };
-
-    auto parse_multi_component_display = [this](TokenStream<ComponentValue>& tokens) -> Optional<Display> {
-        auto list_item = Display::ListItem::No;
-        Optional<DisplayInside> inside;
-        Optional<DisplayOutside> outside;
-
-        auto transaction = tokens.begin_transaction();
-        while (tokens.has_next_token()) {
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            if (auto value = parse_keyword_value(tokens)) {
-                auto keyword = value->to_keyword();
-                if (keyword == Keyword::ListItem) {
-                    if (list_item == Display::ListItem::Yes)
-                        return {};
-                    list_item = Display::ListItem::Yes;
-                    continue;
-                }
-                if (auto inside_value = keyword_to_display_inside(keyword); inside_value.has_value()) {
-                    if (inside.has_value())
-                        return {};
-                    inside = inside_value.value();
-                    continue;
-                }
-                if (auto outside_value = keyword_to_display_outside(keyword); outside_value.has_value()) {
-                    if (outside.has_value())
-                        return {};
-                    outside = outside_value.value();
-                    continue;
-                }
-            }
-
-            // Not a display value, abort.
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "<display>"_fly_string,
-                .value_string = tokens.next_token().to_string(),
-                .description = "Unrecognized value"_string,
-            });
-            return {};
-        }
-
-        // The spec does not allow any other inside values to be combined with list-item
-        // <display-outside>? && [ flow | flow-root ]? && list-item
-        if (list_item == Display::ListItem::Yes && inside.has_value() && inside != DisplayInside::Flow && inside != DisplayInside::FlowRoot)
-            return {};
-
-        transaction.commit();
-        return Display { outside.value_or(DisplayOutside::Block), inside.value_or(DisplayInside::Flow), list_item };
-    };
-
-    // Count non-whitespace tokens to decide between single and multi-component parsing.
-    // This is needed because var() substitution can leave trailing whitespace tokens.
-    size_t non_whitespace_token_count = 0;
-    for (size_t i = 0; i < tokens.remaining_token_count(); ++i) {
-        if (!tokens.peek_token(i).is(Token::Type::Whitespace))
-            ++non_whitespace_token_count;
-    }
-
-    Optional<Display> display;
-    if (non_whitespace_token_count == 1)
-        display = parse_single_component_display(tokens);
-    else
-        display = parse_multi_component_display(tokens);
-
-    if (display.has_value())
-        return DisplayStyleValue::create(display.value());
-
-    return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_flex_shorthand_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-
-    auto make_flex_shorthand = [&](NonnullRefPtr<StyleValue const> flex_grow, NonnullRefPtr<StyleValue const> flex_shrink, NonnullRefPtr<StyleValue const> flex_basis) {
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::Flex,
-            { PropertyID::FlexGrow, PropertyID::FlexShrink, PropertyID::FlexBasis },
-            { move(flex_grow), move(flex_shrink), move(flex_basis) });
-    };
-
-    if (tokens.remaining_token_count() == 1) {
-        // One-value syntax: <flex-grow> | <flex-basis> | none
-        if (parse_all_as_single_keyword_value(tokens, Keyword::None)) {
-            auto zero = NumberStyleValue::create(0);
-            return make_flex_shorthand(zero, zero, KeywordStyleValue::create(Keyword::Auto));
-        }
-
-        auto properties = Array { PropertyID::FlexGrow, PropertyID::FlexBasis };
-        auto property_and_value = parse_css_value_for_properties(properties, tokens);
-        if (!property_and_value.has_value())
-            return nullptr;
-
-        auto& value = property_and_value->style_value;
-        switch (property_and_value->property) {
-        case PropertyID::FlexGrow: {
-            // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
-            // https://github.com/w3c/csswg-drafts/issues/5742
-            auto flex_basis = PercentageStyleValue::create(Percentage(0));
-            auto one = NumberStyleValue::create(1);
-            return make_flex_shorthand(*value, one, flex_basis);
-        }
-        case PropertyID::FlexBasis: {
-            auto one = NumberStyleValue::create(1);
-            return make_flex_shorthand(one, one, *value);
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
-
-        return nullptr;
-    }
-
-    RefPtr<StyleValue const> flex_grow;
-    RefPtr<StyleValue const> flex_shrink;
-    RefPtr<StyleValue const> flex_basis;
-
-    // NOTE: FlexGrow has to be before FlexBasis. `0` is a valid FlexBasis, but only
-    //       if FlexGrow (along with optional FlexShrink) have already been specified.
-    auto remaining_longhands = Vector { PropertyID::FlexGrow, PropertyID::FlexBasis };
-
-    while (tokens.has_next_token()) {
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        if (!property_and_value.has_value())
-            return nullptr;
-        auto& value = property_and_value->style_value;
-        remove_property(remaining_longhands, property_and_value->property);
-
-        switch (property_and_value->property) {
-        case PropertyID::FlexGrow: {
-            VERIFY(!flex_grow);
-            flex_grow = value.release_nonnull();
-
-            // Flex-shrink may optionally follow directly after.
-            auto maybe_flex_shrink = parse_css_value_for_property(PropertyID::FlexShrink, tokens);
-            if (maybe_flex_shrink)
-                flex_shrink = maybe_flex_shrink.release_nonnull();
-            continue;
-        }
-        case PropertyID::FlexBasis: {
-            VERIFY(!flex_basis);
-            flex_basis = value.release_nonnull();
-            continue;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    if (!flex_grow)
-        flex_grow = property_initial_value(PropertyID::FlexGrow);
-    if (!flex_shrink)
-        flex_shrink = property_initial_value(PropertyID::FlexShrink);
-    if (!flex_basis) {
-        // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
-        // https://github.com/w3c/csswg-drafts/issues/5742
-        flex_basis = PercentageStyleValue::create(Percentage(0));
-    }
-
-    return make_flex_shorthand(flex_grow.release_nonnull(), flex_shrink.release_nonnull(), flex_basis.release_nonnull());
-}
-
-RefPtr<StyleValue const> Parser::parse_flex_flow_value(TokenStream<ComponentValue>& tokens)
-{
-    RefPtr<StyleValue const> flex_direction;
-    RefPtr<StyleValue const> flex_wrap;
-
-    auto remaining_longhands = Vector { PropertyID::FlexDirection, PropertyID::FlexWrap };
-    auto transaction = tokens.begin_transaction();
-
-    while (tokens.has_next_token()) {
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        if (!property_and_value.has_value())
-            return nullptr;
-        auto& value = property_and_value->style_value;
-        remove_property(remaining_longhands, property_and_value->property);
-
-        switch (property_and_value->property) {
-        case PropertyID::FlexDirection:
-            VERIFY(!flex_direction);
-            flex_direction = value.release_nonnull();
-            continue;
-        case PropertyID::FlexWrap:
-            VERIFY(!flex_wrap);
-            flex_wrap = value.release_nonnull();
-            continue;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    if (!flex_direction)
-        flex_direction = property_initial_value(PropertyID::FlexDirection);
-    if (!flex_wrap)
-        flex_wrap = property_initial_value(PropertyID::FlexWrap);
-
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::FlexFlow,
-        { PropertyID::FlexDirection, PropertyID::FlexWrap },
-        { flex_direction.release_nonnull(), flex_wrap.release_nonnull() });
 }
 
 // https://drafts.csswg.org/css-fonts-4/#font-prop
