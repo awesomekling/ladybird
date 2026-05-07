@@ -1092,6 +1092,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->stroke_dasharray_values.append(string_from_ffi_bytes(value_ptr, value_len));
                 }
                 return;
+            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::PlaceContent, FFI::CssStyleValueKind::PlaceItems, FFI::CssStyleValueKind::PlaceSelf)) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == kind);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->place_align_source = string_from_ffi_bytes(value_ptr, value_len);
+                else
+                    style_value->place_justify_source = string_from_ffi_bytes(value_ptr, value_len);
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1107,9 +1120,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridTrackSizeList,
                            FFI::CssStyleValueKind::ListStyle,
                            FFI::CssStyleValueKind::MathDepth,
-                           FFI::CssStyleValueKind::PlaceContent,
-                           FFI::CssStyleValueKind::PlaceItems,
-                           FFI::CssStyleValueKind::PlaceSelf,
                            FFI::CssStyleValueKind::PositionArea,
                            FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::OverflowClipMargin,

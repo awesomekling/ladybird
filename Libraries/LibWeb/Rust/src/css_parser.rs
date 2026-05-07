@@ -1976,15 +1976,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     FontVariantNumeric {
         values: Vec<FontVariantNumericValue>,
     },
-    PlaceContent {
-        source: String,
-    },
-    PlaceItems {
-        source: String,
-    },
-    PlaceSelf {
-        source: String,
-    },
+    PlaceContent(RustOwnedPlaceShorthand),
+    PlaceItems(RustOwnedPlaceShorthand),
+    PlaceSelf(RustOwnedPlaceShorthand),
     Frequency(RustOwnedDimensionStyleValue),
     Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
@@ -2401,6 +2395,12 @@ pub(crate) struct RustOwnedContainerType {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPaintOrder {
     value: CssPaintOrderValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPlaceShorthand {
+    align_source: String,
+    justify_source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4130,33 +4130,79 @@ fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<Rust
 }
 
 fn rust_owned_place_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_place_content_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::PlaceContent {
-        source: filtered_input_to_string(filtered_input),
-    })
+    rust_owned_place_shorthand_style_value_kind(
+        filtered_input,
+        component_values_parse_as_align_content,
+        component_values_parse_as_justify_content,
+        RustOwnedStyleValueKind::PlaceContent,
+    )
 }
 
 fn rust_owned_place_items_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_place_items_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::PlaceItems {
-        source: filtered_input_to_string(filtered_input),
-    })
+    rust_owned_place_shorthand_style_value_kind(
+        filtered_input,
+        component_values_parse_as_align_items,
+        component_values_parse_as_justify_items,
+        RustOwnedStyleValueKind::PlaceItems,
+    )
 }
 
 fn rust_owned_place_self_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_place_self_value(filtered_input) {
+    rust_owned_place_shorthand_style_value_kind(
+        filtered_input,
+        component_values_parse_as_align_self,
+        component_values_parse_as_justify_self,
+        RustOwnedStyleValueKind::PlaceSelf,
+    )
+}
+
+fn rust_owned_place_shorthand_style_value_kind(
+    filtered_input: &[u8],
+    parse_align_value: fn(&[ComponentValue]) -> bool,
+    parse_justify_value: fn(&[ComponentValue]) -> bool,
+    style_value_kind: impl FnOnce(RustOwnedPlaceShorthand) -> RustOwnedStyleValueKind,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let non_whitespace_component_values = remove_whitespace_component_values(component_values);
+
+    if non_whitespace_component_values.is_empty() {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::PlaceSelf {
-        source: filtered_input_to_string(filtered_input),
-    })
+    if parse_align_value(&non_whitespace_component_values) && parse_justify_value(&non_whitespace_component_values) {
+        let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+        return Some(style_value_kind(RustOwnedPlaceShorthand {
+            align_source: source.clone(),
+            justify_source: source,
+        }));
+    }
+
+    let non_whitespace_component_indices = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| (!is_whitespace_component_value(component_value)).then_some(index))
+        .collect::<Vec<_>>();
+
+    for component_split_index in non_whitespace_component_indices.iter().skip(1) {
+        let component_split_index = *component_split_index;
+        let align_component_values = strip_whitespace(&component_values[..component_split_index]);
+        let justify_component_values = strip_whitespace(&component_values[component_split_index..]);
+        let align_values = remove_whitespace_component_values(align_component_values);
+        let justify_values = remove_whitespace_component_values(justify_component_values);
+        if parse_align_value(&align_values) && parse_justify_value(&justify_values) {
+            return Some(style_value_kind(RustOwnedPlaceShorthand {
+                align_source: serialize_component_values_for_reparsing(align_component_values, filtered_input_string)?,
+                justify_source: serialize_component_values_for_reparsing(
+                    justify_component_values,
+                    filtered_input_string,
+                )?,
+            }));
+        }
+    }
+
+    None
 }
 
 fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5789,14 +5835,14 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::PlaceContent { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceContent, property_id, source);
+        RustOwnedStyleValueKind::PlaceContent(value) => {
+            callback_place_shorthand_style_value(callback, CssStyleValueKind::PlaceContent, property_id, value);
         }
-        RustOwnedStyleValueKind::PlaceItems { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceItems, property_id, source);
+        RustOwnedStyleValueKind::PlaceItems(value) => {
+            callback_place_shorthand_style_value(callback, CssStyleValueKind::PlaceItems, property_id, value);
         }
-        RustOwnedStyleValueKind::PlaceSelf { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceSelf, property_id, source);
+        RustOwnedStyleValueKind::PlaceSelf(value) => {
+            callback_place_shorthand_style_value(callback, CssStyleValueKind::PlaceSelf, property_id, value);
         }
         RustOwnedStyleValueKind::PositionAnchor(value) => callback(
             CssStyleValueKind::PositionAnchor,
@@ -6774,6 +6820,46 @@ where
         0,
         0,
         source.as_bytes(),
+        "",
+    );
+}
+
+fn callback_place_shorthand_style_value<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    value: &RustOwnedPlaceShorthand,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        value.align_source.as_bytes(),
+        "",
+    );
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        1,
+        0,
+        0,
+        0,
+        value.justify_source.as_bytes(),
         "",
     );
 }
@@ -23479,8 +23565,8 @@ mod tests {
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
         RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
         RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
-        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPosition,
-        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
         RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
@@ -25239,27 +25325,30 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::PlaceContent], "space-between center"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceContent,
-                value: RustOwnedStyleValueKind::PlaceContent {
-                    source: "space-between center".to_string(),
-                },
+                value: RustOwnedStyleValueKind::PlaceContent(RustOwnedPlaceShorthand {
+                    align_source: "space-between".to_string(),
+                    justify_source: "center".to_string(),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::PlaceItems], "normal start"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceItems,
-                value: RustOwnedStyleValueKind::PlaceItems {
-                    source: "normal start".to_string(),
-                },
+                value: RustOwnedStyleValueKind::PlaceItems(RustOwnedPlaceShorthand {
+                    align_source: "normal".to_string(),
+                    justify_source: "start".to_string(),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::PlaceSelf], "safe end unsafe right"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceSelf,
-                value: RustOwnedStyleValueKind::PlaceSelf {
-                    source: "safe end unsafe right".to_string(),
-                },
+                value: RustOwnedStyleValueKind::PlaceSelf(RustOwnedPlaceShorthand {
+                    align_source: "safe end".to_string(),
+                    justify_source: "unsafe right".to_string(),
+                }),
             })
         );
         assert_eq!(
@@ -26759,7 +26848,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "space-between center".to_string(),
+                value: "center".to_string(),
                 value_type: String::new(),
             })
         );
@@ -26772,7 +26861,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "normal start".to_string(),
+                value: "start".to_string(),
                 value_type: String::new(),
             })
         );
@@ -26785,7 +26874,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "safe end unsafe right".to_string(),
+                value: "unsafe right".to_string(),
                 value_type: String::new(),
             })
         );
