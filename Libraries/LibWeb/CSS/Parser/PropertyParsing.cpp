@@ -887,6 +887,52 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto rust_keyword_style_value = [](FlyString const& keyword_string) -> RefPtr<StyleValue const> {
+                auto maybe_keyword = keyword_from_string(keyword_string);
+                if (!maybe_keyword.has_value())
+                    return nullptr;
+                return KeywordStyleValue::create(maybe_keyword.release_value());
+            };
+            auto materialize_rust_position_area = [&](RustComponentValueParser::RustPositionArea const& position_area) -> RefPtr<StyleValue const> {
+                auto first_value = rust_keyword_style_value(position_area.first_keyword);
+                if (!first_value)
+                    return nullptr;
+
+                if (!position_area.second_keyword.has_value())
+                    return first_value.release_nonnull();
+
+                auto second_value = rust_keyword_style_value(*position_area.second_keyword);
+                if (!second_value)
+                    return nullptr;
+
+                StyleValueVector values;
+                values.ensure_capacity(2);
+                values.append(first_value.release_nonnull());
+                values.append(second_value.release_nonnull());
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+            };
+            auto materialize_rust_position_try_fallback = [&](RustComponentValueParser::RustPositionTryFallback const& fallback) -> RefPtr<StyleValue const> {
+                if (fallback.kind == RustComponentValueParser::RustPositionTryFallbackKind::PositionArea)
+                    return materialize_rust_position_area(fallback.position_area);
+
+                StyleValueVector values;
+                if (fallback.dashed_ident.has_value())
+                    values.append(CustomIdentStyleValue::create(*fallback.dashed_ident));
+
+                StyleValueVector try_tactics;
+                if (fallback.has_flip_block)
+                    try_tactics.append(KeywordStyleValue::create(Keyword::FlipBlock));
+                if (fallback.has_flip_inline)
+                    try_tactics.append(KeywordStyleValue::create(Keyword::FlipInline));
+                if (fallback.has_flip_start)
+                    try_tactics.append(KeywordStyleValue::create(Keyword::FlipStart));
+                if (!try_tactics.is_empty())
+                    values.append(StyleValueList::create(move(try_tactics), StyleValueList::Separator::Space));
+
+                if (values.is_empty())
+                    return nullptr;
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+            };
             auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1827,15 +1873,41 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::PositionArea:
-                if (auto value = parse_position_area_value(tokens)) {
+                if (rust_style_value->position_area_is_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (rust_style_value->position_area.has_value()) {
+                    auto value = materialize_rust_position_area(*rust_style_value->position_area);
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::PositionTryFallbacks:
-                if (auto value = parse_position_try_fallbacks_value(tokens)) {
+                if (rust_style_value->position_try_fallbacks_is_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (!rust_style_value->position_try_fallbacks.is_empty()) {
+                    StyleValueVector fallbacks;
+                    fallbacks.ensure_capacity(rust_style_value->position_try_fallbacks.size());
+                    for (auto const& fallback : rust_style_value->position_try_fallbacks) {
+                        auto value = materialize_rust_position_try_fallback(fallback);
+                        if (!value)
+                            break;
+                        fallbacks.append(value.release_nonnull());
+                    }
+                    if (fallbacks.size() != rust_style_value->position_try_fallbacks.size())
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(fallbacks), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::PositionTryOrder:

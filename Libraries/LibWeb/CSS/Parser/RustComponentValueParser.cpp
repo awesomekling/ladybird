@@ -1303,10 +1303,61 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
                            FFI::CssStyleValueKind::GridTrackPlacement,
                            FFI::CssStyleValueKind::GridTrackSizeList,
-                           FFI::CssStyleValueKind::PositionArea,
-                           FFI::CssStyleValueKind::PositionTryFallbacks,
                            FFI::CssStyleValueKind::ShapeOutside)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::PositionArea) {
+                enum : u8 {
+                    None,
+                    Area,
+                };
+
+                if (color_red == None) {
+                    value.position_area_is_none = true;
+                } else if (color_red == Area) {
+                    value.position_area = RustPositionArea {
+                        .first_keyword = fly_string_from_ffi_bytes(value_ptr, value_len),
+                        .second_keyword = value_type_len == 0 ? Optional<FlyString> {} : fly_string_from_ffi_bytes(value_type_ptr, value_type_len),
+                    };
+                }
+            } else if (kind == FFI::CssStyleValueKind::PositionTryFallbacks) {
+                enum : u8 {
+                    None,
+                    PositionArea,
+                    TryTactic,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::PositionTryFallbacks);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == None) {
+                    style_value->position_try_fallbacks_is_none = true;
+                    return;
+                }
+
+                if (color_red == PositionArea) {
+                    style_value->position_try_fallbacks.append(RustPositionTryFallback {
+                        .kind = RustPositionTryFallbackKind::PositionArea,
+                        .position_area = {
+                            .first_keyword = fly_string_from_ffi_bytes(value_ptr, value_len),
+                            .second_keyword = value_type_len == 0 ? Optional<FlyString> {} : fly_string_from_ffi_bytes(value_type_ptr, value_type_len),
+                        },
+                    });
+                    return;
+                }
+
+                VERIFY(color_red == TryTactic);
+                style_value->position_try_fallbacks.append(RustPositionTryFallback {
+                    .kind = RustPositionTryFallbackKind::TryTactic,
+                    .dashed_ident = value_len == 0 ? Optional<FlyString> {} : fly_string_from_ffi_bytes(value_ptr, value_len),
+                    .has_flip_block = color_green != 0,
+                    .has_flip_inline = color_blue != 0,
+                    .has_flip_start = color_alpha != 0,
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::ScrollFunction) {
                 value.scroll_function_scroller = static_cast<FFI::CssScrollFunctionScrollerKind>(color_red);
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_green);

@@ -153,6 +153,25 @@ public:
         RustShadowPlacement placement { RustShadowPlacement::Outer };
     };
 
+    enum class RustPositionTryFallbackKind : u8 {
+        PositionArea,
+        TryTactic,
+    };
+
+    struct RustPositionArea {
+        FlyString first_keyword;
+        Optional<FlyString> second_keyword;
+    };
+
+    struct RustPositionTryFallback {
+        RustPositionTryFallbackKind kind { RustPositionTryFallbackKind::PositionArea };
+        RustPositionArea position_area;
+        Optional<FlyString> dashed_ident;
+        bool has_flip_block { false };
+        bool has_flip_inline { false };
+        bool has_flip_start { false };
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -244,6 +263,10 @@ public:
         FFI::CssTextUnderlinePositionVertical text_underline_position_vertical { FFI::CssTextUnderlinePositionVertical::Invalid };
         bool shadow_is_none { false };
         Vector<RustShadow> shadows;
+        bool position_area_is_none { false };
+        Optional<RustPositionArea> position_area;
+        bool position_try_fallbacks_is_none { false };
+        Vector<RustPositionTryFallback> position_try_fallbacks;
         bool transform_longhand_is_none { false };
         FlyString transform_longhand_function_name;
         Vector<String> transform_longhand_arguments;

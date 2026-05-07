@@ -2004,13 +2004,9 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Position(RustOwnedPosition),
-    PositionArea {
-        source: String,
-    },
+    PositionArea(RustOwnedPositionArea),
     PositionAnchor(RustOwnedPositionAnchor),
-    PositionTryFallbacks {
-        source: String,
-    },
+    PositionTryFallbacks(RustOwnedPositionTryFallbacks),
     PositionTryOrder(RustOwnedPositionTryOrder),
     PositionVisibility(RustOwnedPositionVisibility),
     Quotes(RustOwnedQuotes),
@@ -2437,6 +2433,32 @@ pub(crate) struct RustOwnedPlaceShorthand {
 pub(crate) struct RustOwnedPositionAnchor {
     kind: CssPositionAnchorValueKind,
     name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPositionArea {
+    None,
+    Area {
+        first_keyword: String,
+        second_keyword: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPositionTryFallbacks {
+    None,
+    List(Vec<RustOwnedPositionTryFallback>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPositionTryFallback {
+    PositionArea(RustOwnedPositionArea),
+    TryTactic {
+        dashed_ident: Option<String>,
+        has_flip_block: bool,
+        has_flip_inline: bool,
+        has_flip_start: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4542,23 +4564,15 @@ fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<
 }
 
 fn rust_owned_position_area_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_position_area_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::PositionArea {
-        source: filtered_input_to_string(filtered_input),
-    })
+    Some(RustOwnedStyleValueKind::PositionArea(
+        parse_rust_owned_position_area_value(filtered_input)?,
+    ))
 }
 
 fn rust_owned_position_try_fallbacks_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_position_try_fallbacks_value(filtered_input) {
-        return None;
-    }
-
-    Some(RustOwnedStyleValueKind::PositionTryFallbacks {
-        source: filtered_input_to_string(filtered_input),
-    })
+    Some(RustOwnedStyleValueKind::PositionTryFallbacks(
+        parse_rust_owned_position_try_fallbacks_value(filtered_input)?,
+    ))
 }
 
 fn rust_owned_position_try_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6733,14 +6747,14 @@ where
             value.name.as_ref().map_or(&[], |name| name.as_bytes()),
             "",
         ),
-        RustOwnedStyleValueKind::PositionArea { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PositionArea, property_id, source);
+        RustOwnedStyleValueKind::PositionArea(value) => {
+            callback_position_area_style_value(callback, CssStyleValueKind::PositionArea, property_id, value);
         }
         RustOwnedStyleValueKind::Position(value) => {
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value.value_type);
         }
-        RustOwnedStyleValueKind::PositionTryFallbacks { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::PositionTryFallbacks, property_id, source);
+        RustOwnedStyleValueKind::PositionTryFallbacks(value) => {
+            callback_position_try_fallbacks_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::PositionTryOrder(value) => callback(
             CssStyleValueKind::PositionTryOrder,
@@ -7772,6 +7786,133 @@ fn callback_optional_longhand_source<C>(
             source.as_bytes(),
             "",
         );
+    }
+}
+
+const POSITION_AREA_CALLBACK_NONE: u8 = 0;
+const POSITION_AREA_CALLBACK_AREA: u8 = 1;
+const POSITION_TRY_FALLBACK_CALLBACK_NONE: u8 = 0;
+const POSITION_TRY_FALLBACK_CALLBACK_POSITION_AREA: u8 = 1;
+const POSITION_TRY_FALLBACK_CALLBACK_TRY_TACTIC: u8 = 2;
+
+fn callback_position_area_style_value<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    value: &RustOwnedPositionArea,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedPositionArea::None => callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            POSITION_AREA_CALLBACK_NONE,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedPositionArea::Area {
+            first_keyword,
+            second_keyword,
+        } => callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            POSITION_AREA_CALLBACK_AREA,
+            0,
+            0,
+            0,
+            first_keyword.as_bytes(),
+            second_keyword.as_deref().unwrap_or(""),
+        ),
+    }
+}
+
+fn callback_position_try_fallbacks_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    value: &RustOwnedPositionTryFallbacks,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedPositionTryFallbacks::None => callback(
+            CssStyleValueKind::PositionTryFallbacks,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            POSITION_TRY_FALLBACK_CALLBACK_NONE,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedPositionTryFallbacks::List(fallbacks) => {
+            for fallback in fallbacks {
+                match fallback {
+                    RustOwnedPositionTryFallback::PositionArea(value) => {
+                        let RustOwnedPositionArea::Area {
+                            first_keyword,
+                            second_keyword,
+                        } = value
+                        else {
+                            continue;
+                        };
+                        callback(
+                            CssStyleValueKind::PositionTryFallbacks,
+                            property_id,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            POSITION_TRY_FALLBACK_CALLBACK_POSITION_AREA,
+                            0,
+                            0,
+                            0,
+                            first_keyword.as_bytes(),
+                            second_keyword.as_deref().unwrap_or(""),
+                        );
+                    }
+                    RustOwnedPositionTryFallback::TryTactic {
+                        dashed_ident,
+                        has_flip_block,
+                        has_flip_inline,
+                        has_flip_start,
+                    } => callback(
+                        CssStyleValueKind::PositionTryFallbacks,
+                        property_id,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        POSITION_TRY_FALLBACK_CALLBACK_TRY_TACTIC,
+                        u8::from(*has_flip_block),
+                        u8::from(*has_flip_inline),
+                        u8::from(*has_flip_start),
+                        dashed_ident.as_ref().map_or(&[], |value| value.as_bytes()),
+                        "",
+                    ),
+                }
+            }
+        }
     }
 }
 
@@ -15611,6 +15752,10 @@ where
 }
 
 pub(crate) fn parse_position_area_value(filtered_input: &[u8]) -> bool {
+    parse_rust_owned_position_area_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_position_area_value(filtered_input: &[u8]) -> Option<RustOwnedPositionArea> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
 
@@ -15620,13 +15765,17 @@ pub(crate) fn parse_position_area_value(filtered_input: &[u8]) -> bool {
     // https://drafts.csswg.org/css-anchor-position-1/#position-area-property
     // Value: none | <position-area>
     if parser.consume_ident_matching("none") {
-        return !parser.has_next_component_value();
+        return (!parser.has_next_component_value()).then_some(RustOwnedPositionArea::None);
     }
 
     parse_position_area_component_values(component_values)
 }
 
 pub(crate) fn parse_position_try_fallbacks_value(filtered_input: &[u8]) -> bool {
+    parse_rust_owned_position_try_fallbacks_value(filtered_input).is_some()
+}
+
+fn parse_rust_owned_position_try_fallbacks_value(filtered_input: &[u8]) -> Option<RustOwnedPositionTryFallbacks> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
 
@@ -15636,28 +15785,28 @@ pub(crate) fn parse_position_try_fallbacks_value(filtered_input: &[u8]) -> bool 
     // https://drafts.csswg.org/css-anchor-position-1/#position-try-fallbacks
     // Value: none | [ [<dashed-ident> || <try-tactic>] | <position-area> ]#
     if parser.consume_ident_matching("none") {
-        return !parser.has_next_component_value();
+        return (!parser.has_next_component_value()).then_some(RustOwnedPositionTryFallbacks::None);
     }
 
-    let Some(fallbacks) = parse_comma_separated_component_values(component_values, |component_values| {
-        parse_single_position_try_fallbacks_component_values(component_values).then_some(())
-    }) else {
-        return false;
-    };
+    let fallbacks = parse_comma_separated_component_values(component_values, |component_values| {
+        parse_single_position_try_fallbacks_component_values(component_values)
+    })?;
 
-    !fallbacks.is_empty()
+    (!fallbacks.is_empty()).then_some(RustOwnedPositionTryFallbacks::List(fallbacks))
 }
 
-fn parse_single_position_try_fallbacks_component_values(component_values: Vec<ComponentValue>) -> bool {
+fn parse_single_position_try_fallbacks_component_values(
+    component_values: Vec<ComponentValue>,
+) -> Option<RustOwnedPositionTryFallback> {
     // [ [<dashed-ident> || <try-tactic>] | <position-area> ]
-    if parse_position_area_component_values(component_values.clone()) {
-        return true;
+    if let Some(position_area) = parse_position_area_component_values(component_values.clone()) {
+        return Some(RustOwnedPositionTryFallback::PositionArea(position_area));
     }
 
     let mut parser = ComponentValueParser::new(component_values);
     parser.discard_whitespace();
 
-    let mut has_dashed_ident = false;
+    let mut dashed_ident = None;
     let mut has_flip_block = false;
     let mut has_flip_inline = false;
     let mut has_flip_start = false;
@@ -15665,41 +15814,46 @@ fn parse_single_position_try_fallbacks_component_values(component_values: Vec<Co
     // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-try-fallbacks-try-tactic
     // <try-tactic> = flip-block || flip-inline || flip-start
     while parser.has_next_component_value() {
-        let Some(ident) = parser.consume_an_ident() else {
-            return false;
-        };
+        let ident = parser.consume_an_ident()?;
 
         if ident.starts_with("--") && is_valid_custom_ident(&ident, &[]) {
-            if has_dashed_ident {
-                return false;
+            if dashed_ident.is_some() {
+                return None;
             }
-            has_dashed_ident = true;
+            dashed_ident = Some(ident);
         } else if ident.eq_ignore_ascii_case("flip-block") {
             if has_flip_block {
-                return false;
+                return None;
             }
             has_flip_block = true;
         } else if ident.eq_ignore_ascii_case("flip-inline") {
             if has_flip_inline {
-                return false;
+                return None;
             }
             has_flip_inline = true;
         } else if ident.eq_ignore_ascii_case("flip-start") {
             if has_flip_start {
-                return false;
+                return None;
             }
             has_flip_start = true;
         } else {
-            return false;
+            return None;
         }
 
         parser.discard_whitespace();
     }
 
-    has_dashed_ident || has_flip_block || has_flip_inline || has_flip_start
+    (dashed_ident.is_some() || has_flip_block || has_flip_inline || has_flip_start).then_some(
+        RustOwnedPositionTryFallback::TryTactic {
+            dashed_ident,
+            has_flip_block,
+            has_flip_inline,
+            has_flip_start,
+        },
+    )
 }
 
-fn parse_position_area_component_values(component_values: Vec<ComponentValue>) -> bool {
+fn parse_position_area_component_values(component_values: Vec<ComponentValue>) -> Option<RustOwnedPositionArea> {
     let mut parser = ComponentValueParser::new(component_values);
     parser.discard_whitespace();
 
@@ -15721,28 +15875,61 @@ fn parse_position_area_component_values(component_values: Vec<ComponentValue>) -
     // |
     //   [ self-start | center | self-end | span-self-start | span-self-end | span-all ]{1,2}
     // ]
-    let Some(first) = parser.consume_an_ident() else {
-        return false;
-    };
+    let first = parser.consume_an_ident()?;
 
     parser.discard_whitespace();
     let Some(second) = parser.consume_an_ident() else {
-        return !parser.has_next_component_value() && is_position_area_keyword(&first);
+        return (!parser.has_next_component_value() && is_position_area_keyword(&first)).then_some(
+            RustOwnedPositionArea::Area {
+                first_keyword: first,
+                second_keyword: None,
+            },
+        );
     };
 
     parser.discard_whitespace();
     if parser.has_next_component_value() {
-        return false;
+        return None;
     }
 
-    (is_position_area_x_keyword(&first) && is_position_area_y_keyword(&second))
-        || (is_position_area_y_keyword(&first) && is_position_area_x_keyword(&second))
-        || (is_position_area_block_keyword(&first) && is_position_area_inline_keyword(&second))
-        || (is_position_area_inline_keyword(&first) && is_position_area_block_keyword(&second))
-        || (is_position_area_self_block_keyword(&first) && is_position_area_self_inline_keyword(&second))
-        || (is_position_area_self_inline_keyword(&first) && is_position_area_self_block_keyword(&second))
-        || (is_position_area_start_end_keyword(&first) && is_position_area_start_end_keyword(&second))
-        || (is_position_area_self_start_end_keyword(&first) && is_position_area_self_start_end_keyword(&second))
+    let normalized_keywords = if is_position_area_x_keyword(&first) && is_position_area_y_keyword(&second) {
+        Some((first, second))
+    } else if is_position_area_y_keyword(&first) && is_position_area_x_keyword(&second) {
+        Some((second, first))
+    } else if is_position_area_block_keyword(&first) && is_position_area_inline_keyword(&second) {
+        Some((first, second))
+    } else if is_position_area_inline_keyword(&first) && is_position_area_block_keyword(&second) {
+        Some((second, first))
+    } else if is_position_area_self_block_keyword(&first) && is_position_area_self_inline_keyword(&second) {
+        Some((first, second))
+    } else if is_position_area_self_inline_keyword(&first) && is_position_area_self_block_keyword(&second) {
+        Some((second, first))
+    } else if is_position_area_start_end_keyword(&first) && is_position_area_start_end_keyword(&second)
+        || is_position_area_self_start_end_keyword(&first) && is_position_area_self_start_end_keyword(&second)
+    {
+        Some((first, second))
+    } else {
+        None
+    }?;
+
+    let (first, second) = normalized_keywords;
+    if !is_position_area_axis_ambiguous(&first) && second.eq_ignore_ascii_case("span-all") {
+        return Some(RustOwnedPositionArea::Area {
+            first_keyword: first,
+            second_keyword: None,
+        });
+    }
+    if !is_position_area_axis_ambiguous(&second) && first.eq_ignore_ascii_case("span-all") {
+        return Some(RustOwnedPositionArea::Area {
+            first_keyword: second,
+            second_keyword: None,
+        });
+    }
+
+    Some(RustOwnedPositionArea::Area {
+        first_keyword: first,
+        second_keyword: Some(second),
+    })
 }
 
 fn is_position_area_keyword(value: &str) -> bool {
@@ -15769,10 +15956,10 @@ fn is_position_area_x_keyword(value: &str) -> bool {
             "x-end",
             "span-x-start",
             "span-x-end",
-            "x-self-start",
-            "x-self-end",
-            "span-x-self-start",
-            "span-x-self-end",
+            "self-x-start",
+            "self-x-end",
+            "span-self-x-start",
+            "span-self-x-end",
             "span-all",
         ],
     )
@@ -15791,10 +15978,10 @@ fn is_position_area_y_keyword(value: &str) -> bool {
             "y-end",
             "span-y-start",
             "span-y-end",
-            "y-self-start",
-            "y-self-end",
-            "span-y-self-start",
-            "span-y-self-end",
+            "self-y-start",
+            "self-y-end",
+            "span-self-y-start",
+            "span-self-y-end",
             "span-all",
         ],
     )
@@ -15870,6 +16057,24 @@ fn is_position_area_self_start_end_keyword(value: &str) -> bool {
             "span-self-start",
             "span-self-end",
             "span-all",
+        ],
+    )
+}
+
+fn is_position_area_axis_ambiguous(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "center",
+            "span-all",
+            "start",
+            "end",
+            "self-start",
+            "self-end",
+            "span-start",
+            "span-end",
+            "span-self-start",
+            "span-self-end",
         ],
     )
 }
@@ -24813,7 +25018,8 @@ mod tests {
         RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
         RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
         RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
         RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
         RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
@@ -27222,18 +27428,28 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::PositionArea], "span-inline-end block-start"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PositionArea,
-                value: RustOwnedStyleValueKind::PositionArea {
-                    source: "span-inline-end block-start".to_string(),
-                },
+                value: RustOwnedStyleValueKind::PositionArea(RustOwnedPositionArea::Area {
+                    first_keyword: "block-start".to_string(),
+                    second_keyword: Some("span-inline-end".to_string()),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::PositionTryFallbacks], "--foo flip-block, top left"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PositionTryFallbacks,
-                value: RustOwnedStyleValueKind::PositionTryFallbacks {
-                    source: "--foo flip-block, top left".to_string(),
-                },
+                value: RustOwnedStyleValueKind::PositionTryFallbacks(RustOwnedPositionTryFallbacks::List(vec![
+                    RustOwnedPositionTryFallback::TryTactic {
+                        dashed_ident: Some("--foo".to_string()),
+                        has_flip_block: true,
+                        has_flip_inline: false,
+                        has_flip_start: false,
+                    },
+                    RustOwnedPositionTryFallback::PositionArea(RustOwnedPositionArea::Area {
+                        first_keyword: "left".to_string(),
+                        second_keyword: Some("top".to_string()),
+                    }),
+                ])),
             })
         );
         assert_eq!(
