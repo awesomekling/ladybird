@@ -1135,6 +1135,24 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->flex_wrap_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::Flex) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Flex);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0) {
+                    style_value->flex_shorthand_is_none = true;
+                } else if (color_red == 1) {
+                    style_value->flex_grow_source = string_from_ffi_bytes(value_ptr, value_len);
+                } else if (color_red == 2) {
+                    style_value->flex_shrink_source = string_from_ffi_bytes(value_ptr, value_len);
+                } else {
+                    style_value->flex_basis_source = string_from_ffi_bytes(value_ptr, value_len);
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::TextDecoration) {
                 if (!style_value.has_value())
                     style_value = move(value);
@@ -1202,7 +1220,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
-                           FFI::CssStyleValueKind::Flex,
                            FFI::CssStyleValueKind::FilterValueList,
                            FFI::CssStyleValueKind::FontVariant,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,

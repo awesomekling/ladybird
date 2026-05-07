@@ -1948,9 +1948,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Display(RustOwnedDisplay),
     Flex(RustOwnedDimensionStyleValue),
-    FlexShorthand {
-        source: String,
-    },
+    FlexShorthand(RustOwnedFlexShorthand),
     FlexFlow(RustOwnedFlexFlow),
     FilterValueList {
         source: String,
@@ -2421,6 +2419,16 @@ pub(crate) struct RustOwnedPaintOrder {
 pub(crate) struct RustOwnedFlexFlow {
     flex_direction_source: Option<String>,
     flex_wrap_source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedFlexShorthand {
+    None,
+    Longhands {
+        flex_grow_source: String,
+        flex_shrink_source: String,
+        flex_basis_source: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3946,13 +3954,130 @@ fn rust_owned_display_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
 }
 
 fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_flex_shorthand_value(filtered_input) {
-        return None;
-    }
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
 
-    Some(RustOwnedStyleValueKind::FlexShorthand {
-        source: filtered_input_to_string(filtered_input),
-    })
+    // https://drafts.csswg.org/css-flexbox-1/#flex-property
+    // Value: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
+    let value = match component_values.as_slice() {
+        [component_value] if component_value_is_ident(Some(component_value), "none") => RustOwnedFlexShorthand::None,
+        [component_value] if component_value_parse_as_non_negative_number(component_value) => {
+            // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
+            // https://github.com/w3c/csswg-drafts/issues/5742
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: "1".to_string(),
+                flex_basis_source: "0%".to_string(),
+            }
+        }
+        [component_value] if component_value_parse_as_flex_basis(component_value) => {
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: "1".to_string(),
+                flex_shrink_source: "1".to_string(),
+                flex_basis_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        [flex_grow, flex_shrink]
+            if component_value_parse_as_non_negative_number(flex_grow)
+                && component_value_parse_as_non_negative_number(flex_shrink) =>
+        {
+            // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
+            // https://github.com/w3c/csswg-drafts/issues/5742
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_grow),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_shrink),
+                    filtered_input_string,
+                )?,
+                flex_basis_source: "0%".to_string(),
+            }
+        }
+        [flex_grow, flex_basis]
+            if component_value_parse_as_non_negative_number(flex_grow)
+                && component_value_parse_as_flex_basis(flex_basis) =>
+        {
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_grow),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: "1".to_string(),
+                flex_basis_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_basis),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        [flex_basis, flex_grow]
+            if component_value_parse_as_flex_basis(flex_basis)
+                && component_value_parse_as_non_negative_number(flex_grow) =>
+        {
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_grow),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: "1".to_string(),
+                flex_basis_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_basis),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        [flex_grow, flex_shrink, flex_basis]
+            if component_value_parse_as_non_negative_number(flex_grow)
+                && component_value_parse_as_non_negative_number(flex_shrink)
+                && component_value_parse_as_flex_basis(flex_basis) =>
+        {
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_grow),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_shrink),
+                    filtered_input_string,
+                )?,
+                flex_basis_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_basis),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        [flex_basis, flex_grow, flex_shrink]
+            if component_value_parse_as_flex_basis(flex_basis)
+                && component_value_parse_as_non_negative_number(flex_grow)
+                && component_value_parse_as_non_negative_number(flex_shrink) =>
+        {
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_grow),
+                    filtered_input_string,
+                )?,
+                flex_shrink_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_shrink),
+                    filtered_input_string,
+                )?,
+                flex_basis_source: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(flex_basis),
+                    filtered_input_string,
+                )?,
+            }
+        }
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::FlexShorthand(value))
 }
 
 fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6283,8 +6408,47 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::FlexShorthand { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Flex, property_id, source);
+        RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::None) => callback(
+            CssStyleValueKind::Flex,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::Longhands {
+            flex_grow_source,
+            flex_shrink_source,
+            flex_basis_source,
+        }) => {
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Flex,
+                property_id,
+                1,
+                Some(flex_grow_source),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Flex,
+                property_id,
+                2,
+                Some(flex_shrink_source),
+            );
+            callback_optional_longhand_source(
+                callback,
+                CssStyleValueKind::Flex,
+                property_id,
+                3,
+                Some(flex_basis_source),
+            );
         }
         RustOwnedStyleValueKind::FlexFlow(value) => {
             callback_optional_longhand_source(
@@ -24225,29 +24389,30 @@ mod tests {
         RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
         RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFontStyle, RustOwnedGridAutoFlow,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth,
-        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
-        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -26014,9 +26179,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Flex], "1 1 10em"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Flex,
-                value: RustOwnedStyleValueKind::FlexShorthand {
-                    source: "1 1 10em".to_string(),
-                },
+                value: RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::Longhands {
+                    flex_grow_source: "1".to_string(),
+                    flex_shrink_source: "1".to_string(),
+                    flex_basis_source: "10em".to_string(),
+                }),
             })
         );
         assert_eq!(
@@ -27573,7 +27740,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "1 1 10em".to_string(),
+                value: "10em".to_string(),
                 value_type: String::new(),
             })
         );

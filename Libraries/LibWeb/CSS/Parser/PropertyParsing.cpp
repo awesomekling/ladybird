@@ -1403,9 +1403,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Flex:
-                if (auto value = parse_flex_shorthand_value(tokens)) {
+                if (rust_style_value->flex_shorthand_is_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::Flex,
+                            { PropertyID::FlexGrow, PropertyID::FlexShrink, PropertyID::FlexBasis },
+                            { NumberStyleValue::create(0), NumberStyleValue::create(0), KeywordStyleValue::create(Keyword::Auto) }) };
+                }
+                if (rust_style_value->flex_grow_source.has_value() && rust_style_value->flex_shrink_source.has_value() && rust_style_value->flex_basis_source.has_value()) {
+                    auto flex_grow = parse_rust_source_as_property(PropertyID::FlexGrow, *rust_style_value->flex_grow_source);
+                    auto flex_shrink = parse_rust_source_as_property(PropertyID::FlexShrink, *rust_style_value->flex_shrink_source);
+                    auto flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, *rust_style_value->flex_basis_source);
+                    if (!flex_grow || !flex_shrink || !flex_basis)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::Flex,
+                            { PropertyID::FlexGrow, PropertyID::FlexShrink, PropertyID::FlexBasis },
+                            { flex_grow.release_nonnull(), flex_shrink.release_nonnull(), flex_basis.release_nonnull() }) };
                 }
                 break;
             case FFI::CssStyleValueKind::FlexFlow:

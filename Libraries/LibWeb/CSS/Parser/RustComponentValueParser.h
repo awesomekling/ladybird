@@ -165,6 +165,10 @@ public:
         Optional<String> column_count_source;
         Optional<String> column_width_source;
         Optional<String> column_height_source;
+        bool flex_shorthand_is_none { false };
+        Optional<String> flex_grow_source;
+        Optional<String> flex_shrink_source;
+        Optional<String> flex_basis_source;
         Optional<String> flex_direction_source;
         Optional<String> flex_wrap_source;
         Optional<String> text_decoration_line_source;
