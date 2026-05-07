@@ -930,7 +930,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         input_bytes.data(),
         input_bytes.size(),
         &style_value,
-        [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
+        [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
             auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
             RustStyleValue value {
                 .kind = kind,
@@ -950,6 +950,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (!value_type.has_value())
                     return;
                 value.value_type = value_type.release_value();
+                if (has_numeric_value)
+                    value.numeric_value = numeric_value;
                 if (primitive_kind == FFI::CssPrimitiveValueKind::String)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             }

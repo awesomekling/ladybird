@@ -225,6 +225,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 }
             };
+            auto materialize_rust_numeric_value = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->value_type.has_value() || !rust_style_value->numeric_value.has_value())
+                    return nullptr;
+
+                auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
+                if (!metadata.has_value() || !metadata->range.contains(*rust_style_value->numeric_value))
+                    return nullptr;
+
+                switch (*rust_style_value->value_type) {
+                case ValueType::Integer:
+                    return IntegerStyleValue::create(static_cast<i32>(*rust_style_value->numeric_value));
+                case ValueType::Number:
+                    return NumberStyleValue::create(*rust_style_value->numeric_value);
+                case ValueType::Percentage:
+                    return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                default:
+                    return nullptr;
+                }
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -252,6 +271,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::String && rust_style_value->string.has_value()) {
                         tokens.discard_a_token();
                         maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
+                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Percentage)) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = materialize_rust_numeric_value();
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
                         maybe_parsed_value = parse_rust_numeric_value();
                     } else {

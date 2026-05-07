@@ -1967,7 +1967,7 @@ where
 
 pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
 where
-    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, &[u8], &str),
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, &[u8], &str),
 {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -1990,6 +1990,8 @@ where
                     CssStyleValueKind::Keyword,
                     property_id as u16,
                     CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
                     resolved_keyword.as_bytes(),
                     "",
                 );
@@ -2012,6 +2014,8 @@ where
                 CssStyleValueKind::CustomIdent,
                 property_id as u16,
                 CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
                 name.as_bytes(),
                 property_value_type_name(PropertyValueType::CustomIdent),
             );
@@ -2032,6 +2036,7 @@ where
             }
 
             let primitive_kind = style_value_primitive_kind(*value_type, component_values);
+            let numeric_value = style_value_numeric_value(*value_type, component_values);
             let string_value = if primitive_kind == CssPrimitiveValueKind::String {
                 string_token_value(component_values).unwrap_or("").as_bytes()
             } else {
@@ -2046,6 +2051,8 @@ where
                 },
                 property_id as u16,
                 primitive_kind,
+                numeric_value.is_some(),
+                numeric_value.unwrap_or(0.0),
                 string_value,
                 property_value_type_name(*value_type),
             );
@@ -2054,6 +2061,25 @@ where
     }
 
     false
+}
+
+fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
+    let [ComponentValue::PreservedToken(token)] = component_values else {
+        return None;
+    };
+
+    match (&token.token_type, value_type) {
+        (TokenType::Number { number }, PropertyValueType::Integer) if number_is_integer(*number) => {
+            Some(number.value())
+        }
+        (TokenType::Number { number }, PropertyValueType::Number | PropertyValueType::OpacityValue) => {
+            Some(number.value())
+        }
+        (TokenType::Percentage { number }, PropertyValueType::Percentage | PropertyValueType::OpacityValue) => {
+            Some(number.value())
+        }
+        _ => None,
+    }
 }
 
 fn style_value_primitive_kind(
@@ -17027,6 +17053,7 @@ mod tests {
         kind: CssStyleValueKind,
         property_id: PropertyId,
         primitive_kind: CssPrimitiveValueKind,
+        numeric_value: Option<f64>,
         value: String,
         value_type: String,
     }
@@ -17037,11 +17064,12 @@ mod tests {
         parse_style_value_for_property(
             &property_ids,
             input.as_bytes(),
-            |kind, property_id, primitive_kind, value, value_type| {
+            |kind, property_id, primitive_kind, has_numeric_value, numeric_value, value, value_type| {
                 parsed_value = Some(ParsedStyleValue {
                     kind,
                     property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
                     primitive_kind,
+                    numeric_value: has_numeric_value.then_some(numeric_value),
                     value: String::from_utf8(value.to_vec()).unwrap(),
                     value_type: value_type.to_string(),
                 });
@@ -17573,6 +17601,7 @@ mod tests {
                 kind: CssStyleValueKind::Keyword,
                 property_id: PropertyId::Display,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
                 value: "block".to_string(),
                 value_type: String::new(),
             })
@@ -17583,6 +17612,7 @@ mod tests {
                 kind: CssStyleValueKind::CustomIdent,
                 property_id: PropertyId::AnimationName,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
                 value: "slide".to_string(),
                 value_type: "CustomIdent".to_string(),
             })
@@ -17593,6 +17623,7 @@ mod tests {
                 kind: CssStyleValueKind::ValueType,
                 property_id: PropertyId::FontWeight,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
                 value: String::new(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
@@ -17603,6 +17634,7 @@ mod tests {
                 kind: CssStyleValueKind::Primitive,
                 property_id: PropertyId::ZIndex,
                 primitive_kind: CssPrimitiveValueKind::Integer,
+                numeric_value: Some(12.0),
                 value: String::new(),
                 value_type: "Integer".to_string(),
             })
@@ -17613,8 +17645,20 @@ mod tests {
                 kind: CssStyleValueKind::Primitive,
                 property_id: PropertyId::Opacity,
                 primitive_kind: CssPrimitiveValueKind::Opacity,
+                numeric_value: Some(50.0),
                 value: String::new(),
                 value_type: "OpacityValue".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BackgroundPositionX], "50%"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::BackgroundPositionX,
+                primitive_kind: CssPrimitiveValueKind::Percentage,
+                numeric_value: Some(50.0),
+                value: String::new(),
+                value_type: "Percentage".to_string(),
             })
         );
         assert_eq!(
@@ -17623,6 +17667,7 @@ mod tests {
                 kind: CssStyleValueKind::Primitive,
                 property_id: PropertyId::AnimationName,
                 primitive_kind: CssPrimitiveValueKind::String,
+                numeric_value: None,
                 value: "slide".to_string(),
                 value_type: "String".to_string(),
             })
