@@ -1754,6 +1754,7 @@ pub enum CssStyleValueKind {
     Primitive,
     Color,
     Url,
+    CounterStyleName,
     ValueType,
 }
 
@@ -2163,6 +2164,37 @@ where
                         0,
                         0,
                         tag.as_bytes(),
+                        property_value_type_name(*value_type),
+                    );
+                    return true;
+                }
+            }
+
+            if *value_type == PropertyValueType::CounterStyle {
+                let mut counter_style_name = None;
+                if parse_a_counter_style(
+                    filtered_input,
+                    |kind, _, parsed_name| {
+                        if kind == CssCounterStyleKind::Name {
+                            counter_style_name = parsed_name.map(ToString::to_string);
+                        }
+                    },
+                    |_| {},
+                ) && let Some(counter_style_name) = counter_style_name
+                {
+                    callback(
+                        CssStyleValueKind::CounterStyleName,
+                        property_id as u16,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        counter_style_name.as_bytes(),
                         property_value_type_name(*value_type),
                     );
                     return true;
@@ -18592,6 +18624,19 @@ mod tests {
                 color: None,
                 value: "kern".to_string(),
                 value_type: "OpentypeTag".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ListStyleType], "disc"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::CounterStyleName,
+                property_id: PropertyId::ListStyleType,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "disc".to_string(),
+                value_type: "CounterStyle".to_string(),
             })
         );
         assert_eq!(

@@ -30,6 +30,7 @@
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
@@ -380,6 +381,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(maybe_url.release_value()) };
                     }
+                }
+                break;
+            case FFI::CssStyleValueKind::CounterStyleName:
+                if (rust_style_value->string.has_value()) {
+                    auto counter_style_name = rust_style_value->string.release_value();
+
+                    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+                    // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
+                    // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
+                    // @counter-style rule, and in the counter() functions.
+
+                    // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
+                    auto const& keyword = keyword_from_string(counter_style_name);
+                    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+                        counter_style_name = counter_style_name.to_ascii_lowercase();
+
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, CounterStyleStyleValue::create(counter_style_name) };
                 }
                 break;
             case FFI::CssStyleValueKind::Primitive:
