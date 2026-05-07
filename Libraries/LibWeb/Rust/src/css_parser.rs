@@ -1870,6 +1870,9 @@ pub enum CssStyleValueKind {
     ListStyle,
     MathDepth,
     PaintOrder,
+    PlaceContent,
+    PlaceItems,
+    PlaceSelf,
     PositionArea,
     PositionAnchor,
     PositionTryFallbacks,
@@ -1970,6 +1973,15 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     FontVariantNumeric {
         values: Vec<FontVariantNumericValue>,
+        source: String,
+    },
+    PlaceContent {
+        source: String,
+    },
+    PlaceItems {
+        source: String,
+    },
+    PlaceSelf {
         source: String,
     },
     Frequency(RustOwnedDimensionStyleValue),
@@ -3025,6 +3037,9 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_overflow_clip_margin_shorthand_style_value_kind(filtered_input)
         }
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::PlaceContent => rust_owned_place_content_style_value_kind(filtered_input),
+        PropertyId::PlaceItems => rust_owned_place_items_style_value_kind(filtered_input),
+        PropertyId::PlaceSelf => rust_owned_place_self_style_value_kind(filtered_input),
         PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
         PropertyId::PositionTryFallbacks => rust_owned_position_try_fallbacks_style_value_kind(filtered_input),
@@ -4098,6 +4113,36 @@ fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> Option<Rust
         value,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_place_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_place_content_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PlaceContent {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_place_items_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_place_items_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PlaceItems {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_place_self_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_place_self_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PlaceSelf {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5679,6 +5724,15 @@ where
             &[],
             "",
         ),
+        RustOwnedStyleValueKind::PlaceContent { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceContent, property_id, source);
+        }
+        RustOwnedStyleValueKind::PlaceItems { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceItems, property_id, source);
+        }
+        RustOwnedStyleValueKind::PlaceSelf { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PlaceSelf, property_id, source);
+        }
         RustOwnedStyleValueKind::PositionAnchor(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::PositionAnchor, property_id, &value.source);
         }
@@ -14327,6 +14381,244 @@ pub(crate) fn parse_paint_order_value(filtered_input: &[u8]) -> CssPaintOrderVal
     }
 }
 
+pub(crate) fn parse_place_content_value(filtered_input: &[u8]) -> bool {
+    parse_place_shorthand_value(
+        filtered_input,
+        component_values_parse_as_align_content,
+        component_values_parse_as_justify_content,
+    )
+}
+
+pub(crate) fn parse_place_items_value(filtered_input: &[u8]) -> bool {
+    parse_place_shorthand_value(
+        filtered_input,
+        component_values_parse_as_align_items,
+        component_values_parse_as_justify_items,
+    )
+}
+
+pub(crate) fn parse_place_self_value(filtered_input: &[u8]) -> bool {
+    parse_place_shorthand_value(
+        filtered_input,
+        component_values_parse_as_align_self,
+        component_values_parse_as_justify_self,
+    )
+}
+
+fn parse_place_shorthand_value(
+    filtered_input: &[u8],
+    parse_align_value: fn(&[ComponentValue]) -> bool,
+    parse_justify_value: fn(&[ComponentValue]) -> bool,
+) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    if component_values.is_empty() {
+        return false;
+    }
+
+    if parse_align_value(&component_values) && parse_justify_value(&component_values) {
+        return true;
+    }
+
+    for split_index in 1..component_values.len() {
+        if parse_align_value(&component_values[..split_index]) && parse_justify_value(&component_values[split_index..])
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn component_values_parse_as_align_content(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-align-content
+    // Value: normal | <baseline-position> | <content-distribution> | <overflow-position>? <content-position>
+    component_values_parse_as_single_ident(component_values, &["normal"])
+        || component_values_parse_as_baseline_position(component_values)
+        || component_values_parse_as_content_distribution(component_values)
+        || component_values_parse_as_content_position_with_optional_overflow(component_values, false)
+}
+
+fn component_values_parse_as_justify_content(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-justify-content
+    // Value: normal | <content-distribution> | <overflow-position>? [ <content-position> | left | right ]
+    component_values_parse_as_single_ident(component_values, &["normal"])
+        || component_values_parse_as_content_distribution(component_values)
+        || component_values_parse_as_content_position_with_optional_overflow(component_values, true)
+}
+
+fn component_values_parse_as_align_items(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-align-items
+    // Value: normal | stretch | <baseline-position> | [ <overflow-position>? <self-position> ]
+    component_values_parse_as_single_ident(component_values, &["normal", "stretch"])
+        || component_values_parse_as_baseline_position(component_values)
+        || component_values_parse_as_self_position_with_optional_overflow(component_values, false, false)
+}
+
+fn component_values_parse_as_justify_items(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-justify-items
+    // Value: normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ] | legacy | legacy && [ left | right | center ]
+    component_values_parse_as_single_ident(component_values, &["normal", "stretch", "legacy"])
+        || component_values_parse_as_baseline_position(component_values)
+        || component_values_parse_as_self_position_with_optional_overflow(component_values, true, false)
+        || component_values_parse_as_legacy_justify_items(component_values)
+}
+
+fn component_values_parse_as_align_self(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-align-self
+    // Value: auto | normal | stretch | <baseline-position> | <overflow-position>? <self-position>
+    component_values_parse_as_single_ident(component_values, &["auto", "normal", "stretch"])
+        || component_values_parse_as_baseline_position(component_values)
+        || component_values_parse_as_self_position_with_optional_overflow(component_values, false, false)
+}
+
+fn component_values_parse_as_justify_self(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#propdef-justify-self
+    // Value: auto | normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ]
+    component_values_parse_as_single_ident(component_values, &["auto", "normal", "stretch"])
+        || component_values_parse_as_baseline_position(component_values)
+        || component_values_parse_as_self_position_with_optional_overflow(component_values, true, false)
+}
+
+fn component_values_parse_as_single_ident(component_values: &[ComponentValue], keywords: &[&str]) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    keywords
+        .iter()
+        .any(|keyword| component_value_is_ident(Some(component_value), keyword))
+}
+
+fn component_values_parse_as_baseline_position(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#typedef-baseline-position
+    // <baseline-position> = [ first | last ]? && baseline
+    component_values_parse_as_single_ident(component_values, &["baseline"])
+        || component_values_match_idents(component_values, &["first", "baseline"])
+        || component_values_match_idents(component_values, &["last", "baseline"])
+}
+
+fn component_values_parse_as_content_distribution(component_values: &[ComponentValue]) -> bool {
+    // https://drafts.csswg.org/css-align-3/#typedef-content-distribution
+    // <content-distribution> = space-between | space-around | space-evenly | stretch
+    component_values_parse_as_single_ident(
+        component_values,
+        &["space-between", "space-around", "space-evenly", "stretch"],
+    )
+}
+
+fn component_values_parse_as_content_position_with_optional_overflow(
+    component_values: &[ComponentValue],
+    allow_left_right: bool,
+) -> bool {
+    // https://drafts.csswg.org/css-align-3/#typedef-overflow-position
+    // <overflow-position> = unsafe | safe
+    //
+    // https://drafts.csswg.org/css-align-3/#typedef-content-position
+    // <content-position> = center | start | end | flex-start | flex-end
+    component_values_parse_as_single_content_position(component_values, allow_left_right)
+        || component_values_parse_as_overflow_position_and(component_values, |component_value| {
+            component_value_parse_as_content_position(component_value, allow_left_right)
+        })
+}
+
+fn component_values_parse_as_self_position_with_optional_overflow(
+    component_values: &[ComponentValue],
+    allow_left_right: bool,
+    allow_auto: bool,
+) -> bool {
+    // https://drafts.csswg.org/css-align-3/#typedef-self-position
+    // <self-position> = center | start | end | self-start | self-end | flex-start | flex-end
+    component_values_parse_as_single_self_position(component_values, allow_left_right, allow_auto)
+        || component_values_parse_as_overflow_position_and(component_values, |component_value| {
+            component_value_parse_as_self_position(component_value, allow_left_right, allow_auto)
+        })
+}
+
+fn component_values_parse_as_single_content_position(
+    component_values: &[ComponentValue],
+    allow_left_right: bool,
+) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    component_value_parse_as_content_position(component_value, allow_left_right)
+}
+
+fn component_values_parse_as_single_self_position(
+    component_values: &[ComponentValue],
+    allow_left_right: bool,
+    allow_auto: bool,
+) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    component_value_parse_as_self_position(component_value, allow_left_right, allow_auto)
+}
+
+fn component_values_parse_as_overflow_position_and(
+    component_values: &[ComponentValue],
+    parse_position: impl FnOnce(&ComponentValue) -> bool,
+) -> bool {
+    let [overflow_position, position] = component_values else {
+        return false;
+    };
+    (component_value_is_ident(Some(overflow_position), "safe")
+        || component_value_is_ident(Some(overflow_position), "unsafe"))
+        && parse_position(position)
+}
+
+fn component_value_parse_as_content_position(component_value: &ComponentValue, allow_left_right: bool) -> bool {
+    ["center", "start", "end", "flex-start", "flex-end"]
+        .iter()
+        .any(|keyword| component_value_is_ident(Some(component_value), keyword))
+        || (allow_left_right
+            && ["left", "right"]
+                .iter()
+                .any(|keyword| component_value_is_ident(Some(component_value), keyword)))
+}
+
+fn component_value_parse_as_self_position(
+    component_value: &ComponentValue,
+    allow_left_right: bool,
+    allow_auto: bool,
+) -> bool {
+    [
+        "center",
+        "start",
+        "end",
+        "self-start",
+        "self-end",
+        "flex-start",
+        "flex-end",
+    ]
+    .iter()
+    .any(|keyword| component_value_is_ident(Some(component_value), keyword))
+        || (allow_auto && component_value_is_ident(Some(component_value), "auto"))
+        || (allow_left_right
+            && ["left", "right"]
+                .iter()
+                .any(|keyword| component_value_is_ident(Some(component_value), keyword)))
+}
+
+fn component_values_parse_as_legacy_justify_items(component_values: &[ComponentValue]) -> bool {
+    component_values_match_idents(component_values, &["legacy", "left"])
+        || component_values_match_idents(component_values, &["legacy", "right"])
+        || component_values_match_idents(component_values, &["legacy", "center"])
+        || component_values_match_idents(component_values, &["left", "legacy"])
+        || component_values_match_idents(component_values, &["right", "legacy"])
+        || component_values_match_idents(component_values, &["center", "legacy"])
+}
+
+fn component_values_match_idents(component_values: &[ComponentValue], keywords: &[&str]) -> bool {
+    component_values.len() == keywords.len()
+        && component_values
+            .iter()
+            .zip(keywords)
+            .all(|(component_value, keyword)| component_value_is_ident(Some(component_value), keyword))
+}
+
 pub(crate) fn parse_text_underline_position_value(filtered_input: &[u8]) -> CssTextUnderlinePositionValue {
     let invalid = CssTextUnderlinePositionValue {
         horizontal: CssTextUnderlinePositionHorizontal::Invalid,
@@ -22771,22 +23063,22 @@ mod tests {
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_image_set_value, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
         parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
-        parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
-        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
-        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
-        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
-        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
-        parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
-        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
-        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_paint_order_value, parse_place_content_value, parse_place_items_value, parse_place_self_value,
+        parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
+        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
+        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
+        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -23618,6 +23910,18 @@ mod tests {
 
     fn parse_paint_order(input: &str) -> CssPaintOrderValue {
         parse_paint_order_value(input.as_bytes())
+    }
+
+    fn parse_place_content(input: &str) -> bool {
+        parse_place_content_value(input.as_bytes())
+    }
+
+    fn parse_place_items(input: &str) -> bool {
+        parse_place_items_value(input.as_bytes())
+    }
+
+    fn parse_place_self(input: &str) -> bool {
+        parse_place_self_value(input.as_bytes())
     }
 
     fn parse_text_underline_position(input: &str) -> CssTextUnderlinePositionValue {
@@ -24475,6 +24779,33 @@ mod tests {
                 property_id: PropertyId::FlexFlow,
                 value: RustOwnedStyleValueKind::FlexFlow {
                     source: "wrap row-reverse".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PlaceContent], "space-between center"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PlaceContent,
+                value: RustOwnedStyleValueKind::PlaceContent {
+                    source: "space-between center".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PlaceItems], "normal start"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PlaceItems,
+                value: RustOwnedStyleValueKind::PlaceItems {
+                    source: "normal start".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PlaceSelf], "safe end unsafe right"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PlaceSelf,
+                value: RustOwnedStyleValueKind::PlaceSelf {
+                    source: "safe end unsafe right".to_string(),
                 },
             })
         );
@@ -25958,6 +26289,45 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "wrap row-reverse".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::PlaceContent], "space-between center"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::PlaceContent,
+                property_id: PropertyId::PlaceContent,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "space-between center".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::PlaceItems], "normal start"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::PlaceItems,
+                property_id: PropertyId::PlaceItems,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "normal start".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::PlaceSelf], "safe end unsafe right"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::PlaceSelf,
+                property_id: PropertyId::PlaceSelf,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "safe end unsafe right".to_string(),
                 value_type: String::new(),
             })
         );
@@ -29709,6 +30079,35 @@ mod tests {
             CssPaintOrderValueKind::Invalid
         );
         assert_eq!(parse_paint_order("fill, stroke").kind, CssPaintOrderValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_place_shorthand_values() {
+        assert!(parse_place_content("center"));
+        assert!(parse_place_content("space-between center"));
+        assert!(parse_place_content("first baseline safe right"));
+        assert!(parse_place_content("stretch"));
+        assert!(parse_place_items("normal"));
+        assert!(parse_place_items("stretch"));
+        assert!(parse_place_items("start"));
+        assert!(parse_place_items("normal start"));
+        assert!(parse_place_items("first baseline legacy right"));
+        assert!(parse_place_self("auto"));
+        assert!(parse_place_self("center"));
+        assert!(parse_place_self("safe end unsafe right"));
+    }
+
+    #[test]
+    fn rejects_invalid_place_shorthand_values() {
+        assert!(!parse_place_content(""));
+        assert!(!parse_place_content("left"));
+        assert!(!parse_place_content("center center center"));
+        assert!(!parse_place_items("auto"));
+        assert!(!parse_place_items("safe"));
+        assert!(!parse_place_items("legacy safe center"));
+        assert!(!parse_place_self("legacy"));
+        assert!(!parse_place_self("safe"));
+        assert!(!parse_place_self("left center right"));
     }
 
     #[test]

@@ -1026,6 +1026,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::Separator::Space) };
                 }
                 break;
+            case FFI::CssStyleValueKind::PlaceContent:
+                if (auto value = parse_place_content_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::PlaceItems:
+                if (auto value = parse_place_items_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::PlaceSelf:
+                if (auto value = parse_place_self_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::PositionAnchor:
                 if (auto value = parse_position_anchor_value(tokens)) {
                     generated_transaction.commit();
