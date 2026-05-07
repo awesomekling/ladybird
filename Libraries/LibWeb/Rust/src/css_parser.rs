@@ -1810,6 +1810,10 @@ pub(crate) enum RustOwnedStyleValueKind {
         inset: CssViewFunctionInsetKind,
         inset_position: CssViewFunctionInsetPosition,
     },
+    MathFunction {
+        value_type: PropertyValueType,
+        function: RustOwnedMathFunction,
+    },
     UnresolvedValueType {
         value_type: PropertyValueType,
         source: String,
@@ -1833,6 +1837,13 @@ pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     index: usize,
     style_value: RustOwnedStyleValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedMathFunction {
+    name: String,
+    arguments: Vec<String>,
     source: String,
 }
 
@@ -2307,6 +2318,13 @@ fn parse_rust_owned_generated_longhand_value(
         _ => {}
     }
 
+    if let Some(function) = parse_rust_owned_math_function(component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::MathFunction { value_type, function },
+        };
+    }
+
     let generated_style_value = generated_value_type_id_for_property_value_type(value_type).and_then(|value_type_id| {
         let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
         let style_value = generated_value_type_style_value(syntax_kind, component_values);
@@ -2372,6 +2390,63 @@ fn parse_rust_owned_generated_longhand_value(
             },
         }
     }
+}
+
+fn parse_rust_owned_math_function(
+    component_values: &[ComponentValue],
+    filtered_input: &[u8],
+) -> Option<RustOwnedMathFunction> {
+    // https://drafts.csswg.org/css-values-4/#math
+    // A math function represents a numeric value.
+    let [ComponentValue::Function(function)] = component_values else {
+        return None;
+    };
+    if !is_math_function_name(&function.name) {
+        return None;
+    }
+
+    let filtered_input = std::str::from_utf8(filtered_input)
+        .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
+    let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
+    let arguments = serialize_math_function_arguments_for_reparsing(&function.value, filtered_input)?;
+
+    Some(RustOwnedMathFunction {
+        name: function.name.clone(),
+        arguments,
+        source,
+    })
+}
+
+fn serialize_math_function_arguments_for_reparsing(
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+) -> Option<Vec<String>> {
+    let mut arguments = Vec::new();
+    let mut start = 0;
+
+    for (index, component_value) in component_values.iter().enumerate() {
+        if !matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            continue;
+        }
+
+        arguments.push(serialize_component_values_for_reparsing(
+            strip_whitespace(&component_values[start..index]),
+            filtered_input,
+        )?);
+        start = index + 1;
+    }
+
+    arguments.push(serialize_component_values_for_reparsing(
+        strip_whitespace(&component_values[start..]),
+        filtered_input,
+    )?);
+    Some(arguments)
 }
 
 fn filtered_input_to_string(filtered_input: &[u8]) -> String {
@@ -2570,6 +2645,9 @@ where
             &[],
             property_value_type_name(PropertyValueType::ViewFunction),
         ),
+        RustOwnedStyleValueKind::MathFunction { value_type, .. } => {
+            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
+        }
         RustOwnedStyleValueKind::UnresolvedValueType { value_type, .. } => {
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, *value_type);
         }
@@ -17337,17 +17415,18 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedPositionalValueListShorthandItem, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode,
-        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -18968,6 +19047,48 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::MarginLeft], "calc(1px + 2px)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::MarginLeft,
+                value: RustOwnedStyleValueKind::MathFunction {
+                    value_type: PropertyValueType::Length,
+                    function: RustOwnedMathFunction {
+                        name: "calc".to_string(),
+                        arguments: vec!["1px + 2px".to_string()],
+                        source: "calc(1px + 2px)".to_string(),
+                    },
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Opacity], "clamp(0, 0.5, 1)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Opacity,
+                value: RustOwnedStyleValueKind::MathFunction {
+                    value_type: PropertyValueType::OpacityValue,
+                    function: RustOwnedMathFunction {
+                        name: "clamp".to_string(),
+                        arguments: vec!["0".to_string(), "0.5".to_string(), "1".to_string()],
+                        source: "clamp(0, 0.5, 1)".to_string(),
+                    },
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontWeight], "calc(600 + 100)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontWeight,
+                value: RustOwnedStyleValueKind::MathFunction {
+                    value_type: PropertyValueType::FontWeightAbsolute,
+                    function: RustOwnedMathFunction {
+                        name: "calc".to_string(),
+                        arguments: vec!["600 + 100".to_string()],
+                        source: "calc(600 + 100)".to_string(),
+                    },
+                },
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ObjectPosition,
@@ -19314,6 +19435,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "px".to_string(),
+                value_type: "Length".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::MarginLeft], "calc(1px + 2px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ValueType,
+                property_id: PropertyId::MarginLeft,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
                 value_type: "Length".to_string(),
             })
         );
