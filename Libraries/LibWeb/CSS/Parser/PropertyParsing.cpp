@@ -1526,9 +1526,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::StrokeDasharray:
-                if (auto value = parse_stroke_dasharray_value(tokens)) {
+                if (rust_style_value->stroke_dasharray_none) {
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (!rust_style_value->stroke_dasharray_values.is_empty()) {
+                    Vector<ValueComparingNonnullRefPtr<StyleValue const>> dashes;
+                    dashes.ensure_capacity(rust_style_value->stroke_dasharray_values.size());
+                    for (auto const& dash_value : rust_style_value->stroke_dasharray_values) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(dash_value, "utf-8"sv);
+                        TokenStream value_tokens { component_values };
+                        auto value = parse_number_value(value_tokens, non_negative_range);
+                        if (!value)
+                            value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                        value_tokens.discard_whitespace();
+                        if (!value || value_tokens.has_next_token())
+                            break;
+                        dashes.append(value.release_nonnull());
+                    }
+                    if (dashes.size() != rust_style_value->stroke_dasharray_values.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(dashes), StyleValueList::Separator::Comma) };
                 }
                 break;
             case FFI::CssStyleValueKind::Shadow: {

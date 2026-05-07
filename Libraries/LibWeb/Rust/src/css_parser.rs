@@ -2117,9 +2117,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     BasicShape(RustOwnedBasicShape),
     Rect(RustOwnedRect),
-    StrokeDasharray {
-        source: String,
-    },
+    StrokeDasharray(RustOwnedStrokeDasharray),
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
     ScrollFunction {
         scroller: CssScrollFunctionScrollerKind,
@@ -2455,6 +2453,12 @@ pub(crate) enum RustOwnedScrollbarColor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollbarGutter {
     value: CssScrollbarGutterValueKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedStrokeDasharray {
+    None,
+    Values(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4602,12 +4606,63 @@ fn rust_owned_scrollbar_gutter_style_value_kind(filtered_input: &[u8]) -> Option
 }
 
 fn rust_owned_stroke_dasharray_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_stroke_dasharray_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://svgwg.org/svg2-draft/painting.html#StrokeDashing
+    // Value: none | <dasharray>
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("none") {
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+        return Some(RustOwnedStyleValueKind::StrokeDasharray(RustOwnedStrokeDasharray::None));
+    }
+
+    // https://svgwg.org/svg2-draft/painting.html#DataTypeDasharray
+    // <dasharray> = [ [ <length-percentage> | <number> ]+ ]#
+    let mut values = Vec::new();
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+
+        // A <dasharray> is a list of comma and/or white space separated <number> or <length-percentage> values. A <number> value represents a value in user units.
+        // If any value in the list is negative, the <dasharray> value is invalid.
+        if !component_value_parse_as_non_negative_number(component_value)
+            && !component_value_parse_as_non_negative_length_percentage(component_value)
+        {
+            return None;
+        }
+
+        values.push(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            filtered_input_string,
+        )?);
+        parser.index += 1;
+
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+        if parser.consume_a_comma() {
+            parser.discard_whitespace();
+            if !parser.has_next_component_value() {
+                return None;
+            }
+        }
+    }
+
+    if values.is_empty() {
         return None;
     }
-    Some(RustOwnedStyleValueKind::StrokeDasharray {
-        source: filtered_input_to_string(filtered_input),
-    })
+
+    Some(RustOwnedStyleValueKind::StrokeDasharray(
+        RustOwnedStrokeDasharray::Values(values),
+    ))
 }
 
 fn rust_owned_text_underline_position_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6204,9 +6259,42 @@ where
             value.as_bytes(),
             *value_type,
         ),
-        RustOwnedStyleValueKind::StrokeDasharray { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::StrokeDasharray, property_id, source);
-        }
+        RustOwnedStyleValueKind::StrokeDasharray(value) => match value {
+            RustOwnedStrokeDasharray::None => callback(
+                CssStyleValueKind::StrokeDasharray,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                1,
+                0,
+                0,
+                0,
+                &[],
+                "",
+            ),
+            RustOwnedStrokeDasharray::Values(values) => {
+                for value in values {
+                    callback(
+                        CssStyleValueKind::StrokeDasharray,
+                        property_id,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        value.as_bytes(),
+                        "",
+                    );
+                }
+            }
+        },
         RustOwnedStyleValueKind::Time(value) => callback_primitive_style_value(
             callback,
             property_id,
@@ -23394,23 +23482,23 @@ mod tests {
         RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPosition,
         RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecorationLine,
-        RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
-        RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
-        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -25800,9 +25888,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::StrokeDasharray], "2 3px, calc(4%)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::StrokeDasharray,
-                value: RustOwnedStyleValueKind::StrokeDasharray {
-                    source: "2 3px, calc(4%)".to_string(),
-                },
+                value: RustOwnedStyleValueKind::StrokeDasharray(RustOwnedStrokeDasharray::Values(vec![
+                    "2".to_string(),
+                    "3px".to_string(),
+                    "calc(4%)".to_string(),
+                ])),
             })
         );
         assert_eq!(

@@ -1078,6 +1078,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     });
                 }
                 return;
+            } else if (kind == FFI::CssStyleValueKind::StrokeDasharray) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::StrokeDasharray);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red != 0) {
+                    style_value->stroke_dasharray_none = true;
+                } else {
+                    style_value->stroke_dasharray_values.append(string_from_ffi_bytes(value_ptr, value_len));
+                }
+                return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::AspectRatio,
                            FFI::CssStyleValueKind::BorderRadius,
@@ -1102,7 +1116,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::Shadow,
                            FFI::CssStyleValueKind::ShapeOutside,
                            FFI::CssStyleValueKind::TextDecoration,
-                           FFI::CssStyleValueKind::StrokeDasharray,
                            FFI::CssStyleValueKind::TransformLonghand,
                            FFI::CssStyleValueKind::TransformOrigin)) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
