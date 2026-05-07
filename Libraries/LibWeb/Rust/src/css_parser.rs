@@ -1894,7 +1894,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     Url(String),
     CounterStyleName(String),
-    EasingFunction(RustOwnedSourceBackedStyleValue),
+    EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedSourceBackedStyleValue),
     BasicShape(RustOwnedSourceBackedStyleValue),
     Rect(RustOwnedSourceBackedStyleValue),
@@ -1964,6 +1964,35 @@ pub(crate) struct RustOwnedImageSetOption {
     image_source: String,
     resolution: Option<String>,
     mime_type: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedEasingFunction {
+    value: RustOwnedEasingFunctionValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedEasingFunctionValue {
+    Keyword(String),
+    Linear(Vec<RustOwnedLinearEasingStop>),
+    CubicBezier {
+        x1: String,
+        y1: String,
+        x2: String,
+        y2: String,
+    },
+    Steps {
+        intervals: String,
+        position: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedLinearEasingStop {
+    output: String,
+    first_stop_length: Option<String>,
+    second_stop_length: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2411,12 +2440,18 @@ fn parse_rust_owned_generated_longhand_value(
 
     match value_type {
         PropertyValueType::EasingFunction => {
+            if let Some(value) =
+                rust_owned_easing_function_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(value_type),
+                value: RustOwnedStyleValueKind::UnresolvedValueType {
+                    value_type,
                     source: filtered_input_to_string(filtered_input),
-                }),
+                },
             };
         }
         PropertyValueType::FitContent => {
@@ -2768,6 +2803,178 @@ fn rust_owned_image_set_option(
         image_source,
         resolution,
         mime_type,
+    })
+}
+
+fn rust_owned_easing_function_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+
+    let value = match component_values {
+        [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }),
+        ] if value.eq_ignore_ascii_case("step-start") || value.eq_ignore_ascii_case("step-end") => {
+            RustOwnedEasingFunctionValue::Keyword(value.clone())
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("linear") => {
+            RustOwnedEasingFunctionValue::Linear(rust_owned_linear_easing_stops(function, filtered_input_string)?)
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("cubic-bezier") => {
+            let groups = rust_owned_single_component_function_arguments(function, filtered_input_string)?;
+            let [x1, y1, x2, y2] = groups.as_slice() else {
+                return None;
+            };
+            if !component_value_parse_as_number_in_range(x1, 0.0, 1.0)
+                || !component_value_parse_as_number_prefix(y1)
+                || !component_value_parse_as_number_in_range(x2, 0.0, 1.0)
+                || !component_value_parse_as_number_prefix(y2)
+            {
+                return None;
+            }
+            RustOwnedEasingFunctionValue::CubicBezier {
+                x1: serialize_component_values_for_reparsing(std::slice::from_ref(x1), filtered_input_string)?,
+                y1: serialize_component_values_for_reparsing(std::slice::from_ref(y1), filtered_input_string)?,
+                x2: serialize_component_values_for_reparsing(std::slice::from_ref(x2), filtered_input_string)?,
+                y2: serialize_component_values_for_reparsing(std::slice::from_ref(y2), filtered_input_string)?,
+            }
+        }
+        [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("steps") => {
+            let groups = rust_owned_single_component_function_arguments(function, filtered_input_string)?;
+            if groups.is_empty() || groups.len() > 2 {
+                return None;
+            }
+
+            let mut min_intervals = 1.0;
+            let position = if let Some(step_position) = groups.get(1) {
+                let ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                }) = step_position
+                else {
+                    return None;
+                };
+                if !is_step_position_keyword(value) {
+                    return None;
+                }
+                if value.eq_ignore_ascii_case("jump-none") {
+                    min_intervals = 2.0;
+                }
+                Some(value.clone())
+            } else {
+                None
+            };
+
+            if !component_value_parse_as_integer_in_range(&groups[0], min_intervals, f64::INFINITY) {
+                return None;
+            }
+
+            RustOwnedEasingFunctionValue::Steps {
+                intervals: serialize_component_values_for_reparsing(
+                    std::slice::from_ref(&groups[0]),
+                    filtered_input_string,
+                )?,
+                position,
+            }
+        }
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
+        value,
+        source,
+    }))
+}
+
+fn rust_owned_linear_easing_stops(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<Vec<RustOwnedLinearEasingStop>> {
+    // https://drafts.csswg.org/css-easing-2/#typedef-linear-easing-function
+    // <linear-easing-function> = linear( [ <number> && <linear-stop-length>? ]# )
+    // <linear-stop-length> = <percentage>{1,2}
+    let stops = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        rust_owned_linear_easing_stop(component_values, filtered_input_string)
+    })?;
+
+    (!stops.is_empty()).then_some(stops)
+}
+
+fn rust_owned_linear_easing_stop(
+    component_values: Vec<ComponentValue>,
+    filtered_input_string: &str,
+) -> Option<RustOwnedLinearEasingStop> {
+    let component_values: Vec<_> = component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .cloned()
+        .collect();
+    let mut component_values = component_values.into_iter().peekable();
+
+    let mut output = None;
+    if component_values
+        .peek()
+        .is_some_and(component_value_parse_as_number_prefix)
+    {
+        output = Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(&component_values.next()?),
+            filtered_input_string,
+        )?);
+    }
+
+    let mut stop_lengths = Vec::new();
+    for _ in 0..2 {
+        if component_values.peek().is_some_and(|component_value| {
+            parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
+        }) {
+            stop_lengths.push(serialize_component_values_for_reparsing(
+                std::slice::from_ref(&component_values.next()?),
+                filtered_input_string,
+            )?);
+        }
+    }
+
+    if component_values
+        .peek()
+        .is_some_and(component_value_parse_as_number_prefix)
+    {
+        if output.is_some() {
+            return None;
+        }
+        output = Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(&component_values.next()?),
+            filtered_input_string,
+        )?);
+    }
+
+    if component_values.next().is_some() {
+        return None;
+    }
+
+    Some(RustOwnedLinearEasingStop {
+        output: output?,
+        first_stop_length: stop_lengths.first().cloned(),
+        second_stop_length: stop_lengths.get(1).cloned(),
+    })
+}
+
+fn rust_owned_single_component_function_arguments(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<Vec<ComponentValue>> {
+    parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        let [component_value] = strip_whitespace(&component_values) else {
+            return None;
+        };
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+        Some(component_value.clone())
     })
 }
 
@@ -18107,11 +18314,12 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedImageSet,
-        RustOwnedImageSetOption, RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode,
-        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedDimensionStyleValue, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
+        RustOwnedMathFunction, RustOwnedPositionalValueListShorthandItem, RustOwnedSourceBackedStyleValue,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -19765,9 +19973,48 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TransitionTimingFunction,
-                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedSourceBackedStyleValue {
-                    value_type: Some(PropertyValueType::EasingFunction),
+                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
+                    value: RustOwnedEasingFunctionValue::Linear(vec![
+                        RustOwnedLinearEasingStop {
+                            output: "0".to_string(),
+                            first_stop_length: None,
+                            second_stop_length: None,
+                        },
+                        RustOwnedLinearEasingStop {
+                            output: "1".to_string(),
+                            first_stop_length: None,
+                            second_stop_length: None,
+                        },
+                    ]),
                     source: "linear(0, 1)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "cubic-bezier(0, 0, 1, 1)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransitionTimingFunction,
+                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
+                    value: RustOwnedEasingFunctionValue::CubicBezier {
+                        x1: "0".to_string(),
+                        y1: "0".to_string(),
+                        x2: "1".to_string(),
+                        y2: "1".to_string(),
+                    },
+                    source: "cubic-bezier(0, 0, 1, 1)".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "steps(2, jump-none)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::TransitionTimingFunction,
+                value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
+                    value: RustOwnedEasingFunctionValue::Steps {
+                        intervals: "2".to_string(),
+                        position: Some("jump-none".to_string()),
+                    },
+                    source: "steps(2, jump-none)".to_string(),
                 }),
             })
         );
