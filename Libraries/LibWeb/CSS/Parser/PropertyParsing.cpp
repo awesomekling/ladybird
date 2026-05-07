@@ -978,42 +978,75 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
 {
     auto const& longhands = longhands_for_shorthand(property_id);
 
+    auto create_shorthand_value = [&](Vector<ValueComparingNonnullRefPtr<StyleValue const>> const& parsed_values) -> RefPtr<StyleValue const> {
+        if (parsed_values.is_empty() || parsed_values.size() > longhands.size())
+            return nullptr;
+
+        switch (longhands.size()) {
+        case 2: {
+            switch (parsed_values.size()) {
+            case 1:
+                return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[0] });
+            case 2:
+                return ShorthandStyleValue::create(property_id, longhands, parsed_values);
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        case 4: {
+            switch (parsed_values.size()) {
+            case 1:
+                return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[0], parsed_values[0], parsed_values[0] });
+            case 2:
+                return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[0], parsed_values[1] });
+            case 3:
+                return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[2], parsed_values[1] });
+            case 4:
+                return ShorthandStyleValue::create(property_id, longhands, parsed_values);
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        default:
+            TODO();
+        }
+    };
+
+    {
+        auto rust_transaction = tokens.begin_transaction();
+        auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+        if (auto rust_items = RustComponentValueParser::parse_positional_value_list_shorthand(property_id, source.bytes_as_string_view()); rust_items.has_value()) {
+            Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
+
+            for (auto const& item : rust_items.value()) {
+                if (item.index != parsed_values.size())
+                    return {};
+
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                TokenStream<ComponentValue> value_tokens { component_values };
+                auto parsed_value = parse_css_value_for_property(property_id, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!parsed_value || value_tokens.has_next_token())
+                    return {};
+
+                parsed_values.append(parsed_value.release_nonnull());
+            }
+
+            if (auto shorthand_value = create_shorthand_value(parsed_values)) {
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+                rust_transaction.commit();
+                return shorthand_value;
+            }
+        }
+    }
+
     Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
 
     while (auto parsed_value = parse_css_value_for_property(property_id, tokens))
         parsed_values.append(parsed_value.release_nonnull());
 
-    if (parsed_values.size() == 0 || parsed_values.size() > longhands.size())
-        return nullptr;
-
-    switch (longhands.size()) {
-    case 2: {
-        switch (parsed_values.size()) {
-        case 1:
-            return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[0] });
-        case 2:
-            return ShorthandStyleValue::create(property_id, longhands, parsed_values);
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-    case 4: {
-        switch (parsed_values.size()) {
-        case 1:
-            return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[0], parsed_values[0], parsed_values[0] });
-        case 2:
-            return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[0], parsed_values[1] });
-        case 3:
-            return ShorthandStyleValue::create(property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[2], parsed_values[1] });
-        case 4:
-            return ShorthandStyleValue::create(property_id, longhands, parsed_values);
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-    default:
-        TODO();
-    }
+    return create_shorthand_value(parsed_values);
 }
 
 RefPtr<StyleValue const> Parser::parse_color_scheme_value(TokenStream<ComponentValue>& tokens)

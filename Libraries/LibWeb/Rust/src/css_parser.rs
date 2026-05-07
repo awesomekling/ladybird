@@ -14,10 +14,10 @@ use crate::generated_media_features::{
     media_feature_id_from_string, media_feature_type_is_range,
 };
 use crate::generated_properties::{
-    PropertyNumericRange, PropertyValueType, property_accepted_range_by_value_type, property_accepts_keyword,
-    property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
-    property_resolves_percentages_relative_to, property_value_type_from_css_value_type_name, property_value_type_name,
-    resolve_legacy_value_alias,
+    PropertyNumericRange, PropertyValueType, longhands_for_shorthand, property_accepted_range_by_value_type,
+    property_accepts_keyword, property_accepts_value_type, property_custom_ident_blacklist, property_id_from_u16,
+    property_is_positional_value_list_shorthand, property_resolves_percentages_relative_to,
+    property_value_type_from_css_value_type_name, property_value_type_name, resolve_legacy_value_alias,
 };
 use crate::generated_pseudo_classes::{
     PseudoClassId, PseudoClassParameterType, pseudo_class_id_from_string, pseudo_class_metadata,
@@ -2198,6 +2198,67 @@ where
 
     parser.discard_whitespace();
     !parser.has_next_component_value()
+}
+
+pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(usize, &str),
+{
+    let Some(property_id) = property_id_from_u16(property_id) else {
+        return false;
+    };
+    if !property_is_positional_value_list_shorthand(property_id) {
+        return false;
+    }
+
+    let longhands = longhands_for_shorthand(property_id);
+    if !matches!(longhands.len(), 2 | 4) {
+        return false;
+    }
+
+    let property_ids = [property_id as u16];
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut values = Vec::new();
+
+    loop {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+        if values.len() == longhands.len() {
+            return false;
+        }
+
+        let start = parser.index;
+        parser.index += 1;
+        let Some(serialized_value) = serialize_component_values_for_reparsing(
+            &parser.component_values[start..parser.index],
+            filtered_input_string,
+        ) else {
+            return false;
+        };
+
+        if !parse_style_value_for_property(
+            &property_ids,
+            serialized_value.as_bytes(),
+            |_, _, _, _, _, _, _, _, _| {},
+        ) {
+            return false;
+        }
+        values.push(serialized_value);
+    }
+
+    if values.is_empty() {
+        return false;
+    }
+
+    for (index, value) in values.iter().enumerate() {
+        callback(index, value);
+    }
+
+    true
 }
 
 fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
@@ -16442,15 +16503,16 @@ mod tests {
         parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
         parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
         parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
-        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
-        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
-        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
-        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
-        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
-        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
-        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
-        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_style_value_for_property,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -17426,6 +17488,14 @@ mod tests {
         .then_some(items)
     }
 
+    fn parse_positional_shorthand(property_id: PropertyId, input: &str) -> Option<Vec<(usize, String)>> {
+        let mut items = Vec::new();
+        parse_positional_value_list_shorthand(property_id as u16, input.as_bytes(), |index, value| {
+            items.push((index, value.to_string()));
+        })
+        .then_some(items)
+    }
+
     #[derive(Debug, PartialEq)]
     struct PropertyNumericMetadata {
         property_id: PropertyId,
@@ -18177,6 +18247,30 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn parses_positional_value_list_shorthands() {
+        assert_eq!(
+            parse_positional_shorthand(PropertyId::Margin, "1px 2% auto calc(3px + 4%)"),
+            Some(vec![
+                (0, "1px".to_string()),
+                (1, "2%".to_string()),
+                (2, "auto".to_string()),
+                (3, "calc(3px + 4%)".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_positional_shorthand(PropertyId::BorderBlockWidth, "thin 2px"),
+            Some(vec![(0, "thin".to_string()), (1, "2px".to_string())])
+        );
+        assert_eq!(parse_positional_shorthand(PropertyId::Margin, ""), None);
+        assert_eq!(
+            parse_positional_shorthand(PropertyId::Margin, "1px 2px 3px 4px 5px"),
+            None
+        );
+        assert_eq!(parse_positional_shorthand(PropertyId::Margin, "1px red"), None);
+        assert_eq!(parse_positional_shorthand(PropertyId::Color, "red"), None);
     }
 
     #[test]

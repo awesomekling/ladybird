@@ -1003,6 +1003,27 @@ Optional<Vector<RustComponentValueParser::CoordinatingValueListShorthandItem>> R
     return items;
 }
 
+Optional<Vector<RustComponentValueParser::PositionalValueListShorthandItem>> RustComponentValueParser::parse_positional_value_list_shorthand(PropertyID property_id, StringView input)
+{
+    Vector<PositionalValueListShorthandItem> items;
+    auto input_bytes = input.bytes();
+    if (!FFI::rust_css_parse_positional_value_list_shorthand(
+            static_cast<u16>(to_underlying(property_id)),
+            input_bytes.data(),
+            input_bytes.size(),
+            &items,
+            [](void* raw_items, size_t index, u8 const* value_ptr, size_t value_len) {
+                auto& items = *static_cast<Vector<PositionalValueListShorthandItem>*>(raw_items);
+                items.append(PositionalValueListShorthandItem {
+                    .index = index,
+                    .value = String::from_utf8_without_validation({ value_ptr, value_len }),
+                });
+            }))
+        return {};
+
+    return items;
+}
+
 Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

@@ -214,6 +214,20 @@ pub(crate) fn property_is_shorthand(property_id: PropertyId) -> bool {
 }
 
 #[allow(dead_code)]
+pub(crate) fn property_is_positional_value_list_shorthand(property_id: PropertyId) -> bool {
+    matches!(property_id""")
+    first = True
+    for name, value in properties.items():
+        if "legacy-alias-for" in value or "positional-value-list-shorthand" not in value:
+            continue
+        separator = "," if first else " |"
+        out.write(f"{separator}\n        PropertyId::{property_title(name)}")
+        first = False
+    out.write("""
+    )
+}
+
+#[allow(dead_code)]
 pub(crate) fn longhands_for_shorthand(property_id: PropertyId) -> &'static [PropertyId] {
     match property_id {""")
 

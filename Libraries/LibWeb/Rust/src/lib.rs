@@ -648,6 +648,30 @@ pub unsafe extern "C" fn rust_css_parse_coordinating_value_list_shorthand(
 }
 
 /// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_positional_value_list_shorthand(
+    property_id: u16,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, index: usize, value: *const u8, value_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_positional_value_list_shorthand(property_id, input, |index, value| {
+                callback(ctx, index, value.as_ptr(), value.len());
+            })
+        })
+    }
+}
+
+/// # Safety
 /// - `property_ids` and `property_ids_len` must point to valid PropertyID values
 /// - `value_type` and `value_type_len` must point to a valid string
 /// - Parameters provided to `callback` must be valid pointers
