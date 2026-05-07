@@ -4161,6 +4161,19 @@ RefPtr<StyleValue const> Parser::parse_quotes_value(TokenStream<ComponentValue>&
 RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
+    auto start = tokens.current_index();
+
+    auto validate_parsed_repeat_style = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
+        if (!value)
+            return nullptr;
+
+        auto serialized_repeat_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        if (RustComponentValueParser::parse_repeat_style(serialized_repeat_style.bytes_as_string_view(), "utf-8"sv) == FFI::CssRepeatStyleValueKind::Invalid)
+            return nullptr;
+
+        transaction.commit();
+        return value;
+    };
 
     auto is_directional_repeat = [](StyleValue const& value) -> bool {
         auto keyword = value.to_keyword();
@@ -4189,10 +4202,9 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
 
     if (is_directional_repeat(*x_value)) {
         auto keyword = x_value->to_keyword();
-        transaction.commit();
-        return RepeatStyleStyleValue::create(
+        return validate_parsed_repeat_style(RepeatStyleStyleValue::create(
             keyword == Keyword::RepeatX ? Repetition::Repeat : Repetition::NoRepeat,
-            keyword == Keyword::RepeatX ? Repetition::NoRepeat : Repetition::Repeat);
+            keyword == Keyword::RepeatX ? Repetition::NoRepeat : Repetition::Repeat));
     }
 
     auto x_repeat = as_repeat(x_value->to_keyword());
@@ -4203,8 +4215,7 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
     auto maybe_y_value = parse_css_value_for_property(property, tokens);
     if (!maybe_y_value) {
         // We don't have a second value, so use x for both
-        transaction.commit();
-        return RepeatStyleStyleValue::create(x_repeat.value(), x_repeat.value());
+        return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), x_repeat.value()));
     }
     auto y_value = maybe_y_value.release_nonnull();
     if (is_directional_repeat(*y_value))
@@ -4214,8 +4225,7 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
     if (!y_repeat.has_value())
         return nullptr;
 
-    transaction.commit();
-    return RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value());
+    return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value()));
 }
 
 RefPtr<StyleValue const> Parser::parse_text_decoration_value(TokenStream<ComponentValue>& tokens)

@@ -1128,6 +1128,13 @@ pub enum CssBackgroundSizeValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssRepeatStyleValueKind {
+    Invalid,
+    Valid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssWhiteSpaceTrimValueKind {
     Invalid,
     None,
@@ -5342,6 +5349,40 @@ fn consume_non_negative_length_percentage_component_value(parser: &mut Component
     }
 
     false
+}
+
+pub(crate) fn parse_repeat_style_value(filtered_input: &[u8]) -> CssRepeatStyleValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    if consume_repeat_style_value(&mut parser) && parser_has_no_remaining_component_values(&mut parser) {
+        CssRepeatStyleValueKind::Valid
+    } else {
+        CssRepeatStyleValueKind::Invalid
+    }
+}
+
+fn consume_repeat_style_value(parser: &mut ComponentValueParser) -> bool {
+    // https://drafts.csswg.org/css-backgrounds-3/#typedef-repeat-style
+    // <repeat-style> = repeat-x | repeat-y | [ repeat | space | round | no-repeat ]{1,2}
+    if consume_optional_ident_matching(parser, "repeat-x") || consume_optional_ident_matching(parser, "repeat-y") {
+        return true;
+    }
+
+    if !consume_non_directional_repeat_style_value(parser) {
+        return false;
+    }
+
+    consume_non_directional_repeat_style_value(parser);
+    true
+}
+
+fn consume_non_directional_repeat_style_value(parser: &mut ComponentValueParser) -> bool {
+    consume_optional_ident_matching(parser, "repeat")
+        || consume_optional_ident_matching(parser, "space")
+        || consume_optional_ident_matching(parser, "round")
+        || consume_optional_ident_matching(parser, "no-repeat")
 }
 
 pub(crate) fn parse_translate_value(filtered_input: &[u8]) -> CssTransformLonghandValueKind {
@@ -14479,31 +14520,32 @@ mod tests {
         CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssScrollFunctionAxisKind,
-        CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
-        CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal,
-        CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
-        CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
-        CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind,
-        CssTransformFunctionValueKind, CssTransformLonghandValueKind, CssTransitionBehaviorItemKind,
-        CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind,
-        CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue,
-        CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-        CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-        CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-        FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-        MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison,
-        NamespaceType, OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext,
-        RuleOrListOfDeclarations, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
+        CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
+        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
+        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
+        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
+        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
+        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
+        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
+        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
+        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -14518,8 +14560,8 @@ mod tests {
         parse_length_descriptor, parse_optional_declaration_value_descriptor, parse_page_size_descriptor,
         parse_paint_order_value, parse_position_anchor_value, parse_position_try_order_value, parse_position_value,
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value_prefix,
-        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_rotate_value, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
+        parse_quotes_value, parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value,
+        parse_scale_value, parse_scroll_function_value, parse_scrollbar_gutter_value, parse_string_descriptor,
         parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
         parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
         parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
@@ -15149,6 +15191,10 @@ mod tests {
 
     fn parse_background_size(input: &str) -> CssBackgroundSizeValueKind {
         parse_background_size_value(input.as_bytes())
+    }
+
+    fn parse_repeat_style(input: &str) -> CssRepeatStyleValueKind {
+        parse_repeat_style_value(input.as_bytes())
     }
 
     fn parse_translate(input: &str) -> CssTransformLonghandValueKind {
@@ -18244,6 +18290,31 @@ mod tests {
         assert_eq!(
             parse_background_size("1px 2px 3px"),
             CssBackgroundSizeValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_repeat_style_values() {
+        assert_eq!(parse_repeat_style("repeat-x"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("repeat-y"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("repeat"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("space"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("round"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("no-repeat"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("repeat space"), CssRepeatStyleValueKind::Valid);
+        assert_eq!(parse_repeat_style("round no-repeat"), CssRepeatStyleValueKind::Valid);
+    }
+
+    #[test]
+    fn rejects_invalid_repeat_style_values() {
+        assert_eq!(parse_repeat_style(""), CssRepeatStyleValueKind::Invalid);
+        assert_eq!(parse_repeat_style("auto"), CssRepeatStyleValueKind::Invalid);
+        assert_eq!(parse_repeat_style("repeat-z"), CssRepeatStyleValueKind::Invalid);
+        assert_eq!(parse_repeat_style("repeat undefined"), CssRepeatStyleValueKind::Invalid);
+        assert_eq!(parse_repeat_style("repeat-x repeat"), CssRepeatStyleValueKind::Invalid);
+        assert_eq!(
+            parse_repeat_style("repeat space round"),
+            CssRepeatStyleValueKind::Invalid
         );
     }
 
