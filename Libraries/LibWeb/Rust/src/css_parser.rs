@@ -1857,6 +1857,7 @@ pub enum CssStyleValueKind {
     Quotes,
     RepeatStyle,
     ScrollFunction,
+    ScrollbarColor,
     ScrollbarGutter,
     TimelineName,
     TimelineScope,
@@ -1981,7 +1982,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     RepeatStyle(RustOwnedRepeatStyle),
     Resolution(RustOwnedDimensionStyleValue),
-    ScrollbarColor(RustOwnedSourceBackedStyleValue),
+    ScrollbarColor(RustOwnedScrollbarColor),
     ScrollbarGutter(RustOwnedScrollbarGutter),
     Shadow(RustOwnedSourceBackedStyleValue),
     Shorthand(RustOwnedStyleValueList),
@@ -2260,6 +2261,12 @@ pub(crate) struct RustOwnedRepeatStyle {
     repeat_x: CssRepeatStyleRepetition,
     repeat_y: CssRepeatStyleRepetition,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedScrollbarColor {
+    Auto { source: String },
+    Colors { source: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2738,6 +2745,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackgroundRepeat | PropertyId::MaskRepeat => {
             rust_owned_repeat_style_style_value_kind(filtered_input)
         }
+        PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
         PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
         PropertyId::TimelineScope => rust_owned_timeline_scope_style_value_kind(filtered_input),
         PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
@@ -3447,6 +3455,48 @@ fn consume_non_directional_repeat_style_value_kind(
         return Some(CssRepeatStyleRepetition::NoRepeat);
     }
     None
+}
+
+fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-scrollbars/#propdef-scrollbar-color
+    // auto | <color>{2}
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+        && value.eq_ignore_ascii_case("auto")
+    {
+        return Some(RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto {
+            source,
+        }));
+    }
+
+    let colors: Vec<_> = component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .collect();
+    let [thumb_color, track_color] = colors.as_slice() else {
+        return None;
+    };
+
+    let thumb_color_source = serialize_component_values_for_reparsing(std::slice::from_ref(*thumb_color), &source)?;
+    let track_color_source = serialize_component_values_for_reparsing(std::slice::from_ref(*track_color), &source)?;
+    if parse_color_value(thumb_color_source.as_bytes(), false) != CssColorValueKind::Valid
+        || parse_color_value(track_color_source.as_bytes(), false) != CssColorValueKind::Valid
+    {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ScrollbarColor(
+        RustOwnedScrollbarColor::Colors { source },
+    ))
 }
 
 fn rust_owned_scrollbar_gutter_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4288,7 +4338,6 @@ where
         | RustOwnedStyleValueKind::RadialGradient(value)
         | RustOwnedStyleValueKind::RadialSize(value)
         | RustOwnedStyleValueKind::RandomValueSharing(value)
-        | RustOwnedStyleValueKind::ScrollbarColor(value)
         | RustOwnedStyleValueKind::Shadow(value)
         | RustOwnedStyleValueKind::Superellipse(value)
         | RustOwnedStyleValueKind::Transformation(value)
@@ -4476,6 +4525,24 @@ where
             0.0,
             value.repeat_x as u8,
             value.repeat_y as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedStyleValueKind::ScrollbarColor(value) => callback(
+            CssStyleValueKind::ScrollbarColor,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            match value {
+                RustOwnedScrollbarColor::Auto { .. } => 1,
+                RustOwnedScrollbarColor::Colors { .. } => 2,
+            },
+            0,
             0,
             0,
             &[],
@@ -20039,9 +20106,9 @@ mod tests {
         RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFontStyle,
         RustOwnedGridAutoFlow, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop,
         RustOwnedMathFunction, RustOwnedPaintOrder, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarGutter,
-        RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedSourceBackedStyleValue, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTouchAction, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
         SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
@@ -21982,6 +22049,24 @@ mod tests {
                     repeat_x: CssRepeatStyleRepetition::Repeat,
                     repeat_y: CssRepeatStyleRepetition::Space,
                     source: "repeat space".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ScrollbarColor], "auto"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ScrollbarColor,
+                value: RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto {
+                    source: "auto".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ScrollbarColor], "red CanvasText"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ScrollbarColor,
+                value: RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Colors {
+                    source: "red CanvasText".to_string(),
                 }),
             })
         );

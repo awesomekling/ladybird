@@ -930,6 +930,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::ScrollbarColor:
+                if (rust_style_value->scrollbar_color_kind == 1) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
+                }
+                if (rust_style_value->scrollbar_color_kind == 2) {
+                    auto thumb_color = parse_color_value(tokens);
+                    if (!thumb_color)
+                        break;
+                    tokens.discard_whitespace();
+                    auto track_color = parse_color_value(tokens);
+                    if (!track_color)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, ScrollbarColorStyleValue::create(thumb_color.release_nonnull(), track_color.release_nonnull()) };
+                }
+                break;
             case FFI::CssStyleValueKind::ScrollbarGutter:
                 switch (rust_style_value->scrollbar_gutter) {
                 case FFI::CssScrollbarGutterValueKind::Invalid:

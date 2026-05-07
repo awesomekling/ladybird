@@ -129,6 +129,7 @@ public:
         FFI::CssPositionVisibilityValue position_visibility {};
         u8 repeat_x { 1 };
         u8 repeat_y { 1 };
+        u8 scrollbar_color_kind { 0 };
         FFI::CssScrollbarGutterValueKind scrollbar_gutter { FFI::CssScrollbarGutterValueKind::Invalid };
         FFI::CssTextWrapValue text_wrap {};
         FFI::CssTextWrapModeValue text_wrap_mode { FFI::CssTextWrapModeValue::Invalid };

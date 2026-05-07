@@ -1024,6 +1024,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
                 value.repeat_x = color_red;
                 value.repeat_y = color_green;
+            } else if (kind == FFI::CssStyleValueKind::ScrollbarColor) {
+                value.scrollbar_color_kind = color_red;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
                 value.scrollbar_gutter = static_cast<FFI::CssScrollbarGutterValueKind>(color_red);
             } else if (kind == FFI::CssStyleValueKind::TextWrap) {
