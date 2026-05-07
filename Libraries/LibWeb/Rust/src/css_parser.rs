@@ -3241,16 +3241,22 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
         PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
+            | PropertyId::BoxShadow
             | PropertyId::ColorScheme
             | PropertyId::Contain
             | PropertyId::ContainerType
+            | PropertyId::Content
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
             | PropertyId::FontLanguageOverride
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
+            | PropertyId::ListStyle
             | PropertyId::MathDepth
             | PropertyId::PaintOrder
+            | PropertyId::PlaceContent
+            | PropertyId::PlaceItems
+            | PropertyId::PlaceSelf
             | PropertyId::PositionAnchor
             | PropertyId::PositionArea
             | PropertyId::PositionTryFallbacks
@@ -3260,11 +3266,14 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Rotate
             | PropertyId::Scale
             | PropertyId::ScrollTimelineName
+            | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
+            | PropertyId::ShapeOutside
             | PropertyId::StrokeDasharray
             | PropertyId::TextDecoration
             | PropertyId::TextDecorationLine
             | PropertyId::TextIndent
+            | PropertyId::TextShadow
             | PropertyId::TextUnderlinePosition
             | PropertyId::TextWrap
             | PropertyId::TextWrapMode
@@ -4452,6 +4461,17 @@ fn rust_owned_counter_definitions_style_value_kind(
 ) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values.as_slice()
+        && value.eq_ignore_ascii_case("none")
+    {
+        return Some(RustOwnedStyleValueKind::Keyword("none".to_string()));
+    }
+
     let mut parser = ComponentValueParser::new(component_values);
     let mut definitions = Vec::new();
 

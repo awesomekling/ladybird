@@ -404,7 +404,6 @@ private:
     RefPtr<StyleValue const> parse_border_radius_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_border_radius_shorthand_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_columns_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_content_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_increment_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_reset_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_set_value(TokenStream<ComponentValue>&);
@@ -420,18 +419,10 @@ private:
     RefPtr<StyleValue const> parse_font_variant_emoji(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_list_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_mask_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_overflow_clip_margin_shorthand(PropertyID, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_place_content_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_place_items_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_place_self_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_repeat_style_value(PropertyID, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_scrollbar_color_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
-    RefPtr<StyleValue const> parse_single_shadow_value(TokenStream<ComponentValue>&, ShadowStyleValue::ShadowType);
-    RefPtr<StyleValue const> parse_shape_outside_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);

@@ -266,16 +266,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::AnchorName:
         case PropertyID::AnchorScope:
         case PropertyID::AnimationName:
+        case PropertyID::BoxShadow:
         case PropertyID::ColorScheme:
         case PropertyID::Contain:
         case PropertyID::ContainerType:
+        case PropertyID::Content:
         case PropertyID::FontFamily:
         case PropertyID::FontFeatureSettings:
         case PropertyID::FontLanguageOverride:
         case PropertyID::FontVariant:
         case PropertyID::FontVariationSettings:
+        case PropertyID::ListStyle:
         case PropertyID::MathDepth:
         case PropertyID::PaintOrder:
+        case PropertyID::PlaceContent:
+        case PropertyID::PlaceItems:
+        case PropertyID::PlaceSelf:
         case PropertyID::PositionAnchor:
         case PropertyID::PositionArea:
         case PropertyID::PositionTryFallbacks:
@@ -285,11 +291,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::Rotate:
         case PropertyID::Scale:
         case PropertyID::ScrollTimelineName:
+        case PropertyID::ScrollbarColor:
         case PropertyID::ScrollbarGutter:
+        case PropertyID::ShapeOutside:
         case PropertyID::StrokeDasharray:
         case PropertyID::TextDecoration:
         case PropertyID::TextDecorationLine:
         case PropertyID::TextIndent:
+        case PropertyID::TextShadow:
         case PropertyID::TextUnderlinePosition:
         case PropertyID::TextWrap:
         case PropertyID::TextWrapMode:
@@ -3600,13 +3609,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BorderRadius:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_radius_shorthand_value(tokens); });
     case PropertyID::BoxShadow:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Normal); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::ColorScheme:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Columns:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_columns_value(tokens); });
     case PropertyID::Content:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_content_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::CounterIncrement:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_counter_increment_value(tokens); });
     case PropertyID::CounterReset:
@@ -3659,7 +3668,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::GridAutoRows:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_auto_track_sizes(tokens); });
     case PropertyID::ListStyle:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_list_style_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Mask:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_mask_value(tokens); });
     case PropertyID::MaskPosition:
@@ -3694,22 +3703,20 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::OverflowClipMarginInline:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_overflow_clip_margin_shorthand(property_id, tokens); });
     case PropertyID::PlaceContent:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_place_content_value(tokens); });
     case PropertyID::PlaceItems:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_place_items_value(tokens); });
     case PropertyID::PlaceSelf:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_place_self_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::PositionAnchor:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::PositionArea:
     case PropertyID::PositionTryFallbacks:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::ScrollbarColor:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_scrollbar_color_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::ShapeOutside:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_shape_outside_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::TextShadow:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Text); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Transition:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transition_value(tokens); });
     default:
@@ -4853,275 +4860,6 @@ RefPtr<StyleValue const> Parser::parse_columns_value(TokenStream<ComponentValue>
         { column_count.release_nonnull(), column_width.release_nonnull(), column_height.release_nonnull() });
 }
 
-RefPtr<StyleValue const> Parser::parse_shadow_value(TokenStream<ComponentValue>& tokens, ShadowStyleValue::ShadowType shadow_type)
-{
-    // "none"
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    return parse_comma_separated_value_list(tokens, [this, shadow_type](auto& tokens) {
-        return parse_single_shadow_value(tokens, shadow_type);
-    });
-}
-
-RefPtr<StyleValue const> Parser::parse_single_shadow_value(TokenStream<ComponentValue>& tokens, ShadowStyleValue::ShadowType shadow_type)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    RefPtr<StyleValue const> color;
-    RefPtr<StyleValue const> offset_x;
-    RefPtr<StyleValue const> offset_y;
-    RefPtr<StyleValue const> blur_radius;
-    RefPtr<StyleValue const> spread_distance;
-    Optional<ShadowPlacement> placement;
-
-    while (tokens.has_next_token()) {
-        if (auto maybe_color = parse_color_value(tokens); maybe_color) {
-            if (color)
-                return nullptr;
-            color = maybe_color.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        auto const& token = tokens.next_token();
-        if (auto maybe_offset_x = parse_length_value(tokens, infinite_range); maybe_offset_x) {
-            // horizontal offset
-            if (offset_x)
-                return nullptr;
-            offset_x = maybe_offset_x;
-
-            // vertical offset
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                return nullptr;
-            auto maybe_offset_y = parse_length_value(tokens, infinite_range);
-            if (!maybe_offset_y)
-                return nullptr;
-            offset_y = maybe_offset_y;
-
-            // blur radius (optional)
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-
-            auto maybe_blur_radius = parse_length_value(tokens, non_negative_range);
-            if (!maybe_blur_radius)
-                continue;
-            blur_radius = maybe_blur_radius;
-
-            // spread distance (optional)
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            auto maybe_spread_distance = parse_length_value(tokens, infinite_range);
-            if (!maybe_spread_distance)
-                continue;
-
-            if (shadow_type == ShadowStyleValue::ShadowType::Text)
-                return nullptr;
-
-            spread_distance = maybe_spread_distance;
-
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        if (shadow_type == ShadowStyleValue::ShadowType::Normal && token.is_ident("inset"sv)) {
-            if (placement.has_value())
-                return nullptr;
-            placement = ShadowPlacement::Inner;
-            tokens.discard_a_token(); // inset
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        if (token.is(Token::Type::Comma))
-            break;
-
-        return nullptr;
-    }
-
-    // x/y offsets are required
-    if (!offset_x || !offset_y)
-        return nullptr;
-
-    // Placement is outer by default
-    if (!placement.has_value())
-        placement = ShadowPlacement::Outer;
-
-    transaction.commit();
-    return ShadowStyleValue::create(shadow_type, color, offset_x.release_nonnull(), offset_y.release_nonnull(), blur_radius, spread_distance, placement.release_value());
-}
-
-RefPtr<StyleValue const> Parser::parse_shape_outside_value(TokenStream<ComponentValue>& tokens)
-{
-    // none | [ <basic-shape> || <shape-box> ] | <image>
-    auto transaction = tokens.begin_transaction();
-
-    // none
-    if (auto maybe_none = parse_all_as_single_keyword_value(tokens, Keyword::None)) {
-        transaction.commit();
-        return maybe_none;
-    }
-
-    // <image>
-    if (auto maybe_image = parse_image_value(tokens)) {
-        transaction.commit();
-        return maybe_image;
-    }
-
-    // [ <basic-shape> || <shape-box> ]
-    RefPtr<StyleValue const> basic_shape_value;
-    RefPtr<StyleValue const> shape_box_value;
-    while (tokens.has_next_token()) {
-        if (auto maybe_basic_shape_value = parse_basic_shape_value(tokens)) {
-            if (basic_shape_value)
-                return nullptr;
-            basic_shape_value = maybe_basic_shape_value;
-            continue;
-        }
-
-        if (auto maybe_keyword_value = parse_keyword_value(tokens)) {
-            if (shape_box_value)
-                return nullptr;
-            if (!keyword_to_shape_box(maybe_keyword_value->to_keyword()).has_value())
-                return nullptr;
-            shape_box_value = maybe_keyword_value;
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    if (!basic_shape_value && !shape_box_value)
-        return nullptr;
-
-    transaction.commit();
-
-    if (basic_shape_value && !shape_box_value)
-        return basic_shape_value;
-
-    if (!basic_shape_value && shape_box_value)
-        return shape_box_value;
-
-    return StyleValueList::create({ basic_shape_value.release_nonnull(), shape_box_value.release_nonnull() }, StyleValueList::Separator::Space);
-}
-
-RefPtr<StyleValue const> Parser::parse_content_value(TokenStream<ComponentValue>& tokens)
-{
-    // FIXME: `content` accepts several kinds of function() type, which we don't handle in property_accepts_value() yet.
-
-    auto is_single_value_keyword = [](Keyword keyword) -> bool {
-        switch (keyword) {
-        case Keyword::None:
-        case Keyword::Normal:
-            return true;
-        default:
-            return false;
-        }
-    };
-
-    auto parse_quote_value = [this](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        auto keyword_value = parse_keyword_value(tokens);
-        if (!keyword_value)
-            return nullptr;
-
-        switch (keyword_value->to_keyword()) {
-        case Keyword::OpenQuote:
-        case Keyword::CloseQuote:
-        case Keyword::NoOpenQuote:
-        case Keyword::NoCloseQuote:
-            transaction.commit();
-            return keyword_value;
-        default:
-            return nullptr;
-        }
-    };
-
-    auto parse_content_item = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        // https://drafts.csswg.org/css-content-3/#typedef-content-list
-        // <content-list> = [ <string> | contents | <image> | <quote> | <target> | <leader()> ]+
-        //
-        // https://drafts.csswg.org/css-content-3/#typedef-quote
-        // <quote> = open-quote | close-quote | no-open-quote | no-close-quote
-        if (auto quote_value = parse_quote_value(tokens))
-            return quote_value;
-        if (auto string_value = parse_string_value(tokens))
-            return string_value;
-        if (auto image_value = parse_image_value(tokens))
-            return image_value;
-        if (auto counter_value = parse_counter_value(tokens))
-            return counter_value;
-
-        return nullptr;
-    };
-
-    auto parse_alt_text_item = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        // https://drafts.csswg.org/css-content-3/#content-property
-        // / [ <string> | <counter> | <attr()> ]+
-        // NB: <attr()> is handled as an arbitrary substitution function and does not reach this code path.
-        if (auto string_value = parse_string_value(tokens))
-            return string_value;
-        if (auto counter_value = parse_counter_value(tokens))
-            return counter_value;
-
-        return nullptr;
-    };
-
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none.release_nonnull();
-    if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
-        return normal.release_nonnull();
-
-    auto transaction = tokens.begin_transaction();
-
-    StyleValueVector content_values;
-    StyleValueVector alt_text_values;
-    bool in_alt_text = false;
-
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        auto& next = tokens.next_token();
-        if (next.is_delim('/')) {
-            if (in_alt_text || content_values.is_empty())
-                return nullptr;
-            in_alt_text = true;
-            tokens.discard_a_token(); // /
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        if (auto style_value = in_alt_text ? parse_alt_text_item(tokens) : parse_content_item(tokens)) {
-            if (is_single_value_keyword(style_value->to_keyword()))
-                return nullptr;
-
-            if (in_alt_text)
-                alt_text_values.append(style_value.release_nonnull());
-            else
-                content_values.append(style_value.release_nonnull());
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    if (content_values.is_empty())
-        return nullptr;
-    if (in_alt_text && alt_text_values.is_empty())
-        return nullptr;
-
-    RefPtr<StyleValueList> alt_text;
-    if (!alt_text_values.is_empty())
-        alt_text = StyleValueList::create(move(alt_text_values), StyleValueList::Separator::Space);
-
-    transaction.commit();
-    return ContentStyleValue::create(StyleValueList::create(move(content_values), StyleValueList::Separator::Space), move(alt_text));
-}
-
 // https://www.w3.org/TR/css-display-3/#the-display-properties
 RefPtr<StyleValue const> Parser::parse_display_value(TokenStream<ComponentValue>& tokens)
 {
@@ -5619,85 +5357,6 @@ RefPtr<StyleValue const> Parser::parse_font_family_value(TokenStream<ComponentVa
     return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
 }
 
-RefPtr<StyleValue const> Parser::parse_list_style_value(TokenStream<ComponentValue>& tokens)
-{
-    RefPtr<StyleValue const> list_position;
-    RefPtr<StyleValue const> list_image;
-    RefPtr<StyleValue const> list_type;
-    int found_nones = 0;
-
-    Vector<PropertyID> remaining_longhands { PropertyID::ListStyleImage, PropertyID::ListStylePosition, PropertyID::ListStyleType };
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        if (auto const& peek = tokens.next_token(); peek.is_ident("none"sv)) {
-            tokens.discard_a_token(); // none
-            found_nones++;
-            continue;
-        }
-
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        tokens.discard_whitespace();
-        if (!property_and_value.has_value())
-            return nullptr;
-        auto& value = property_and_value->style_value;
-        remove_property(remaining_longhands, property_and_value->property);
-
-        switch (property_and_value->property) {
-        case PropertyID::ListStylePosition: {
-            VERIFY(!list_position);
-            list_position = value.release_nonnull();
-            continue;
-        }
-        case PropertyID::ListStyleImage: {
-            VERIFY(!list_image);
-            list_image = value.release_nonnull();
-            continue;
-        }
-        case PropertyID::ListStyleType: {
-            VERIFY(!list_type);
-            list_type = value.release_nonnull();
-            continue;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    if (found_nones > 2)
-        return nullptr;
-
-    if (found_nones == 2) {
-        if (list_image || list_type)
-            return nullptr;
-        auto none = KeywordStyleValue::create(Keyword::None);
-        list_image = none;
-        list_type = none;
-
-    } else if (found_nones == 1) {
-        if (list_image && list_type)
-            return nullptr;
-        auto none = KeywordStyleValue::create(Keyword::None);
-        if (!list_image)
-            list_image = none;
-        if (!list_type)
-            list_type = none;
-    }
-
-    if (!list_position)
-        list_position = property_initial_value(PropertyID::ListStylePosition);
-    if (!list_image)
-        list_image = property_initial_value(PropertyID::ListStyleImage);
-    if (!list_type)
-        list_type = property_initial_value(PropertyID::ListStyleType);
-
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::ListStyle,
-        { PropertyID::ListStylePosition, PropertyID::ListStyleImage, PropertyID::ListStyleType },
-        { list_position.release_nonnull(), list_image.release_nonnull(), list_type.release_nonnull() });
-}
-
 RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& tokens)
 {
     // https://drafts.fxtf.org/css-masking-1/#the-mask
@@ -5980,81 +5639,6 @@ RefPtr<StyleValue const> Parser::parse_overflow_clip_margin_shorthand(PropertyID
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_place_content_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto maybe_align_content_value = parse_css_value_for_property(PropertyID::AlignContent, tokens);
-    if (!maybe_align_content_value)
-        return nullptr;
-
-    if (!tokens.has_next_token()) {
-        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifyContent, maybe_align_content_value->to_keyword()))
-            return nullptr;
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::PlaceContent,
-            { PropertyID::AlignContent, PropertyID::JustifyContent },
-            { *maybe_align_content_value, *maybe_align_content_value });
-    }
-
-    auto maybe_justify_content_value = parse_css_value_for_property(PropertyID::JustifyContent, tokens);
-    if (!maybe_justify_content_value)
-        return nullptr;
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::PlaceContent,
-        { PropertyID::AlignContent, PropertyID::JustifyContent },
-        { maybe_align_content_value.release_nonnull(), maybe_justify_content_value.release_nonnull() });
-}
-
-RefPtr<StyleValue const> Parser::parse_place_items_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto maybe_align_items_value = parse_css_value_for_property(PropertyID::AlignItems, tokens);
-    if (!maybe_align_items_value)
-        return nullptr;
-
-    if (!tokens.has_next_token()) {
-        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifyItems, maybe_align_items_value->to_keyword()))
-            return nullptr;
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::PlaceItems,
-            { PropertyID::AlignItems, PropertyID::JustifyItems },
-            { *maybe_align_items_value, *maybe_align_items_value });
-    }
-
-    auto maybe_justify_items_value = parse_css_value_for_property(PropertyID::JustifyItems, tokens);
-    if (!maybe_justify_items_value)
-        return nullptr;
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::PlaceItems,
-        { PropertyID::AlignItems, PropertyID::JustifyItems },
-        { *maybe_align_items_value, *maybe_justify_items_value });
-}
-
-RefPtr<StyleValue const> Parser::parse_place_self_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto maybe_align_self_value = parse_css_value_for_property(PropertyID::AlignSelf, tokens);
-    if (!maybe_align_self_value)
-        return nullptr;
-
-    if (!tokens.has_next_token()) {
-        if (!RustComponentValueParser::property_accepts_keyword(PropertyID::JustifySelf, maybe_align_self_value->to_keyword()))
-            return nullptr;
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::PlaceSelf,
-            { PropertyID::AlignSelf, PropertyID::JustifySelf },
-            { *maybe_align_self_value, *maybe_align_self_value });
-    }
-
-    auto maybe_justify_self_value = parse_css_value_for_property(PropertyID::JustifySelf, tokens);
-    if (!maybe_justify_self_value)
-        return nullptr;
-    transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::PlaceSelf,
-        { PropertyID::AlignSelf, PropertyID::JustifySelf },
-        { *maybe_align_self_value, *maybe_justify_self_value });
-}
-
 RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -6176,32 +5760,6 @@ RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentVal
         return nullptr;
 
     return parsed_value;
-}
-
-// https://drafts.csswg.org/css-scrollbars/#propdef-scrollbar-color
-RefPtr<StyleValue const> Parser::parse_scrollbar_color_value(TokenStream<ComponentValue>& tokens)
-{
-    // auto | <color>{2}
-    if (!tokens.has_next_token())
-        return nullptr;
-    if (auto auto_keyword = parse_all_as_single_keyword_value(tokens, Keyword::Auto))
-        return auto_keyword;
-
-    auto transaction = tokens.begin_transaction();
-
-    auto thumb_color = parse_color_value(tokens);
-    if (!thumb_color)
-        return nullptr;
-
-    tokens.discard_whitespace();
-
-    auto track_color = parse_color_value(tokens);
-    if (!track_color)
-        return nullptr;
-    tokens.discard_whitespace();
-    transaction.commit();
-
-    return ScrollbarColorStyleValue::create(thumb_color.release_nonnull(), track_color.release_nonnull());
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
