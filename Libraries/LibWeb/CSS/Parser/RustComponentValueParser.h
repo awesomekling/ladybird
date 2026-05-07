@@ -88,6 +88,15 @@ public:
         Optional<FlyString> string;
     };
 
+    struct SimpleColor {
+        FFI::CssParsedColorKind kind { FFI::CssParsedColorKind::Invalid };
+        u8 red { 0 };
+        u8 green { 0 };
+        u8 blue { 0 };
+        u8 alpha { 0 };
+        Optional<FlyString> name;
+    };
+
     struct CoordinatingValueListShorthandItem {
         size_t layer_index { 0 };
         PropertyID property_id;
@@ -324,6 +333,7 @@ public:
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input);
+    static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
     static Optional<Vector<CoordinatingValueListShorthandItem>> parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID>, StringView input);
     static Optional<Vector<PositionalValueListShorthandItem>> parse_positional_value_list_shorthand(PropertyID, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);

@@ -1155,6 +1155,14 @@ pub enum CssColorValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssParsedColorKind {
+    Invalid,
+    Rgba,
+    Keyword,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssImageSetValueKind {
     Invalid,
     Valid,
@@ -6238,6 +6246,40 @@ pub(crate) fn parse_color_value(filtered_input: &[u8], allow_quirky_color: bool)
     }
 }
 
+pub(crate) fn parse_simple_color_value<C>(filtered_input: &[u8], allow_quirky_color: bool, mut callback: C) -> bool
+where
+    C: FnMut(CssParsedColorKind, u8, u8, u8, u8, &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    let [component_value] = component_values else {
+        return false;
+    };
+
+    let Some(color) = simple_color_from_component_value(component_value, allow_quirky_color) else {
+        return false;
+    };
+
+    match color {
+        ParsedSimpleColor::Rgba {
+            red,
+            green,
+            blue,
+            alpha,
+            name,
+        } => {
+            callback(CssParsedColorKind::Rgba, red, green, blue, alpha, name.unwrap_or(""));
+        }
+        ParsedSimpleColor::Keyword { name } => {
+            callback(CssParsedColorKind::Keyword, 0, 0, 0, 0, name);
+        }
+    }
+
+    true
+}
+
 pub(crate) fn parse_image_set_value(filtered_input: &[u8]) -> CssImageSetValueKind {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -6811,6 +6853,314 @@ fn component_value_parse_as_quirky_color(component_value: &ComponentValue, allow
             ..
         }) => number.value() >= 0.0 && number_is_integer(*number),
         _ => false,
+    }
+}
+
+enum ParsedSimpleColor<'a> {
+    Rgba {
+        red: u8,
+        green: u8,
+        blue: u8,
+        alpha: u8,
+        name: Option<&'a str>,
+    },
+    Keyword {
+        name: &'a str,
+    },
+}
+
+fn simple_color_from_component_value(
+    component_value: &ComponentValue,
+    allow_quirky_color: bool,
+) -> Option<ParsedSimpleColor<'_>> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) => simple_color_from_ident(value, allow_quirky_color),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Hash { value, .. },
+            ..
+        }) => color_from_hex_string(value).map(|(red, green, blue, alpha)| ParsedSimpleColor::Rgba {
+            red,
+            green,
+            blue,
+            alpha,
+            name: None,
+        }),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if allow_quirky_color => {
+            if !number_is_integer(*number) || number.value() < 0.0 {
+                return None;
+            }
+            simple_color_from_quirky_serialization(&format!("{:.0}", number.value()))
+        }
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) if allow_quirky_color => {
+            if !number_is_integer(*number) || number.value() < 0.0 {
+                return None;
+            }
+            simple_color_from_quirky_serialization(&format!("{:.0}{unit}", number.value()))
+        }
+        _ => None,
+    }
+}
+
+fn simple_color_from_ident(value: &str, allow_quirky_color: bool) -> Option<ParsedSimpleColor<'_>> {
+    if value.eq_ignore_ascii_case("transparent") {
+        return Some(ParsedSimpleColor::Rgba {
+            red: 0,
+            green: 0,
+            blue: 0,
+            alpha: 0,
+            name: Some(value),
+        });
+    }
+
+    if let Some((red, green, blue)) = named_color_rgb(value) {
+        return Some(ParsedSimpleColor::Rgba {
+            red,
+            green,
+            blue,
+            alpha: 255,
+            name: Some(value),
+        });
+    }
+
+    if value.eq_ignore_ascii_case("currentcolor") || is_system_color(value) {
+        return Some(ParsedSimpleColor::Keyword { name: value });
+    }
+
+    if allow_quirky_color {
+        return simple_color_from_quirky_identifier(value);
+    }
+
+    None
+}
+
+fn simple_color_from_quirky_identifier(serialization: &str) -> Option<ParsedSimpleColor<'static>> {
+    if !matches!(serialization.len(), 3 | 6) || !serialization.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    color_from_hex_string(serialization).map(|(red, green, blue, alpha)| ParsedSimpleColor::Rgba {
+        red,
+        green,
+        blue,
+        alpha,
+        name: None,
+    })
+}
+
+fn simple_color_from_quirky_serialization(serialization: &str) -> Option<ParsedSimpleColor<'static>> {
+    let mut serialization = serialization.to_string();
+    if serialization.len() < 6 {
+        serialization = format!("{serialization:0>6}");
+    }
+    if !matches!(serialization.len(), 3 | 6) || !serialization.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    color_from_hex_string(&serialization).map(|(red, green, blue, alpha)| ParsedSimpleColor::Rgba {
+        red,
+        green,
+        blue,
+        alpha,
+        name: None,
+    })
+}
+
+fn color_from_hex_string(value: &str) -> Option<(u8, u8, u8, u8)> {
+    fn hex_nibble_to_u8(nibble: char) -> Option<u8> {
+        nibble.to_digit(16).and_then(|value| u8::try_from(value).ok())
+    }
+
+    let mut chars = value.chars();
+    match value.len() {
+        3 => {
+            let red = hex_nibble_to_u8(chars.next()?)?;
+            let green = hex_nibble_to_u8(chars.next()?)?;
+            let blue = hex_nibble_to_u8(chars.next()?)?;
+            Some((red * 17, green * 17, blue * 17, 255))
+        }
+        4 => {
+            let red = hex_nibble_to_u8(chars.next()?)?;
+            let green = hex_nibble_to_u8(chars.next()?)?;
+            let blue = hex_nibble_to_u8(chars.next()?)?;
+            let alpha = hex_nibble_to_u8(chars.next()?)?;
+            Some((red * 17, green * 17, blue * 17, alpha * 17))
+        }
+        6 | 8 => {
+            let bytes = value.as_bytes();
+            let red = u8::from_str_radix(std::str::from_utf8(&bytes[0..2]).ok()?, 16).ok()?;
+            let green = u8::from_str_radix(std::str::from_utf8(&bytes[2..4]).ok()?, 16).ok()?;
+            let blue = u8::from_str_radix(std::str::from_utf8(&bytes[4..6]).ok()?, 16).ok()?;
+            let alpha = if value.len() == 8 {
+                u8::from_str_radix(std::str::from_utf8(&bytes[6..8]).ok()?, 16).ok()?
+            } else {
+                255
+            };
+            Some((red, green, blue, alpha))
+        }
+        _ => None,
+    }
+}
+
+fn named_color_rgb(input: &str) -> Option<(u8, u8, u8)> {
+    match input.to_ascii_lowercase().as_str() {
+        "black" => Some((0x00, 0x00, 0x00)),
+        "silver" => Some((0xc0, 0xc0, 0xc0)),
+        "gray" => Some((0x80, 0x80, 0x80)),
+        "white" => Some((0xff, 0xff, 0xff)),
+        "maroon" => Some((0x80, 0x00, 0x00)),
+        "red" => Some((0xff, 0x00, 0x00)),
+        "purple" => Some((0x80, 0x00, 0x80)),
+        "fuchsia" => Some((0xff, 0x00, 0xff)),
+        "green" => Some((0x00, 0x80, 0x00)),
+        "lime" => Some((0x00, 0xff, 0x00)),
+        "olive" => Some((0x80, 0x80, 0x00)),
+        "yellow" => Some((0xff, 0xff, 0x00)),
+        "navy" => Some((0x00, 0x00, 0x80)),
+        "blue" => Some((0x00, 0x00, 0xff)),
+        "teal" => Some((0x00, 0x80, 0x80)),
+        "aqua" => Some((0x00, 0xff, 0xff)),
+        "orange" => Some((0xff, 0xa5, 0x00)),
+        "aliceblue" => Some((0xf0, 0xf8, 0xff)),
+        "antiquewhite" => Some((0xfa, 0xeb, 0xd7)),
+        "aquamarine" => Some((0x7f, 0xff, 0xd4)),
+        "azure" => Some((0xf0, 0xff, 0xff)),
+        "beige" => Some((0xf5, 0xf5, 0xdc)),
+        "bisque" => Some((0xff, 0xe4, 0xc4)),
+        "blanchedalmond" => Some((0xff, 0xeb, 0xcd)),
+        "blueviolet" => Some((0x8a, 0x2b, 0xe2)),
+        "brown" => Some((0xa5, 0x2a, 0x2a)),
+        "burlywood" => Some((0xde, 0xb8, 0x87)),
+        "cadetblue" => Some((0x5f, 0x9e, 0xa0)),
+        "chartreuse" => Some((0x7f, 0xff, 0x00)),
+        "chocolate" => Some((0xd2, 0x69, 0x1e)),
+        "coral" => Some((0xff, 0x7f, 0x50)),
+        "cornflowerblue" => Some((0x64, 0x95, 0xed)),
+        "cornsilk" => Some((0xff, 0xf8, 0xdc)),
+        "crimson" => Some((0xdc, 0x14, 0x3c)),
+        "cyan" => Some((0x00, 0xff, 0xff)),
+        "darkblue" => Some((0x00, 0x00, 0x8b)),
+        "darkcyan" => Some((0x00, 0x8b, 0x8b)),
+        "darkgoldenrod" => Some((0xb8, 0x86, 0x0b)),
+        "darkgray" => Some((0xa9, 0xa9, 0xa9)),
+        "darkgreen" => Some((0x00, 0x64, 0x00)),
+        "darkgrey" => Some((0xa9, 0xa9, 0xa9)),
+        "darkkhaki" => Some((0xbd, 0xb7, 0x6b)),
+        "darkmagenta" => Some((0x8b, 0x00, 0x8b)),
+        "darkolivegreen" => Some((0x55, 0x6b, 0x2f)),
+        "darkorange" => Some((0xff, 0x8c, 0x00)),
+        "darkorchid" => Some((0x99, 0x32, 0xcc)),
+        "darkred" => Some((0x8b, 0x00, 0x00)),
+        "darksalmon" => Some((0xe9, 0x96, 0x7a)),
+        "darkseagreen" => Some((0x8f, 0xbc, 0x8f)),
+        "darkslateblue" => Some((0x48, 0x3d, 0x8b)),
+        "darkslategray" => Some((0x2f, 0x4f, 0x4f)),
+        "darkslategrey" => Some((0x2f, 0x4f, 0x4f)),
+        "darkturquoise" => Some((0x00, 0xce, 0xd1)),
+        "darkviolet" => Some((0x94, 0x00, 0xd3)),
+        "deeppink" => Some((0xff, 0x14, 0x93)),
+        "deepskyblue" => Some((0x00, 0xbf, 0xff)),
+        "dimgray" => Some((0x69, 0x69, 0x69)),
+        "dimgrey" => Some((0x69, 0x69, 0x69)),
+        "dodgerblue" => Some((0x1e, 0x90, 0xff)),
+        "firebrick" => Some((0xb2, 0x22, 0x22)),
+        "floralwhite" => Some((0xff, 0xfa, 0xf0)),
+        "forestgreen" => Some((0x22, 0x8b, 0x22)),
+        "gainsboro" => Some((0xdc, 0xdc, 0xdc)),
+        "ghostwhite" => Some((0xf8, 0xf8, 0xff)),
+        "gold" => Some((0xff, 0xd7, 0x00)),
+        "goldenrod" => Some((0xda, 0xa5, 0x20)),
+        "greenyellow" => Some((0xad, 0xff, 0x2f)),
+        "grey" => Some((0x80, 0x80, 0x80)),
+        "honeydew" => Some((0xf0, 0xff, 0xf0)),
+        "hotpink" => Some((0xff, 0x69, 0xb4)),
+        "indianred" => Some((0xcd, 0x5c, 0x5c)),
+        "indigo" => Some((0x4b, 0x00, 0x82)),
+        "ivory" => Some((0xff, 0xff, 0xf0)),
+        "khaki" => Some((0xf0, 0xe6, 0x8c)),
+        "lavender" => Some((0xe6, 0xe6, 0xfa)),
+        "lavenderblush" => Some((0xff, 0xf0, 0xf5)),
+        "lawngreen" => Some((0x7c, 0xfc, 0x00)),
+        "lemonchiffon" => Some((0xff, 0xfa, 0xcd)),
+        "lightblue" => Some((0xad, 0xd8, 0xe6)),
+        "lightcoral" => Some((0xf0, 0x80, 0x80)),
+        "lightcyan" => Some((0xe0, 0xff, 0xff)),
+        "lightgoldenrodyellow" => Some((0xfa, 0xfa, 0xd2)),
+        "lightgray" => Some((0xd3, 0xd3, 0xd3)),
+        "lightgreen" => Some((0x90, 0xee, 0x90)),
+        "lightgrey" => Some((0xd3, 0xd3, 0xd3)),
+        "lightpink" => Some((0xff, 0xb6, 0xc1)),
+        "lightsalmon" => Some((0xff, 0xa0, 0x7a)),
+        "lightseagreen" => Some((0x20, 0xb2, 0xaa)),
+        "lightskyblue" => Some((0x87, 0xce, 0xfa)),
+        "lightslategray" => Some((0x77, 0x88, 0x99)),
+        "lightslategrey" => Some((0x77, 0x88, 0x99)),
+        "lightsteelblue" => Some((0xb0, 0xc4, 0xde)),
+        "lightyellow" => Some((0xff, 0xff, 0xe0)),
+        "limegreen" => Some((0x32, 0xcd, 0x32)),
+        "linen" => Some((0xfa, 0xf0, 0xe6)),
+        "magenta" => Some((0xff, 0x00, 0xff)),
+        "mediumaquamarine" => Some((0x66, 0xcd, 0xaa)),
+        "mediumblue" => Some((0x00, 0x00, 0xcd)),
+        "mediumorchid" => Some((0xba, 0x55, 0xd3)),
+        "mediumpurple" => Some((0x93, 0x70, 0xdb)),
+        "mediumseagreen" => Some((0x3c, 0xb3, 0x71)),
+        "mediumslateblue" => Some((0x7b, 0x68, 0xee)),
+        "mediumspringgreen" => Some((0x00, 0xfa, 0x9a)),
+        "mediumturquoise" => Some((0x48, 0xd1, 0xcc)),
+        "mediumvioletred" => Some((0xc7, 0x15, 0x85)),
+        "midnightblue" => Some((0x19, 0x19, 0x70)),
+        "mintcream" => Some((0xf5, 0xff, 0xfa)),
+        "mistyrose" => Some((0xff, 0xe4, 0xe1)),
+        "moccasin" => Some((0xff, 0xe4, 0xb5)),
+        "navajowhite" => Some((0xff, 0xde, 0xad)),
+        "oldlace" => Some((0xfd, 0xf5, 0xe6)),
+        "olivedrab" => Some((0x6b, 0x8e, 0x23)),
+        "orangered" => Some((0xff, 0x45, 0x00)),
+        "orchid" => Some((0xda, 0x70, 0xd6)),
+        "palegoldenrod" => Some((0xee, 0xe8, 0xaa)),
+        "palegreen" => Some((0x98, 0xfb, 0x98)),
+        "paleturquoise" => Some((0xaf, 0xee, 0xee)),
+        "palevioletred" => Some((0xdb, 0x70, 0x93)),
+        "papayawhip" => Some((0xff, 0xef, 0xd5)),
+        "peachpuff" => Some((0xff, 0xda, 0xb9)),
+        "peru" => Some((0xcd, 0x85, 0x3f)),
+        "pink" => Some((0xff, 0xc0, 0xcb)),
+        "plum" => Some((0xdd, 0xa0, 0xdd)),
+        "powderblue" => Some((0xb0, 0xe0, 0xe6)),
+        "rosybrown" => Some((0xbc, 0x8f, 0x8f)),
+        "royalblue" => Some((0x41, 0x69, 0xe1)),
+        "saddlebrown" => Some((0x8b, 0x45, 0x13)),
+        "salmon" => Some((0xfa, 0x80, 0x72)),
+        "sandybrown" => Some((0xf4, 0xa4, 0x60)),
+        "seagreen" => Some((0x2e, 0x8b, 0x57)),
+        "seashell" => Some((0xff, 0xf5, 0xee)),
+        "sienna" => Some((0xa0, 0x52, 0x2d)),
+        "skyblue" => Some((0x87, 0xce, 0xeb)),
+        "slateblue" => Some((0x6a, 0x5a, 0xcd)),
+        "slategray" => Some((0x70, 0x80, 0x90)),
+        "slategrey" => Some((0x70, 0x80, 0x90)),
+        "snow" => Some((0xff, 0xfa, 0xfa)),
+        "springgreen" => Some((0x00, 0xff, 0x7f)),
+        "steelblue" => Some((0x46, 0x82, 0xb4)),
+        "tan" => Some((0xd2, 0xb4, 0x8c)),
+        "thistle" => Some((0xd8, 0xbf, 0xd8)),
+        "tomato" => Some((0xff, 0x63, 0x47)),
+        "turquoise" => Some((0x40, 0xe0, 0xd0)),
+        "violet" => Some((0xee, 0x82, 0xee)),
+        "wheat" => Some((0xf5, 0xde, 0xb3)),
+        "whitesmoke" => Some((0xf5, 0xf5, 0xf5)),
+        "yellowgreen" => Some((0x9a, 0xcd, 0x32)),
+        "rebeccapurple" => Some((0x66, 0x33, 0x99)),
+        _ => None,
     }
 }
 
@@ -16459,7 +16809,7 @@ mod tests {
         CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind,
         CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaQuery,
         CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
-        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
+        CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
         CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
         CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
         CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
@@ -16506,13 +16856,13 @@ mod tests {
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
         parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_style_value_for_property,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
+        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
+        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -17164,6 +17514,22 @@ mod tests {
 
     fn parse_quirky_color(input: &str) -> CssColorValueKind {
         parse_color_value(input.as_bytes(), true)
+    }
+
+    fn parse_simple_color(
+        input: &str,
+        allow_quirky_color: bool,
+    ) -> Option<(CssParsedColorKind, u8, u8, u8, u8, String)> {
+        let mut parsed_color = None;
+        parse_simple_color_value(
+            input.as_bytes(),
+            allow_quirky_color,
+            |kind, red, green, blue, alpha, name| {
+                parsed_color = Some((kind, red, green, blue, alpha, name.to_string()));
+            },
+        )
+        .then_some(parsed_color)
+        .flatten()
     }
 
     fn parse_image_set(input: &str) -> CssImageSetValueKind {
@@ -20827,6 +21193,45 @@ mod tests {
         assert_eq!(parse_color("rgb(1 2 3)"), CssColorValueKind::Valid);
         assert_eq!(parse_quirky_color("000000"), CssColorValueKind::Valid);
         assert_eq!(parse_quirky_color("123abc"), CssColorValueKind::Valid);
+    }
+
+    #[test]
+    fn parses_simple_colors_as_rust_owned_values() {
+        assert_eq!(
+            parse_simple_color("red", false),
+            Some((CssParsedColorKind::Rgba, 255, 0, 0, 255, "red".to_string()))
+        );
+        assert_eq!(
+            parse_simple_color("transparent", false),
+            Some((CssParsedColorKind::Rgba, 0, 0, 0, 0, "transparent".to_string()))
+        );
+        assert_eq!(
+            parse_simple_color("#0f08", false),
+            Some((CssParsedColorKind::Rgba, 0, 255, 0, 136, String::new()))
+        );
+        assert_eq!(
+            parse_simple_color("#336699cc", false),
+            Some((CssParsedColorKind::Rgba, 0x33, 0x66, 0x99, 0xcc, String::new()))
+        );
+        assert_eq!(
+            parse_simple_color("currentColor", false),
+            Some((CssParsedColorKind::Keyword, 0, 0, 0, 0, "currentColor".to_string()))
+        );
+        assert_eq!(
+            parse_simple_color("CanvasText", false),
+            Some((CssParsedColorKind::Keyword, 0, 0, 0, 0, "CanvasText".to_string()))
+        );
+        assert_eq!(
+            parse_simple_color("123abc", true),
+            Some((CssParsedColorKind::Rgba, 0x12, 0x3a, 0xbc, 255, String::new()))
+        );
+        assert_eq!(
+            parse_simple_color("abc", true),
+            Some((CssParsedColorKind::Rgba, 0xaa, 0xbb, 0xcc, 255, String::new()))
+        );
+        assert_eq!(parse_simple_color("a", true), None);
+        assert_eq!(parse_simple_color("123abc", false), None);
+        assert_eq!(parse_simple_color("rgb(1 2 3)", false), None);
     }
 
     #[test]

@@ -3606,6 +3606,32 @@ FFI::CssColorValueKind RustComponentValueParser::parse_color(StringView input, S
         allow_quirky_color);
 }
 
+Optional<RustComponentValueParser::SimpleColor> RustComponentValueParser::parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color)
+{
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    Optional<SimpleColor> color;
+    FFI::rust_css_parse_simple_color(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        allow_quirky_color,
+        &color,
+        [](void* raw_color, FFI::CssParsedColorKind kind, u8 red, u8 green, u8 blue, u8 alpha, u8 const* name_ptr, size_t name_len) {
+            auto& color = *static_cast<Optional<SimpleColor>*>(raw_color);
+            color = SimpleColor {
+                .kind = kind,
+                .red = red,
+                .green = green,
+                .blue = blue,
+                .alpha = alpha,
+                .name = name_len > 0 ? Optional<FlyString> { fly_string_from_ffi_bytes(name_ptr, name_len) } : Optional<FlyString> {},
+            };
+        });
+
+    return color;
+}
+
 FFI::CssImageSetValueKind RustComponentValueParser::parse_image_set(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
