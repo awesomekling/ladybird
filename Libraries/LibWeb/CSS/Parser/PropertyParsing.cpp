@@ -964,6 +964,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::PositionArea:
+                if (auto value = parse_position_area_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
+            case FFI::CssStyleValueKind::PositionTryFallbacks:
+                if (auto value = parse_position_try_fallbacks_value(tokens)) {
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value };
+                }
+                break;
             case FFI::CssStyleValueKind::PositionTryOrder:
                 if (auto keyword = position_try_order_keyword_from_rust(rust_style_value->position_try_order); keyword.has_value()) {
                     discard_rust_owned_property_value_tokens();

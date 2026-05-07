@@ -1860,7 +1860,9 @@ pub enum CssStyleValueKind {
     GridTrackPlacement,
     GridTrackSizeList,
     PaintOrder,
+    PositionArea,
     PositionAnchor,
+    PositionTryFallbacks,
     PositionTryOrder,
     PositionVisibility,
     Quotes,
@@ -1963,7 +1965,13 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Position(RustOwnedPosition),
+    PositionArea {
+        source: String,
+    },
     PositionAnchor(RustOwnedPositionAnchor),
+    PositionTryFallbacks {
+        source: String,
+    },
     PositionTryOrder(RustOwnedPositionTryOrder),
     PositionVisibility(RustOwnedPositionVisibility),
     Quotes(RustOwnedQuotes),
@@ -2919,7 +2927,9 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
         PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
+        PropertyId::PositionTryFallbacks => rust_owned_position_try_fallbacks_style_value_kind(filtered_input),
         PropertyId::PositionTryOrder => rust_owned_position_try_order_style_value_kind(filtered_input),
         PropertyId::PositionVisibility => rust_owned_position_visibility_style_value_kind(filtered_input),
         PropertyId::Quotes => rust_owned_quotes_style_value_kind(filtered_input),
@@ -3950,6 +3960,26 @@ fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<
         name,
         source: filtered_input_to_string(filtered_input),
     }))
+}
+
+fn rust_owned_position_area_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_position_area_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionArea {
+        source: filtered_input_to_string(filtered_input),
+    })
+}
+
+fn rust_owned_position_try_fallbacks_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    if !parse_position_try_fallbacks_value(filtered_input) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionTryFallbacks {
+        source: filtered_input_to_string(filtered_input),
+    })
 }
 
 fn rust_owned_position_try_order_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5334,8 +5364,14 @@ where
         RustOwnedStyleValueKind::PositionAnchor(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::PositionAnchor, property_id, &value.source);
         }
+        RustOwnedStyleValueKind::PositionArea { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PositionArea, property_id, source);
+        }
         RustOwnedStyleValueKind::Position(value) => {
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value.value_type);
+        }
+        RustOwnedStyleValueKind::PositionTryFallbacks { source } => {
+            callback_source_backed_style_value(callback, CssStyleValueKind::PositionTryFallbacks, property_id, source);
         }
         RustOwnedStyleValueKind::PositionTryOrder(value) => callback(
             CssStyleValueKind::PositionTryOrder,
@@ -12365,6 +12401,274 @@ where
 
     name_callback(&name);
     CssPositionAnchorValueKind::AnchorName
+}
+
+pub(crate) fn parse_position_area_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#position-area-property
+    // Value: none | <position-area>
+    if parser.consume_ident_matching("none") {
+        return !parser.has_next_component_value();
+    }
+
+    parse_position_area_component_values(component_values)
+}
+
+pub(crate) fn parse_position_try_fallbacks_value(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+
+    let mut parser = ComponentValueParser::new(component_values.clone());
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#position-try-fallbacks
+    // Value: none | [ [<dashed-ident> || <try-tactic>] | <position-area> ]#
+    if parser.consume_ident_matching("none") {
+        return !parser.has_next_component_value();
+    }
+
+    let Some(fallbacks) = parse_comma_separated_component_values(component_values, |component_values| {
+        parse_single_position_try_fallbacks_component_values(component_values).then_some(())
+    }) else {
+        return false;
+    };
+
+    !fallbacks.is_empty()
+}
+
+fn parse_single_position_try_fallbacks_component_values(component_values: Vec<ComponentValue>) -> bool {
+    // [ [<dashed-ident> || <try-tactic>] | <position-area> ]
+    if parse_position_area_component_values(component_values.clone()) {
+        return true;
+    }
+
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    let mut has_dashed_ident = false;
+    let mut has_flip_block = false;
+    let mut has_flip_inline = false;
+    let mut has_flip_start = false;
+
+    // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-try-fallbacks-try-tactic
+    // <try-tactic> = flip-block || flip-inline || flip-start
+    while parser.has_next_component_value() {
+        let Some(ident) = parser.consume_an_ident() else {
+            return false;
+        };
+
+        if ident.starts_with("--") && is_valid_custom_ident(&ident, &[]) {
+            if has_dashed_ident {
+                return false;
+            }
+            has_dashed_ident = true;
+        } else if ident.eq_ignore_ascii_case("flip-block") {
+            if has_flip_block {
+                return false;
+            }
+            has_flip_block = true;
+        } else if ident.eq_ignore_ascii_case("flip-inline") {
+            if has_flip_inline {
+                return false;
+            }
+            has_flip_inline = true;
+        } else if ident.eq_ignore_ascii_case("flip-start") {
+            if has_flip_start {
+                return false;
+            }
+            has_flip_start = true;
+        } else {
+            return false;
+        }
+
+        parser.discard_whitespace();
+    }
+
+    has_dashed_ident || has_flip_block || has_flip_inline || has_flip_start
+}
+
+fn parse_position_area_component_values(component_values: Vec<ComponentValue>) -> bool {
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+
+    // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-area
+    // <position-area> = [
+    //   [ left | center | right | span-left | span-right | x-start | x-end | span-x-start | span-x-end | x-self-start | x-self-end | span-x-self-start | span-x-self-end | span-all ]
+    //   ||
+    //   [ top | center | bottom | span-top | span-bottom | y-start | y-end | span-y-start | span-y-end | y-self-start | y-self-end | span-y-self-start | span-y-self-end | span-all ]
+    // |
+    //   [ block-start | center | block-end | span-block-start | span-block-end | span-all ]
+    //   ||
+    //   [ inline-start | center | inline-end | span-inline-start | span-inline-end | span-all ]
+    // |
+    //   [ self-block-start | center | self-block-end | span-self-block-start | span-self-block-end | span-all ]
+    //   ||
+    //   [ self-inline-start | center | self-inline-end | span-self-inline-start | span-self-inline-end | span-all ]
+    // |
+    //   [ start | center | end | span-start | span-end | span-all ]{1,2}
+    // |
+    //   [ self-start | center | self-end | span-self-start | span-self-end | span-all ]{1,2}
+    // ]
+    let Some(first) = parser.consume_an_ident() else {
+        return false;
+    };
+
+    parser.discard_whitespace();
+    let Some(second) = parser.consume_an_ident() else {
+        return !parser.has_next_component_value() && is_position_area_keyword(&first);
+    };
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    (is_position_area_x_keyword(&first) && is_position_area_y_keyword(&second))
+        || (is_position_area_y_keyword(&first) && is_position_area_x_keyword(&second))
+        || (is_position_area_block_keyword(&first) && is_position_area_inline_keyword(&second))
+        || (is_position_area_inline_keyword(&first) && is_position_area_block_keyword(&second))
+        || (is_position_area_self_block_keyword(&first) && is_position_area_self_inline_keyword(&second))
+        || (is_position_area_self_inline_keyword(&first) && is_position_area_self_block_keyword(&second))
+        || (is_position_area_start_end_keyword(&first) && is_position_area_start_end_keyword(&second))
+        || (is_position_area_self_start_end_keyword(&first) && is_position_area_self_start_end_keyword(&second))
+}
+
+fn is_position_area_keyword(value: &str) -> bool {
+    is_position_area_x_keyword(value)
+        || is_position_area_y_keyword(value)
+        || is_position_area_block_keyword(value)
+        || is_position_area_inline_keyword(value)
+        || is_position_area_self_block_keyword(value)
+        || is_position_area_self_inline_keyword(value)
+        || is_position_area_start_end_keyword(value)
+        || is_position_area_self_start_end_keyword(value)
+}
+
+fn is_position_area_x_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "left",
+            "center",
+            "right",
+            "span-left",
+            "span-right",
+            "x-start",
+            "x-end",
+            "span-x-start",
+            "span-x-end",
+            "x-self-start",
+            "x-self-end",
+            "span-x-self-start",
+            "span-x-self-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_y_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "top",
+            "center",
+            "bottom",
+            "span-top",
+            "span-bottom",
+            "y-start",
+            "y-end",
+            "span-y-start",
+            "span-y-end",
+            "y-self-start",
+            "y-self-end",
+            "span-y-self-start",
+            "span-y-self-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_block_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "block-start",
+            "center",
+            "block-end",
+            "span-block-start",
+            "span-block-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_inline_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "inline-start",
+            "center",
+            "inline-end",
+            "span-inline-start",
+            "span-inline-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_self_block_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "self-block-start",
+            "center",
+            "self-block-end",
+            "span-self-block-start",
+            "span-self-block-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_self_inline_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "self-inline-start",
+            "center",
+            "self-inline-end",
+            "span-self-inline-start",
+            "span-self-inline-end",
+            "span-all",
+        ],
+    )
+}
+
+fn is_position_area_start_end_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(value, &["start", "center", "end", "span-start", "span-end", "span-all"])
+}
+
+fn is_position_area_self_start_end_keyword(value: &str) -> bool {
+    matches_any_ignore_ascii_case(
+        value,
+        &[
+            "self-start",
+            "center",
+            "self-end",
+            "span-self-start",
+            "span-self-end",
+            "span-all",
+        ],
+    )
+}
+
+fn matches_any_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
+    candidates.iter().any(|candidate| value.eq_ignore_ascii_case(candidate))
 }
 
 pub(crate) fn parse_timeline_scope_value<N>(filtered_input: &[u8], mut name_callback: N) -> CssTimelineScopeValueKind
@@ -21094,20 +21398,20 @@ mod tests {
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_image_set_value, parse_length_descriptor, parse_optional_declaration_value_descriptor,
-        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value,
-        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
-        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
-        parse_stroke_dasharray_value, parse_style_value_for_property, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_page_size_descriptor, parse_paint_order_value, parse_position_anchor_value, parse_position_area_value,
+        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
+        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
+        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
+        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
+        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
+        parse_rust_owned_style_value_for_property, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
+        parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
+        parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
+        parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
+        parse_transition_behavior_value, parse_transition_property_value, parse_translate_value,
+        parse_view_function_value, parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix,
+        parse_view_transition_name_value, parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -21837,6 +22141,14 @@ mod tests {
         let mut name = None;
         let kind = parse_position_anchor_value(input.as_bytes(), |parsed_name| name = Some(parsed_name.to_string()));
         (kind, name)
+    }
+
+    fn parse_position_area(input: &str) -> bool {
+        parse_position_area_value(input.as_bytes())
+    }
+
+    fn parse_position_try_fallbacks(input: &str) -> bool {
+        parse_position_try_fallbacks_value(input.as_bytes())
     }
 
     fn parse_timeline_scope(input: &str) -> (CssTimelineScopeValueKind, Vec<String>) {
@@ -23188,6 +23500,24 @@ mod tests {
                     },
                     source: "markers stroke".to_string(),
                 }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PositionArea], "span-inline-end block-start"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PositionArea,
+                value: RustOwnedStyleValueKind::PositionArea {
+                    source: "span-inline-end block-start".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::PositionTryFallbacks], "--foo flip-block, top left"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::PositionTryFallbacks,
+                value: RustOwnedStyleValueKind::PositionTryFallbacks {
+                    source: "--foo flip-block, top left".to_string(),
+                },
             })
         );
         assert_eq!(
@@ -28044,6 +28374,51 @@ mod tests {
             CssPositionAnchorValueKind::Invalid
         );
         assert_eq!(parse_position_anchor("foo").0, CssPositionAnchorValueKind::Invalid);
+    }
+
+    #[test]
+    fn parses_position_area_values() {
+        assert!(parse_position_area("none"));
+        assert!(parse_position_area("center"));
+        assert!(parse_position_area("span-all span-all"));
+        assert!(parse_position_area("left top"));
+        assert!(parse_position_area("top left"));
+        assert!(parse_position_area("block-start inline-end"));
+        assert!(parse_position_area("self-inline-end self-block-start"));
+        assert!(parse_position_area("span-start center"));
+    }
+
+    #[test]
+    fn rejects_invalid_position_area_values() {
+        assert!(!parse_position_area(""));
+        assert!(!parse_position_area("none none"));
+        assert!(!parse_position_area("start none"));
+        assert!(!parse_position_area("top left top"));
+        assert!(!parse_position_area("foobar"));
+        assert!(!parse_position_area("left right"));
+        assert!(!parse_position_area("block-start block-end"));
+    }
+
+    #[test]
+    fn parses_position_try_fallbacks_values() {
+        assert!(parse_position_try_fallbacks("none"));
+        assert!(parse_position_try_fallbacks("--foo"));
+        assert!(parse_position_try_fallbacks("flip-block"));
+        assert!(parse_position_try_fallbacks("--foo flip-block flip-inline"));
+        assert!(parse_position_try_fallbacks("top left"));
+        assert!(parse_position_try_fallbacks(
+            "--foo, flip-start, block-start inline-end"
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_position_try_fallbacks_values() {
+        assert!(!parse_position_try_fallbacks(""));
+        assert!(!parse_position_try_fallbacks("none, --foo"));
+        assert!(!parse_position_try_fallbacks("--foo --bar"));
+        assert!(!parse_position_try_fallbacks("flip-block flip-block"));
+        assert!(!parse_position_try_fallbacks("start none"));
+        assert!(!parse_position_try_fallbacks("--foo,"));
     }
 
     #[test]
