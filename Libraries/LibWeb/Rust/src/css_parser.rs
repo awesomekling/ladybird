@@ -1732,6 +1732,16 @@ pub enum CssGeneratedPropertyValueKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssStyleValueKind {
+    Invalid,
+    Keyword,
+    CustomIdent,
+    Primitive,
+    ValueType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssSyntaxNodeKind {
     Invalid,
     Universal,
@@ -1953,6 +1963,131 @@ where
     }
 
     false
+}
+
+pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, &[u8], &str),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+    {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if property_accepts_keyword(property_id, value) {
+                let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
+                callback(
+                    CssStyleValueKind::Keyword,
+                    property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    resolved_keyword.as_bytes(),
+                    "",
+                );
+                return true;
+            }
+        }
+    }
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if !property_accepts_value_type(property_id, PropertyValueType::CustomIdent) {
+            continue;
+        }
+
+        let mut parser = ComponentValueParser::new(component_values.to_vec());
+        if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
+            callback(
+                CssStyleValueKind::CustomIdent,
+                property_id as u16,
+                CssPrimitiveValueKind::Invalid,
+                name.as_bytes(),
+                property_value_type_name(PropertyValueType::CustomIdent),
+            );
+            return true;
+        }
+    }
+
+    for value_type in generated_property_value_type_order() {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if !property_accepts_value_type(property_id, *value_type) {
+                continue;
+            }
+            if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+                continue;
+            }
+
+            let primitive_kind = style_value_primitive_kind(*value_type, component_values);
+            let string_value = if primitive_kind == CssPrimitiveValueKind::String {
+                string_token_value(component_values).unwrap_or("").as_bytes()
+            } else {
+                &[]
+            };
+
+            callback(
+                if primitive_kind == CssPrimitiveValueKind::Invalid {
+                    CssStyleValueKind::ValueType
+                } else {
+                    CssStyleValueKind::Primitive
+                },
+                property_id as u16,
+                primitive_kind,
+                string_value,
+                property_value_type_name(*value_type),
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
+fn style_value_primitive_kind(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+) -> CssPrimitiveValueKind {
+    let [component_value] = component_values else {
+        return CssPrimitiveValueKind::Invalid;
+    };
+
+    match value_type {
+        PropertyValueType::Integer => parse_integer_value_prefix(component_value),
+        PropertyValueType::Number => parse_number_value_prefix(component_value),
+        PropertyValueType::Length => parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default()),
+        PropertyValueType::Time => parse_time_value_prefix(component_value),
+        PropertyValueType::Percentage => parse_percentage_value_prefix(component_value),
+        PropertyValueType::String => parse_string_value_prefix(component_value),
+        PropertyValueType::OpacityValue => parse_opacity_value_prefix(component_value),
+        _ => CssPrimitiveValueKind::Invalid,
+    }
+}
+
+fn string_token_value(component_values: &[ComponentValue]) -> Option<&str> {
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        }),
+    ] = component_values
+    else {
+        return None;
+    };
+
+    Some(value)
 }
 
 fn generated_property_value_type_order() -> &'static [PropertyValueType] {
@@ -15920,21 +16055,21 @@ mod tests {
         CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
         CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind,
         CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssSupportsFeatureKind,
-        CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-        CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-        CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-        CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
-        CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
-        CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind,
-        CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue,
-        CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-        CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-        FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-        FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
-        MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser,
-        PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind,
+        CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
+        CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
+        CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
+        CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
+        CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+        CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+        CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+        CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind,
+        CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+        FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+        FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+        MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+        OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
         component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
@@ -15961,13 +16096,13 @@ mod tests {
         parse_position_visibility_value, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
         parse_repeat_style_value, parse_rotate_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_string_descriptor, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_scrollbar_gutter_value, parse_string_descriptor, parse_style_value_for_property,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -16888,6 +17023,34 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq)]
+    struct ParsedStyleValue {
+        kind: CssStyleValueKind,
+        property_id: PropertyId,
+        primitive_kind: CssPrimitiveValueKind,
+        value: String,
+        value_type: String,
+    }
+
+    fn parse_style_value(property_ids: &[PropertyId], input: &str) -> Option<ParsedStyleValue> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        let mut parsed_value = None;
+        parse_style_value_for_property(
+            &property_ids,
+            input.as_bytes(),
+            |kind, property_id, primitive_kind, value, value_type| {
+                parsed_value = Some(ParsedStyleValue {
+                    kind,
+                    property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                    primitive_kind,
+                    value: String::from_utf8(value.to_vec()).unwrap(),
+                    value_type: value_type.to_string(),
+                });
+            },
+        );
+        parsed_value
+    }
+
+    #[derive(Debug, PartialEq)]
     struct PropertyNumericMetadata {
         property_id: PropertyId,
         minimum: f64,
@@ -17400,6 +17563,71 @@ mod tests {
         );
         assert_eq!(parse_generated_property(&[PropertyId::MaskImage], "url(foo.png)"), None);
         assert_eq!(parse_generated_property(&[PropertyId::Color], "10px"), None);
+    }
+
+    #[test]
+    fn parses_style_values_with_rust_owned_ast() {
+        assert_eq!(
+            parse_style_value(&[PropertyId::Color, PropertyId::Display], "block"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Keyword,
+                property_id: PropertyId::Display,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                value: "block".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnimationName], "slide"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::CustomIdent,
+                property_id: PropertyId::AnimationName,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                value: "slide".to_string(),
+                value_type: "CustomIdent".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FontWeight], "bold"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ValueType,
+                property_id: PropertyId::FontWeight,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                value: String::new(),
+                value_type: "FontWeightAbsolute".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ZIndex], "12"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::ZIndex,
+                primitive_kind: CssPrimitiveValueKind::Integer,
+                value: String::new(),
+                value_type: "Integer".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Opacity], "50%"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::Opacity,
+                primitive_kind: CssPrimitiveValueKind::Opacity,
+                value: String::new(),
+                value_type: "OpacityValue".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::AnimationName], "\"slide\""),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id: PropertyId::AnimationName,
+                primitive_kind: CssPrimitiveValueKind::String,
+                value: "slide".to_string(),
+                value_type: "String".to_string(),
+            })
+        );
+        assert_eq!(parse_style_value(&[PropertyId::Color], "10px"), None);
     }
 
     #[test]

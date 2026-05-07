@@ -916,6 +916,50 @@ Optional<RustComponentValueParser::GeneratedPropertyValue> RustComponentValuePar
     return generated_property_value;
 }
 
+Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::parse_style_value_for_property(ReadonlySpan<PropertyID> property_ids, StringView input)
+{
+    Vector<u16, 4> ffi_property_ids;
+    for (auto property_id : property_ids)
+        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
+
+    Optional<RustStyleValue> style_value;
+    auto input_bytes = input.bytes();
+    FFI::rust_css_parse_style_value_for_property(
+        ffi_property_ids.data(),
+        ffi_property_ids.size(),
+        input_bytes.data(),
+        input_bytes.size(),
+        &style_value,
+        [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
+            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            RustStyleValue value {
+                .kind = kind,
+                .property_id = static_cast<PropertyID>(property_id),
+                .primitive_kind = primitive_kind,
+            };
+
+            if (kind == FFI::CssStyleValueKind::Keyword) {
+                auto keyword = keyword_from_string({ value_ptr, value_len });
+                if (!keyword.has_value())
+                    return;
+                value.keyword = keyword.release_value();
+            } else if (kind == FFI::CssStyleValueKind::CustomIdent) {
+                value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Primitive || kind == FFI::CssStyleValueKind::ValueType) {
+                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                if (!value_type.has_value())
+                    return;
+                value.value_type = value_type.release_value();
+                if (primitive_kind == FFI::CssPrimitiveValueKind::String)
+                    value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            }
+
+            style_value = move(value);
+        });
+
+    return style_value;
+}
+
 Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

@@ -74,6 +74,16 @@ public:
         Optional<ValueType> value_type;
     };
 
+    struct RustStyleValue {
+        FFI::CssStyleValueKind kind;
+        PropertyID property_id;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<Keyword> keyword;
+        Optional<FlyString> custom_ident;
+        Optional<ValueType> value_type;
+        Optional<FlyString> string;
+    };
+
     struct PropertyNumericMetadata {
         PropertyID property_id;
         NumericRange range;
@@ -298,6 +308,7 @@ public:
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
+    static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static Optional<SyntaxComponent> parse_syntax_component(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);

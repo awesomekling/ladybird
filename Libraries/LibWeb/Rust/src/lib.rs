@@ -56,7 +56,7 @@ pub use css_parser::{
     CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext,
     CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
     CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent,
-    CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind,
+    CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType, CssSimpleSelectorKind, CssStyleValueKind,
     CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal,
     CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue,
     CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind,
@@ -537,6 +537,57 @@ pub unsafe extern "C" fn rust_css_parse_generated_property_value(
                     value_type.len(),
                 );
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
+    property_ids: *const u16,
+    property_ids_len: usize,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssStyleValueKind,
+        property_id: u16,
+        primitive_kind: CssPrimitiveValueKind,
+        value: *const u8,
+        value_len: usize,
+        value_type: *const u8,
+        value_type_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
+                return false;
+            };
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_style_value_for_property(
+                property_ids,
+                input,
+                |kind, property_id, primitive_kind, value, value_type| {
+                    callback(
+                        ctx,
+                        kind,
+                        property_id,
+                        primitive_kind,
+                        value.as_ptr(),
+                        value.len(),
+                        value_type.as_ptr(),
+                        value_type.len(),
+                    );
+                },
+            )
         })
     }
 }

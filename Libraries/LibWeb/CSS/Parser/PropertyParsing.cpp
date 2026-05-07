@@ -193,64 +193,74 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                   auto component_value_source = peek_token.original_source_text();
                   return component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
               }();
-        if (auto generated_value = RustComponentValueParser::parse_generated_property_value(property_ids, source.bytes_as_string_view()); generated_value.has_value()) {
-            switch (generated_value->kind) {
-            case FFI::CssGeneratedPropertyValueKind::Invalid:
+        if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property(property_ids, source.bytes_as_string_view()); rust_style_value.has_value()) {
+            auto parse_rust_numeric_value = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->value_type.has_value())
+                    return nullptr;
+
+                auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
+                if (!metadata.has_value())
+                    return nullptr;
+
+                switch (*rust_style_value->value_type) {
+                case ValueType::Integer:
+                    return parse_integer_value(tokens, metadata->range);
+                case ValueType::Number:
+                    return parse_number_value(tokens, metadata->range);
+                case ValueType::Length:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        VERIFY(metadata->percentage_range.has_value());
+                        return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                    }
+                    return parse_length_value(tokens, metadata->range);
+                case ValueType::Time:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        VERIFY(metadata->percentage_range.has_value());
+                        return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                    }
+                    return parse_time_value(tokens, metadata->range);
+                case ValueType::Percentage:
+                    return parse_percentage_value(tokens, metadata->range);
+                default:
+                    return nullptr;
+                }
+            };
+
+            switch (rust_style_value->kind) {
+            case FFI::CssStyleValueKind::Invalid:
                 break;
-            case FFI::CssGeneratedPropertyValueKind::Keyword:
-                if (generated_value->keyword.has_value()) {
+            case FFI::CssStyleValueKind::Keyword:
+                if (rust_style_value->keyword.has_value()) {
                     tokens.discard_a_token();
                     generated_transaction.commit();
-                    return PropertyAndValue { generated_value->property_id, KeywordStyleValue::create(*generated_value->keyword) };
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(*rust_style_value->keyword) };
                 }
                 break;
-            case FFI::CssGeneratedPropertyValueKind::CustomIdent:
-                if (generated_value->custom_ident.has_value()) {
+            case FFI::CssStyleValueKind::CustomIdent:
+                if (rust_style_value->custom_ident.has_value()) {
                     tokens.discard_a_token();
                     generated_transaction.commit();
-                    return PropertyAndValue { generated_value->property_id, CustomIdentStyleValue::create(*generated_value->custom_ident) };
+                    return PropertyAndValue { rust_style_value->property_id, CustomIdentStyleValue::create(*rust_style_value->custom_ident) };
                 }
                 break;
-            case FFI::CssGeneratedPropertyValueKind::ValueType:
-                if (generated_value->value_type.has_value()) {
-                    auto context_guard = push_temporary_value_parsing_context(generated_value->property_id);
+            case FFI::CssStyleValueKind::Primitive:
+            case FFI::CssStyleValueKind::ValueType:
+                if (rust_style_value->value_type.has_value()) {
+                    auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);
 
-                    auto parse_generated_numeric_value = [&]() -> RefPtr<StyleValue const> {
-                        auto metadata = RustComponentValueParser::property_numeric_metadata({ &generated_value->property_id, 1 }, *generated_value->value_type);
-                        if (!metadata.has_value())
-                            return nullptr;
+                    RefPtr<StyleValue const> maybe_parsed_value;
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::String && rust_style_value->string.has_value()) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
+                    } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage)) {
+                        maybe_parsed_value = parse_rust_numeric_value();
+                    } else {
+                        maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
+                    }
 
-                        switch (*generated_value->value_type) {
-                        case ValueType::Integer:
-                            return parse_integer_value(tokens, metadata->range);
-                        case ValueType::Number:
-                            return parse_number_value(tokens, metadata->range);
-                        case ValueType::Length:
-                            if (metadata->percentages_resolve_to_value_type) {
-                                VERIFY(metadata->percentage_range.has_value());
-                                return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
-                            }
-                            return parse_length_value(tokens, metadata->range);
-                        case ValueType::Time:
-                            if (metadata->percentages_resolve_to_value_type) {
-                                VERIFY(metadata->percentage_range.has_value());
-                                return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
-                            }
-                            return parse_time_value(tokens, metadata->range);
-                        case ValueType::Percentage:
-                            return parse_percentage_value(tokens, metadata->range);
-                        default:
-                            return nullptr;
-                        }
-                    };
-
-                    auto value_type_is_numeric = first_is_one_of(*generated_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage);
-                    auto maybe_parsed_value = value_type_is_numeric ? parse_generated_numeric_value() : RefPtr<StyleValue const> {};
-                    if (!maybe_parsed_value && !value_type_is_numeric)
-                        maybe_parsed_value = parse_value(*generated_value->value_type, tokens);
                     if (maybe_parsed_value) {
                         generated_transaction.commit();
-                        return PropertyAndValue { generated_value->property_id, maybe_parsed_value };
+                        return PropertyAndValue { rust_style_value->property_id, maybe_parsed_value };
                     }
                 }
                 break;
