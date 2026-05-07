@@ -1186,8 +1186,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else if (color_red == 1)
                     style_value->aspect_ratio_denominator_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
+            } else if (kind == FFI::CssStyleValueKind::BorderRadius) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::BorderRadius);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == 0)
+                    style_value->border_radius_horizontal_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                else
+                    style_value->border_radius_vertical_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (first_is_one_of(kind,
-                           FFI::CssStyleValueKind::BorderRadius,
                            FFI::CssStyleValueKind::Content,
                            FFI::CssStyleValueKind::Cursor,
                            FFI::CssStyleValueKind::Flex,

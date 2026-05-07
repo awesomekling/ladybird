@@ -1938,9 +1938,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         source: String,
     },
     CounterDefinitions(RustOwnedCounterDefinitions),
-    BorderRadius {
-        source: String,
-    },
+    BorderRadius(RustOwnedBorderRadius),
     Columns(RustOwnedColumns),
     Content {
         source: String,
@@ -2324,6 +2322,12 @@ pub(crate) struct RustOwnedAspectRatio {
 pub(crate) struct RustOwnedBackgroundSizeList {
     values: Vec<RustOwnedBackgroundSize>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderRadius {
+    horizontal_sources: Vec<String>,
+    vertical_sources: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4705,23 +4709,81 @@ fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 }
 
 fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_border_radius_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    // https://drafts.csswg.org/css-borders-4/#typedef-border-radius
+    // <border-radius> = <slash-separated-border-radius-syntax> | <legacy-border-radius-syntax>
+    // <slash-separated-border-radius-syntax> = <length-percentage [0,∞]> [ / <length-percentage [0,∞]> ]?
+    // <legacy-border-radius-syntax> = <length-percentage [0,∞]>{1,2}
+    let (horizontal, vertical) = match component_values.as_slice() {
+        [horizontal] => (horizontal, None),
+        [horizontal, vertical] => (horizontal, Some(vertical)),
+        [horizontal, slash, vertical] if component_value_is_delim(Some(slash), '/') => (horizontal, Some(vertical)),
+        _ => return None,
+    };
+
+    if !component_value_parse_as_non_negative_length_percentage(horizontal) {
         return None;
     }
+    let horizontal_source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(horizontal), filtered_input_string)?;
 
-    Some(RustOwnedStyleValueKind::BorderRadius {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let vertical_sources = if let Some(vertical) = vertical {
+        if !component_value_parse_as_non_negative_length_percentage(vertical) {
+            return None;
+        }
+        vec![serialize_component_values_for_reparsing(
+            std::slice::from_ref(vertical),
+            filtered_input_string,
+        )?]
+    } else {
+        vec![]
+    };
+
+    Some(RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
+        horizontal_sources: vec![horizontal_source],
+        vertical_sources,
+    }))
 }
 
 fn rust_owned_border_radius_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    if !parse_border_radius_shorthand_value(filtered_input) {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let slash_positions = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| component_value_is_delim(Some(component_value), '/').then_some(index))
+        .collect::<Vec<_>>();
+
+    if slash_positions.len() > 1 {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::BorderRadius {
-        source: filtered_input_to_string(filtered_input),
-    })
+    let (horizontal_radii, vertical_radii) = if let Some(slash_position) = slash_positions.first() {
+        (
+            &component_values[..*slash_position],
+            Some(&component_values[*slash_position + 1..]),
+        )
+    } else {
+        (component_values.as_slice(), None)
+    };
+
+    // https://drafts.csswg.org/css-backgrounds-3/#border-radius
+    // <'border-radius'> = <length-percentage [0,∞]>{1,4} [ / <length-percentage [0,∞]>{1,4} ]?
+    let horizontal_sources = rust_owned_border_radius_shorthand_side_sources(horizontal_radii, filtered_input_string)?;
+    let vertical_sources = if let Some(vertical_radii) = vertical_radii {
+        rust_owned_border_radius_shorthand_side_sources(vertical_radii, filtered_input_string)?
+    } else {
+        vec![]
+    };
+
+    Some(RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
+        horizontal_sources,
+        vertical_sources,
+    }))
 }
 
 fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6081,8 +6143,25 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::BorderRadius { source } => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::BorderRadius, property_id, source);
+        RustOwnedStyleValueKind::BorderRadius(value) => {
+            for source in &value.horizontal_sources {
+                callback_optional_longhand_source(
+                    callback,
+                    CssStyleValueKind::BorderRadius,
+                    property_id,
+                    0,
+                    Some(source),
+                );
+            }
+            for source in &value.vertical_sources {
+                callback_optional_longhand_source(
+                    callback,
+                    CssStyleValueKind::BorderRadius,
+                    property_id,
+                    1,
+                    Some(source),
+                );
+            }
         }
         RustOwnedStyleValueKind::Columns(value) => {
             callback_optional_longhand_source(
@@ -14041,6 +14120,20 @@ fn parse_border_radius_shorthand_side(component_values: &[ComponentValue]) -> bo
         && component_values
             .iter()
             .all(component_value_parse_as_non_negative_length_percentage)
+}
+
+fn rust_owned_border_radius_shorthand_side_sources(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<Vec<String>> {
+    if !parse_border_radius_shorthand_side(component_values) {
+        return None;
+    }
+
+    component_values
+        .iter()
+        .map(|component_value| serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source))
+        .collect()
 }
 
 fn parse_single_column_component_value(
@@ -24129,14 +24222,14 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize,
         RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeKind,
-        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedDimensionStyleValue, RustOwnedDisplay,
-        RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexFlow, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridTrackPlacement,
-        RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedBorderRadius, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
+        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFontStyle, RustOwnedGridAutoFlow,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSizeList, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
+        RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth,
+        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionComponent, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
         RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
@@ -26164,9 +26257,20 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderTopLeftRadius], "1px / 2%"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderTopLeftRadius,
-                value: RustOwnedStyleValueKind::BorderRadius {
-                    source: "1px / 2%".to_string(),
-                },
+                value: RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
+                    horizontal_sources: vec!["1px".to_string()],
+                    vertical_sources: vec!["2%".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderRadius], "1px 2px / 3px 4px"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderRadius,
+                value: RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
+                    horizontal_sources: vec!["1px".to_string(), "2px".to_string()],
+                    vertical_sources: vec!["3px".to_string(), "4px".to_string()],
+                }),
             })
         );
         assert_eq!(
@@ -27352,7 +27456,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "1px / 2px".to_string(),
+                value: "2px".to_string(),
                 value_type: String::new(),
             })
         );

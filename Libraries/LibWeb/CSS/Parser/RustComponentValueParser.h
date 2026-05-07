@@ -178,6 +178,8 @@ public:
         bool aspect_ratio_has_auto { false };
         Optional<String> aspect_ratio_numerator_source;
         Optional<String> aspect_ratio_denominator_source;
+        Vector<String> border_radius_horizontal_sources;
+        Vector<String> border_radius_vertical_sources;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;

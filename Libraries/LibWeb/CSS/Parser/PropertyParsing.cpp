@@ -824,6 +824,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_non_negative_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_nonnull();
+            };
 
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -1270,13 +1279,91 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BorderRadius:
-                if (auto value = rust_style_value->property_id == PropertyID::BorderRadius
-                        ? parse_border_radius_shorthand_value(tokens)
-                        : parse_border_radius_value(tokens)) {
+                if (rust_style_value->border_radius_horizontal_sources.is_empty())
+                    break;
+                if (rust_style_value->property_id == PropertyID::BorderRadius) {
+                    auto parse_radius_values = [&](Vector<String> const& sources) -> Optional<StyleValueVector> {
+                        StyleValueVector values;
+                        values.ensure_capacity(sources.size());
+                        for (auto const& source : sources) {
+                            auto value = parse_rust_source_as_non_negative_length_percentage(source);
+                            if (!value)
+                                return {};
+                            values.append(value.release_nonnull());
+                        }
+                        return values;
+                    };
+                    auto top_left = [](StyleValueVector& radii) { return radii[0]; };
+                    auto top_right = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                        case 3:
+                        case 2:
+                            return radii[1];
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+                    auto bottom_right = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                        case 3:
+                            return radii[2];
+                        case 2:
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+                    auto bottom_left = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                            return radii[3];
+                        case 3:
+                        case 2:
+                            return radii[1];
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+
+                    auto maybe_horizontal_radii = parse_radius_values(rust_style_value->border_radius_horizontal_sources);
+                    auto maybe_vertical_radii = rust_style_value->border_radius_vertical_sources.is_empty()
+                        ? Optional<StyleValueVector> {}
+                        : parse_radius_values(rust_style_value->border_radius_vertical_sources);
+                    if (!maybe_horizontal_radii.has_value() || (!rust_style_value->border_radius_vertical_sources.is_empty() && !maybe_vertical_radii.has_value()))
+                        break;
+
+                    auto& horizontal_radii = *maybe_horizontal_radii;
+                    auto& vertical_radii = maybe_vertical_radii.has_value() ? *maybe_vertical_radii : horizontal_radii;
+                    auto top_left_radius = BorderRadiusStyleValue::create(top_left(horizontal_radii), top_left(vertical_radii));
+                    auto top_right_radius = BorderRadiusStyleValue::create(top_right(horizontal_radii), top_right(vertical_radii));
+                    auto bottom_right_radius = BorderRadiusStyleValue::create(bottom_right(horizontal_radii), bottom_right(vertical_radii));
+                    auto bottom_left_radius = BorderRadiusStyleValue::create(bottom_left(horizontal_radii), bottom_left(vertical_radii));
+
+                    discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id,
+                        ShorthandStyleValue::create(PropertyID::BorderRadius,
+                            { PropertyID::BorderTopLeftRadius, PropertyID::BorderTopRightRadius, PropertyID::BorderBottomRightRadius, PropertyID::BorderBottomLeftRadius },
+                            { top_left_radius, top_right_radius, bottom_right_radius, bottom_left_radius }) };
+                } else {
+                    auto horizontal = parse_rust_source_as_non_negative_length_percentage(rust_style_value->border_radius_horizontal_sources[0]);
+                    auto vertical = rust_style_value->border_radius_vertical_sources.is_empty()
+                        ? horizontal
+                        : parse_rust_source_as_non_negative_length_percentage(rust_style_value->border_radius_vertical_sources[0]);
+                    if (!horizontal || !vertical)
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, BorderRadiusStyleValue::create(horizontal.release_nonnull(), vertical.release_nonnull()) };
                 }
-                break;
             case FFI::CssStyleValueKind::Columns:
                 if (rust_style_value->column_count_source.has_value() || rust_style_value->column_width_source.has_value() || rust_style_value->column_height_source.has_value()) {
                     auto column_count = rust_style_value->column_count_source.has_value()
