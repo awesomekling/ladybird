@@ -3221,33 +3221,6 @@ Optional<RustComponentValueParser::FontSource> RustComponentValueParser::parse_a
     VERIFY_NOT_REACHED();
 }
 
-Optional<RustComponentValueParser::FontLanguageOverride> RustComponentValueParser::parse_a_font_language_override(StringView input, StringView encoding)
-{
-    Optional<FontLanguageOverride> font_language_override;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_language_override(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &font_language_override,
-        [](void* raw_font_language_override, FFI::CssFontLanguageOverrideKind kind, u8 const* value_ptr, size_t value_len) {
-            auto& font_language_override = *static_cast<Optional<FontLanguageOverride>*>(raw_font_language_override);
-            Optional<FlyString> value;
-            if (kind == FFI::CssFontLanguageOverrideKind::String)
-                value = fly_string_from_ffi_bytes(value_ptr, value_len);
-            font_language_override = FontLanguageOverride {
-                .kind = kind,
-                .value = move(value),
-            };
-        });
-
-    if (!parsed)
-        return {};
-
-    return font_language_override;
-}
-
 Optional<FlyString> RustComponentValueParser::parse_an_opentype_tag(StringView input, StringView encoding)
 {
     Optional<FlyString> opentype_tag;
@@ -3267,48 +3240,6 @@ Optional<FlyString> RustComponentValueParser::parse_an_opentype_tag(StringView i
         return {};
 
     return opentype_tag;
-}
-
-static Optional<RustComponentValueParser::OpenTypeSettings> parse_open_type_settings_impl(StringView input, StringView encoding, bool is_variation_settings)
-{
-    RustComponentValueParser::OpenTypeSettings settings {};
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = (is_variation_settings ? FFI::rust_css_parse_font_variation_settings : FFI::rust_css_parse_font_feature_settings)(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &settings,
-        [](void* raw_settings, FFI::CssOpenTypeSettingsKind kind) {
-            auto& settings = *static_cast<RustComponentValueParser::OpenTypeSettings*>(raw_settings);
-            settings.kind = kind;
-        },
-        [](void* raw_settings, u8 const* tag_ptr, size_t tag_len, FFI::CssOpenTypeTaggedValueKind value_kind, u8 const* value_ptr, size_t value_len) {
-            auto& settings = *static_cast<RustComponentValueParser::OpenTypeSettings*>(raw_settings);
-            Optional<String> value;
-            if (value_kind == FFI::CssOpenTypeTaggedValueKind::Value)
-                value = string_from_ffi_bytes(value_ptr, value_len);
-            settings.tag_values.append({
-                .tag = fly_string_from_ffi_bytes(tag_ptr, tag_len),
-                .value_kind = value_kind,
-                .value = move(value),
-            });
-        });
-
-    if (!parsed)
-        return {};
-
-    return settings;
-}
-
-Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::parse_font_feature_settings(StringView input, StringView encoding)
-{
-    return parse_open_type_settings_impl(input, encoding, false);
-}
-
-Optional<RustComponentValueParser::OpenTypeSettings> RustComponentValueParser::parse_font_variation_settings(StringView input, StringView encoding)
-{
-    return parse_open_type_settings_impl(input, encoding, true);
 }
 
 Optional<RustComponentValueParser::FontStyle> RustComponentValueParser::parse_a_font_style(StringView input, StringView encoding)
@@ -3361,81 +3292,6 @@ Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> RustCompo
         return {};
 
     return values;
-}
-
-Optional<RustComponentValueParser::FontVariant> RustComponentValueParser::parse_a_font_variant(StringView input, StringView encoding)
-{
-    FontVariant font_variant;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_variant(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &font_variant,
-        [](void* raw_font_variant, FFI::CssFontVariantSimpleValueKind kind, u8 const* value_ptr, size_t value_len) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            switch (kind) {
-            case FFI::CssFontVariantSimpleValueKind::LigaturesNone:
-                font_variant.ligatures_none = true;
-                break;
-            case FFI::CssFontVariantSimpleValueKind::Caps:
-                font_variant.caps = fly_string_from_ffi_bytes(value_ptr, value_len);
-                break;
-            case FFI::CssFontVariantSimpleValueKind::Emoji:
-                font_variant.emoji = fly_string_from_ffi_bytes(value_ptr, value_len);
-                break;
-            case FFI::CssFontVariantSimpleValueKind::Position:
-                font_variant.position = fly_string_from_ffi_bytes(value_ptr, value_len);
-                break;
-            }
-        },
-        [](void* raw_font_variant, FFI::CssFontVariantAlternatesValueKind kind) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            if (!font_variant.alternates.has_value())
-                font_variant.alternates = Vector<FontVariantAlternatesValue> {};
-            font_variant.alternates->append({
-                .kind = kind,
-            });
-        },
-        [](void* raw_font_variant, u8 const* value_ptr, size_t value_len) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            VERIFY(font_variant.alternates.has_value());
-            VERIFY(!font_variant.alternates->is_empty());
-            font_variant.alternates->last().feature_value_names.append(fly_string_from_ffi_bytes(value_ptr, value_len));
-        },
-        [](void* raw_font_variant, FFI::CssFontVariantEastAsianValueKind kind, u8 const* value_ptr, size_t value_len) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            if (!font_variant.east_asian.has_value())
-                font_variant.east_asian = Vector<FontVariantEastAsianValue> {};
-            font_variant.east_asian->append({
-                .kind = kind,
-                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
-            });
-        },
-        [](void* raw_font_variant, FFI::CssFontVariantNumericValueKind kind, u8 const* value_ptr, size_t value_len) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            if (!font_variant.numeric.has_value())
-                font_variant.numeric = Vector<FontVariantNumericValue> {};
-            font_variant.numeric->append({
-                .kind = kind,
-                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
-            });
-        },
-        [](void* raw_font_variant, FFI::CssFontVariantLigaturesValueKind kind, u8 const* value_ptr, size_t value_len) {
-            auto& font_variant = *static_cast<FontVariant*>(raw_font_variant);
-            if (!font_variant.ligatures.has_value())
-                font_variant.ligatures = Vector<FontVariantLigaturesValue> {};
-            font_variant.ligatures->append({
-                .kind = kind,
-                .value = fly_string_from_ffi_bytes(value_ptr, value_len),
-            });
-        });
-
-    if (!parsed)
-        return {};
-
-    return font_variant;
 }
 
 Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> RustComponentValueParser::parse_a_font_variant_east_asian(StringView input, StringView encoding)

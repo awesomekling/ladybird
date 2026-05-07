@@ -3240,6 +3240,11 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
         PropertyId::AnimationName
             | PropertyId::Contain
             | PropertyId::ContainerType
+            | PropertyId::FontFamily
+            | PropertyId::FontFeatureSettings
+            | PropertyId::FontLanguageOverride
+            | PropertyId::FontVariant
+            | PropertyId::FontVariationSettings
             | PropertyId::MathDepth
             | PropertyId::PaintOrder
             | PropertyId::PositionTryOrder
@@ -22940,6 +22945,10 @@ impl ComponentValueParser {
             };
             let value = value.to_ascii_lowercase();
 
+            if value.eq_ignore_ascii_case("normal") || value.eq_ignore_ascii_case("none") {
+                return None;
+            }
+
             if matches_font_variant_caps_value(&value) {
                 if font_variant.caps.is_some() {
                     return None;
@@ -31890,6 +31899,9 @@ mod tests {
     #[test]
     fn rejects_invalid_font_variant_values() {
         assert_eq!(parse_font_variant(""), None);
+        assert_eq!(parse_font_variant("normal none"), None);
+        assert_eq!(parse_font_variant("none normal"), None);
+        assert_eq!(parse_font_variant("small-caps normal"), None);
         assert_eq!(parse_font_variant("normal small-caps"), None);
         assert_eq!(parse_font_variant("none small-caps"), None);
         assert_eq!(parse_font_variant("small-caps all-small-caps"), None);

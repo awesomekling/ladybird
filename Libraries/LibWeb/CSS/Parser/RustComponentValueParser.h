@@ -117,11 +117,6 @@ public:
         FlyString value;
     };
 
-    struct FontLanguageOverride {
-        FFI::CssFontLanguageOverrideKind kind;
-        Optional<FlyString> value;
-    };
-
     struct FontFamilyValue {
         FFI::CssFontFamilyValueKind kind;
         FlyString value;
@@ -472,22 +467,6 @@ public:
         Vector<FontTech> tech;
     };
 
-    struct FontVariant {
-        bool ligatures_none { false };
-        Optional<Vector<FontVariantAlternatesValue>> alternates;
-        Optional<FlyString> caps;
-        Optional<Vector<FontVariantEastAsianValue>> east_asian;
-        Optional<FlyString> emoji;
-        Optional<Vector<FontVariantLigaturesValue>> ligatures;
-        Optional<Vector<FontVariantNumericValue>> numeric;
-        Optional<FlyString> position;
-    };
-
-    struct OpenTypeSettings {
-        FFI::CssOpenTypeSettingsKind kind;
-        Vector<OpenTypeTaggedValue> tag_values;
-    };
-
     struct ColorScheme {
         FFI::CssColorSchemeValueKind kind;
         bool only { false };
@@ -600,13 +579,9 @@ public:
     static Optional<URL> parse_an_import_url(StringView input, StringView encoding);
     static Optional<ImportRulePrelude> parse_an_import_rule_prelude(StringView input, StringView encoding);
     static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
-    static Optional<FontLanguageOverride> parse_a_font_language_override(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
-    static Optional<OpenTypeSettings> parse_font_feature_settings(StringView input, StringView encoding);
-    static Optional<OpenTypeSettings> parse_font_variation_settings(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
     static Optional<Vector<FontVariantAlternatesValue>> parse_a_font_variant_alternates(StringView input, StringView encoding);
-    static Optional<FontVariant> parse_a_font_variant(StringView input, StringView encoding);
     static Optional<Vector<FontVariantEastAsianValue>> parse_a_font_variant_east_asian(StringView input, StringView encoding);
     static Optional<Vector<FontVariantNumericValue>> parse_a_font_variant_numeric(StringView input, StringView encoding);
     static Optional<Vector<FontVariantLigaturesValue>> parse_a_font_variant_ligatures(StringView input, StringView encoding);
