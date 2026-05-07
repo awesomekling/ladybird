@@ -1822,6 +1822,20 @@ pub(crate) enum RustOwnedStyleValueParseResult {
     Invalid,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
+    layer_index: usize,
+    style_value: RustOwnedStyleValue,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionalValueListShorthandItem {
+    index: usize,
+    style_value: RustOwnedStyleValue,
+    source: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum CssSyntaxNodeKind {
@@ -2595,21 +2609,37 @@ pub(crate) fn parse_coordinating_value_list_shorthand<C>(
 where
     C: FnMut(usize, u16, &str),
 {
-    if property_ids.is_empty() {
+    let Some(items) = parse_rust_owned_coordinating_value_list_shorthand(property_ids, filtered_input) else {
         return false;
+    };
+
+    for item in items {
+        callback(item.layer_index, item.style_value.property_id as u16, &item.source);
+    }
+
+    true
+}
+
+pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedCoordinatingValueListShorthandItem>> {
+    if property_ids.is_empty() {
+        return None;
     }
 
     if !property_ids
         .iter()
         .all(|property_id| property_id_from_u16(*property_id).is_some())
     {
-        return false;
+        return None;
     }
 
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
     let mut layer_index = 0;
+    let mut items = Vec::new();
 
     // https://drafts.csswg.org/css-values-4/#comb-comma
     // A hash mark (#) indicates that the preceding type, word, or group occurs
@@ -2633,34 +2663,33 @@ where
 
             let start = parser.index;
             parser.index += 1;
-            let Some(serialized_value) = serialize_component_values_for_reparsing(
+            let serialized_value = serialize_component_values_for_reparsing(
                 &parser.component_values[start..parser.index],
                 filtered_input_string,
-            ) else {
-                return false;
-            };
+            )?;
 
-            let mut matched_property_id = None;
-            if !parse_style_value_for_property(
-                &remaining_property_ids,
-                serialized_value.as_bytes(),
-                |_, property_id, _, _, _, _, _, _, _, _, _, _, _| {
-                    matched_property_id = Some(property_id);
-                },
-            ) {
-                return false;
-            }
-            let Some(matched_property_id) = matched_property_id else {
-                return false;
+            let RustOwnedStyleValueParseResult::Parsed(style_value) =
+                parse_rust_owned_style_value_for_property(&remaining_property_ids, serialized_value.as_bytes())
+            else {
+                return None;
+            };
+            let matched_property_id = style_value.property_id as u16;
+
+            if !remaining_property_ids.contains(&matched_property_id) {
+                return None;
             };
 
             remaining_property_ids.retain(|property_id| *property_id != matched_property_id);
-            callback(layer_index, matched_property_id, &serialized_value);
+            items.push(RustOwnedCoordinatingValueListShorthandItem {
+                layer_index,
+                style_value,
+                source: serialized_value,
+            });
             parsed_any_value = true;
         }
 
         if !parsed_any_value {
-            return false;
+            return None;
         }
 
         parser.discard_whitespace();
@@ -2672,23 +2701,40 @@ where
     }
 
     parser.discard_whitespace();
-    !parser.has_next_component_value()
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    Some(items)
 }
 
 pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
 where
     C: FnMut(usize, &str),
 {
-    let Some(property_id) = property_id_from_u16(property_id) else {
+    let Some(items) = parse_rust_owned_positional_value_list_shorthand(property_id, filtered_input) else {
         return false;
     };
+
+    for item in items {
+        callback(item.index, &item.source);
+    }
+
+    true
+}
+
+pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
+    property_id: u16,
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedPositionalValueListShorthandItem>> {
+    let property_id = property_id_from_u16(property_id)?;
     if !property_is_positional_value_list_shorthand(property_id) {
-        return false;
+        return None;
     }
 
     let longhands = longhands_for_shorthand(property_id);
     if !matches!(longhands.len(), 2 | 4) {
-        return false;
+        return None;
     }
 
     let property_ids = [property_id as u16];
@@ -2703,37 +2749,33 @@ where
             break;
         }
         if values.len() == longhands.len() {
-            return false;
+            return None;
         }
 
         let start = parser.index;
         parser.index += 1;
-        let Some(serialized_value) = serialize_component_values_for_reparsing(
+        let serialized_value = serialize_component_values_for_reparsing(
             &parser.component_values[start..parser.index],
             filtered_input_string,
-        ) else {
-            return false;
-        };
+        )?;
 
-        if !parse_style_value_for_property(
-            &property_ids,
-            serialized_value.as_bytes(),
-            |_, _, _, _, _, _, _, _, _, _, _, _, _| {},
-        ) {
-            return false;
-        }
-        values.push(serialized_value);
+        let RustOwnedStyleValueParseResult::Parsed(style_value) =
+            parse_rust_owned_style_value_for_property(&property_ids, serialized_value.as_bytes())
+        else {
+            return None;
+        };
+        values.push(RustOwnedPositionalValueListShorthandItem {
+            index: values.len(),
+            style_value,
+            source: serialized_value,
+        });
     }
 
     if values.is_empty() {
-        return false;
+        return None;
     }
 
-    for (index, value) in values.iter().enumerate() {
-        callback(index, value);
-    }
-
-    true
+    Some(values)
 }
 
 fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
@@ -17295,17 +17337,17 @@ mod tests {
         FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
         MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
         OpenTypeTaggedValue, Parser, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedPositionalValueListShorthandItem, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueParseResult, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -17323,7 +17365,8 @@ mod tests {
         parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_style_value_for_property, parse_scale_value,
+        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property, parse_scale_value,
         parse_scroll_function_value, parse_scrollbar_gutter_value, parse_simple_color_value, parse_string_descriptor,
         parse_style_value_for_property, parse_text_underline_position_value, parse_text_wrap_mode_value,
         parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value,
@@ -18341,12 +18384,27 @@ mod tests {
         .then_some(items)
     }
 
+    fn parse_rust_owned_coordinating_shorthand(
+        property_ids: &[PropertyId],
+        input: &str,
+    ) -> Option<Vec<RustOwnedCoordinatingValueListShorthandItem>> {
+        let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
+        parse_rust_owned_coordinating_value_list_shorthand(&property_ids, input.as_bytes())
+    }
+
     fn parse_positional_shorthand(property_id: PropertyId, input: &str) -> Option<Vec<(usize, String)>> {
         let mut items = Vec::new();
         parse_positional_value_list_shorthand(property_id as u16, input.as_bytes(), |index, value| {
             items.push((index, value.to_string()));
         })
         .then_some(items)
+    }
+
+    fn parse_rust_owned_positional_shorthand(
+        property_id: PropertyId,
+        input: &str,
+    ) -> Option<Vec<RustOwnedPositionalValueListShorthandItem>> {
+        parse_rust_owned_positional_value_list_shorthand(property_id as u16, input.as_bytes())
     }
 
     #[derive(Debug, PartialEq)]
@@ -19350,6 +19408,45 @@ mod tests {
                 (1, PropertyId::TransitionDuration, "2s".to_string()),
             ])
         );
+        let rust_items = parse_rust_owned_coordinating_shorthand(
+            &[
+                PropertyId::TransitionProperty,
+                PropertyId::TransitionDuration,
+                PropertyId::TransitionTimingFunction,
+                PropertyId::TransitionDelay,
+                PropertyId::TransitionBehavior,
+            ],
+            "opacity 1s ease-in 250ms allow-discrete, transform 2s",
+        )
+        .unwrap();
+        assert_eq!(
+            rust_items
+                .iter()
+                .map(|item| (item.layer_index, item.style_value.property_id, item.source.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, PropertyId::TransitionProperty, "opacity".to_string()),
+                (0, PropertyId::TransitionDuration, "1s".to_string()),
+                (0, PropertyId::TransitionTimingFunction, "ease-in".to_string()),
+                (0, PropertyId::TransitionDelay, "250ms".to_string()),
+                (0, PropertyId::TransitionBehavior, "allow-discrete".to_string()),
+                (1, PropertyId::TransitionProperty, "transform".to_string()),
+                (1, PropertyId::TransitionDuration, "2s".to_string()),
+            ]
+        );
+        assert_eq!(
+            rust_items[1].style_value,
+            RustOwnedStyleValue {
+                property_id: PropertyId::TransitionDuration,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::Time,
+                    numeric_value: Some(1.0),
+                    secondary_numeric_value: None,
+                    value: "s".to_string(),
+                    value_type: PropertyValueType::Time,
+                },
+            }
+        );
         assert_eq!(
             parse_coordinating_shorthand(
                 &[
@@ -19402,6 +19499,33 @@ mod tests {
                 (2, "auto".to_string()),
                 (3, "calc(3px + 4%)".to_string()),
             ])
+        );
+        let rust_items =
+            parse_rust_owned_positional_shorthand(PropertyId::Margin, "1px 2% auto calc(3px + 4%)").unwrap();
+        assert_eq!(
+            rust_items
+                .iter()
+                .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, PropertyId::Margin, "1px".to_string()),
+                (1, PropertyId::Margin, "2%".to_string()),
+                (2, PropertyId::Margin, "auto".to_string()),
+                (3, PropertyId::Margin, "calc(3px + 4%)".to_string()),
+            ]
+        );
+        assert_eq!(
+            rust_items[0].style_value,
+            RustOwnedStyleValue {
+                property_id: PropertyId::Margin,
+                value: RustOwnedStyleValueKind::Primitive {
+                    primitive_kind: CssPrimitiveValueKind::Length,
+                    numeric_value: Some(1.0),
+                    secondary_numeric_value: None,
+                    value: "px".to_string(),
+                    value_type: PropertyValueType::Length,
+                },
+            }
         );
         assert_eq!(
             parse_positional_shorthand(PropertyId::BorderBlockWidth, "thin 2px"),
