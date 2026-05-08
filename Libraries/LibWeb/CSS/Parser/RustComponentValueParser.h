@@ -211,8 +211,8 @@ public:
 
     struct RustCursorImage {
         String image_source;
-        Optional<String> x_source;
-        Optional<String> y_source;
+        Optional<RustNestedPrimitiveValue> x;
+        Optional<RustNestedPrimitiveValue> y;
     };
 
     enum class RustFilterValueListEventKind : u8 {

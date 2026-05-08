@@ -1884,6 +1884,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
             };
+            auto materialize_rust_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_number(value.source_or_unit);
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
+                    return nullptr;
+                return NumberStyleValue::create(*value.numeric_value);
+            };
             auto materialize_rust_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_non_negative_number(value.source_or_unit);
@@ -2951,12 +2958,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         RefPtr<StyleValue const> x;
                         RefPtr<StyleValue const> y;
-                        if (cursor_image.x_source.has_value() && cursor_image.y_source.has_value()) {
-                            x = parse_rust_source_as_number(*cursor_image.x_source);
-                            y = parse_rust_source_as_number(*cursor_image.y_source);
+                        if (cursor_image.x.has_value() && cursor_image.y.has_value()) {
+                            x = materialize_rust_nested_number(*cursor_image.x);
+                            y = materialize_rust_nested_number(*cursor_image.y);
                             if (!x || !y)
                                 break;
-                        } else if (cursor_image.x_source.has_value() || cursor_image.y_source.has_value()) {
+                        } else if (cursor_image.x.has_value() || cursor_image.y.has_value()) {
                             break;
                         }
 

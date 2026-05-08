@@ -2460,8 +2460,8 @@ pub(crate) struct RustOwnedCursor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCursorImage {
     image_source: String,
-    x_source: Option<String>,
-    y_source: Option<String>,
+    x: Option<RustOwnedNestedPrimitiveValue>,
+    y: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -9767,36 +9767,22 @@ where
             image.image_source.as_bytes(),
             "",
         );
-        if let (Some(x_source), Some(y_source)) = (&image.x_source, &image.y_source) {
-            callback(
+        if let (Some(x), Some(y)) = (&image.x, &image.y) {
+            callback_nested_primitive(
+                callback,
                 CssStyleValueKind::Cursor,
                 property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
                 CURSOR_CALLBACK_IMAGE_COORDINATE_X,
                 0,
-                0,
-                0,
-                x_source.as_bytes(),
-                "",
+                x,
             );
-            callback(
+            callback_nested_primitive(
+                callback,
                 CssStyleValueKind::Cursor,
                 property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
                 CURSOR_CALLBACK_IMAGE_COORDINATE_Y,
                 0,
-                0,
-                0,
-                y_source.as_bytes(),
-                "",
+                y,
             );
         }
     }
@@ -19609,6 +19595,25 @@ fn component_value_parse_as_nested_length_percentage(
     }
 }
 
+fn component_value_parse_as_nested_number(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
 fn component_value_parse_as_nested_angle(
     component_value: &ComponentValue,
     source: &str,
@@ -19908,16 +19913,14 @@ fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> Opti
     match coordinates {
         [] => Some(RustOwnedCursorImage {
             image_source,
-            x_source: None,
-            y_source: None,
+            x: None,
+            y: None,
         }),
         [x, y] if component_value_parse_as_number_prefix(x) && component_value_parse_as_number_prefix(y) => {
-            let x_source = serialize_component_values_for_reparsing(std::slice::from_ref(x), source)?;
-            let y_source = serialize_component_values_for_reparsing(std::slice::from_ref(y), source)?;
             Some(RustOwnedCursorImage {
                 image_source,
-                x_source: Some(x_source),
-                y_source: Some(y_source),
+                x: Some(component_value_parse_as_nested_number(x, source)?),
+                y: Some(component_value_parse_as_nested_number(y, source)?),
             })
         }
         _ => None,
@@ -32080,8 +32083,8 @@ mod tests {
                 value: RustOwnedStyleValueKind::Cursor(RustOwnedCursor {
                     images: vec![RustOwnedCursorImage {
                         image_source: "url(cursor.png)".to_string(),
-                        x_source: Some("1".to_string()),
-                        y_source: Some("2".to_string()),
+                        x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),
+                        y: Some(RustOwnedNestedPrimitiveValue::Number(2.0)),
                     }],
                     predefined: "pointer".to_string(),
                 }),

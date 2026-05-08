@@ -1636,13 +1636,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 if (color_red == ImageCoordinateX) {
                     VERIFY(!style_value->cursor_images.is_empty());
-                    style_value->cursor_images.last().x_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->cursor_images.last().x = nested_primitive_value_from_callback_payload();
                     return;
                 }
 
                 if (color_red == ImageCoordinateY) {
                     VERIFY(!style_value->cursor_images.is_empty());
-                    style_value->cursor_images.last().y_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->cursor_images.last().y = nested_primitive_value_from_callback_payload();
                     return;
                 }
 
