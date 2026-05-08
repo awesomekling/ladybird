@@ -1824,6 +1824,33 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return nullptr;
             };
+            auto materialize_rust_flex_basis = [&](RustComponentValueParser::RustStyleValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.flex_basis_kind.has_value())
+                    return nullptr;
+
+                switch (*value.flex_basis_kind) {
+                case RustComponentValueParser::RustFlexBasisKind::Auto:
+                    return KeywordStyleValue::create(Keyword::Auto);
+                case RustComponentValueParser::RustFlexBasisKind::Content:
+                    return KeywordStyleValue::create(Keyword::Content);
+                case RustComponentValueParser::RustFlexBasisKind::FitContent:
+                    return KeywordStyleValue::create(Keyword::FitContent);
+                case RustComponentValueParser::RustFlexBasisKind::MinContent:
+                    return KeywordStyleValue::create(Keyword::MinContent);
+                case RustComponentValueParser::RustFlexBasisKind::MaxContent:
+                    return KeywordStyleValue::create(Keyword::MaxContent);
+                case RustComponentValueParser::RustFlexBasisKind::LengthPercentage:
+                    if (!value.flex_basis.has_value())
+                        return nullptr;
+                    return materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
+                case RustComponentValueParser::RustFlexBasisKind::Source:
+                    if (!value.flex_basis_source.has_value())
+                        return nullptr;
+                    return parse_rust_source_as_property(PropertyID::FlexBasis, *value.flex_basis_source);
+                }
+
+                VERIFY_NOT_REACHED();
+            };
             auto materialize_rust_nested_transform_origin_component = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
                     auto maybe_keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
@@ -3110,15 +3137,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             { PropertyID::FlexGrow, PropertyID::FlexShrink, PropertyID::FlexBasis },
                             { NumberStyleValue::create(0), NumberStyleValue::create(0), KeywordStyleValue::create(Keyword::Auto) }) };
                 }
-                if (rust_style_value->flex_grow_source.has_value() && rust_style_value->flex_shrink_source.has_value() && rust_style_value->flex_basis_source.has_value()) {
-                    auto flex_grow = parse_rust_source_as_property(PropertyID::FlexGrow, *rust_style_value->flex_grow_source);
-                    auto flex_shrink = parse_rust_source_as_property(PropertyID::FlexShrink, *rust_style_value->flex_shrink_source);
-                    auto flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, *rust_style_value->flex_basis_source);
-                    if (!flex_grow && *rust_style_value->flex_shrink_source == "1"sv && *rust_style_value->flex_basis_source == "0%"sv) {
+                if (rust_style_value->flex_grow.has_value() && rust_style_value->flex_shrink.has_value() && rust_style_value->flex_basis_kind.has_value()) {
+                    auto flex_grow = materialize_rust_nested_non_negative_number(*rust_style_value->flex_grow);
+                    auto flex_shrink = materialize_rust_nested_non_negative_number(*rust_style_value->flex_shrink);
+                    auto flex_basis = materialize_rust_flex_basis(*rust_style_value);
+                    if (!flex_grow
+                        && rust_style_value->flex_grow->primitive_kind == FFI::CssPrimitiveValueKind::Invalid
+                        && rust_style_value->flex_shrink->primitive_kind == FFI::CssPrimitiveValueKind::Number
+                        && rust_style_value->flex_shrink->numeric_value.has_value()
+                        && *rust_style_value->flex_shrink->numeric_value == 1
+                        && *rust_style_value->flex_basis_kind == RustComponentValueParser::RustFlexBasisKind::LengthPercentage
+                        && rust_style_value->flex_basis.has_value()
+                        && rust_style_value->flex_basis->primitive_kind == FFI::CssPrimitiveValueKind::Percentage
+                        && rust_style_value->flex_basis->numeric_value.has_value()
+                        && *rust_style_value->flex_basis->numeric_value == 0) {
                         // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
                         // https://github.com/w3c/csswg-drafts/issues/5742
                         flex_grow = NumberStyleValue::create(1);
-                        flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, *rust_style_value->flex_grow_source);
+                        flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, rust_style_value->flex_grow->source_or_unit);
                     }
                     if (!flex_grow || !flex_shrink || !flex_basis)
                         break;

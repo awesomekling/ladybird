@@ -152,6 +152,16 @@ public:
         Wavy,
     };
 
+    enum class RustFlexBasisKind : u8 {
+        Auto,
+        Content,
+        FitContent,
+        MinContent,
+        MaxContent,
+        LengthPercentage,
+        Source,
+    };
+
     enum class RustTextDecorationThicknessKind : u8 {
         Auto,
         FromFont,
@@ -424,8 +434,10 @@ public:
         Optional<RustNestedPrimitiveValue> column_height;
         bool column_height_is_auto { false };
         bool flex_shorthand_is_none { false };
-        Optional<String> flex_grow_source;
-        Optional<String> flex_shrink_source;
+        Optional<RustNestedPrimitiveValue> flex_grow;
+        Optional<RustNestedPrimitiveValue> flex_shrink;
+        Optional<RustFlexBasisKind> flex_basis_kind;
+        Optional<RustNestedPrimitiveValue> flex_basis;
         Optional<String> flex_basis_source;
         Optional<FlexDirection> flex_direction;
         Optional<FlexWrap> flex_wrap;
