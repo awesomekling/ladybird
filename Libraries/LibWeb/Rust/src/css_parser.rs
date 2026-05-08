@@ -2320,12 +2320,14 @@ pub(crate) enum RustOwnedFitContentValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRect {
-    top: String,
-    right: String,
-    bottom: String,
-    left: String,
+    sides: Vec<RustOwnedRectSide>,
     requires_commas: bool,
-    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedRectSide {
+    Auto,
+    Length(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7334,39 +7336,30 @@ fn rust_owned_rect_style_value_kind(
         }
     }
 
-    let [top, right, bottom, left] = sides.as_slice() else {
-        return None;
-    };
-
     Some(RustOwnedStyleValueKind::Rect(RustOwnedRect {
-        top: top.clone(),
-        right: right.clone(),
-        bottom: bottom.clone(),
-        left: left.clone(),
+        sides,
         requires_commas: requires_commas.unwrap_or(false),
-        source: serialize_component_values_for_reparsing(component_values, filtered_input_string)?,
     }))
 }
 
-fn rust_owned_rect_side(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn rust_owned_rect_side(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<RustOwnedRectSide> {
     parser.discard_whitespace();
 
     let component_value = parser.next_component_value()?;
-    let is_auto = matches!(
+    if matches!(
         component_value,
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
             ..
         }) if value.eq_ignore_ascii_case("auto")
-    );
-    if is_auto || component_value_parse_as_length(component_value) {
-        let value =
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    ) {
         parser.index += 1;
-        return Some(value);
+        return Some(RustOwnedRectSide::Auto);
     }
 
-    None
+    let value = component_value_parse_as_nested_length(component_value, filtered_input_string)?;
+    parser.index += 1;
+    Some(RustOwnedRectSide::Length(value))
 }
 
 fn rust_owned_primitive_style_value_kind(
@@ -9315,22 +9308,33 @@ fn callback_rect_style_value<C>(callback: &mut C, property_id: u16, value: &Rust
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let sources = format!("{}\0{}\0{}\0{}", value.top, value.right, value.bottom, value.left);
-    callback(
-        CssStyleValueKind::Rect,
-        property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
-        false,
-        0.0,
-        u8::from(value.requires_commas),
-        0,
-        0,
-        0,
-        sources.as_bytes(),
-        "",
-    );
+    for side in &value.sides {
+        match side {
+            RustOwnedRectSide::Auto => callback(
+                CssStyleValueKind::Rect,
+                property_id,
+                CssPrimitiveValueKind::Keyword,
+                false,
+                0.0,
+                false,
+                0.0,
+                u8::from(value.requires_commas),
+                0,
+                1,
+                0,
+                b"auto",
+                "",
+            ),
+            RustOwnedRectSide::Length(length) => callback_nested_primitive(
+                callback,
+                CssStyleValueKind::Rect,
+                property_id,
+                u8::from(value.requires_commas),
+                0,
+                length,
+            ),
+        }
+    }
 }
 
 fn callback_source_backed_value_type_style_value<C>(
@@ -29721,28 +29725,28 @@ mod tests {
         RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
         RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
         RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
-        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
-        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
+        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -32214,12 +32218,22 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Clip,
                 value: RustOwnedStyleValueKind::Rect(RustOwnedRect {
-                    top: "1px".to_string(),
-                    right: "auto".to_string(),
-                    bottom: "2px".to_string(),
-                    left: "3px".to_string(),
+                    sides: vec![
+                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
+                        }),
+                        RustOwnedRectSide::Auto,
+                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                            value: 2.0,
+                            unit: "px".to_string(),
+                        }),
+                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                            value: 3.0,
+                            unit: "px".to_string(),
+                        }),
+                    ],
                     requires_commas: true,
-                    source: "rect(1px, auto, 2px, 3px)".to_string(),
                 }),
             })
         );
@@ -33226,11 +33240,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::Rect,
                 property_id: PropertyId::Clip,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(3.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "1px\0auto\02px\03px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );

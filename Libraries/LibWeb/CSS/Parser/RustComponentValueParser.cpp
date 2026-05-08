@@ -992,9 +992,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (value_len > 0)
                     value.fit_content_argument_source = String::from_utf8_without_validation({ value_ptr, value_len });
             } else if (kind == FFI::CssStyleValueKind::Rect) {
-                value.rect_requires_commas = color_red;
-                for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
-                    value.rect_sources.append(String::from_utf8_without_validation(source.bytes()));
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Rect);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->rect_requires_commas = color_red != 0;
+                style_value->rect_sides.append(nested_primitive_value_from_callback_payload());
+                return;
             } else if (kind == FFI::CssStyleValueKind::AnchorNameOrScope) {
                 value.anchor_name_or_scope_kind = static_cast<FFI::CssAnchorNameOrScopeValueKind>(color_red);
                 for (auto name : StringView { value_ptr, value_len }.split_view('\0'))

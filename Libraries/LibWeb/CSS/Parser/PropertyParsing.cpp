@@ -1467,40 +1467,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
-                if (rust_style_value->rect_sources.size() != 4)
-                    return nullptr;
-
-                auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
-                auto parse_rust_rect_side_source = [&](String const& source) -> RefPtr<StyleValue const> {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                    TokenStream side_tokens { component_values };
-
-                    side_tokens.discard_whitespace();
-                    if (side_tokens.next_token().is_ident("auto"sv)) {
-                        side_tokens.discard_a_token();
-                        side_tokens.discard_whitespace();
-                        if (side_tokens.has_next_token())
-                            return nullptr;
-                        return KeywordStyleValue::create(Keyword::Auto);
-                    }
-
-                    auto length = parse_length_value(side_tokens, infinite_range);
-                    side_tokens.discard_whitespace();
-                    if (!length || side_tokens.has_next_token())
-                        return nullptr;
-                    return length.release_nonnull();
-                };
-
-                auto top = parse_rust_rect_side_source(rust_style_value->rect_sources[0]);
-                auto right = parse_rust_rect_side_source(rust_style_value->rect_sources[1]);
-                auto bottom = parse_rust_rect_side_source(rust_style_value->rect_sources[2]);
-                auto left = parse_rust_rect_side_source(rust_style_value->rect_sources[3]);
-                if (!top || !right || !bottom || !left)
-                    return nullptr;
-
-                return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
-            };
             auto parse_rust_source_as_value_type = [&](StringView source, ValueType value_type) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1871,6 +1837,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return KeywordStyleValue::create(Keyword::Auto);
                 }
                 return materialize_rust_nested_length_percentage(value, non_negative_range);
+            };
+            auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
+                if (rust_style_value->rect_sides.size() != 4)
+                    return nullptr;
+
+                auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
+                auto materialize_rust_rect_side = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                    if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                        auto keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
+                        if (!keyword.has_value() || *keyword != Keyword::Auto)
+                            return nullptr;
+                        return KeywordStyleValue::create(Keyword::Auto);
+                    }
+                    return materialize_rust_nested_length(value, infinite_range);
+                };
+
+                auto top = materialize_rust_rect_side(rust_style_value->rect_sides[0]);
+                auto right = materialize_rust_rect_side(rust_style_value->rect_sides[1]);
+                auto bottom = materialize_rust_rect_side(rust_style_value->rect_sides[2]);
+                auto left = materialize_rust_rect_side(rust_style_value->rect_sides[3]);
+                if (!top || !right || !bottom || !left)
+                    return nullptr;
+
+                return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
             };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())

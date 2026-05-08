@@ -418,7 +418,7 @@ public:
         Vector<String> basic_shape_argument_groups;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
         Optional<String> fit_content_argument_source;
-        Vector<String> rect_sources;
+        Vector<RustNestedPrimitiveValue> rect_sides;
         bool rect_requires_commas { false };
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
