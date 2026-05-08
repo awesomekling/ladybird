@@ -2545,12 +2545,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (offset < value_len)
                         ++offset;
                 }
-            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Anchor, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction, FFI::CssStyleValueKind::ValueType)) {
+            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Anchor, FFI::CssStyleValueKind::AnchorSize, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction, FFI::CssStyleValueKind::ValueType)) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())
                     return;
                 value.value_type = value_type.release_value();
-                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::MathFunction || kind == FFI::CssStyleValueKind::ValueType) && value_len > 0)
+                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::AnchorSize || kind == FFI::CssStyleValueKind::MathFunction || kind == FFI::CssStyleValueKind::ValueType) && value_len > 0)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
                 if (has_numeric_value)
                     value.numeric_value = numeric_value;

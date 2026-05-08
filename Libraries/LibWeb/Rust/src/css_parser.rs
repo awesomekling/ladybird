@@ -1861,6 +1861,7 @@ pub enum CssStyleValueKind {
     AspectRatio,
     AnimationName,
     Anchor,
+    AnchorSize,
     AnchorNameOrScope,
     BackgroundSize,
     Border,
@@ -1945,6 +1946,7 @@ pub(crate) struct RustOwnedStyleValue {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStyleValueKind {
     Anchor(RustOwnedAnchorFunction),
+    AnchorSize(RustOwnedAnchorSizeFunction),
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
     Angle(RustOwnedDimensionStyleValue),
     AnimationName(RustOwnedAnimationName),
@@ -2214,6 +2216,12 @@ pub(crate) struct RustOwnedAnchorFunction {
     anchor_side: String,
     fallback: Option<String>,
     source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedAnchorSizeFunction {
+    source: String,
+    value_type: PropertyValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4148,6 +4156,13 @@ fn parse_rust_owned_generated_longhand_value(
         };
     }
 
+    if let Some(function) = parse_rust_owned_anchor_size_function(value_type, component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::AnchorSize(function),
+        };
+    }
+
     let generated_style_value = generated_value_type_id_for_property_value_type(value_type).and_then(|value_type_id| {
         let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
         let style_value = generated_value_type_style_value(syntax_kind, component_values);
@@ -4376,6 +4391,40 @@ fn rust_owned_anchor_function_from_function(
             filtered_input_string,
         )?,
     }))
+}
+
+fn parse_rust_owned_anchor_size_function(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+    filtered_input: &[u8],
+) -> Option<RustOwnedAnchorSizeFunction> {
+    if !matches!(
+        value_type,
+        PropertyValueType::Length | PropertyValueType::LengthPercentage
+    ) {
+        return None;
+    }
+
+    let [ComponentValue::Function(function)] = strip_whitespace(component_values) else {
+        return None;
+    };
+
+    // https://drafts.csswg.org/css-anchor-position-1/#funcdef-anchor-size
+    // anchor-size() = anchor-size( [ <anchor-name> || <anchor-size> ]? , <length-percentage>? )
+    if !function.name.eq_ignore_ascii_case("anchor-size") {
+        return None;
+    }
+
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+    // AD-HOC: Rust classifies the function shape here, while C++ still
+    // validates the full grammar and property context during materialization.
+    Some(RustOwnedAnchorSizeFunction {
+        source: serialize_component_values_for_reparsing(
+            &[ComponentValue::Function(function.clone())],
+            &filtered_input_string,
+        )?,
+        value_type,
+    })
 }
 
 fn component_value_parse_as_anchor_side(component_value: &ComponentValue) -> bool {
@@ -8327,6 +8376,15 @@ where
                 property_id,
                 &value.source,
                 PropertyValueType::Anchor,
+            );
+        }
+        RustOwnedStyleValueKind::AnchorSize(value) => {
+            callback_source_backed_value_type_kind_style_value(
+                callback,
+                CssStyleValueKind::AnchorSize,
+                property_id,
+                &value.source,
+                value.value_type,
             );
         }
         RustOwnedStyleValueKind::Counter(value) => {
@@ -33143,9 +33201,9 @@ mod tests {
         FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind,
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
-        RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
-        RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
+        RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
+        RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList,
+        RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
         RustOwnedBasicShapeRadiusComponent, RustOwnedBasicShapeRectangleComponent, RustOwnedBorderImage,
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
         RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
@@ -35509,6 +35567,16 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Width], "anchor-size(--target width, 10px)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Width,
+                value: RustOwnedStyleValueKind::AnchorSize(RustOwnedAnchorSizeFunction {
+                    source: "anchor-size(--target width, 10px)".to_string(),
+                    value_type: PropertyValueType::Length,
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BackgroundSize], "cover, auto 10px, 2% calc(3px + 4%)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundSize,
@@ -37495,6 +37563,19 @@ mod tests {
                 color: None,
                 value: "anchor(--target bottom, calc(1px + 2%))".to_string(),
                 value_type: "Anchor".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Width], "anchor-size(--target width, 10px)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::AnchorSize,
+                property_id: PropertyId::Width,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "anchor-size(--target width, 10px)".to_string(),
+                value_type: "Length".to_string(),
             })
         );
         assert_eq!(
