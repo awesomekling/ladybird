@@ -290,6 +290,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::StrokeLinejoin:
     case PropertyID::StrokeMiterlimit:
     case PropertyID::StrokeOpacity:
+    case PropertyID::TabSize:
     case PropertyID::TableLayout:
     case PropertyID::TextAlign:
     case PropertyID::TextAnchor:

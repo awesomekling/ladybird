@@ -401,6 +401,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::StrokeLinejoin
             | PropertyId::StrokeMiterlimit
             | PropertyId::StrokeOpacity
+            | PropertyId::TabSize
             | PropertyId::TableLayout
             | PropertyId::TextAlign
             | PropertyId::TextAnchor
@@ -571,6 +572,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::Stroke
         | PropertyId::StrokeMiterlimit
         | PropertyId::StrokeOpacity
+        | PropertyId::TabSize
         | PropertyId::TextDecorationColor
         | PropertyId::TextDecorationThickness
         | PropertyId::TextUnderlineOffset
@@ -723,6 +725,25 @@ fn rust_owned_generated_property_specific_style_value_kind(
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
 
+    // AD-HOC: Prefer the <length> arm for tab-size math expressions containing a dimension.
+    // The generated grammar accepts calc(10px) as <number>, but the CSS parser has
+    // historically materialized it as a length.
+    if property_id == PropertyId::TabSize
+        && component_values_contain_dimension(component_values)
+        && component_values_parse_as_property_value_type(PropertyValueType::Length, filtered_input)
+        && component_values_satisfy_property_numeric_range(property_id, PropertyValueType::Length, component_values)
+    {
+        return Some(
+            parse_rust_owned_generated_longhand_value(
+                property_id,
+                PropertyValueType::Length,
+                filtered_input,
+                component_values,
+            )
+            .value,
+        );
+    }
+
     if property_id == PropertyId::FontWeight
         && component_values_parse_as_property_value_type(PropertyValueType::Number, filtered_input)
         && component_values_satisfy_property_numeric_range(property_id, PropertyValueType::Number, component_values)
@@ -836,6 +857,18 @@ fn component_values_satisfy_property_numeric_range(
 
     let (minimum, maximum) = numeric_range_to_f64(range, value_type);
     minimum <= numeric_value && numeric_value <= maximum
+}
+
+fn component_values_contain_dimension(component_values: &[ComponentValue]) -> bool {
+    component_values.iter().any(|component_value| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { .. },
+            ..
+        }) => true,
+        ComponentValue::Function(function) => component_values_contain_dimension(&function.value),
+        ComponentValue::SimpleBlock(block) => component_values_contain_dimension(&block.value),
+        _ => false,
+    })
 }
 
 pub(super) fn parse_rust_owned_generated_longhand_value(

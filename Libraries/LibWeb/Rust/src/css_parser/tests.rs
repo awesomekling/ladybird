@@ -2704,6 +2704,19 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::TabSize], "calc(10px)"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::TabSize,
+            value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
+                kind: RustOwnedSourceBackedValueKind::MathFunction {
+                    name: "calc".to_string(),
+                },
+                source: "calc(10px)".to_string(),
+                value_type: PropertyValueType::Length,
+            }),
+        })
+    );
     for (property_id, source, keyword) in [
         (PropertyId::OverflowWrap, "break-word", "break-word"),
         (PropertyId::ScrollBehavior, "smooth", "smooth"),
