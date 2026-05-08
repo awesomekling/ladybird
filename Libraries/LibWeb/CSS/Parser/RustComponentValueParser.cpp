@@ -1047,6 +1047,27 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             } else if (kind == FFI::CssStyleValueKind::BasicShape) {
                 value.basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
+                enum : u8 {
+                    BasicShapeComponentHeader,
+                    BasicShapeComponentPolygonPointX,
+                    BasicShapeComponentPolygonPointY,
+                };
+                if (value.basic_shape_kind == RustBasicShapeKind::Polygon) {
+                    if (!style_value.has_value())
+                        style_value = move(value);
+                    else {
+                        VERIFY(style_value->kind == FFI::CssStyleValueKind::BasicShape);
+                        VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                        VERIFY(style_value->basic_shape_kind == RustBasicShapeKind::Polygon);
+                    }
+
+                    style_value->basic_shape_fill_rule = color_green;
+                    if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY)
+                        style_value->basic_shape_polygon_coordinates.append(nested_primitive_value_from_callback_payload());
+                    else
+                        VERIFY(color_blue == BasicShapeComponentHeader);
+                    return;
+                }
                 if (value.basic_shape_kind == RustBasicShapeKind::Path) {
                     value.basic_shape_fill_rule = color_green;
                     value.basic_shape_path_data = string_from_ffi_bytes(value_ptr, value_len);
@@ -1589,7 +1610,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 case RustShapeOutsideEventKind::BasicShape:
                     style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
-                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Path) {
+                    enum : u8 {
+                        BasicShapeComponentHeader,
+                        BasicShapeComponentPolygonPointX,
+                        BasicShapeComponentPolygonPointY,
+                    };
+                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Polygon) {
+                        style_value->shape_outside_basic_shape_fill_rule = color_alpha;
+                        if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY)
+                            style_value->shape_outside_basic_shape_polygon_coordinates.append(nested_primitive_value_from_callback_payload());
+                        else
+                            VERIFY(color_blue == BasicShapeComponentHeader);
+                    } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Path) {
                         style_value->shape_outside_basic_shape_fill_rule = color_blue;
                         style_value->shape_outside_basic_shape_path_data = string_from_ffi_bytes(value_ptr, value_len);
                     } else if (value_len == 0) {

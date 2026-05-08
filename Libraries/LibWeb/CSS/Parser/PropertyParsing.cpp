@@ -1241,13 +1241,39 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return Gfx::WindingRule::EvenOdd;
                 return {};
             };
-            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups, Optional<u8> fill_rule_value, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
+            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups, Optional<u8> fill_rule_value, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& polygon_coordinates, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
                 auto materialize_rust_fill_rule = [](Optional<u8> fill_rule_value) -> Optional<Gfx::WindingRule> {
                     if (!fill_rule_value.has_value() || *fill_rule_value == 0)
                         return Gfx::WindingRule::Nonzero;
                     if (*fill_rule_value == 1)
                         return Gfx::WindingRule::EvenOdd;
                     return {};
+                };
+                auto materialize_rust_basic_shape_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.numeric_value.has_value()) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream value_tokens { component_values };
+                        auto parsed_value = parse_length_percentage_value(value_tokens, range, range);
+                        value_tokens.discard_whitespace();
+                        if (!parsed_value || value_tokens.has_next_token())
+                            return nullptr;
+                        return parsed_value.release_nonnull();
+                    }
+                    if (value.primitive_kind == FFI::CssPrimitiveValueKind::Length) {
+                        auto length_unit = string_to_length_unit(value.source_or_unit);
+                        if (!length_unit.has_value())
+                            return nullptr;
+                        Length length { *value.numeric_value, length_unit.release_value() };
+                        if (!range.contains(length.raw_value()))
+                            return nullptr;
+                        return LengthStyleValue::create(length);
+                    }
+                    if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                        if (!range.contains(*value.numeric_value))
+                            return nullptr;
+                        return PercentageStyleValue::create(Percentage { *value.numeric_value });
+                    }
+                    return nullptr;
                 };
                 auto parse_optional_round_border_radius = [&](TokenStream<ComponentValue>& arguments_tokens) -> RefPtr<StyleValue const> {
                     NonnullRefPtr<StyleValue const> border_radius = BorderRadiusRectStyleValue::create_zero();
@@ -1409,6 +1435,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustBasicShapeKind::Polygon: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "polygon"sv });
+                    if (!polygon_coordinates.is_empty()) {
+                        auto fill_rule = materialize_rust_fill_rule(fill_rule_value);
+                        if (!fill_rule.has_value() || polygon_coordinates.size() % 2 != 0)
+                            return nullptr;
+
+                        Vector<Polygon::Point> points;
+                        points.ensure_capacity(polygon_coordinates.size() / 2);
+                        for (size_t i = 0; i < polygon_coordinates.size(); i += 2) {
+                            auto x_pos = materialize_rust_basic_shape_length_percentage(polygon_coordinates[i], infinite_range);
+                            auto y_pos = materialize_rust_basic_shape_length_percentage(polygon_coordinates[i + 1], infinite_range);
+                            if (!x_pos || !y_pos)
+                                return nullptr;
+                            points.append(Polygon::Point { x_pos.release_nonnull(), y_pos.release_nonnull() });
+                        }
+
+                        return BasicShapeStyleValue::create(Polygon { *fill_rule, move(points) });
+                    }
+
                     if (argument_groups.is_empty())
                         return nullptr;
 
@@ -1622,7 +1666,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 RefPtr<StyleValue const> basic_shape_value;
                 RefPtr<StyleValue const> shape_box_value;
                 if (rust_style_value->shape_outside_basic_shape_kind.has_value()) {
-                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups, rust_style_value->shape_outside_basic_shape_fill_rule, rust_style_value->shape_outside_basic_shape_path_data);
+                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups, rust_style_value->shape_outside_basic_shape_fill_rule, rust_style_value->shape_outside_basic_shape_polygon_coordinates, rust_style_value->shape_outside_basic_shape_path_data);
                     if (!basic_shape_value)
                         return nullptr;
                 }
@@ -2560,7 +2604,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BasicShape:
-                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_path_data)) {
+                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_polygon_coordinates, rust_style_value->basic_shape_path_data)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

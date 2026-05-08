@@ -2239,6 +2239,7 @@ pub(crate) struct RustOwnedBasicShape {
     kind: RustOwnedBasicShapeKind,
     argument_groups: Vec<String>,
     fill_rule: RustOwnedBasicShapeFillRule,
+    polygon_points: Vec<RustOwnedBasicShapePolygonPoint>,
     path_data: Option<String>,
     source: String,
 }
@@ -2259,6 +2260,12 @@ pub(crate) enum RustOwnedBasicShapeKind {
 pub(crate) enum RustOwnedBasicShapeFillRule {
     Nonzero,
     Evenodd,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBasicShapePolygonPoint {
+    x: RustOwnedNestedPrimitiveValue,
+    y: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4442,6 +4449,7 @@ fn rust_owned_basic_shape_style_value_kind(
     // https://drafts.csswg.org/css-shapes-1/#typedef-basic-shape
     // <basic-shape> = <inset()> | <circle()> | <ellipse()> | <polygon()> | <path()> | <rect()> | <xywh()>
     let mut fill_rule = RustOwnedBasicShapeFillRule::Nonzero;
+    let mut polygon_points = vec![];
     let mut path_data = None;
     let kind = if function.name.eq_ignore_ascii_case("inset") {
         parse_inset_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Inset)
@@ -4456,7 +4464,10 @@ fn rust_owned_basic_shape_style_value_kind(
         parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Ellipse)
             .then_some(RustOwnedBasicShapeKind::Ellipse)
     } else if function.name.eq_ignore_ascii_case("polygon") {
-        parse_polygon_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Polygon)
+        let polygon = parse_owned_polygon_basic_shape_function(function, filtered_input_string)?;
+        fill_rule = polygon.fill_rule;
+        polygon_points = polygon.points;
+        Some(RustOwnedBasicShapeKind::Polygon)
     } else if function.name.eq_ignore_ascii_case("path") {
         let path = parse_path_basic_shape_function(function)?;
         fill_rule = path.fill_rule;
@@ -4478,6 +4489,7 @@ fn rust_owned_basic_shape_style_value_kind(
         kind,
         argument_groups,
         fill_rule,
+        polygon_points,
         path_data,
         source: filtered_input_string.to_string(),
     }))
@@ -9636,6 +9648,10 @@ const BASIC_SHAPE_CALLBACK_ELLIPSE: u8 = 4;
 const BASIC_SHAPE_CALLBACK_POLYGON: u8 = 5;
 const BASIC_SHAPE_CALLBACK_PATH: u8 = 6;
 
+const BASIC_SHAPE_COMPONENT_HEADER: u8 = 0;
+const BASIC_SHAPE_COMPONENT_POLYGON_POINT_X: u8 = 1;
+const BASIC_SHAPE_COMPONENT_POLYGON_POINT_Y: u8 = 2;
+
 const FIT_CONTENT_CALLBACK_KEYWORD: u8 = 0;
 const FIT_CONTENT_CALLBACK_FUNCTION: u8 = 1;
 
@@ -9973,6 +9989,37 @@ where
 {
     let (kind, argument_groups) = basic_shape_callback_payload(value);
 
+    if value.kind == RustOwnedBasicShapeKind::Polygon {
+        callback_basic_shape_header(
+            callback,
+            CssStyleValueKind::BasicShape,
+            property_id,
+            kind,
+            value.fill_rule,
+        );
+        for point in &value.polygon_points {
+            callback_basic_shape_nested_primitive(
+                callback,
+                CssStyleValueKind::BasicShape,
+                property_id,
+                kind,
+                value.fill_rule,
+                BASIC_SHAPE_COMPONENT_POLYGON_POINT_X,
+                &point.x,
+            );
+            callback_basic_shape_nested_primitive(
+                callback,
+                CssStyleValueKind::BasicShape,
+                property_id,
+                kind,
+                value.fill_rule,
+                BASIC_SHAPE_COMPONENT_POLYGON_POINT_Y,
+                &point.y,
+            );
+        }
+        return;
+    }
+
     callback(
         CssStyleValueKind::BasicShape,
         property_id,
@@ -9986,6 +10033,62 @@ where
         0,
         0,
         argument_groups.as_bytes(),
+        "",
+    );
+}
+
+fn callback_basic_shape_header<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    fill_rule: RustOwnedBasicShapeFillRule,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        style_value_kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        fill_rule as u8,
+        BASIC_SHAPE_COMPONENT_HEADER,
+        0,
+        &[],
+        "",
+    );
+}
+
+fn callback_basic_shape_nested_primitive<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    fill_rule: RustOwnedBasicShapeFillRule,
+    component: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+
+    callback(
+        style_value_kind,
+        property_id,
+        primitive_kind,
+        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        false,
+        0.0,
+        kind,
+        fill_rule as u8,
+        component,
+        0,
+        unit_or_source.as_bytes(),
         "",
     );
 }
@@ -10947,6 +11050,29 @@ where
 {
     let (kind, argument_groups) = basic_shape_callback_payload(value);
 
+    if value.kind == RustOwnedBasicShapeKind::Polygon {
+        callback_shape_outside_basic_shape_header(callback, property_id, kind, value.fill_rule);
+        for point in &value.polygon_points {
+            callback_shape_outside_basic_shape_nested_primitive(
+                callback,
+                property_id,
+                kind,
+                value.fill_rule,
+                BASIC_SHAPE_COMPONENT_POLYGON_POINT_X,
+                &point.x,
+            );
+            callback_shape_outside_basic_shape_nested_primitive(
+                callback,
+                property_id,
+                kind,
+                value.fill_rule,
+                BASIC_SHAPE_COMPONENT_POLYGON_POINT_Y,
+                &point.y,
+            );
+        }
+        return;
+    }
+
     callback(
         CssStyleValueKind::ShapeOutside,
         property_id,
@@ -10960,6 +11086,60 @@ where
         value.fill_rule as u8,
         0,
         argument_groups.as_bytes(),
+        "",
+    );
+}
+
+fn callback_shape_outside_basic_shape_header<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    fill_rule: RustOwnedBasicShapeFillRule,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::ShapeOutside,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE,
+        kind,
+        BASIC_SHAPE_COMPONENT_HEADER,
+        fill_rule as u8,
+        &[],
+        "",
+    );
+}
+
+fn callback_shape_outside_basic_shape_nested_primitive<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    fill_rule: RustOwnedBasicShapeFillRule,
+    component: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+
+    callback(
+        CssStyleValueKind::ShapeOutside,
+        property_id,
+        primitive_kind,
+        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        false,
+        0.0,
+        SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE,
+        kind,
+        component,
+        fill_rule as u8,
+        unit_or_source.as_bytes(),
         "",
     );
 }
@@ -16542,6 +16722,49 @@ fn parse_polygon_basic_shape_function(function: &Function) -> bool {
         };
         component_value_parse_as_length_percentage(x) && component_value_parse_as_length_percentage(y)
     })
+}
+
+struct ParsedPolygonBasicShapeFunction {
+    fill_rule: RustOwnedBasicShapeFillRule,
+    points: Vec<RustOwnedBasicShapePolygonPoint>,
+}
+
+fn parse_owned_polygon_basic_shape_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<ParsedPolygonBasicShapeFunction> {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-polygon
+    // polygon() = polygon( <'fill-rule'>? , [<length-percentage> <length-percentage>]# )
+    let mut arguments = parse_comma_separated_component_values(function.value.clone(), |component_values| {
+        Some(remove_whitespace_component_values(&component_values))
+    })?;
+
+    if arguments.is_empty() {
+        return None;
+    }
+
+    let fill_rule = if let Some(fill_rule) = component_values_fill_rule(&arguments[0]) {
+        arguments.remove(0);
+        fill_rule
+    } else {
+        RustOwnedBasicShapeFillRule::Nonzero
+    };
+    if arguments.is_empty() {
+        return None;
+    }
+
+    let mut points = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        let [x, y] = argument.as_slice() else {
+            return None;
+        };
+        points.push(RustOwnedBasicShapePolygonPoint {
+            x: component_value_parse_as_nested_length_percentage(x, filtered_input_string)?,
+            y: component_value_parse_as_nested_length_percentage(y, filtered_input_string)?,
+        });
+    }
+
+    Some(ParsedPolygonBasicShapeFunction { fill_rule, points })
 }
 
 struct ParsedPathBasicShapeFunction {
@@ -31278,17 +31501,18 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageOutset,
-        RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource, RustOwnedBorderImageWidth,
-        RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumnInteger,
-        RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
-        RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
-        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorderImage,
+        RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
+        RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
+        RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
+        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -33183,6 +33407,7 @@ mod tests {
                         kind: RustOwnedBasicShapeKind::Circle,
                         argument_groups: vec!["10px".to_string()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                        polygon_points: vec![],
                         path_data: None,
                         source: "circle(10px)".to_string(),
                     }),
@@ -33199,6 +33424,7 @@ mod tests {
                         kind: RustOwnedBasicShapeKind::Circle,
                         argument_groups: vec![String::new()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                        polygon_points: vec![],
                         path_data: None,
                         source: "circle()".to_string(),
                     }),
@@ -33924,6 +34150,7 @@ mod tests {
                     kind: RustOwnedBasicShapeKind::Inset,
                     argument_groups: vec!["10px".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                    polygon_points: vec![],
                     path_data: None,
                     source: "inset(10px)".to_string(),
                 }),
@@ -33937,8 +34164,41 @@ mod tests {
                     kind: RustOwnedBasicShapeKind::Path,
                     argument_groups: vec!["evenodd".to_string(), "\"M 0 0 L 1 1\"".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
+                    polygon_points: vec![],
                     path_data: Some("M 0 0 L 1 1".to_string()),
                     source: "path(evenodd, \"M 0 0 L 1 1\")".to_string(),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ClipPath], "polygon(evenodd, 0 0, 100% 0)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ClipPath,
+                value: RustOwnedStyleValueKind::BasicShape(RustOwnedBasicShape {
+                    kind: RustOwnedBasicShapeKind::Polygon,
+                    argument_groups: vec!["evenodd".to_string(), "0 0".to_string(), "100% 0".to_string()],
+                    fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
+                    polygon_points: vec![
+                        RustOwnedBasicShapePolygonPoint {
+                            x: RustOwnedNestedPrimitiveValue::Length {
+                                value: 0.0,
+                                unit: "px".to_string(),
+                            },
+                            y: RustOwnedNestedPrimitiveValue::Length {
+                                value: 0.0,
+                                unit: "px".to_string(),
+                            },
+                        },
+                        RustOwnedBasicShapePolygonPoint {
+                            x: RustOwnedNestedPrimitiveValue::Percentage(100.0),
+                            y: RustOwnedNestedPrimitiveValue::Length {
+                                value: 0.0,
+                                unit: "px".to_string(),
+                            },
+                        },
+                    ],
+                    path_data: None,
+                    source: "polygon(evenodd, 0 0, 100% 0)".to_string(),
                 }),
             })
         );
