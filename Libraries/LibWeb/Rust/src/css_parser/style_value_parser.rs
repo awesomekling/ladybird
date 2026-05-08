@@ -1,0 +1,1017 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::*;
+
+pub(crate) fn parse_rust_owned_style_value_for_property(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+) -> RustOwnedStyleValueParseResult {
+    parse_rust_owned_style_value_for_property_with_mode(property_ids, filtered_input, false)
+}
+
+pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+    is_coordinating_shorthand_item: bool,
+) -> RustOwnedStyleValueParseResult {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        // AD-HOC: These list-valued longhands parse to complete StyleValueLists
+        // when materialized in C++. During coordinating shorthand parsing we
+        // need one layer item at a time, since the shorthand parser wraps each
+        // longhand's layer items into the final outer comma-separated list.
+        //
+        // This also keeps `animation-name`, which accepts arbitrary custom
+        // identifiers, from stealing keywords such as `ease-in` from the other
+        // animation longhands while parsing the `animation` shorthand.
+        if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
+            continue;
+        }
+        // AD-HOC: The `background` and `mask` shorthands parse one layer at a
+        // time and then wrap those layer values into the final comma-separated
+        // longhand lists in C++. Keep their position components on the
+        // generated value-type path so they materialize as a single
+        // `PositionStyleValue`, while direct longhand parsing below keeps
+        // owning the full comma-separated layer list in Rust.
+        if property_ids.len() > 1
+            && matches!(
+                property_id,
+                PropertyId::BackgroundPosition
+                    | PropertyId::BackgroundPositionX
+                    | PropertyId::BackgroundPositionY
+                    | PropertyId::MaskPosition
+            )
+        {
+            continue;
+        }
+        if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
+            return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
+        }
+    }
+
+    if property_ids.len() == 1
+        && let Some(property_id) = property_id_from_u16(property_ids[0])
+        && property_uses_rust_owned_whole_grammar(property_id)
+        && !(is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id))
+    {
+        return RustOwnedStyleValueParseResult::Invalid;
+    }
+
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+    {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if property_accepts_keyword(property_id, value) {
+                let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
+                return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                        resolved_keyword.to_string(),
+                    )),
+                });
+            }
+        }
+    }
+
+    for property_id in property_ids {
+        let Some(property_id) = property_id_from_u16(*property_id) else {
+            continue;
+        };
+        if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
+            continue;
+        }
+        if !property_accepts_value_type(property_id, PropertyValueType::CustomIdent) {
+            continue;
+        }
+
+        let mut parser = ComponentValueParser::new(component_values.to_vec());
+        if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
+            return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CustomIdent {
+                    value: name,
+                    value_type: PropertyValueType::CustomIdent,
+                }),
+            });
+        }
+    }
+
+    for value_type in generated_property_value_type_order() {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if !property_accepts_value_type(property_id, *value_type) {
+                continue;
+            }
+            if property_ids.len() != 1 && *value_type == PropertyValueType::FontStyle {
+                continue;
+            }
+            if property_ids.len() != 1 && *value_type == PropertyValueType::ViewTimelineInset {
+                if let Some(values) = parse_rust_owned_view_timeline_inset_value_prefix(filtered_input) {
+                    return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                        property_id,
+                        value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
+                    });
+                }
+                continue;
+            }
+            let value_type_matches = if *value_type == PropertyValueType::Url {
+                match property_id {
+                    PropertyId::ClipPath => parse_a_url_function(filtered_input, |_| {}, |_| {}),
+                    PropertyId::MaskImage => component_values_parse_as_fragment_url(filtered_input),
+                    _ => false,
+                }
+            } else {
+                component_values_parse_as_property_value_type(*value_type, filtered_input)
+            };
+            if !value_type_matches {
+                continue;
+            }
+
+            return RustOwnedStyleValueParseResult::Parsed(parse_rust_owned_generated_longhand_value(
+                property_id,
+                *value_type,
+                filtered_input,
+                component_values,
+            ));
+        }
+    }
+
+    if is_coordinating_shorthand_item {
+        for property_id in property_ids {
+            let Some(property_id) = property_id_from_u16(*property_id) else {
+                continue;
+            };
+            if !property_parses_as_coordinating_shorthand_item(property_id)
+                || !property_accepts_value_type(property_id, PropertyValueType::CustomIdent)
+            {
+                continue;
+            }
+
+            let mut parser = ComponentValueParser::new(component_values.to_vec());
+            if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
+                return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CustomIdent {
+                        value: name,
+                        value_type: PropertyValueType::CustomIdent,
+                    }),
+                });
+            }
+        }
+    }
+
+    RustOwnedStyleValueParseResult::Invalid
+}
+
+fn property_parses_as_coordinating_shorthand_item(property_id: PropertyId) -> bool {
+    matches!(
+        property_id,
+        PropertyId::AnimationName
+            | PropertyId::ScrollTimelineName
+            | PropertyId::TransitionBehavior
+            | PropertyId::TransitionProperty
+            | PropertyId::ViewTimelineName
+    )
+}
+
+fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
+    matches!(
+        property_id,
+        PropertyId::AnchorName
+            | PropertyId::AnchorScope
+            | PropertyId::AnimationName
+            | PropertyId::AspectRatio
+            | PropertyId::BackgroundRepeat
+            | PropertyId::BackgroundPosition
+            | PropertyId::BackgroundPositionX
+            | PropertyId::BackgroundPositionY
+            | PropertyId::BackgroundSize
+            | PropertyId::Border
+            | PropertyId::BorderBlock
+            | PropertyId::BorderImage
+            | PropertyId::BorderImageOutset
+            | PropertyId::BorderImageRepeat
+            | PropertyId::BorderImageSlice
+            | PropertyId::BorderImageWidth
+            | PropertyId::BorderInline
+            | PropertyId::BorderBottomLeftRadius
+            | PropertyId::BorderBottomRightRadius
+            | PropertyId::BorderEndEndRadius
+            | PropertyId::BorderEndStartRadius
+            | PropertyId::BorderRadius
+            | PropertyId::BorderStartEndRadius
+            | PropertyId::BorderStartStartRadius
+            | PropertyId::BorderTopLeftRadius
+            | PropertyId::BorderTopRightRadius
+            | PropertyId::BoxShadow
+            | PropertyId::BackdropFilter
+            | PropertyId::ColorScheme
+            | PropertyId::Columns
+            | PropertyId::Contain
+            | PropertyId::ContainerType
+            | PropertyId::Content
+            | PropertyId::CounterIncrement
+            | PropertyId::CounterReset
+            | PropertyId::CounterSet
+            | PropertyId::Cursor
+            | PropertyId::Display
+            | PropertyId::Filter
+            | PropertyId::Flex
+            | PropertyId::FlexFlow
+            | PropertyId::FontFamily
+            | PropertyId::FontFeatureSettings
+            | PropertyId::FontLanguageOverride
+            | PropertyId::FontVariant
+            | PropertyId::FontVariationSettings
+            | PropertyId::GridAutoColumns
+            | PropertyId::GridAutoFlow
+            | PropertyId::GridAutoRows
+            | PropertyId::GridColumnEnd
+            | PropertyId::GridColumnStart
+            | PropertyId::GridRowEnd
+            | PropertyId::GridRowStart
+            | PropertyId::GridTemplateAreas
+            | PropertyId::GridTemplateColumns
+            | PropertyId::GridTemplateRows
+            | PropertyId::ListStyle
+            | PropertyId::MaskRepeat
+            | PropertyId::MaskPosition
+            | PropertyId::MaskSize
+            | PropertyId::MathDepth
+            | PropertyId::OverflowClipMargin
+            | PropertyId::OverflowClipMarginBlock
+            | PropertyId::OverflowClipMarginBlockEnd
+            | PropertyId::OverflowClipMarginBlockStart
+            | PropertyId::OverflowClipMarginBottom
+            | PropertyId::OverflowClipMarginInline
+            | PropertyId::OverflowClipMarginInlineEnd
+            | PropertyId::OverflowClipMarginInlineStart
+            | PropertyId::OverflowClipMarginLeft
+            | PropertyId::OverflowClipMarginRight
+            | PropertyId::OverflowClipMarginTop
+            | PropertyId::PaintOrder
+            | PropertyId::PlaceContent
+            | PropertyId::PlaceItems
+            | PropertyId::PlaceSelf
+            | PropertyId::PositionAnchor
+            | PropertyId::PositionArea
+            | PropertyId::PositionTryFallbacks
+            | PropertyId::PositionTryOrder
+            | PropertyId::PositionVisibility
+            | PropertyId::Quotes
+            | PropertyId::Rotate
+            | PropertyId::Scale
+            | PropertyId::ScrollTimeline
+            | PropertyId::ScrollTimelineName
+            | PropertyId::ScrollbarColor
+            | PropertyId::ScrollbarGutter
+            | PropertyId::ShapeOutside
+            | PropertyId::StrokeDasharray
+            | PropertyId::TextDecoration
+            | PropertyId::TextDecorationLine
+            | PropertyId::TextIndent
+            | PropertyId::TextShadow
+            | PropertyId::TextUnderlinePosition
+            | PropertyId::TextWrap
+            | PropertyId::TextWrapMode
+            | PropertyId::TextWrapStyle
+            | PropertyId::TimelineScope
+            | PropertyId::TouchAction
+            | PropertyId::TransformOrigin
+            | PropertyId::TransitionBehavior
+            | PropertyId::TransitionProperty
+            | PropertyId::Translate
+            | PropertyId::ViewTimeline
+            | PropertyId::ViewTimelineName
+            | PropertyId::ViewTransitionName
+            | PropertyId::WhiteSpace
+            | PropertyId::WhiteSpaceTrim
+            | PropertyId::WillChange
+    )
+}
+
+fn parse_rust_owned_property_specific_longhand_value(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    match property_id {
+        PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
+        PropertyId::AnchorScope => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, true),
+        PropertyId::Inset
+        | PropertyId::Top
+        | PropertyId::Right
+        | PropertyId::Bottom
+        | PropertyId::Left
+        | PropertyId::InsetBlock
+        | PropertyId::InsetBlockStart
+        | PropertyId::InsetBlockEnd
+        | PropertyId::InsetInline
+        | PropertyId::InsetInlineStart
+        | PropertyId::InsetInlineEnd => rust_owned_anchor_function_style_value_kind(filtered_input),
+        PropertyId::BackgroundSize | PropertyId::MaskSize => {
+            rust_owned_background_size_style_value_kind(filtered_input)
+        }
+        PropertyId::BackgroundPosition => {
+            rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
+        }
+        PropertyId::BackgroundPositionX | PropertyId::BackgroundPositionY => {
+            rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
+        }
+        PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
+        PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
+        PropertyId::Border | PropertyId::BorderBlock | PropertyId::BorderInline => {
+            rust_owned_border_shorthand_style_value_kind(property_id, filtered_input)
+        }
+        PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
+        PropertyId::BorderImage => rust_owned_border_image_shorthand_style_value_kind(filtered_input),
+        PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),
+        PropertyId::BorderImageRepeat => rust_owned_border_image_repeat_style_value_kind(filtered_input),
+        PropertyId::BorderImageSlice => rust_owned_border_image_slice_style_value_kind(filtered_input),
+        PropertyId::BorderImageWidth => rust_owned_border_image_width_style_value_kind(filtered_input),
+        PropertyId::BorderBottomLeftRadius
+        | PropertyId::BorderBottomRightRadius
+        | PropertyId::BorderEndEndRadius
+        | PropertyId::BorderEndStartRadius
+        | PropertyId::BorderStartEndRadius
+        | PropertyId::BorderStartStartRadius
+        | PropertyId::BorderTopLeftRadius
+        | PropertyId::BorderTopRightRadius => rust_owned_border_radius_style_value_kind(filtered_input),
+        PropertyId::BoxShadow | PropertyId::TextShadow => {
+            rust_owned_shadow_style_value_kind(property_id, filtered_input)
+        }
+        PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
+        PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
+        PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
+        PropertyId::Content => rust_owned_content_style_value_kind(filtered_input),
+        PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
+        PropertyId::CounterReset => rust_owned_counter_definitions_style_value_kind(filtered_input, true, 0),
+        PropertyId::CounterSet => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 0),
+        PropertyId::Display => rust_owned_display_style_value_kind(filtered_input),
+        PropertyId::Flex => rust_owned_flex_shorthand_style_value_kind(filtered_input),
+        PropertyId::FlexFlow => rust_owned_flex_flow_style_value_kind(filtered_input),
+        PropertyId::BackdropFilter | PropertyId::Filter => {
+            rust_owned_filter_value_list_style_value_kind(filtered_input)
+        }
+        PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
+        PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
+        PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
+        PropertyId::FontVariant => rust_owned_font_variant_style_value_kind(filtered_input),
+        PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
+        PropertyId::GridAutoColumns | PropertyId::GridAutoRows => {
+            rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input)
+        }
+        PropertyId::GridAutoFlow => rust_owned_grid_auto_flow_style_value_kind(filtered_input),
+        PropertyId::GridColumnEnd | PropertyId::GridColumnStart | PropertyId::GridRowEnd | PropertyId::GridRowStart => {
+            rust_owned_grid_track_placement_style_value_kind(filtered_input)
+        }
+        PropertyId::GridTemplateAreas => rust_owned_grid_template_areas_style_value_kind(filtered_input),
+        PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
+            rust_owned_grid_track_size_list_style_value_kind(filtered_input)
+        }
+        PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
+        PropertyId::MaskPosition => {
+            rust_owned_position_list_style_value_kind(PropertyValueType::Position, filtered_input)
+        }
+        PropertyId::Cursor => rust_owned_cursor_style_value_kind(filtered_input),
+        PropertyId::MathDepth => rust_owned_math_depth_style_value_kind(filtered_input),
+        PropertyId::OverflowClipMarginBlockEnd
+        | PropertyId::OverflowClipMarginBlockStart
+        | PropertyId::OverflowClipMarginBottom
+        | PropertyId::OverflowClipMarginInlineEnd
+        | PropertyId::OverflowClipMarginInlineStart
+        | PropertyId::OverflowClipMarginLeft
+        | PropertyId::OverflowClipMarginRight
+        | PropertyId::OverflowClipMarginTop => rust_owned_overflow_clip_margin_style_value_kind(filtered_input),
+        PropertyId::OverflowClipMargin | PropertyId::OverflowClipMarginBlock | PropertyId::OverflowClipMarginInline => {
+            rust_owned_overflow_clip_margin_shorthand_style_value_kind(filtered_input)
+        }
+        PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::PlaceContent => rust_owned_place_content_style_value_kind(filtered_input),
+        PropertyId::PlaceItems => rust_owned_place_items_style_value_kind(filtered_input),
+        PropertyId::PlaceSelf => rust_owned_place_self_style_value_kind(filtered_input),
+        PropertyId::PositionArea => rust_owned_position_area_style_value_kind(filtered_input),
+        PropertyId::PositionAnchor => rust_owned_position_anchor_style_value_kind(filtered_input),
+        PropertyId::PositionTryFallbacks => rust_owned_position_try_fallbacks_style_value_kind(filtered_input),
+        PropertyId::PositionTryOrder => rust_owned_position_try_order_style_value_kind(filtered_input),
+        PropertyId::PositionVisibility => rust_owned_position_visibility_style_value_kind(filtered_input),
+        PropertyId::Quotes => rust_owned_quotes_style_value_kind(filtered_input),
+        PropertyId::BackgroundRepeat | PropertyId::MaskRepeat => {
+            rust_owned_repeat_style_style_value_kind(filtered_input)
+        }
+        PropertyId::ScrollbarColor => rust_owned_scrollbar_color_style_value_kind(filtered_input),
+        PropertyId::ScrollbarGutter => rust_owned_scrollbar_gutter_style_value_kind(filtered_input),
+        PropertyId::ShapeOutside => rust_owned_shape_outside_style_value_kind(filtered_input),
+        PropertyId::ScrollTimeline => rust_owned_scroll_timeline_style_value_kind(filtered_input),
+        PropertyId::TextDecoration => rust_owned_text_decoration_style_value_kind(filtered_input),
+        PropertyId::TextDecorationLine => rust_owned_text_decoration_line_style_value_kind(filtered_input),
+        PropertyId::StrokeDasharray => rust_owned_stroke_dasharray_style_value_kind(filtered_input),
+        PropertyId::ScrollTimelineName | PropertyId::ViewTimelineName => {
+            rust_owned_timeline_name_style_value_kind(filtered_input)
+        }
+        PropertyId::TimelineScope => rust_owned_timeline_scope_style_value_kind(filtered_input),
+        PropertyId::TextWrap => rust_owned_text_wrap_style_value_kind(filtered_input),
+        PropertyId::TextWrapMode => rust_owned_text_wrap_mode_style_value_kind(filtered_input),
+        PropertyId::TextWrapStyle => rust_owned_text_wrap_style_style_value_kind(filtered_input),
+        PropertyId::TextIndent => rust_owned_text_indent_style_value_kind(filtered_input),
+        PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
+        PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::TransformOrigin => rust_owned_transform_origin_style_value_kind(filtered_input),
+        PropertyId::Rotate | PropertyId::Scale | PropertyId::Translate => {
+            rust_owned_transform_longhand_style_value_kind(property_id, filtered_input)
+        }
+        PropertyId::TransitionBehavior => rust_owned_transition_behavior_style_value_kind(filtered_input),
+        PropertyId::TransitionProperty => rust_owned_transition_property_style_value_kind(filtered_input),
+        PropertyId::ViewTimeline => rust_owned_view_timeline_style_value_kind(filtered_input),
+        PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
+        PropertyId::WhiteSpace => rust_owned_white_space_style_value_kind(filtered_input),
+        PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
+        PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_rust_owned_generated_longhand_value(
+    property_id: PropertyId,
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+    component_values: &[ComponentValue],
+) -> RustOwnedStyleValue {
+    if value_type == PropertyValueType::Color
+        && let [component_value] = component_values
+        && let Some(color) = simple_color_from_component_value(component_value, false)
+    {
+        return match color {
+            ParsedSimpleColor::Rgba {
+                red,
+                green,
+                blue,
+                alpha,
+                name,
+            } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
+                    red,
+                    green,
+                    blue,
+                    alpha,
+                    name: name.map(ToString::to_string),
+                }),
+            },
+            ParsedSimpleColor::Keyword { name } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
+                    primitive_kind: CssPrimitiveValueKind::Keyword,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: name.to_string(),
+                    value_type,
+                }),
+            },
+        };
+    }
+
+    if value_type == PropertyValueType::Color
+        && let [ComponentValue::Function(function)] = component_values
+    {
+        // https://drafts.csswg.org/css-color-4/#typedef-color
+        // <color> = <absolute-color-base> | currentcolor | <system-color> | <contrast-color()> | <device-cmyk()>
+        if component_value_parse_as_color_function(function)
+            && let Some(source) =
+                serialize_component_values_for_reparsing(component_values, &filtered_input_to_string(filtered_input))
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Source(source)),
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::DashedIdent {
+        let mut name = None;
+        if parse_a_dashed_ident(filtered_input, |parsed_name| {
+            name = Some(parsed_name.to_string());
+        }) && let Some(name) = name
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
+                    primitive_kind: CssPrimitiveValueKind::CustomIdent,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: name,
+                    value_type,
+                }),
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::OpentypeTag {
+        let mut tag = None;
+        if parse_an_opentype_tag(filtered_input, |parsed_tag| {
+            tag = Some(parsed_tag.to_string());
+        }) && let Some(tag) = tag
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
+                    primitive_kind: CssPrimitiveValueKind::String,
+                    numeric_value: None,
+                    secondary_numeric_value: None,
+                    value: tag,
+                    value_type,
+                }),
+            };
+        }
+    }
+
+    if value_type == PropertyValueType::CounterStyle
+        && let Some(counter_style) =
+            parse_all_component_values(filtered_input, ComponentValueParser::parse_a_counter_style)
+    {
+        return match counter_style {
+            CounterStyle::Name(counter_style_name) => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CounterStyleName(
+                    counter_style_name,
+                )),
+            },
+            CounterStyle::SymbolsFunction { .. } => RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::CounterStyle(counter_style),
+            },
+        };
+    }
+
+    if value_type == PropertyValueType::Counter
+        && let Some(value) = rust_owned_counter_function_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::CornerShape
+        && let Some(value) = rust_owned_corner_shape_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Image
+        && let Some(value) =
+            rust_owned_image_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Paint
+        && let Some(value) = rust_owned_paint_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Anchor
+        && let Some(value) = rust_owned_anchor_function_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Url
+        && (property_id == PropertyId::ClipPath
+            || (property_id == PropertyId::MaskImage && component_values_parse_as_fragment_url(filtered_input)))
+    {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::Url(rust_owned_url_from_source(&filtered_input_to_string(filtered_input))),
+        };
+    }
+
+    match value_type {
+        PropertyValueType::EasingFunction => {
+            if let Some(value) =
+                rust_owned_easing_function_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
+            };
+        }
+        PropertyValueType::FitContent => {
+            if let Some(value) =
+                rust_owned_fit_content_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
+            };
+        }
+        PropertyValueType::BasicShape => {
+            if let Some(value) =
+                rust_owned_basic_shape_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
+            };
+        }
+        PropertyValueType::Rect => {
+            if let Some(value) =
+                rust_owned_rect_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            {
+                return RustOwnedStyleValue { property_id, value };
+            }
+
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
+            };
+        }
+        PropertyValueType::ScrollFunction => {
+            let scroll_function = parse_scroll_function_value(filtered_input);
+            if scroll_function.kind == CssScrollFunctionValueKind::Valid {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ScrollFunction(RustOwnedScrollFunction {
+                        scroller: scroll_function.scroller,
+                        axis: scroll_function.axis,
+                    }),
+                };
+            }
+        }
+        PropertyValueType::ViewTimelineInset => {
+            if let Some(values) = parse_rust_owned_view_timeline_inset_value(filtered_input) {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
+                };
+            }
+        }
+        PropertyValueType::ViewFunction => {
+            let view_function = parse_view_function_value(filtered_input);
+            if view_function.kind == CssViewFunctionValueKind::Valid {
+                return RustOwnedStyleValue {
+                    property_id,
+                    value: RustOwnedStyleValueKind::ViewFunction(RustOwnedViewFunction {
+                        axis: view_function.axis,
+                        inset: view_function.inset,
+                        inset_position: view_function.inset_position,
+                    }),
+                };
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(function) = parse_rust_owned_math_function(value_type, component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::SourceBacked(function),
+        };
+    }
+
+    if let Some(function) = parse_rust_owned_tree_counting_function(value_type, component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::SourceBacked(function),
+        };
+    }
+
+    if let Some(function) = parse_rust_owned_anchor_size_function(value_type, component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::AnchorSize(function),
+        };
+    }
+
+    let generated_style_value = generated_value_type_id_for_property_value_type(value_type).and_then(|value_type_id| {
+        let syntax_kind = component_values_parse_as_generated_value_type(value_type_id, component_values);
+        let style_value = generated_value_type_style_value(syntax_kind, component_values);
+        if style_value.kind == GeneratedValueTypeStyleValueKind::Invalid {
+            None
+        } else {
+            Some(style_value)
+        }
+    });
+    let primitive_kind = if let Some(generated_style_value) = generated_style_value.as_ref() {
+        match generated_style_value.kind {
+            GeneratedValueTypeStyleValueKind::Invalid => CssPrimitiveValueKind::Invalid,
+            GeneratedValueTypeStyleValueKind::Keyword => CssPrimitiveValueKind::Keyword,
+            GeneratedValueTypeStyleValueKind::Number => CssPrimitiveValueKind::Number,
+            GeneratedValueTypeStyleValueKind::String => CssPrimitiveValueKind::String,
+            GeneratedValueTypeStyleValueKind::CustomIdent => CssPrimitiveValueKind::CustomIdent,
+        }
+    } else {
+        style_value_primitive_kind(value_type, component_values)
+    };
+    let numeric_value = generated_style_value
+        .as_ref()
+        .and_then(|style_value| style_value.numeric_value)
+        .or_else(|| style_value_numeric_value(value_type, component_values));
+    let secondary_numeric_value = style_value_secondary_numeric_value(value_type, component_values);
+    let value = if let Some(generated_style_value) = generated_style_value.as_ref()
+        && let Some(value) = generated_style_value.value
+    {
+        value.to_string()
+    } else if primitive_kind == CssPrimitiveValueKind::Ratio {
+        if style_value_ratio_has_denominator(value_type, component_values) {
+            "has-denominator".to_string()
+        } else {
+            String::new()
+        }
+    } else if primitive_kind == CssPrimitiveValueKind::String {
+        string_token_value(component_values).unwrap_or("").to_string()
+    } else if matches!(
+        primitive_kind,
+        CssPrimitiveValueKind::Angle
+            | CssPrimitiveValueKind::Flex
+            | CssPrimitiveValueKind::Frequency
+            | CssPrimitiveValueKind::Length
+            | CssPrimitiveValueKind::Resolution
+            | CssPrimitiveValueKind::Time
+    ) {
+        style_value_dimension_unit(value_type, component_values)
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    if primitive_kind == CssPrimitiveValueKind::Invalid {
+        RustOwnedStyleValue {
+            property_id,
+            value: rust_owned_source_backed_style_value_kind(value_type, filtered_input_to_string(filtered_input)),
+        }
+    } else {
+        RustOwnedStyleValue {
+            property_id,
+            value: rust_owned_primitive_style_value_kind(
+                value_type,
+                primitive_kind,
+                numeric_value,
+                secondary_numeric_value,
+                value,
+            ),
+        }
+    }
+}
+
+fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, source: String) -> RustOwnedStyleValueKind {
+    match value_type {
+        PropertyValueType::Anchor => {
+            rust_owned_anchor_function_style_value_kind(source.as_bytes()).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::Counter => {
+            rust_owned_counter_function_style_value_kind(source.as_bytes()).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::Image => {
+            rust_owned_image_style_value_kind(source.as_bytes(), &source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::FontStyle => {
+            rust_owned_font_style_style_value_kind(source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::Position | PropertyValueType::BackgroundPosition => {
+            rust_owned_position_style_value_kind(value_type, source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::TransformList => {
+            if let Some(value) = rust_owned_transform_list_style_value_kind(source.as_bytes(), &source) {
+                value
+            } else {
+                unreachable!("valid <transform-list> should have a Rust-owned representation")
+            }
+        }
+        PropertyValueType::FontVariantAlternates => {
+            rust_owned_font_variant_alternates_style_value_kind(source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::FontVariantEastAsian => {
+            rust_owned_font_variant_east_asian_style_value_kind(source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::FontVariantLigatures => {
+            rust_owned_font_variant_ligatures_style_value_kind(source).unwrap_or_else(|| unreachable!())
+        }
+        PropertyValueType::FontVariantNumeric => {
+            rust_owned_font_variant_numeric_style_value_kind(source).unwrap_or_else(|| unreachable!())
+        }
+        _ => unreachable!("valid generated longhand value type should have a Rust-owned representation"),
+    }
+}
+
+fn rust_owned_transform_list_style_value_kind(
+    filtered_input: &[u8],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
+    // <transform-list> = <transform-function>+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    if component_values.is_empty() {
+        return None;
+    }
+
+    let mut values = Vec::new();
+    for component_value in component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        let ComponentValue::Function(function) = component_value else {
+            return None;
+        };
+        values.push(RustOwnedStyleValueKind::Transformation(
+            rust_owned_transformation_style_value_kind(function, component_value, filtered_input_string)?,
+        ));
+    }
+
+    Some(RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
+        values,
+        separator: RustOwnedStyleValueListSeparator::Space,
+        value_type: Some(PropertyValueType::TransformList),
+        source: Some(filtered_input_string.to_string()),
+    }))
+}
+
+pub(super) fn rust_owned_anchor_function_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = strip_whitespace(&component_values) else {
+        return None;
+    };
+
+    rust_owned_anchor_function_from_function(function, filtered_input_string)
+}
+
+fn rust_owned_anchor_function_from_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-anchor-position-1/#funcdef-anchor
+    // <anchor()> = anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )
+    if !function.name.eq_ignore_ascii_case("anchor") {
+        return None;
+    }
+
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() || groups.len() > 2 {
+        return None;
+    }
+
+    let mut anchor_name = None;
+    let mut anchor_side = None;
+    for component_value in strip_whitespace(groups[0])
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        if let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = component_value
+            && value.starts_with("--")
+            && is_valid_custom_ident(value, &[])
+        {
+            if anchor_name.is_some() {
+                return None;
+            }
+            anchor_name = Some(value.clone());
+            continue;
+        }
+
+        if anchor_side.is_some() || !component_value_parse_as_anchor_side(component_value) {
+            return None;
+        }
+        anchor_side = Some(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            filtered_input_string,
+        )?);
+    }
+
+    let anchor_side = anchor_side?;
+    let fallback = if groups.len() == 2 {
+        let fallback = strip_whitespace(groups[1]);
+        if !component_values_parse_as_anchor_fallback(fallback, filtered_input_string) {
+            return None;
+        }
+        Some(serialize_component_values_for_reparsing(
+            fallback,
+            filtered_input_string,
+        )?)
+    } else {
+        None
+    };
+
+    Some(RustOwnedStyleValueKind::Anchor(RustOwnedAnchorFunction {
+        anchor_name,
+        anchor_side,
+        fallback,
+        source: serialize_component_values_for_reparsing(
+            &[ComponentValue::Function(function.clone())],
+            filtered_input_string,
+        )?,
+    }))
+}
+
+fn parse_rust_owned_anchor_size_function(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+    filtered_input: &[u8],
+) -> Option<RustOwnedAnchorSizeFunction> {
+    if !matches!(
+        value_type,
+        PropertyValueType::Length | PropertyValueType::LengthPercentage
+    ) {
+        return None;
+    }
+
+    let [ComponentValue::Function(function)] = strip_whitespace(component_values) else {
+        return None;
+    };
+
+    // https://drafts.csswg.org/css-anchor-position-1/#funcdef-anchor-size
+    // anchor-size() = anchor-size( [ <anchor-name> || <anchor-size> ]? , <length-percentage>? )
+    if !function.name.eq_ignore_ascii_case("anchor-size") {
+        return None;
+    }
+
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+    // AD-HOC: Rust classifies the function shape here, while C++ still
+    // validates the full grammar and property context during materialization.
+    Some(RustOwnedAnchorSizeFunction {
+        source: serialize_component_values_for_reparsing(
+            &[ComponentValue::Function(function.clone())],
+            &filtered_input_string,
+        )?,
+        value_type,
+    })
+}
+
+fn component_value_parse_as_anchor_side(component_value: &ComponentValue) -> bool {
+    // <anchor-side> = inside | outside
+    //               | top | left | right | bottom
+    //               | start | end | self-start | self-end
+    //               | <percentage> | center
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "inside"
+                | "outside"
+                | "top"
+                | "left"
+                | "right"
+                | "bottom"
+                | "start"
+                | "end"
+                | "self-start"
+                | "self-end"
+                | "center"
+        ),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => true,
+        // AD-HOC: Match the existing C++ parser's calc handling for
+        // anchor-side. It parses a length-percentage here to allow math
+        // functions, then materializes and range-checks the value in C++.
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => false,
+    }
+}
+
+fn component_values_parse_as_anchor_fallback(component_values: &[ComponentValue], filtered_input_string: &str) -> bool {
+    let [component_value] = component_values else {
+        return false;
+    };
+    component_value_parse_as_length_percentage(component_value)
+        || matches!(
+            component_value,
+            ComponentValue::Function(function)
+                if rust_owned_anchor_function_from_function(function, filtered_input_string).is_some()
+        )
+}
