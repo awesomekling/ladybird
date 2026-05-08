@@ -2493,7 +2493,7 @@ pub(crate) enum RustOwnedShapeOutside {
     None,
     Image(String),
     Shape {
-        basic_shape_source: Option<String>,
+        basic_shape: Option<RustOwnedBasicShape>,
         shape_box_source: Option<String>,
     },
 }
@@ -4233,9 +4233,13 @@ fn rust_owned_basic_shape_style_value_kind(
         None
     }?;
 
-    let argument_groups = parse_comma_separated_component_values(function.value.clone(), |component_values| {
-        serialize_component_values_for_reparsing(strip_whitespace(&component_values), filtered_input_string)
-    })?;
+    let argument_groups = if strip_whitespace(&function.value).is_empty() {
+        vec![String::new()]
+    } else {
+        parse_comma_separated_component_values(function.value.clone(), |component_values| {
+            serialize_component_values_for_reparsing(strip_whitespace(&component_values), filtered_input_string)
+        })?
+    };
 
     Some(RustOwnedStyleValueKind::BasicShape(RustOwnedBasicShape {
         kind,
@@ -9347,16 +9351,7 @@ fn callback_basic_shape_style_value<C>(callback: &mut C, property_id: u16, value
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let kind = match value.kind {
-        RustOwnedBasicShapeKind::Inset => BASIC_SHAPE_CALLBACK_INSET,
-        RustOwnedBasicShapeKind::Xywh => BASIC_SHAPE_CALLBACK_XYWH,
-        RustOwnedBasicShapeKind::Rect => BASIC_SHAPE_CALLBACK_RECT,
-        RustOwnedBasicShapeKind::Circle => BASIC_SHAPE_CALLBACK_CIRCLE,
-        RustOwnedBasicShapeKind::Ellipse => BASIC_SHAPE_CALLBACK_ELLIPSE,
-        RustOwnedBasicShapeKind::Polygon => BASIC_SHAPE_CALLBACK_POLYGON,
-        RustOwnedBasicShapeKind::Path => BASIC_SHAPE_CALLBACK_PATH,
-    };
-    let argument_groups = value.argument_groups.join("\0");
+    let (kind, argument_groups) = basic_shape_callback_payload(value);
 
     callback(
         CssStyleValueKind::BasicShape,
@@ -9373,6 +9368,19 @@ where
         argument_groups.as_bytes(),
         "",
     );
+}
+
+fn basic_shape_callback_payload(value: &RustOwnedBasicShape) -> (u8, String) {
+    let kind = match value.kind {
+        RustOwnedBasicShapeKind::Inset => BASIC_SHAPE_CALLBACK_INSET,
+        RustOwnedBasicShapeKind::Xywh => BASIC_SHAPE_CALLBACK_XYWH,
+        RustOwnedBasicShapeKind::Rect => BASIC_SHAPE_CALLBACK_RECT,
+        RustOwnedBasicShapeKind::Circle => BASIC_SHAPE_CALLBACK_CIRCLE,
+        RustOwnedBasicShapeKind::Ellipse => BASIC_SHAPE_CALLBACK_ELLIPSE,
+        RustOwnedBasicShapeKind::Polygon => BASIC_SHAPE_CALLBACK_POLYGON,
+        RustOwnedBasicShapeKind::Path => BASIC_SHAPE_CALLBACK_PATH,
+    };
+    (kind, value.argument_groups.join("\0"))
 }
 
 fn callback_rect_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedRect)
@@ -9867,11 +9875,11 @@ where
             callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_IMAGE, source);
         }
         RustOwnedShapeOutside::Shape {
-            basic_shape_source,
+            basic_shape,
             shape_box_source,
         } => {
-            if let Some(source) = basic_shape_source {
-                callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE, source);
+            if let Some(basic_shape) = basic_shape {
+                callback_shape_outside_basic_shape_event(callback, property_id, basic_shape);
             }
             if let Some(source) = shape_box_source {
                 callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX, source);
@@ -9897,6 +9905,29 @@ where
         0,
         0,
         source.as_bytes(),
+        "",
+    );
+}
+
+fn callback_shape_outside_basic_shape_event<C>(callback: &mut C, property_id: u16, value: &RustOwnedBasicShape)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, argument_groups) = basic_shape_callback_payload(value);
+
+    callback(
+        CssStyleValueKind::ShapeOutside,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE,
+        kind,
+        0,
+        0,
+        argument_groups.as_bytes(),
         "",
     );
 }
@@ -18519,15 +18550,16 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
         return Some(RustOwnedShapeOutside::Image(filtered_input_to_string(filtered_input)));
     }
 
-    let mut basic_shape_source = None;
+    let mut basic_shape = None;
     let mut shape_box_source = None;
     for component_value in &component_values {
         let component_values = std::slice::from_ref(component_value);
-        if basic_shape_source.is_none()
+        if basic_shape.is_none()
             && let Some(source) = serialize_component_values_for_reparsing(component_values, filtered_input_string)
-            && parse_basic_shape_value(source.as_bytes()) == CssBasicShapeValueKind::Valid
+            && let Some(RustOwnedStyleValueKind::BasicShape(value)) =
+                rust_owned_basic_shape_style_value_kind(source.as_bytes(), &source)
         {
-            basic_shape_source = Some(source.to_string());
+            basic_shape = Some(value);
             continue;
         }
 
@@ -18542,12 +18574,12 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
         return None;
     }
 
-    if basic_shape_source.is_none() && shape_box_source.is_none() {
+    if basic_shape.is_none() && shape_box_source.is_none() {
         return None;
     }
 
     Some(RustOwnedShapeOutside::Shape {
-        basic_shape_source,
+        basic_shape,
         shape_box_source,
     })
 }
@@ -30912,8 +30944,26 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ShapeOutside,
                 value: RustOwnedStyleValueKind::ShapeOutside(RustOwnedShapeOutside::Shape {
-                    basic_shape_source: Some("circle(10px)".to_string()),
+                    basic_shape: Some(RustOwnedBasicShape {
+                        kind: RustOwnedBasicShapeKind::Circle,
+                        argument_groups: vec!["10px".to_string()],
+                        source: "circle(10px)".to_string(),
+                    }),
                     shape_box_source: Some("border-box".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::ShapeOutside], "circle()"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::ShapeOutside,
+                value: RustOwnedStyleValueKind::ShapeOutside(RustOwnedShapeOutside::Shape {
+                    basic_shape: Some(RustOwnedBasicShape {
+                        kind: RustOwnedBasicShapeKind::Circle,
+                        argument_groups: vec![String::new()],
+                        source: "circle()".to_string(),
+                    }),
+                    shape_box_source: None,
                 }),
             })
         );

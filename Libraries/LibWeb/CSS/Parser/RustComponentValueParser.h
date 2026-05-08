@@ -387,7 +387,8 @@ public:
         Vector<RustContentEvent> content_events;
         bool shape_outside_is_none { false };
         Optional<String> shape_outside_image_source;
-        Optional<String> shape_outside_basic_shape_source;
+        Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
+        Vector<String> shape_outside_basic_shape_argument_groups;
         Optional<String> shape_outside_shape_box_source;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };

@@ -1239,8 +1239,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return Gfx::WindingRule::EvenOdd;
                 return {};
             };
-            auto materialize_rust_basic_shape = [&]() -> RefPtr<StyleValue const> {
-                auto const& argument_groups = rust_style_value->basic_shape_argument_groups;
+            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups) -> RefPtr<StyleValue const> {
                 auto parse_optional_round_border_radius = [&](TokenStream<ComponentValue>& arguments_tokens) -> RefPtr<StyleValue const> {
                     NonnullRefPtr<StyleValue const> border_radius = BorderRadiusRectStyleValue::create_zero();
                     arguments_tokens.discard_whitespace();
@@ -1257,7 +1256,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return border_radius;
                 };
 
-                switch (rust_style_value->basic_shape_kind) {
+                switch (kind) {
                 case RustComponentValueParser::RustBasicShapeKind::Inset: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "inset"sv });
                     if (argument_groups.size() != 1)
@@ -1358,7 +1357,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustBasicShapeKind::Circle:
                 case RustComponentValueParser::RustBasicShapeKind::Ellipse: {
-                    auto is_circle = rust_style_value->basic_shape_kind == RustComponentValueParser::RustBasicShapeKind::Circle;
+                    auto is_circle = kind == RustComponentValueParser::RustBasicShapeKind::Circle;
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { is_circle ? "circle"sv : "ellipse"sv });
                     if (argument_groups.size() != 1)
                         return nullptr;
@@ -1466,15 +1465,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 }
                 VERIFY_NOT_REACHED();
-            };
-            auto parse_rust_source_as_basic_shape = [&](StringView source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_basic_shape_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
             };
             auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->rect_sources.size() != 4)
@@ -1660,8 +1650,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 RefPtr<StyleValue const> basic_shape_value;
                 RefPtr<StyleValue const> shape_box_value;
-                if (rust_style_value->shape_outside_basic_shape_source.has_value()) {
-                    basic_shape_value = parse_rust_source_as_basic_shape(*rust_style_value->shape_outside_basic_shape_source);
+                if (rust_style_value->shape_outside_basic_shape_kind.has_value()) {
+                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups);
                     if (!basic_shape_value)
                         return nullptr;
                 }
@@ -2201,7 +2191,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BasicShape:
-                if (auto value = materialize_rust_basic_shape()) {
+                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

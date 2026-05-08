@@ -963,8 +963,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     value.easing_function_sources.append(String::from_utf8_without_validation(source.bytes()));
             } else if (kind == FFI::CssStyleValueKind::BasicShape) {
                 value.basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
-                for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
-                    value.basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
+                if (value_len == 0) {
+                    value.basic_shape_argument_groups.append(String {});
+                } else {
+                    for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
+                        value.basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
+                }
             } else if (kind == FFI::CssStyleValueKind::FitContent) {
                 value.fit_content_kind = static_cast<RustFitContentKind>(color_red);
                 if (value_len > 0)
@@ -1408,7 +1412,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
                     break;
                 case RustShapeOutsideEventKind::BasicShape:
-                    style_value->shape_outside_basic_shape_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
+                    if (value_len == 0) {
+                        style_value->shape_outside_basic_shape_argument_groups.append(String {});
+                    } else {
+                        for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
+                            style_value->shape_outside_basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
+                    }
                     break;
                 case RustShapeOutsideEventKind::ShapeBox:
                     style_value->shape_outside_shape_box_source = string_from_ffi_bytes(value_ptr, value_len);
