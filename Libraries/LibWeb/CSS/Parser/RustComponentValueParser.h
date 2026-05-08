@@ -586,7 +586,6 @@ public:
         Vector<RustLinearEasingStop> linear_easing_stops;
         StepPosition easing_function_step_position { StepPosition::End };
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
-        Vector<String> basic_shape_argument_groups;
         Optional<u8> basic_shape_fill_rule;
         Vector<RustBasicShapeRectangleComponent> basic_shape_rectangle_components;
         Vector<RustNestedPrimitiveValue> basic_shape_rectangle_border_radius_horizontal_radii;
@@ -634,7 +633,6 @@ public:
         Optional<String> shape_outside_image_source;
         Optional<URL> shape_outside_image_source_url;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
-        Vector<String> shape_outside_basic_shape_argument_groups;
         Optional<u8> shape_outside_basic_shape_fill_rule;
         Vector<RustBasicShapeRectangleComponent> shape_outside_basic_shape_rectangle_components;
         Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_rectangle_border_radius_horizontal_radii;

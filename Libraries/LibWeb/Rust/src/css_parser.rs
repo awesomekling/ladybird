@@ -2272,7 +2272,6 @@ pub(crate) enum RustOwnedImageKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBasicShape {
     kind: RustOwnedBasicShapeKind,
-    argument_groups: Vec<String>,
     fill_rule: RustOwnedBasicShapeFillRule,
     rectangle_components: Vec<RustOwnedBasicShapeRectangleComponent>,
     rectangle_border_radius: Option<RustOwnedBorderRadius>,
@@ -4667,17 +4666,8 @@ fn rust_owned_basic_shape_style_value_kind(
         None
     }?;
 
-    let argument_groups = if strip_whitespace(&function.value).is_empty() {
-        vec![String::new()]
-    } else {
-        parse_comma_separated_component_values(function.value.clone(), |component_values| {
-            serialize_component_values_for_reparsing(strip_whitespace(&component_values), filtered_input_string)
-        })?
-    };
-
     Some(RustOwnedStyleValueKind::BasicShape(Box::new(RustOwnedBasicShape {
         kind,
-        argument_groups,
         fill_rule,
         rectangle_components,
         rectangle_border_radius,
@@ -10460,7 +10450,7 @@ fn callback_basic_shape_style_value<C>(callback: &mut C, property_id: u16, value
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, argument_groups) = basic_shape_callback_payload(value);
+    let (kind, path_data) = basic_shape_callback_payload(value);
 
     if matches!(
         value.kind,
@@ -10535,7 +10525,7 @@ where
         value.fill_rule as u8,
         0,
         0,
-        argument_groups.as_bytes(),
+        path_data.as_bytes(),
         "",
     );
 }
@@ -10776,11 +10766,7 @@ fn basic_shape_callback_payload(value: &RustOwnedBasicShape) -> (u8, String) {
         RustOwnedBasicShapeKind::Polygon => BASIC_SHAPE_CALLBACK_POLYGON,
         RustOwnedBasicShapeKind::Path => BASIC_SHAPE_CALLBACK_PATH,
     };
-    let payload = if value.kind == RustOwnedBasicShapeKind::Path {
-        value.path_data.clone().unwrap_or_default()
-    } else {
-        value.argument_groups.join("\0")
-    };
+    let payload = value.path_data.clone().unwrap_or_default();
     (kind, payload)
 }
 
@@ -12045,7 +12031,7 @@ fn callback_shape_outside_basic_shape_event<C>(callback: &mut C, property_id: u1
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, argument_groups) = basic_shape_callback_payload(value);
+    let (kind, path_data) = basic_shape_callback_payload(value);
 
     if matches!(
         value.kind,
@@ -12100,7 +12086,7 @@ where
         kind,
         value.fill_rule as u8,
         0,
-        argument_groups.as_bytes(),
+        path_data.as_bytes(),
         "",
     );
 }
@@ -35244,7 +35230,6 @@ mod tests {
                 value: RustOwnedStyleValueKind::ShapeOutside(RustOwnedShapeOutside::Shape {
                     basic_shape: Some(Box::new(RustOwnedBasicShape {
                         kind: RustOwnedBasicShapeKind::Circle,
-                        argument_groups: vec!["10px".to_string()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
                         rectangle_components: vec![],
                         rectangle_border_radius: None,
@@ -35270,7 +35255,6 @@ mod tests {
                 value: RustOwnedStyleValueKind::ShapeOutside(RustOwnedShapeOutside::Shape {
                     basic_shape: Some(Box::new(RustOwnedBasicShape {
                         kind: RustOwnedBasicShapeKind::Circle,
-                        argument_groups: vec![String::new()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
                         rectangle_components: vec![],
                         rectangle_border_radius: None,
@@ -36027,7 +36011,6 @@ mod tests {
                 property_id: PropertyId::ClipPath,
                 value: RustOwnedStyleValueKind::BasicShape(Box::new(RustOwnedBasicShape {
                     kind: RustOwnedBasicShapeKind::Inset,
-                    argument_groups: vec!["10px".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
                     rectangle_components: vec![RustOwnedBasicShapeRectangleComponent::LengthPercentage(
                         RustOwnedNestedPrimitiveValue::Length {
@@ -36050,7 +36033,6 @@ mod tests {
                 property_id: PropertyId::ClipPath,
                 value: RustOwnedStyleValueKind::BasicShape(Box::new(RustOwnedBasicShape {
                     kind: RustOwnedBasicShapeKind::Path,
-                    argument_groups: vec!["evenodd".to_string(), "\"M 0 0 L 1 1\"".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
                     rectangle_components: vec![],
                     rectangle_border_radius: None,
@@ -36068,7 +36050,6 @@ mod tests {
                 property_id: PropertyId::ClipPath,
                 value: RustOwnedStyleValueKind::BasicShape(Box::new(RustOwnedBasicShape {
                     kind: RustOwnedBasicShapeKind::Polygon,
-                    argument_groups: vec!["evenodd".to_string(), "0 0".to_string(), "100% 0".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
                     rectangle_components: vec![],
                     rectangle_border_radius: None,

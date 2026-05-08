@@ -1167,11 +1167,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (value.basic_shape_kind == RustBasicShapeKind::Path) {
                     value.basic_shape_fill_rule = color_green;
                     value.basic_shape_path_data = string_from_ffi_bytes(value_ptr, value_len);
-                } else if (value_len == 0) {
-                    value.basic_shape_argument_groups.append(String {});
-                } else {
-                    for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
-                        value.basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
                 }
             } else if (kind == FFI::CssStyleValueKind::FitContent) {
                 value.fit_content_kind = static_cast<RustFitContentKind>(color_red);
@@ -1802,11 +1797,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Path) {
                         style_value->shape_outside_basic_shape_fill_rule = color_blue;
                         style_value->shape_outside_basic_shape_path_data = string_from_ffi_bytes(value_ptr, value_len);
-                    } else if (value_len == 0) {
-                        style_value->shape_outside_basic_shape_argument_groups.append(String {});
-                    } else {
-                        for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
-                            style_value->shape_outside_basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
                     }
                     break;
                 }
