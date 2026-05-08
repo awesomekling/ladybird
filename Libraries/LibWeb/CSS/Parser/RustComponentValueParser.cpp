@@ -1272,7 +1272,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->flex_shrink = nested_primitive_value_from_callback_payload();
                 } else {
                     style_value->flex_basis_kind = static_cast<RustFlexBasisKind>(color_green);
-                    if (*style_value->flex_basis_kind == RustFlexBasisKind::LengthPercentage)
+                    if (*style_value->flex_basis_kind == RustFlexBasisKind::LengthPercentage || *style_value->flex_basis_kind == RustFlexBasisKind::FitContentFunction)
                         style_value->flex_basis = nested_primitive_value_from_callback_payload();
                     else if (*style_value->flex_basis_kind == RustFlexBasisKind::Source)
                         style_value->flex_basis_source = string_from_ffi_bytes(value_ptr, value_len);

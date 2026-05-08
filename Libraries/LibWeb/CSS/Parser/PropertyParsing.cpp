@@ -1864,6 +1864,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return KeywordStyleValue::create(Keyword::MinContent);
                 case RustComponentValueParser::RustFlexBasisKind::MaxContent:
                     return KeywordStyleValue::create(Keyword::MaxContent);
+                case RustComponentValueParser::RustFlexBasisKind::FitContentFunction: {
+                    if (!value.flex_basis.has_value())
+                        return nullptr;
+                    auto argument = materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
+                    if (!argument)
+                        return nullptr;
+                    return FunctionStyleValue::create("fit-content"_fly_string, argument.release_nonnull());
+                }
                 case RustComponentValueParser::RustFlexBasisKind::LengthPercentage:
                     if (!value.flex_basis.has_value())
                         return nullptr;

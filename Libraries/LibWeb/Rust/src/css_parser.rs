@@ -2754,6 +2754,7 @@ pub(crate) enum RustOwnedFlexShorthand {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedFlexBasis {
     Keyword(RustOwnedFlexBasisKeyword),
+    FitContentFunction(RustOwnedNestedPrimitiveValue),
     LengthPercentage(RustOwnedNestedPrimitiveValue),
     Source(String),
 }
@@ -2768,8 +2769,9 @@ pub(crate) enum RustOwnedFlexBasisKeyword {
     MaxContent,
 }
 
-const FLEX_BASIS_KIND_LENGTH_PERCENTAGE: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 + 1;
-const FLEX_BASIS_KIND_SOURCE: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 + 2;
+const FLEX_BASIS_KIND_FIT_CONTENT_FUNCTION: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 + 1;
+const FLEX_BASIS_KIND_LENGTH_PERCENTAGE: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 + 2;
+const FLEX_BASIS_KIND_SOURCE: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 + 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPlaceShorthand {
@@ -4800,6 +4802,21 @@ fn rust_owned_flex_basis_from_component_value(
     if component_value_parse_as_non_negative_length_percentage(component_value) {
         return component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)
             .map(RustOwnedFlexBasis::LengthPercentage);
+    }
+
+    if let ComponentValue::Function(function) = component_value
+        && function.name.eq_ignore_ascii_case("fit-content")
+    {
+        // https://drafts.csswg.org/css-sizing-3/#funcdef-width-fit-content
+        // fit-content() = fit-content( <length-percentage [0,∞]> )
+        let [component_value] = strip_whitespace(&function.value) else {
+            return None;
+        };
+        if !component_value_parse_as_non_negative_length_percentage(component_value) {
+            return None;
+        }
+        return component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)
+            .map(RustOwnedFlexBasis::FitContentFunction);
     }
 
     serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
@@ -10812,6 +10829,14 @@ where
             property_id,
             FLEX_SHORTHAND_CALLBACK_BASIS,
             FLEX_BASIS_KIND_LENGTH_PERCENTAGE,
+            value,
+        ),
+        RustOwnedFlexBasis::FitContentFunction(value) => callback_nested_primitive(
+            callback,
+            CssStyleValueKind::Flex,
+            property_id,
+            FLEX_SHORTHAND_CALLBACK_BASIS,
+            FLEX_BASIS_KIND_FIT_CONTENT_FUNCTION,
             value,
         ),
         RustOwnedFlexBasis::Source(source) => callback(
@@ -33149,6 +33174,17 @@ mod tests {
                         value: 10.0,
                         unit: "em".to_string(),
                     }),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Flex], "1 1 fit-content(20%)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Flex,
+                value: RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::Longhands {
+                    flex_grow: RustOwnedNestedPrimitiveValue::Number(1.0),
+                    flex_shrink: RustOwnedNestedPrimitiveValue::Number(1.0),
+                    flex_basis: RustOwnedFlexBasis::FitContentFunction(RustOwnedNestedPrimitiveValue::Percentage(20.0)),
                 }),
             })
         );

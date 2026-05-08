@@ -182,6 +182,7 @@ public:
         FitContent,
         MinContent,
         MaxContent,
+        FitContentFunction,
         LengthPercentage,
         Source,
     };
