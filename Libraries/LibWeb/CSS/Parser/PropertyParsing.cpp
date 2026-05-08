@@ -2826,7 +2826,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 };
             case FFI::CssStyleValueKind::Url:
                 if (rust_style_value->string.has_value()) {
-                    auto maybe_url = RustComponentValueParser::parse_a_url_function(rust_style_value->string->bytes_as_string_view(), "utf-8"sv);
+                    auto maybe_url = rust_style_value->url.has_value()
+                        ? rust_style_value->url
+                        : RustComponentValueParser::parse_a_url_function(rust_style_value->string->bytes_as_string_view(), "utf-8"sv);
                     if (maybe_url.has_value()) {
                         tokens.discard_a_token();
                         generated_transaction.commit();
@@ -3671,7 +3673,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         case RustComponentValueParser::RustFilterValueListEventKind::None:
                             break;
                         case RustComponentValueParser::RustFilterValueListEventKind::Url: {
-                            auto url = parse_rust_source_as_url(event.source);
+                            auto url = event.url.has_value() ? event.url : parse_rust_source_as_url(event.source);
                             if (!url.has_value())
                                 break;
                             filter_value_list.append(url.release_value());

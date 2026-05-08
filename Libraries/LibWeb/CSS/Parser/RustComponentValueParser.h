@@ -488,6 +488,7 @@ public:
         RustNestedPrimitiveValue value;
         RustNestedPrimitiveValue secondary_value;
         String source;
+        Optional<URL> url;
         Optional<RustNestedPrimitiveValue> drop_shadow_radius;
         Optional<RustStyleColor> drop_shadow_color;
     };
@@ -650,6 +651,7 @@ public:
         Optional<RustImageKind> image_kind;
         Optional<String> image_source;
         Optional<URL> image_url;
+        Optional<URL> url;
         Vector<RustPosition> positions;
         Vector<RustPositionComponent> position_components;
         FFI::CssPositionAnchorValueKind position_anchor_kind { FFI::CssPositionAnchorValueKind::Invalid };

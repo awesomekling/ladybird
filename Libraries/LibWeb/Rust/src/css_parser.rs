@@ -2096,7 +2096,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         alpha: u8,
         name: Option<String>,
     },
-    Url(String),
+    Url(RustOwnedUrl),
     CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedFitContent),
@@ -2229,11 +2229,17 @@ pub(crate) enum RustOwnedCounterFunctionKind {
 pub(crate) struct RustOwnedImage {
     kind: RustOwnedImageKind,
     source: String,
-    url: Option<RustOwnedImageUrl>,
+    url: Option<RustOwnedUrlPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct RustOwnedImageUrl {
+pub(crate) struct RustOwnedUrl {
+    source: String,
+    url: Option<RustOwnedUrlPayload>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedUrlPayload {
     function_type: CssUrlFunctionType,
     url: String,
 }
@@ -2646,7 +2652,7 @@ pub(crate) enum RustOwnedFilterValueList {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedFilterValue {
-    Url(String),
+    Url(RustOwnedUrl),
     Blur {
         radius: Option<RustOwnedNestedPrimitiveValue>,
     },
@@ -4013,7 +4019,7 @@ fn parse_rust_owned_generated_longhand_value(
     {
         return RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::Url(filtered_input_to_string(filtered_input)),
+            value: RustOwnedStyleValueKind::Url(rust_owned_url_from_source(&filtered_input_to_string(filtered_input))),
         };
     }
 
@@ -7488,7 +7494,7 @@ fn rust_owned_image_style_value_kind(
     if component_value_parse_as_image_url(component_value) {
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Url,
-            url: rust_owned_image_url_from_component_value(component_value),
+            url: rust_owned_url_payload_from_component_value(component_value),
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -7529,17 +7535,41 @@ fn rust_owned_image_from_component_value(
     }
 }
 
-fn rust_owned_image_url_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedImageUrl> {
+fn rust_owned_url_payload_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedUrlPayload> {
     let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
     let url_function = parser.parse_a_url_function()?;
     parser.discard_whitespace();
     if parser.has_next_component_value() || !url_function.request_url_modifiers.is_empty() {
         return None;
     }
-    Some(RustOwnedImageUrl {
+    Some(RustOwnedUrlPayload {
         function_type: url_function.function_type,
         url: url_function.url,
     })
+}
+
+fn rust_owned_url_from_component_value(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedUrl> {
+    let source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    Some(rust_owned_url_from_source(&source))
+}
+
+fn rust_owned_url_from_source(source: &str) -> RustOwnedUrl {
+    let (mut parser, _) = parser_from_filtered_input(source.as_bytes());
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let url = if let [component_value] = component_values {
+        rust_owned_url_payload_from_component_value(component_value)
+    } else {
+        None
+    };
+    RustOwnedUrl {
+        source: source.to_string(),
+        url,
+    }
 }
 
 fn rust_owned_image_set_style_value_kind(
@@ -9427,21 +9457,7 @@ where
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
-        RustOwnedStyleValueKind::Url(value) => callback(
-            CssStyleValueKind::Url,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            0,
-            0,
-            0,
-            0,
-            value.as_bytes(),
-            property_value_type_name(PropertyValueType::Url),
-        ),
+        RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::CounterStyleName(value) => callback(
             CssStyleValueKind::CounterStyleName,
             property_id,
@@ -10956,6 +10972,35 @@ fn image_callback_payload(image: &RustOwnedImage) -> (u8, u8, &str) {
     (image.kind as u8, IMAGE_URL_FUNCTION_TYPE_NONE, &image.source)
 }
 
+fn url_callback_payload(url: &RustOwnedUrl) -> (u8, &str) {
+    if let Some(url) = url.url.as_ref() {
+        return (image_url_function_type_callback_payload(url.function_type), &url.url);
+    }
+    (IMAGE_URL_FUNCTION_TYPE_NONE, &url.source)
+}
+
+fn callback_url_style_value<C>(callback: &mut C, property_id: u16, url: &RustOwnedUrl)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (url_function_type, payload) = url_callback_payload(url);
+    callback(
+        CssStyleValueKind::Url,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        0,
+        0,
+        0,
+        url_function_type,
+        payload.as_bytes(),
+        property_value_type_name(PropertyValueType::Url),
+    );
+}
+
 fn callback_image_style_value<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -11872,21 +11917,24 @@ where
         RustOwnedFilterValueList::Filters(filters) => {
             for filter in filters {
                 match filter {
-                    RustOwnedFilterValue::Url(source) => callback(
-                        CssStyleValueKind::FilterValueList,
-                        property_id,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        FILTER_VALUE_LIST_CALLBACK_URL,
-                        0,
-                        0,
-                        0,
-                        source.as_bytes(),
-                        "",
-                    ),
+                    RustOwnedFilterValue::Url(url) => {
+                        let (url_function_type, payload) = url_callback_payload(url);
+                        callback(
+                            CssStyleValueKind::FilterValueList,
+                            property_id,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            FILTER_VALUE_LIST_CALLBACK_URL,
+                            0,
+                            0,
+                            url_function_type,
+                            payload.as_bytes(),
+                            "",
+                        );
+                    }
                     RustOwnedFilterValue::Blur { radius } => callback_optional_filter_nested_primitive(
                         callback,
                         property_id,
@@ -22230,8 +22278,8 @@ fn parse_rust_owned_filter_value_list_value(filtered_input: &[u8]) -> Option<Rus
     for component_value in component_values {
         let mut url_parser = ComponentValueParser::new(vec![component_value.clone()]);
         if url_parser.parse_a_url_function().is_some() {
-            filters.push(RustOwnedFilterValue::Url(serialize_component_values_for_reparsing(
-                std::slice::from_ref(&component_value),
+            filters.push(RustOwnedFilterValue::Url(rust_owned_url_from_component_value(
+                &component_value,
                 filtered_input_string,
             )?));
             continue;
@@ -32630,26 +32678,26 @@ mod tests {
         RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
         RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedImageUrl, RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
-        RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
-        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
+        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition,
+        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
+        RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
         RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
         RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
         RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
+        RustOwnedTransitionProperty, RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedViewTimelineInset,
+        RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
+        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
         TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction,
         TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
@@ -34457,7 +34505,7 @@ mod tests {
                     position: Some(RustOwnedListStylePosition::Inside),
                     image: Some(RustOwnedListStyleImage::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
-                        url: Some(RustOwnedImageUrl {
+                        url: Some(RustOwnedUrlPayload {
                             function_type: CssUrlFunctionType::Url,
                             url: "marker.png".to_string(),
                         }),
@@ -34807,7 +34855,7 @@ mod tests {
                 value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
                     items: vec![RustOwnedContentItem::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
-                        url: Some(RustOwnedImageUrl {
+                        url: Some(RustOwnedUrlPayload {
                             function_type: CssUrlFunctionType::Url,
                             url: "marker.png".to_string(),
                         }),
@@ -34837,7 +34885,7 @@ mod tests {
                 property_id: PropertyId::BackgroundImage,
                 value: RustOwnedStyleValueKind::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
-                    url: Some(RustOwnedImageUrl {
+                    url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "example.png".to_string(),
                     }),
@@ -35101,7 +35149,7 @@ mod tests {
                 value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
                     source: Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
-                        url: Some(RustOwnedImageUrl {
+                        url: Some(RustOwnedUrlPayload {
                             function_type: CssUrlFunctionType::Url,
                             url: "border.png".to_string(),
                         }),
@@ -35194,7 +35242,7 @@ mod tests {
                     images: vec![RustOwnedCursorImage {
                         image: RustOwnedImage {
                             kind: RustOwnedImageKind::Url,
-                            url: Some(RustOwnedImageUrl {
+                            url: Some(RustOwnedUrlPayload {
                                 function_type: CssUrlFunctionType::Url,
                                 url: "cursor.png".to_string(),
                             }),
@@ -36566,7 +36614,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "url(image.png)".to_string(),
+                value: "image.png".to_string(),
                 value_type: "Url".to_string(),
             })
         );

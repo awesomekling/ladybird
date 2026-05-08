@@ -1020,6 +1020,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::Url) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                value.url = image_url_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::EasingFunction) {
@@ -1970,6 +1971,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .value = nested_primitive_value_from_callback_payload(),
                     .secondary_value = secondary_nested_primitive_value_from_callback_payload(),
                     .source = string_from_ffi_bytes(value_ptr, value_len),
+                    .url = filter_event_kind == RustFilterValueListEventKind::Url
+                        ? image_url_from_callback_payload()
+                        : OptionalNone {},
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::Cursor) {
