@@ -1592,6 +1592,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .first = static_cast<FFI::CssPaintOrderKeyword>(color_green),
                     .second = static_cast<FFI::CssPaintOrderKeyword>(color_blue),
                 };
+            } else if (kind == FFI::CssStyleValueKind::Position) {
+                if (!style_value.has_value()) {
+                    auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                    if (!value_type.has_value())
+                        return;
+                    value.value_type = value_type.release_value();
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Position);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                style_value->position_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (kind == FFI::CssStyleValueKind::PositionAnchor) {
                 value.position_anchor_kind = static_cast<FFI::CssPositionAnchorValueKind>(color_red);
                 value.position_anchor_name = fly_string_from_ffi_bytes(value_ptr, value_len);

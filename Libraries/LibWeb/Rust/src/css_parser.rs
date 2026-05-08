@@ -1878,6 +1878,7 @@ pub enum CssStyleValueKind {
     PlaceContent,
     PlaceItems,
     PlaceSelf,
+    Position,
     PositionArea,
     PositionAnchor,
     PositionTryFallbacks,
@@ -2003,6 +2004,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     Position(RustOwnedPosition),
+    PositionList(RustOwnedPositionList),
     PositionArea(RustOwnedPositionArea),
     PositionAnchor(RustOwnedPositionAnchor),
     PositionTryFallbacks(RustOwnedPositionTryFallbacks),
@@ -2606,6 +2608,12 @@ pub(crate) struct RustOwnedPosition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionList {
+    value_type: PropertyValueType,
+    sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedPositionComponent {
     Edge { edge: PositionEdge, source: String },
     LengthPercentage { source: String },
@@ -3107,6 +3115,15 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
             continue;
         }
+        // AD-HOC: The `background` and `mask` shorthands parse one layer at a
+        // time and then wrap those layer values into the final comma-separated
+        // longhand lists in C++. Keep their position components on the
+        // generated value-type path so they materialize as a single
+        // `PositionStyleValue`, while direct longhand parsing below keeps
+        // owning the full comma-separated layer list in Rust.
+        if property_ids.len() > 1 && matches!(property_id, PropertyId::BackgroundPosition | PropertyId::MaskPosition) {
+            continue;
+        }
         if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
         }
@@ -3248,6 +3265,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnimationName
             | PropertyId::AspectRatio
             | PropertyId::BackgroundRepeat
+            | PropertyId::BackgroundPosition
             | PropertyId::BackgroundSize
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
@@ -3289,6 +3307,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateRows
             | PropertyId::ListStyle
             | PropertyId::MaskRepeat
+            | PropertyId::MaskPosition
             | PropertyId::MaskSize
             | PropertyId::MathDepth
             | PropertyId::OverflowClipMargin
@@ -3364,6 +3383,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackgroundSize | PropertyId::MaskSize => {
             rust_owned_background_size_style_value_kind(filtered_input)
         }
+        PropertyId::BackgroundPosition => {
+            rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
+        }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
@@ -3408,6 +3430,9 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
         PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
+        PropertyId::MaskPosition => {
+            rust_owned_position_list_style_value_kind(PropertyValueType::Position, filtered_input)
+        }
         PropertyId::Cursor => rust_owned_cursor_style_value_kind(filtered_input),
         PropertyId::MathDepth => rust_owned_math_depth_style_value_kind(filtered_input),
         PropertyId::OverflowClipMarginBlockEnd
@@ -4915,6 +4940,29 @@ fn rust_owned_position_style_value_kind(
         value_type,
         components,
         source,
+    }))
+}
+
+fn rust_owned_position_list_style_value_kind(
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let sources = parse_comma_separated_component_values(component_values, |component_values| {
+        let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
+        rust_owned_position_style_value_kind(value_type, value_source.clone())?;
+        Some(value_source)
+    })?;
+
+    if sources.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+        value_type,
+        sources,
     }))
 }
 
@@ -7387,6 +7435,25 @@ where
         }
         RustOwnedStyleValueKind::Position(value) => {
             callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value.value_type);
+        }
+        RustOwnedStyleValueKind::PositionList(value) => {
+            for source in &value.sources {
+                callback(
+                    CssStyleValueKind::Position,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    property_value_type_name(value.value_type),
+                );
+            }
         }
         RustOwnedStyleValueKind::PositionTryFallbacks(value) => {
             callback_position_try_fallbacks_style_value(callback, property_id, value);
@@ -26877,7 +26944,7 @@ mod tests {
         RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth,
         RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
         RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
         RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
         RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
@@ -29253,25 +29320,22 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_rust_owned_style_value(&[PropertyId::BackgroundPosition], "left 10px top"),
+            parse_rust_owned_style_value(&[PropertyId::BackgroundPosition], "left 10px top, center"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundPosition,
-                value: RustOwnedStyleValueKind::Position(RustOwnedPosition {
+                value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                     value_type: PropertyValueType::BackgroundPosition,
-                    components: vec![
-                        RustOwnedPositionComponent::Edge {
-                            edge: PositionEdge::Left,
-                            source: "left".to_string(),
-                        },
-                        RustOwnedPositionComponent::LengthPercentage {
-                            source: "10px".to_string(),
-                        },
-                        RustOwnedPositionComponent::Edge {
-                            edge: PositionEdge::Top,
-                            source: "top".to_string(),
-                        },
-                    ],
-                    source: "left 10px top".to_string(),
+                    sources: vec!["left 10px top".to_string(), "center".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::MaskPosition], "left 10px top 20px, center"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::MaskPosition,
+                value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+                    value_type: PropertyValueType::Position,
+                    sources: vec!["left 10px top 20px".to_string(), "center".to_string()],
                 }),
             })
         );

@@ -267,6 +267,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::AnchorScope:
         case PropertyID::AnimationName:
         case PropertyID::AspectRatio:
+        case PropertyID::BackgroundPosition:
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
         case PropertyID::BorderBottomLeftRadius:
@@ -308,6 +309,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::GridTemplateColumns:
         case PropertyID::GridTemplateRows:
         case PropertyID::ListStyle:
+        case PropertyID::MaskPosition:
         case PropertyID::MaskRepeat:
         case PropertyID::MaskSize:
         case PropertyID::MathDepth:
@@ -2697,6 +2699,57 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             { align_self.release_nonnull(), justify_self.release_nonnull() }) };
                 }
                 break;
+            case FFI::CssStyleValueKind::Position:
+                if (!rust_style_value->position_sources.is_empty() && rust_style_value->value_type.has_value()) {
+                    if (*rust_style_value->value_type == ValueType::BackgroundPosition) {
+                        StyleValueVector background_position_x_values;
+                        StyleValueVector background_position_y_values;
+                        background_position_x_values.ensure_capacity(rust_style_value->position_sources.size());
+                        background_position_y_values.ensure_capacity(rust_style_value->position_sources.size());
+
+                        for (auto const& source : rust_style_value->position_sources) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            auto position = parse_position_value(value_tokens, PositionParsingMode::BackgroundPosition);
+                            value_tokens.discard_whitespace();
+                            if (!position || value_tokens.has_next_token())
+                                break;
+
+                            background_position_x_values.append(position->as_position().edge_x());
+                            background_position_y_values.append(position->as_position().edge_y());
+                        }
+
+                        if (background_position_x_values.size() == rust_style_value->position_sources.size()) {
+                            discard_rust_owned_property_value_tokens();
+                            generated_transaction.commit();
+                            return PropertyAndValue { rust_style_value->property_id,
+                                ShorthandStyleValue::create(PropertyID::BackgroundPosition,
+                                    { PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY },
+                                    { StyleValueList::create(move(background_position_x_values), StyleValueList::Separator::Comma),
+                                        StyleValueList::create(move(background_position_y_values), StyleValueList::Separator::Comma) }) };
+                        }
+                    } else if (*rust_style_value->value_type == ValueType::Position) {
+                        StyleValueVector values;
+                        values.ensure_capacity(rust_style_value->position_sources.size());
+                        for (auto const& source : rust_style_value->position_sources) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            auto position = parse_position_value(value_tokens);
+                            value_tokens.discard_whitespace();
+                            if (!position || value_tokens.has_next_token())
+                                break;
+
+                            values.append(position.release_nonnull());
+                        }
+
+                        if (values.size() == rust_style_value->position_sources.size()) {
+                            discard_rust_owned_property_value_tokens();
+                            generated_transaction.commit();
+                            return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
+                        }
+                    }
+                }
+                break;
             case FFI::CssStyleValueKind::PositionAnchor:
                 switch (rust_style_value->position_anchor_kind) {
                 case FFI::CssPositionAnchorValueKind::Invalid:
@@ -3708,7 +3761,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::Background:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_background_value(tokens); });
     case PropertyID::BackgroundPosition:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_background_position_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BackgroundPositionX:
     case PropertyID::BackgroundPositionY:
         return parse_all_as(tokens, [this, property_id](auto& tokens) {
@@ -3798,11 +3851,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::Mask:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_mask_value(tokens); });
     case PropertyID::MaskPosition:
-        return parse_all_as(tokens, [this](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this](auto& tokens) {
-                return parse_position_value(tokens);
-            });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::MaskRepeat:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::MaskSize:
