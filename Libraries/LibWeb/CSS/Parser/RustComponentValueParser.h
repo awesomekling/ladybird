@@ -158,10 +158,26 @@ public:
         LengthPercentage,
     };
 
+    enum class RustBorderImageRepeat : u8 {
+        Stretch,
+        Repeat,
+        Round,
+        Space,
+    };
+
     struct RustNestedPrimitiveValue {
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
+    };
+
+    struct RustBorderImageWidth {
+        bool is_auto { false };
+        RustNestedPrimitiveValue value;
+    };
+
+    struct RustBorderImageOutset {
+        RustNestedPrimitiveValue value;
     };
 
     struct RustShadow {
@@ -420,15 +436,15 @@ public:
         Optional<String> border_style_source;
         Optional<String> border_color_source;
         Optional<String> border_image_source_source;
-        Optional<String> border_image_shorthand_slice_source;
-        Optional<String> border_image_shorthand_width_source;
-        Optional<String> border_image_shorthand_outset_source;
-        Optional<String> border_image_shorthand_repeat_source;
-        Vector<String> border_image_outset_sources;
-        Vector<String> border_image_repeat_sources;
-        Vector<String> border_image_slice_sources;
+        bool border_image_shorthand_has_slice { false };
+        bool border_image_shorthand_has_width { false };
+        bool border_image_shorthand_has_outset { false };
+        bool border_image_shorthand_has_repeat { false };
+        Vector<RustBorderImageOutset> border_image_outsets;
+        Vector<RustBorderImageRepeat> border_image_repeats;
+        Vector<RustNestedPrimitiveValue> border_image_slices;
         bool border_image_slice_fill { false };
-        Vector<String> border_image_width_sources;
+        Vector<RustBorderImageWidth> border_image_widths;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Optional<RustCounterFunctionKind> counter_function;

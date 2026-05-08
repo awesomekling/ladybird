@@ -1743,7 +1743,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return value;
                 return parse_rust_source_as_non_negative_length_percentage(source);
             };
-            auto materialize_rust_style_value_list = [&](Vector<String> const& sources, auto parse_source) -> RefPtr<StyleValue const> {
+            auto materialize_rust_style_value_list = [&](auto const& sources, auto parse_source) -> RefPtr<StyleValue const> {
                 if (sources.is_empty())
                     return nullptr;
                 StyleValueVector values;
@@ -1983,6 +1983,56 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return NumberStyleValue::create(*value.numeric_value);
                 }
                 return materialize_rust_nested_length_percentage(value, non_negative_range);
+            };
+            auto border_image_repeat_keyword_from_rust = [](RustComponentValueParser::RustBorderImageRepeat repeat) {
+                switch (repeat) {
+                case RustComponentValueParser::RustBorderImageRepeat::Stretch:
+                    return Keyword::Stretch;
+                case RustComponentValueParser::RustBorderImageRepeat::Repeat:
+                    return Keyword::Repeat;
+                case RustComponentValueParser::RustBorderImageRepeat::Round:
+                    return Keyword::Round;
+                case RustComponentValueParser::RustBorderImageRepeat::Space:
+                    return Keyword::Space;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto materialize_rust_border_image_slice = [&](Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& values) -> RefPtr<StyleValue const> {
+                if (values.size() != 4)
+                    return nullptr;
+                auto top = materialize_rust_nested_non_negative_number_percentage(values[0]);
+                auto right = materialize_rust_nested_non_negative_number_percentage(values[1]);
+                auto bottom = materialize_rust_nested_non_negative_number_percentage(values[2]);
+                auto left = materialize_rust_nested_non_negative_number_percentage(values[3]);
+                if (!top || !right || !bottom || !left)
+                    return nullptr;
+                return BorderImageSliceStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull(), rust_style_value->border_image_slice_fill);
+            };
+            auto materialize_rust_border_image_outset = [&](RustComponentValueParser::RustBorderImageOutset const& outset) -> RefPtr<StyleValue const> {
+                if (outset.value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
+                    return materialize_rust_nested_non_negative_number(outset.value);
+                if (outset.value.primitive_kind == FFI::CssPrimitiveValueKind::Invalid)
+                    return parse_rust_source_as_border_image_outset(outset.value.source_or_unit);
+                return materialize_rust_nested_length(outset.value, non_negative_range);
+            };
+            auto materialize_rust_border_image_width = [&](RustComponentValueParser::RustBorderImageWidth const& width) -> RefPtr<StyleValue const> {
+                if (width.is_auto)
+                    return KeywordStyleValue::create(Keyword::Auto);
+                if (width.value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
+                    return materialize_rust_nested_non_negative_number(width.value);
+                if (width.value.primitive_kind == FFI::CssPrimitiveValueKind::Invalid)
+                    return parse_rust_source_as_border_image_width(width.value.source_or_unit);
+                return materialize_rust_nested_length_percentage(width.value, non_negative_range);
+            };
+            auto materialize_rust_border_image_repeat = [&](Vector<RustComponentValueParser::RustBorderImageRepeat> const& repeats) -> RefPtr<StyleValue const> {
+                if (repeats.is_empty())
+                    return nullptr;
+                StyleValueVector values;
+                for (auto repeat : repeats)
+                    values.append(KeywordStyleValue::create(border_image_repeat_keyword_from_rust(repeat)));
+                if (values.size() == 1)
+                    return values[0];
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
             };
             auto rust_keyword_style_value = [](FlyString const& keyword_string) -> RefPtr<StyleValue const> {
                 auto maybe_keyword = keyword_from_string(keyword_string);
@@ -2801,27 +2851,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, BorderRadiusStyleValue::create(horizontal.release_nonnull(), vertical.release_nonnull()) };
                 }
             case FFI::CssStyleValueKind::BorderImageSlice:
-                if (rust_style_value->border_image_slice_sources.size() == 4) {
-                    auto top = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[0]);
-                    auto right = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[1]);
-                    auto bottom = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[2]);
-                    auto left = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[3]);
-                    if (!top || !right || !bottom || !left)
-                        break;
-
+                if (auto value = materialize_rust_border_image_slice(rust_style_value->border_image_slices)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id,
-                        BorderImageSliceStyleValue::create(
-                            top.release_nonnull(),
-                            right.release_nonnull(),
-                            bottom.release_nonnull(),
-                            left.release_nonnull(),
-                            rust_style_value->border_image_slice_fill) };
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::BorderImageOutset:
-                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_outset_sources, parse_rust_source_as_border_image_outset)) {
+                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_outsets, materialize_rust_border_image_outset)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
@@ -2894,17 +2931,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto source = rust_style_value->border_image_source_source.has_value()
                     ? parse_rust_source_as_property(PropertyID::BorderImageSource, *rust_style_value->border_image_source_source)
                     : property_initial_value(PropertyID::BorderImageSource);
-                auto slice = rust_style_value->border_image_shorthand_slice_source.has_value()
-                    ? parse_rust_source_as_property(PropertyID::BorderImageSlice, *rust_style_value->border_image_shorthand_slice_source)
+                auto slice = rust_style_value->border_image_shorthand_has_slice
+                    ? materialize_rust_border_image_slice(rust_style_value->border_image_slices)
                     : property_initial_value(PropertyID::BorderImageSlice);
-                auto width = rust_style_value->border_image_shorthand_width_source.has_value()
-                    ? parse_rust_source_as_property(PropertyID::BorderImageWidth, *rust_style_value->border_image_shorthand_width_source)
+                auto width = rust_style_value->border_image_shorthand_has_width
+                    ? materialize_rust_style_value_list(rust_style_value->border_image_widths, materialize_rust_border_image_width)
                     : property_initial_value(PropertyID::BorderImageWidth);
-                auto outset = rust_style_value->border_image_shorthand_outset_source.has_value()
-                    ? parse_rust_source_as_property(PropertyID::BorderImageOutset, *rust_style_value->border_image_shorthand_outset_source)
+                auto outset = rust_style_value->border_image_shorthand_has_outset
+                    ? materialize_rust_style_value_list(rust_style_value->border_image_outsets, materialize_rust_border_image_outset)
                     : property_initial_value(PropertyID::BorderImageOutset);
-                auto repeat = rust_style_value->border_image_shorthand_repeat_source.has_value()
-                    ? parse_rust_source_as_property(PropertyID::BorderImageRepeat, *rust_style_value->border_image_shorthand_repeat_source)
+                auto repeat = rust_style_value->border_image_shorthand_has_repeat
+                    ? materialize_rust_border_image_repeat(rust_style_value->border_image_repeats)
                     : property_initial_value(PropertyID::BorderImageRepeat);
                 if (!source || !slice || !width || !outset || !repeat)
                     break;
@@ -2919,19 +2956,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 };
             }
             case FFI::CssStyleValueKind::BorderImageRepeat:
-                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_repeat_sources, [&](auto const& source) -> RefPtr<StyleValue const> {
-                        auto maybe_keyword = keyword_from_string(source);
-                        if (!maybe_keyword.has_value())
-                            return nullptr;
-                        return KeywordStyleValue::create(maybe_keyword.release_value());
-                    })) {
+                if (auto value = materialize_rust_border_image_repeat(rust_style_value->border_image_repeats)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::BorderImageWidth:
-                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_width_sources, parse_rust_source_as_border_image_width)) {
+                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_widths, materialize_rust_border_image_width)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
