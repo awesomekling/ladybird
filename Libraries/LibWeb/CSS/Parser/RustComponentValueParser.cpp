@@ -980,6 +980,29 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     nested_value.numeric_value = secondary_numeric_value;
                 return nested_value;
             };
+            auto image_url_from_callback_payload = [&]() -> Optional<URL> {
+                enum : u8 {
+                    NoURL,
+                    URLFunction,
+                    SrcFunction,
+                };
+
+                URL::Type url_type;
+                switch (color_alpha) {
+                case NoURL:
+                    return {};
+                case URLFunction:
+                    url_type = URL::Type::Url;
+                    break;
+                case SrcFunction:
+                    url_type = URL::Type::Src;
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+
+                return URL { string_from_ffi_bytes(value_ptr, value_len), url_type, {} };
+            };
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1406,6 +1429,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (*style_value->list_style_image_kind == RustListStyleImageKind::Source) {
                         style_value->list_style_image_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
+                        style_value->list_style_image_source_url = image_url_from_callback_payload();
                     }
                 } else {
                     auto type_kind = static_cast<RustListStyleTypeKind>(color_green);
@@ -1521,6 +1545,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (*style_value->border_image_source_kind == RustBorderImageSourceKind::Source) {
                         style_value->border_image_source_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
+                        style_value->border_image_source_source_url = image_url_from_callback_payload();
                     }
                     break;
                 case 1:
@@ -1706,6 +1731,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case RustShapeOutsideEventKind::Image:
                     style_value->shape_outside_image_source_kind = static_cast<RustImageKind>(color_green);
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->shape_outside_image_source_url = image_url_from_callback_payload();
                     break;
                 case RustShapeOutsideEventKind::BasicShape: {
                     style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
@@ -1807,6 +1833,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         .kind = static_cast<RustContentEventKind>(color_red),
                         .image_kind = static_cast<RustImageKind>(color_green),
                         .source = string_from_ffi_bytes(value_ptr, value_len),
+                        .image_url = image_url_from_callback_payload(),
                     });
                     break;
                 case RustContentEventKind::ItemCounter:
@@ -1977,6 +2004,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 RustCursorImage image {
                     .image_kind = static_cast<RustImageKind>(color_green),
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
+                    .image_url = image_url_from_callback_payload(),
                 };
                 style_value->cursor_images.append(move(image));
                 return;

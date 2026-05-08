@@ -2228,6 +2228,13 @@ pub(crate) enum RustOwnedCounterFunctionKind {
 pub(crate) struct RustOwnedImage {
     kind: RustOwnedImageKind,
     source: String,
+    url: Option<RustOwnedImageUrl>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RustOwnedImageUrl {
+    function_type: CssUrlFunctionType,
+    url: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6014,6 +6021,7 @@ fn consume_border_image_source(parser: &mut ComponentValueParser, source: &str) 
         RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(image)),
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
+            url: None,
             source,
         })),
         _ => None,
@@ -7479,6 +7487,7 @@ fn rust_owned_image_style_value_kind(
     if component_value_parse_as_image_url(component_value) {
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Url,
+            url: rust_owned_image_url_from_component_value(component_value),
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -7491,6 +7500,7 @@ fn rust_owned_image_style_value_kind(
     {
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
+            url: None,
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -7511,10 +7521,24 @@ fn rust_owned_image_from_component_value(
         RustOwnedStyleValueKind::Image(image) => Some(image),
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
+            url: None,
             source,
         }),
         _ => None,
     }
+}
+
+fn rust_owned_image_url_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedImageUrl> {
+    let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+    let url_function = parser.parse_a_url_function()?;
+    parser.discard_whitespace();
+    if parser.has_next_component_value() || !url_function.request_url_modifiers.is_empty() {
+        return None;
+    }
+    Some(RustOwnedImageUrl {
+        function_type: url_function.function_type,
+        url: url_function.url,
+    })
 }
 
 fn rust_owned_image_set_style_value_kind(
@@ -8203,9 +8227,12 @@ where
             const SOURCE: u8 = 0;
 
             if let Some(source) = &value.source {
-                let (kind, image_kind, source) = match source {
-                    RustOwnedBorderImageSource::None => (0, 0, ""),
-                    RustOwnedBorderImageSource::Image(image) => (1, image.kind as u8, image.source.as_str()),
+                let (kind, image_kind, url_function_type, payload) = match source {
+                    RustOwnedBorderImageSource::None => (0, 0, IMAGE_URL_FUNCTION_TYPE_NONE, ""),
+                    RustOwnedBorderImageSource::Image(image) => {
+                        let (image_kind, url_function_type, payload) = image_callback_payload(image);
+                        (1, image_kind, url_function_type, payload)
+                    }
                 };
                 callback(
                     CssStyleValueKind::BorderImage,
@@ -8218,8 +8245,8 @@ where
                     SOURCE,
                     kind,
                     image_kind,
-                    0,
-                    source.as_bytes(),
+                    url_function_type,
+                    payload.as_bytes(),
                     "",
                 );
             }
@@ -10901,12 +10928,36 @@ const SHAPE_OUTSIDE_CALLBACK_NONE: u8 = 0;
 const SHAPE_OUTSIDE_CALLBACK_IMAGE: u8 = 1;
 const SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE: u8 = 2;
 const SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX: u8 = 3;
+const IMAGE_URL_FUNCTION_TYPE_NONE: u8 = 0;
+const IMAGE_URL_FUNCTION_TYPE_URL: u8 = 1;
+const IMAGE_URL_FUNCTION_TYPE_SRC: u8 = 2;
+
+fn image_url_function_type_callback_payload(function_type: CssUrlFunctionType) -> u8 {
+    match function_type {
+        CssUrlFunctionType::Url => IMAGE_URL_FUNCTION_TYPE_URL,
+        CssUrlFunctionType::Src => IMAGE_URL_FUNCTION_TYPE_SRC,
+    }
+}
+
+fn image_callback_payload(image: &RustOwnedImage) -> (u8, u8, &str) {
+    if image.kind == RustOwnedImageKind::Url
+        && let Some(url) = image.url.as_ref()
+    {
+        return (
+            image.kind as u8,
+            image_url_function_type_callback_payload(url.function_type),
+            &url.url,
+        );
+    }
+    (image.kind as u8, IMAGE_URL_FUNCTION_TYPE_NONE, &image.source)
+}
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     for image in &value.images {
+        let (image_kind, url_function_type, payload) = image_callback_payload(&image.image);
         callback(
             CssStyleValueKind::Cursor,
             property_id,
@@ -10916,10 +10967,10 @@ where
             false,
             0.0,
             CURSOR_CALLBACK_IMAGE,
-            image.image.kind as u8,
+            image_kind,
             0,
-            0,
-            image.image.source.as_bytes(),
+            url_function_type,
+            payload.as_bytes(),
             "",
         );
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
@@ -10963,9 +11014,12 @@ fn callback_list_style_image<C>(callback: &mut C, property_id: u16, value: &Rust
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, source) = match value {
-        RustOwnedListStyleImage::None => (LIST_STYLE_IMAGE_CALLBACK_NONE, ""),
-        RustOwnedListStyleImage::Image(image) => (LIST_STYLE_IMAGE_CALLBACK_SOURCE, image.source.as_str()),
+    let (kind, image_kind, url_function_type, payload) = match value {
+        RustOwnedListStyleImage::None => (LIST_STYLE_IMAGE_CALLBACK_NONE, 0, IMAGE_URL_FUNCTION_TYPE_NONE, ""),
+        RustOwnedListStyleImage::Image(image) => {
+            let (image_kind, url_function_type, payload) = image_callback_payload(image);
+            (LIST_STYLE_IMAGE_CALLBACK_SOURCE, image_kind, url_function_type, payload)
+        }
     };
     callback(
         CssStyleValueKind::ListStyle,
@@ -10977,12 +11031,9 @@ where
         0.0,
         1,
         kind,
-        match value {
-            RustOwnedListStyleImage::None => 0,
-            RustOwnedListStyleImage::Image(image) => image.kind as u8,
-        },
-        0,
-        source.as_bytes(),
+        image_kind,
+        url_function_type,
+        payload.as_bytes(),
         "",
     );
 }
@@ -11152,6 +11203,7 @@ fn callback_content_image_event<C>(callback: &mut C, property_id: u16, image: &R
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
+    let (image_kind, url_function_type, payload) = image_callback_payload(image);
     callback(
         CssStyleValueKind::Content,
         property_id,
@@ -11161,10 +11213,10 @@ where
         false,
         0.0,
         CONTENT_CALLBACK_ITEM_IMAGE,
-        image.kind as u8,
+        image_kind,
         0,
-        0,
-        image.source.as_bytes(),
+        url_function_type,
+        payload.as_bytes(),
         "",
     );
 }
@@ -11418,13 +11470,7 @@ where
             callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_NONE, 0, "");
         }
         RustOwnedShapeOutside::Image(image) => {
-            callback_shape_outside_event(
-                callback,
-                property_id,
-                SHAPE_OUTSIDE_CALLBACK_IMAGE,
-                image.kind as u8,
-                &image.source,
-            );
+            callback_shape_outside_image_event(callback, property_id, image);
         }
         RustOwnedShapeOutside::Shape { basic_shape, shape_box } => {
             if let Some(basic_shape) = basic_shape {
@@ -11468,6 +11514,28 @@ where
         0,
         0,
         source.as_bytes(),
+        "",
+    );
+}
+
+fn callback_shape_outside_image_event<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (image_kind, url_function_type, payload) = image_callback_payload(image);
+    callback(
+        CssStyleValueKind::ShapeOutside,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        SHAPE_OUTSIDE_CALLBACK_IMAGE,
+        image_kind,
+        0,
+        url_function_type,
+        payload.as_bytes(),
         "",
     );
 }
@@ -21674,6 +21742,7 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
             RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(image)),
             RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
                 kind: RustOwnedImageKind::ImageSet,
+                url: None,
                 source: filtered_input_to_string(filtered_input),
             })),
             _ => None,
@@ -32535,17 +32604,17 @@ mod tests {
         RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
         RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
-        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
-        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition,
-        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
-        RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedImageUrl, RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
+        RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
+        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle,
+        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
         RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
@@ -34362,6 +34431,10 @@ mod tests {
                     position: Some(RustOwnedListStylePosition::Inside),
                     image: Some(RustOwnedListStyleImage::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
+                        url: Some(RustOwnedImageUrl {
+                            function_type: CssUrlFunctionType::Url,
+                            url: "marker.png".to_string(),
+                        }),
                         source: "url(marker.png)".to_string(),
                     })),
                     list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
@@ -34708,6 +34781,10 @@ mod tests {
                 value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
                     items: vec![RustOwnedContentItem::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
+                        url: Some(RustOwnedImageUrl {
+                            function_type: CssUrlFunctionType::Url,
+                            url: "marker.png".to_string(),
+                        }),
                         source: "url(marker.png)".to_string(),
                     })],
                     alt_text: vec![],
@@ -34734,6 +34811,10 @@ mod tests {
                 property_id: PropertyId::BackgroundImage,
                 value: RustOwnedStyleValueKind::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
+                    url: Some(RustOwnedImageUrl {
+                        function_type: CssUrlFunctionType::Url,
+                        url: "example.png".to_string(),
+                    }),
                     source: "url(example.png)".to_string(),
                 }),
             })
@@ -34744,6 +34825,7 @@ mod tests {
                 property_id: PropertyId::BackgroundImage,
                 value: RustOwnedStyleValueKind::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Gradient,
+                    url: None,
                     source: "linear-gradient(black, white)".to_string(),
                 }),
             })
@@ -34993,6 +35075,10 @@ mod tests {
                 value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
                     source: Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
+                        url: Some(RustOwnedImageUrl {
+                            function_type: CssUrlFunctionType::Url,
+                            url: "border.png".to_string(),
+                        }),
                         source: "url(border.png)".to_string(),
                     })),
                     slice: Some(RustOwnedBorderImageSlice {
@@ -35082,6 +35168,10 @@ mod tests {
                     images: vec![RustOwnedCursorImage {
                         image: RustOwnedImage {
                             kind: RustOwnedImageKind::Url,
+                            url: Some(RustOwnedImageUrl {
+                                function_type: CssUrlFunctionType::Url,
+                                url: "cursor.png".to_string(),
+                            }),
                             source: "url(cursor.png)".to_string(),
                         },
                         x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),

@@ -358,6 +358,7 @@ public:
     struct RustCursorImage {
         RustImageKind image_kind { RustImageKind::Url };
         String image_source;
+        Optional<URL> image_url;
         Optional<RustNestedPrimitiveValue> x;
         Optional<RustNestedPrimitiveValue> y;
     };
@@ -472,6 +473,7 @@ public:
         RustContentEventKind kind { RustContentEventKind::Normal };
         RustImageKind image_kind { RustImageKind::Url };
         String source;
+        Optional<URL> image_url;
         RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
         FlyString counter_name;
         FlyString counter_join_string;
@@ -542,6 +544,7 @@ public:
         Optional<RustListStyleImageKind> list_style_image_kind;
         Optional<RustImageKind> list_style_image_source_kind;
         Optional<String> list_style_image_source;
+        Optional<URL> list_style_image_source_url;
         Optional<RustListStyleTypeKind> list_style_type_kind;
         Optional<String> list_style_type_string;
         Optional<CounterStyle> list_style_type_counter_style;
@@ -558,6 +561,7 @@ public:
         Optional<RustBorderImageSourceKind> border_image_source_kind;
         Optional<RustImageKind> border_image_source_source_kind;
         Optional<String> border_image_source_source;
+        Optional<URL> border_image_source_source_url;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };
         bool border_image_shorthand_has_outset { false };
@@ -627,6 +631,7 @@ public:
         bool shape_outside_is_none { false };
         Optional<RustImageKind> shape_outside_image_source_kind;
         Optional<String> shape_outside_image_source;
+        Optional<URL> shape_outside_image_source_url;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Vector<String> shape_outside_basic_shape_argument_groups;
         Optional<u8> shape_outside_basic_shape_fill_rule;
