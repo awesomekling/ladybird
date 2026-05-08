@@ -2557,7 +2557,7 @@ pub(crate) enum RustOwnedContent {
 pub(crate) enum RustOwnedContentItem {
     Quote(String),
     String(String),
-    Image(String),
+    Image(RustOwnedImage),
     Counter(RustOwnedCounterFunction),
 }
 
@@ -10559,8 +10559,8 @@ where
                     RustOwnedContentItem::String(source) => {
                         callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_STRING, source);
                     }
-                    RustOwnedContentItem::Image(source) => {
-                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_IMAGE, source);
+                    RustOwnedContentItem::Image(image) => {
+                        callback_content_image_event(callback, property_id, image);
                     }
                     RustOwnedContentItem::Counter(counter) => {
                         callback_content_counter_event(callback, property_id, CONTENT_CALLBACK_ITEM_COUNTER, counter);
@@ -10640,6 +10640,27 @@ where
             }
         }
     }
+}
+
+fn callback_content_image_event<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Content,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        CONTENT_CALLBACK_ITEM_IMAGE,
+        image.kind as u8,
+        0,
+        0,
+        image.source.as_bytes(),
+        "",
+    );
 }
 
 fn callback_counter_function_style_value<C>(
@@ -21338,7 +21359,7 @@ fn component_value_parse_as_content_item(
     }
 
     if component_value_parse_as_content_image(component_value) {
-        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+        return rust_owned_image_from_component_value(component_value, filtered_input_string)
             .map(RustOwnedContentItem::Image);
     }
 
@@ -33337,6 +33358,19 @@ mod tests {
                             symbols_type: CssCounterStyleSymbolsType::Symbolic,
                             symbols: vec!["*".to_string(), "**".to_string()],
                         }),
+                    })],
+                    alt_text: vec![],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Content], "url(marker.png)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Content,
+                value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
+                    items: vec![RustOwnedContentItem::Image(RustOwnedImage {
+                        kind: RustOwnedImageKind::Url,
+                        source: "url(marker.png)".to_string(),
                     })],
                     alt_text: vec![],
                 }),

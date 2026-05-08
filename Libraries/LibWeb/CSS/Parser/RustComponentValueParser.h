@@ -428,6 +428,7 @@ public:
 
     struct RustContentEvent {
         RustContentEventKind kind { RustContentEventKind::Normal };
+        RustImageKind image_kind { RustImageKind::Url };
         String source;
         RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
         FlyString counter_name;

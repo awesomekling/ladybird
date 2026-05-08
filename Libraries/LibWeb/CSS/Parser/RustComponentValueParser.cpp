@@ -1619,6 +1619,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case RustContentEventKind::AltTextString:
                     style_value->content_events.append({
                         .kind = static_cast<RustContentEventKind>(color_red),
+                        .image_kind = static_cast<RustImageKind>(color_green),
                         .source = string_from_ffi_bytes(value_ptr, value_len),
                     });
                     break;

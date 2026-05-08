@@ -1553,7 +1553,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         content_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemImage:
-                        value = parse_rust_source_as_image(event.source);
+                        value = materialize_rust_image(event.image_kind, event.source);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
