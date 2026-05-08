@@ -2000,7 +2000,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
     Border {
-        width: Option<RustOwnedBorderWidth>,
+        width: Option<RustOwnedNestedPrimitiveValue>,
         style: Option<RustOwnedLineStyle>,
         color: Option<RustOwnedColor>,
     },
@@ -2474,19 +2474,9 @@ pub(crate) enum RustOwnedColor {
     Source(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedBorderWidth {
-    Length(RustOwnedNestedPrimitiveValue),
-    LineWidth(RustOwnedLineWidth),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum RustOwnedLineWidth {
-    Thin,
-    Medium,
-    Thick,
-}
+const LINE_WIDTH_THIN: u8 = 0;
+const LINE_WIDTH_MEDIUM: u8 = 1;
+const LINE_WIDTH_THICK: u8 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedPaint {
@@ -6101,26 +6091,24 @@ fn rust_owned_superellipse_style_value_kind(
 fn rust_owned_border_width_from_component_value(
     component_value: &ComponentValue,
     source: &str,
-) -> Option<RustOwnedBorderWidth> {
-    if let Some(line_width) = rust_owned_line_width_from_component_value(component_value) {
-        return Some(RustOwnedBorderWidth::LineWidth(line_width));
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    if let Some(line_width) = rust_owned_line_width_keyword_from_component_value(component_value) {
+        return Some(RustOwnedNestedPrimitiveValue::Keyword(line_width.to_string()));
     }
 
-    Some(RustOwnedBorderWidth::Length(
-        component_value_parse_as_nested_non_negative_length(component_value, source)?,
-    ))
+    component_value_parse_as_nested_non_negative_length(component_value, source)
 }
 
-fn rust_owned_line_width_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedLineWidth> {
+fn rust_owned_line_width_keyword_from_component_value(component_value: &ComponentValue) -> Option<&'static str> {
     let ident = component_value_ident(component_value)?;
     if ident.eq_ignore_ascii_case("thin") {
-        return Some(RustOwnedLineWidth::Thin);
+        return Some("thin");
     }
     if ident.eq_ignore_ascii_case("medium") {
-        return Some(RustOwnedLineWidth::Medium);
+        return Some("medium");
     }
     if ident.eq_ignore_ascii_case("thick") {
-        return Some(RustOwnedLineWidth::Thick);
+        return Some("thick");
     }
     None
 }
@@ -10099,13 +10087,15 @@ fn callback_border_width_style_value<C>(
     callback: &mut C,
     kind: CssStyleValueKind,
     property_id: u16,
-    value: &RustOwnedBorderWidth,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    match value {
-        RustOwnedBorderWidth::Length(value) => callback_nested_primitive(callback, kind, property_id, 0, 1, value),
-        RustOwnedBorderWidth::LineWidth(value) => callback(
+    if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = value {
+        let Some(line_width) = line_width_from_keyword(keyword) else {
+            unreachable!("border-width keywords are validated while parsing")
+        };
+        callback(
             kind,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -10114,13 +10104,28 @@ fn callback_border_width_style_value<C>(
             false,
             0.0,
             0,
-            *value as u8,
+            line_width,
             0,
             0,
             &[],
             "",
-        ),
+        );
+    } else {
+        callback_nested_primitive(callback, kind, property_id, 0, 1, value);
     }
+}
+
+fn line_width_from_keyword(keyword: &str) -> Option<u8> {
+    if keyword == "thin" {
+        return Some(LINE_WIDTH_THIN);
+    }
+    if keyword == "medium" {
+        return Some(LINE_WIDTH_MEDIUM);
+    }
+    if keyword == "thick" {
+        return Some(LINE_WIDTH_THICK);
+    }
+    None
 }
 
 fn callback_rust_owned_color<C>(
@@ -33199,17 +33204,17 @@ mod tests {
         RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorderImage,
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-        RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
-        RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
-        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCornerShape, RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
+        RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
         RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder,
         RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
@@ -35639,10 +35644,10 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Border,
                 value: RustOwnedStyleValueKind::Border {
-                    width: Some(RustOwnedBorderWidth::Length(RustOwnedNestedPrimitiveValue::Length {
+                    width: Some(RustOwnedNestedPrimitiveValue::Length {
                         value: 1.0,
                         unit: "px".to_string(),
-                    },)),
+                    }),
                     style: Some(RustOwnedLineStyle::Solid),
                     color: Some(RustOwnedColor::Simple {
                         kind: CssParsedColorKind::Rgba,
@@ -35660,7 +35665,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderBlock,
                 value: RustOwnedStyleValueKind::Border {
-                    width: Some(RustOwnedBorderWidth::LineWidth(RustOwnedLineWidth::Thick)),
+                    width: Some(RustOwnedNestedPrimitiveValue::Keyword("thick".to_string())),
                     style: Some(RustOwnedLineStyle::Dashed),
                     color: Some(RustOwnedColor::Simple {
                         kind: CssParsedColorKind::Keyword,
