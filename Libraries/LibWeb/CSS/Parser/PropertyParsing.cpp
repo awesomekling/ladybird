@@ -4941,6 +4941,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::ColorFunction:
             case FFI::CssStyleValueKind::MathFunction:
             case FFI::CssStyleValueKind::Primitive:
+            case FFI::CssStyleValueKind::TreeCountingFunction:
             case FFI::CssStyleValueKind::ValueType:
                 if (rust_style_value->value_type.has_value()) {
                     auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);

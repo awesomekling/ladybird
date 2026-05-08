@@ -1935,6 +1935,7 @@ pub enum CssStyleValueKind {
     WhiteSpaceTrim,
     WillChange,
     MathFunction,
+    TreeCountingFunction,
     ValueType,
 }
 
@@ -2085,7 +2086,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TransformLonghand(RustOwnedTransformLonghand),
     TransformOrigin(RustOwnedTransformOrigin),
     Transformation(RustOwnedTransformation),
-    TreeCountingFunction(RustOwnedFunctionStyleValue),
+    TreeCountingFunction(RustOwnedSourceBackedStyleValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
     ViewTimeline(RustOwnedViewTimeline),
@@ -2147,10 +2148,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     MathFunction {
         value_type: PropertyValueType,
         function: RustOwnedMathFunction,
-    },
-    UnresolvedValueType {
-        value_type: PropertyValueType,
-        source: String,
     },
 }
 
@@ -4180,6 +4177,13 @@ fn parse_rust_owned_generated_longhand_value(
         };
     }
 
+    if let Some(function) = parse_rust_owned_tree_counting_function(value_type, component_values, filtered_input) {
+        return RustOwnedStyleValue {
+            property_id,
+            value: RustOwnedStyleValueKind::TreeCountingFunction(function),
+        };
+    }
+
     if let Some(function) = parse_rust_owned_anchor_size_function(value_type, component_values, filtered_input) {
         return RustOwnedStyleValue {
             property_id,
@@ -4300,7 +4304,7 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
         PropertyValueType::FontVariantNumeric => {
             rust_owned_font_variant_numeric_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
-        _ => RustOwnedStyleValueKind::UnresolvedValueType { value_type, source },
+        _ => unreachable!("valid generated longhand value type should have a Rust-owned representation"),
     }
 }
 
@@ -8347,6 +8351,29 @@ fn serialize_math_function_arguments_for_reparsing(
     Some(arguments)
 }
 
+fn parse_rust_owned_tree_counting_function(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+    filtered_input: &[u8],
+) -> Option<RustOwnedSourceBackedStyleValue> {
+    // https://drafts.csswg.org/css-values-5/#tree-counting
+    // <tree-counting-function> = <sibling-index()> | <sibling-count()>
+    let [ComponentValue::Function(function)] = component_values else {
+        return None;
+    };
+    if !function.name.eq_ignore_ascii_case("sibling-index") && !function.name.eq_ignore_ascii_case("sibling-count") {
+        return None;
+    }
+    if !strip_whitespace(&function.value).is_empty() {
+        return None;
+    }
+
+    let filtered_input = std::str::from_utf8(filtered_input)
+        .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
+    let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
+    Some(RustOwnedSourceBackedStyleValue { source, value_type })
+}
+
 fn filtered_input_to_string(filtered_input: &[u8]) -> String {
     String::from_utf8_lossy(filtered_input).to_string()
 }
@@ -9585,8 +9612,17 @@ where
             value.unit.as_bytes(),
             value.value_type,
         ),
-        RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
+        RustOwnedStyleValueKind::Function(function) => {
             let _ = function;
+        }
+        RustOwnedStyleValueKind::TreeCountingFunction(function) => {
+            callback_source_backed_value_type_kind_style_value(
+                callback,
+                CssStyleValueKind::TreeCountingFunction,
+                property_id,
+                &function.source,
+                function.value_type,
+            );
         }
         RustOwnedStyleValueKind::CounterStyle { value } => {
             callback_counter_style(callback, CssStyleValueKind::CounterStyle, property_id, value);
@@ -9941,9 +9977,6 @@ where
                 &function.source,
                 *value_type,
             );
-        }
-        RustOwnedStyleValueKind::UnresolvedValueType { value_type, source } => {
-            callback_source_backed_value_type_style_value(callback, property_id, source, *value_type);
         }
     }
 }
@@ -36221,6 +36254,16 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::FontWeight], "sibling-count()"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::FontWeight,
+                value: RustOwnedStyleValueKind::TreeCountingFunction(RustOwnedSourceBackedStyleValue {
+                    source: "sibling-count()".to_string(),
+                    value_type: PropertyValueType::FontWeightAbsolute,
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ObjectPosition,
@@ -37527,6 +37570,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: String::new(),
+                value_type: "FontWeightAbsolute".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::FontWeight], "sibling-count()"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::TreeCountingFunction,
+                property_id: PropertyId::FontWeight,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "sibling-count()".to_string(),
                 value_type: "FontWeightAbsolute".to_string(),
             })
         );
