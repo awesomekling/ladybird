@@ -942,6 +942,24 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 .color_blue = color_blue,
                 .color_alpha = color_alpha,
             };
+            auto nested_primitive_value_from_callback_payload = [&]() {
+                RustNestedPrimitiveValue nested_value {
+                    .primitive_kind = primitive_kind,
+                    .source_or_unit = string_from_ffi_bytes(value_ptr, value_len),
+                };
+                if (has_numeric_value)
+                    nested_value.numeric_value = numeric_value;
+                return nested_value;
+            };
+            auto secondary_nested_primitive_value_from_callback_payload = [&]() {
+                RustNestedPrimitiveValue nested_value {
+                    .primitive_kind = static_cast<FFI::CssPrimitiveValueKind>(color_alpha),
+                    .source_or_unit = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                };
+                if (has_secondary_numeric_value)
+                    nested_value.numeric_value = secondary_numeric_value;
+                return nested_value;
+            };
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1394,13 +1412,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_red == Color)
                     shadow.color_source = string_from_ffi_bytes(value_ptr, value_len);
                 else if (color_red == OffsetX)
-                    shadow.offset_x_source = string_from_ffi_bytes(value_ptr, value_len);
+                    shadow.offset_x = nested_primitive_value_from_callback_payload();
                 else if (color_red == OffsetY)
-                    shadow.offset_y_source = string_from_ffi_bytes(value_ptr, value_len);
+                    shadow.offset_y = nested_primitive_value_from_callback_payload();
                 else if (color_red == BlurRadius)
-                    shadow.blur_radius_source = string_from_ffi_bytes(value_ptr, value_len);
+                    shadow.blur_radius = nested_primitive_value_from_callback_payload();
                 else if (color_red == SpreadDistance)
-                    shadow.spread_distance_source = string_from_ffi_bytes(value_ptr, value_len);
+                    shadow.spread_distance = nested_primitive_value_from_callback_payload();
                 return;
             } else if (kind == FFI::CssStyleValueKind::ShapeOutside) {
                 if (!style_value.has_value())
@@ -1566,7 +1584,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (filter_event_kind == RustFilterValueListEventKind::DropShadowRadius) {
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
-                    style_value->filter_value_list_events.last().drop_shadow_radius_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->filter_value_list_events.last().drop_shadow_radius = nested_primitive_value_from_callback_payload();
                     return;
                 }
                 if (filter_event_kind == RustFilterValueListEventKind::DropShadowColor) {
@@ -1580,9 +1598,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .kind = filter_event_kind,
                     .simple_function = static_cast<RustSimpleFilterFunction>(color_green),
                     .has_value = color_blue != 0,
-                    .has_secondary_value = color_alpha != 0,
+                    .has_secondary_value = filter_event_kind == RustFilterValueListEventKind::DropShadow,
+                    .value = nested_primitive_value_from_callback_payload(),
+                    .secondary_value = secondary_nested_primitive_value_from_callback_payload(),
                     .source = string_from_ffi_bytes(value_ptr, value_len),
-                    .secondary_source = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::Cursor) {

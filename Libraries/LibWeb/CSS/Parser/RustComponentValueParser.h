@@ -139,12 +139,18 @@ public:
         Inner,
     };
 
+    struct RustNestedPrimitiveValue {
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> numeric_value;
+        String source_or_unit;
+    };
+
     struct RustShadow {
         Optional<String> color_source;
-        String offset_x_source;
-        String offset_y_source;
-        Optional<String> blur_radius_source;
-        Optional<String> spread_distance_source;
+        RustNestedPrimitiveValue offset_x;
+        RustNestedPrimitiveValue offset_y;
+        Optional<RustNestedPrimitiveValue> blur_radius;
+        Optional<RustNestedPrimitiveValue> spread_distance;
         RustShadowPlacement placement { RustShadowPlacement::Outer };
     };
 
@@ -323,9 +329,10 @@ public:
         RustSimpleFilterFunction simple_function { RustSimpleFilterFunction::Brightness };
         bool has_value { false };
         bool has_secondary_value { false };
+        RustNestedPrimitiveValue value;
+        RustNestedPrimitiveValue secondary_value;
         String source;
-        String secondary_source;
-        Optional<String> drop_shadow_radius_source;
+        Optional<RustNestedPrimitiveValue> drop_shadow_radius;
         Optional<String> drop_shadow_color_source;
     };
 

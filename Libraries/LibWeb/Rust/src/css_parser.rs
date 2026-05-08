@@ -2508,21 +2508,30 @@ pub(crate) enum RustOwnedFilterValueList {
 pub(crate) enum RustOwnedFilterValue {
     Url(String),
     Blur {
-        radius_source: Option<String>,
+        radius: Option<RustOwnedNestedPrimitiveValue>,
     },
     DropShadow {
         color_source: Option<String>,
-        offset_x_source: String,
-        offset_y_source: String,
-        radius_source: Option<String>,
+        offset_x: RustOwnedNestedPrimitiveValue,
+        offset_y: RustOwnedNestedPrimitiveValue,
+        radius: Option<RustOwnedNestedPrimitiveValue>,
     },
     HueRotate {
-        angle_source: Option<String>,
+        angle: Option<RustOwnedNestedPrimitiveValue>,
     },
     Simple {
         function: RustOwnedSimpleFilterFunction,
-        amount_source: Option<String>,
+        amount: Option<RustOwnedNestedPrimitiveValue>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedNestedPrimitiveValue {
+    Number(f64),
+    Percentage(f64),
+    Length { value: f64, unit: String },
+    Angle { value: f64, unit: String },
+    Source(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2732,10 +2741,10 @@ pub(crate) enum RustOwnedShadow {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedSingleShadow {
     color_source: Option<String>,
-    offset_x_source: String,
-    offset_y_source: String,
-    blur_radius_source: Option<String>,
-    spread_distance_source: Option<String>,
+    offset_x: RustOwnedNestedPrimitiveValue,
+    offset_y: RustOwnedNestedPrimitiveValue,
+    blur_radius: Option<RustOwnedNestedPrimitiveValue>,
+    spread_distance: Option<RustOwnedNestedPrimitiveValue>,
     placement: RustOwnedShadowPlacement,
 }
 
@@ -10197,41 +10206,35 @@ where
                         source.as_bytes(),
                         "",
                     ),
-                    RustOwnedFilterValue::Blur { radius_source } => callback_optional_filter_source(
+                    RustOwnedFilterValue::Blur { radius } => callback_optional_filter_nested_primitive(
                         callback,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_BLUR,
                         0,
-                        radius_source.as_ref(),
+                        radius.as_ref(),
                     ),
                     RustOwnedFilterValue::DropShadow {
                         color_source,
-                        offset_x_source,
-                        offset_y_source,
-                        radius_source,
+                        offset_x,
+                        offset_y,
+                        radius,
                     } => {
-                        callback(
+                        callback_nested_primitive_pair(
+                            callback,
                             CssStyleValueKind::FilterValueList,
                             property_id,
-                            CssPrimitiveValueKind::Invalid,
-                            false,
-                            0.0,
-                            false,
-                            0.0,
                             FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW,
                             0,
-                            0,
-                            0,
-                            offset_x_source.as_bytes(),
-                            offset_y_source,
+                            offset_x,
+                            offset_y,
                         );
-                        if let Some(radius_source) = radius_source {
-                            callback_filter_source(
+                        if let Some(radius) = radius {
+                            callback_filter_nested_primitive(
                                 callback,
                                 property_id,
                                 FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_RADIUS,
                                 0,
-                                radius_source,
+                                radius,
                             );
                         }
                         if let Some(color_source) = color_source {
@@ -10244,17 +10247,14 @@ where
                             );
                         }
                     }
-                    RustOwnedFilterValue::HueRotate { angle_source } => callback_optional_filter_source(
+                    RustOwnedFilterValue::HueRotate { angle } => callback_optional_filter_nested_primitive(
                         callback,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_HUE_ROTATE,
                         0,
-                        angle_source.as_ref(),
+                        angle.as_ref(),
                     ),
-                    RustOwnedFilterValue::Simple {
-                        function,
-                        amount_source,
-                    } => callback_optional_filter_source(
+                    RustOwnedFilterValue::Simple { function, amount } => callback_optional_filter_nested_primitive(
                         callback,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_SIMPLE,
@@ -10267,7 +10267,7 @@ where
                             RustOwnedSimpleFilterFunction::Saturate => SIMPLE_FILTER_FUNCTION_SATURATE,
                             RustOwnedSimpleFilterFunction::Sepia => SIMPLE_FILTER_FUNCTION_SEPIA,
                         },
-                        amount_source.as_ref(),
+                        amount.as_ref(),
                     ),
                 }
             }
@@ -10296,17 +10296,36 @@ where
     );
 }
 
-fn callback_optional_filter_source<C>(
+fn callback_filter_nested_primitive<C>(
     callback: &mut C,
     property_id: u16,
     kind: u8,
     secondary_kind: u8,
-    source: Option<&String>,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    if let Some(source) = source {
-        callback_filter_source(callback, property_id, kind, secondary_kind, source);
+    callback_nested_primitive(
+        callback,
+        CssStyleValueKind::FilterValueList,
+        property_id,
+        kind,
+        secondary_kind,
+        value,
+    );
+}
+
+fn callback_optional_filter_nested_primitive<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: Option<&RustOwnedNestedPrimitiveValue>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    if let Some(value) = value {
+        callback_filter_nested_primitive(callback, property_id, kind, secondary_kind, value);
     } else {
         callback(
             CssStyleValueKind::FilterValueList,
@@ -10323,6 +10342,77 @@ fn callback_optional_filter_source<C>(
             &[],
             "",
         );
+    }
+}
+
+fn callback_nested_primitive_pair<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+    secondary_value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+    let (secondary_primitive_kind, secondary_numeric_value, secondary_unit_or_source) =
+        nested_primitive_callback_payload(secondary_value);
+
+    callback(
+        style_value_kind,
+        property_id,
+        primitive_kind,
+        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        !matches!(secondary_value, RustOwnedNestedPrimitiveValue::Source(_)),
+        secondary_numeric_value,
+        kind,
+        secondary_kind,
+        1,
+        secondary_primitive_kind as u8,
+        unit_or_source.as_bytes(),
+        secondary_unit_or_source,
+    );
+}
+
+fn callback_nested_primitive<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+
+    callback(
+        style_value_kind,
+        property_id,
+        primitive_kind,
+        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        false,
+        0.0,
+        kind,
+        secondary_kind,
+        1,
+        0,
+        unit_or_source.as_bytes(),
+        "",
+    );
+}
+
+fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (CssPrimitiveValueKind, f64, &str) {
+    match value {
+        RustOwnedNestedPrimitiveValue::Number(value) => (CssPrimitiveValueKind::Number, *value, ""),
+        RustOwnedNestedPrimitiveValue::Percentage(value) => (CssPrimitiveValueKind::Percentage, *value, ""),
+        RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, *value, unit),
+        RustOwnedNestedPrimitiveValue::Angle { value, unit } => (CssPrimitiveValueKind::Angle, *value, unit),
+        RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
 }
 
@@ -10631,47 +10721,78 @@ fn callback_shadow_style_value<C>(callback: &mut C, property_id: u16, value: &Ru
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let mut callback_shadow_component = |component: u8, placement: u8, source: &str| {
-        callback(
-            CssStyleValueKind::Shadow,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            component,
-            placement,
-            0,
-            0,
-            source.as_bytes(),
-            "",
-        );
-    };
-
     match value {
-        RustOwnedShadow::None => callback_shadow_component(SHADOW_CALLBACK_NONE, 0, ""),
+        RustOwnedShadow::None => callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_NONE, 0, ""),
         RustOwnedShadow::Shadows(shadows) => {
             for shadow in shadows {
                 let placement = match shadow.placement {
                     RustOwnedShadowPlacement::Outer => SHADOW_PLACEMENT_OUTER,
                     RustOwnedShadowPlacement::Inner => SHADOW_PLACEMENT_INNER,
                 };
-                callback_shadow_component(SHADOW_CALLBACK_BEGIN_SHADOW, placement, "");
+                callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_BEGIN_SHADOW, placement, "");
                 if let Some(color_source) = &shadow.color_source {
-                    callback_shadow_component(SHADOW_CALLBACK_COLOR, 0, color_source);
+                    callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_COLOR, 0, color_source);
                 }
-                callback_shadow_component(SHADOW_CALLBACK_OFFSET_X, 0, &shadow.offset_x_source);
-                callback_shadow_component(SHADOW_CALLBACK_OFFSET_Y, 0, &shadow.offset_y_source);
-                if let Some(blur_radius_source) = &shadow.blur_radius_source {
-                    callback_shadow_component(SHADOW_CALLBACK_BLUR_RADIUS, 0, blur_radius_source);
+                callback_nested_primitive(
+                    callback,
+                    CssStyleValueKind::Shadow,
+                    property_id,
+                    SHADOW_CALLBACK_OFFSET_X,
+                    0,
+                    &shadow.offset_x,
+                );
+                callback_nested_primitive(
+                    callback,
+                    CssStyleValueKind::Shadow,
+                    property_id,
+                    SHADOW_CALLBACK_OFFSET_Y,
+                    0,
+                    &shadow.offset_y,
+                );
+                if let Some(blur_radius) = &shadow.blur_radius {
+                    callback_nested_primitive(
+                        callback,
+                        CssStyleValueKind::Shadow,
+                        property_id,
+                        SHADOW_CALLBACK_BLUR_RADIUS,
+                        0,
+                        blur_radius,
+                    );
                 }
-                if let Some(spread_distance_source) = &shadow.spread_distance_source {
-                    callback_shadow_component(SHADOW_CALLBACK_SPREAD_DISTANCE, 0, spread_distance_source);
+                if let Some(spread_distance) = &shadow.spread_distance {
+                    callback_nested_primitive(
+                        callback,
+                        CssStyleValueKind::Shadow,
+                        property_id,
+                        SHADOW_CALLBACK_SPREAD_DISTANCE,
+                        0,
+                        spread_distance,
+                    );
                 }
             }
         }
     }
+}
+
+fn callback_shadow_source_component<C>(callback: &mut C, property_id: u16, component: u8, placement: u8, source: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Shadow,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        component,
+        placement,
+        0,
+        0,
+        source.as_bytes(),
+        "",
+    );
 }
 
 fn callback_transform_longhand_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedTransformLonghand)
@@ -19257,13 +19378,10 @@ fn component_values_parse_as_blur_function(
     // blur( <length>? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => Some(RustOwnedFilterValue::Blur { radius_source: None }),
+        [] => Some(RustOwnedFilterValue::Blur { radius: None }),
         [component_value] if component_value_parse_as_non_negative_length(component_value) => {
             Some(RustOwnedFilterValue::Blur {
-                radius_source: Some(serialize_component_values_for_reparsing(
-                    std::slice::from_ref(component_value),
-                    source,
-                )?),
+                radius: Some(component_value_parse_as_nested_length(component_value, source)?),
             })
         }
         _ => None,
@@ -19283,10 +19401,10 @@ fn component_values_parse_as_drop_shadow_function(
 
     let mut parser = ComponentValueParser::new(component_values.to_vec());
     let color_source_before_lengths = consume_filter_drop_shadow_color(&mut parser, source);
-    let offset_x_source = consume_filter_drop_shadow_length(&mut parser, source)?;
-    let offset_y_source = consume_filter_drop_shadow_length(&mut parser, source)?;
+    let offset_x = consume_filter_drop_shadow_length(&mut parser, source)?;
+    let offset_y = consume_filter_drop_shadow_length(&mut parser, source)?;
 
-    let radius_source = consume_filter_drop_shadow_length(&mut parser, source);
+    let radius = consume_filter_drop_shadow_length(&mut parser, source);
     let color_source = if color_source_before_lengths.is_some() {
         color_source_before_lengths
     } else {
@@ -19295,9 +19413,9 @@ fn component_values_parse_as_drop_shadow_function(
 
     (!parser.has_next_component_value()).then_some(RustOwnedFilterValue::DropShadow {
         color_source,
-        offset_x_source,
-        offset_y_source,
-        radius_source,
+        offset_x,
+        offset_y,
+        radius,
     })
 }
 
@@ -19313,13 +19431,16 @@ fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser, source: &
     None
 }
 
-fn consume_filter_drop_shadow_length(parser: &mut ComponentValueParser, source: &str) -> Option<String> {
+fn consume_filter_drop_shadow_length(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value().cloned()?;
 
     if component_value_parse_as_length(&component_value) {
         parser.index += 1;
-        return serialize_component_values_for_reparsing(std::slice::from_ref(&component_value), source);
+        return component_value_parse_as_nested_length(&component_value, source);
     }
 
     None
@@ -19333,14 +19454,11 @@ fn component_values_parse_as_hue_rotate_function(
     // hue-rotate( [ <angle> | <zero> ]? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => Some(RustOwnedFilterValue::HueRotate { angle_source: None }),
+        [] => Some(RustOwnedFilterValue::HueRotate { angle: None }),
         [component_value] => {
             if component_value_parse_as_angle(component_value) {
                 return Some(RustOwnedFilterValue::HueRotate {
-                    angle_source: Some(serialize_component_values_for_reparsing(
-                        std::slice::from_ref(component_value),
-                        source,
-                    )?),
+                    angle: Some(component_value_parse_as_nested_angle(component_value, source)?),
                 });
             }
 
@@ -19351,7 +19469,7 @@ fn component_values_parse_as_hue_rotate_function(
                     ..
                 }) if number_is_integer(*number) && number.value() == 0.0
             )
-            .then_some(RustOwnedFilterValue::HueRotate { angle_source: None })
+            .then_some(RustOwnedFilterValue::HueRotate { angle: None })
         }
         _ => None,
     }
@@ -19384,18 +19502,94 @@ fn component_values_parse_as_simple_filter_function(
     // saturate( [ <number> | <percentage> ]? )
     let component_values = strip_whitespace(component_values);
     match component_values {
-        [] => Some(RustOwnedFilterValue::Simple {
-            function,
-            amount_source: None,
-        }),
+        [] => Some(RustOwnedFilterValue::Simple { function, amount: None }),
         [component_value] if component_value_parse_as_filter_amount(component_value) => {
             Some(RustOwnedFilterValue::Simple {
                 function,
-                amount_source: Some(serialize_component_values_for_reparsing(
-                    std::slice::from_ref(component_value),
+                amount: Some(component_value_parse_as_nested_number_percentage(
+                    component_value,
                     source,
                 )?),
             })
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_length(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Length)) => {
+            Some(RustOwnedNestedPrimitiveValue::Length {
+                value: number.value(),
+                unit: unit.to_string(),
+            })
+        }
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() == 0.0 => Some(RustOwnedNestedPrimitiveValue::Length {
+            value: 0.0,
+            unit: "px".to_string(),
+        }),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions and anchor-size()
+        // still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_angle(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Angle)) => {
+            Some(RustOwnedNestedPrimitiveValue::Angle {
+                value: number.value(),
+                unit: unit.to_string(),
+            })
+        }
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_number_percentage(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
         }
         _ => None,
     }
@@ -19621,10 +19815,10 @@ fn parse_single_shadow_value(
     parser.discard_whitespace();
 
     let mut color_source = None;
-    let mut offset_x_source = None;
-    let mut offset_y_source = None;
-    let mut blur_radius_source = None;
-    let mut spread_distance_source = None;
+    let mut offset_x = None;
+    let mut offset_y = None;
+    let mut blur_radius = None;
+    let mut spread_distance = None;
     let mut placement = RustOwnedShadowPlacement::Outer;
     let mut has_placement = false;
 
@@ -19652,37 +19846,27 @@ fn parse_single_shadow_value(
             continue;
         }
 
-        if offset_x_source.is_none() {
-            let offset_x = consume_component_value_source_matching(
-                &mut parser,
-                filtered_input_string,
-                component_value_parse_as_length,
-            )?;
-            let offset_y = consume_component_value_source_matching(
-                &mut parser,
-                filtered_input_string,
-                component_value_parse_as_length,
-            )?;
+        if offset_x.is_none() {
+            let parsed_offset_x =
+                consume_nested_length_matching(&mut parser, filtered_input_string, component_value_parse_as_length)?;
+            let parsed_offset_y =
+                consume_nested_length_matching(&mut parser, filtered_input_string, component_value_parse_as_length)?;
 
-            let blur_radius = consume_component_value_source_matching(
+            let parsed_blur_radius = consume_nested_length_matching(
                 &mut parser,
                 filtered_input_string,
                 component_value_parse_as_non_negative_length,
             );
-            let spread_distance = if blur_radius.is_some() && is_box_shadow {
-                consume_component_value_source_matching(
-                    &mut parser,
-                    filtered_input_string,
-                    component_value_parse_as_length,
-                )
+            let parsed_spread_distance = if parsed_blur_radius.is_some() && is_box_shadow {
+                consume_nested_length_matching(&mut parser, filtered_input_string, component_value_parse_as_length)
             } else {
                 None
             };
 
-            offset_x_source = Some(offset_x);
-            offset_y_source = Some(offset_y);
-            blur_radius_source = blur_radius;
-            spread_distance_source = spread_distance;
+            offset_x = Some(parsed_offset_x);
+            offset_y = Some(parsed_offset_y);
+            blur_radius = parsed_blur_radius;
+            spread_distance = parsed_spread_distance;
             continue;
         }
 
@@ -19691,12 +19875,31 @@ fn parse_single_shadow_value(
 
     Some(RustOwnedSingleShadow {
         color_source,
-        offset_x_source: offset_x_source?,
-        offset_y_source: offset_y_source?,
-        blur_radius_source,
-        spread_distance_source,
+        offset_x: offset_x?,
+        offset_y: offset_y?,
+        blur_radius,
+        spread_distance,
         placement,
     })
+}
+
+fn consume_nested_length_matching<F>(
+    parser: &mut ComponentValueParser,
+    source: &str,
+    predicate: F,
+) -> Option<RustOwnedNestedPrimitiveValue>
+where
+    F: Fn(&ComponentValue) -> bool,
+{
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if predicate(component_value) {
+        let value = component_value_parse_as_nested_length(component_value, source)?;
+        parser.index += 1;
+        return Some(value);
+    }
+
+    None
 }
 
 fn consume_transform_origin_component(parser: &mut ComponentValueParser) -> Option<TransformOriginComponent> {
@@ -29366,31 +29569,31 @@ mod tests {
         RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
         RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
         RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
-        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
+        RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor,
+        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback,
+        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
+        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
+        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
+        RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -31316,11 +31519,14 @@ mod tests {
                 value: RustOwnedStyleValueKind::FilterValueList {
                     value: RustOwnedFilterValueList::Filters(vec![
                         RustOwnedFilterValue::Blur {
-                            radius_source: Some("10px".to_string()),
+                            radius: Some(RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            }),
                         },
                         RustOwnedFilterValue::Simple {
                             function: RustOwnedSimpleFilterFunction::Opacity,
-                            amount_source: Some("50%".to_string()),
+                            amount: Some(RustOwnedNestedPrimitiveValue::Percentage(50.0)),
                         },
                     ]),
                 },
@@ -31707,10 +31913,19 @@ mod tests {
                 property_id: PropertyId::BoxShadow,
                 value: RustOwnedStyleValueKind::Shadow(RustOwnedShadow::Shadows(vec![RustOwnedSingleShadow {
                     color_source: Some("red".to_string()),
-                    offset_x_source: "1px".to_string(),
-                    offset_y_source: "2px".to_string(),
-                    blur_radius_source: Some("3px".to_string()),
-                    spread_distance_source: None,
+                    offset_x: RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    },
+                    offset_y: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
+                    blur_radius: Some(RustOwnedNestedPrimitiveValue::Length {
+                        value: 3.0,
+                        unit: "px".to_string(),
+                    }),
+                    spread_distance: None,
                     placement: RustOwnedShadowPlacement::Inner,
                 }])),
             })
@@ -33220,11 +33435,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::FilterValueList,
                 property_id: PropertyId::Filter,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Percentage,
+                numeric_value: Some(50.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "50%".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
@@ -37016,9 +37231,9 @@ mod tests {
         let [
             RustOwnedFilterValue::DropShadow {
                 color_source,
-                offset_x_source,
-                offset_y_source,
-                radius_source,
+                offset_x,
+                offset_y,
+                radius,
             },
         ] = filters.as_slice()
         else {
@@ -37026,9 +37241,27 @@ mod tests {
         };
 
         assert_eq!(color_source.as_deref(), Some("red"));
-        assert_eq!(offset_x_source, "1px");
-        assert_eq!(offset_y_source, "2px");
-        assert_eq!(radius_source.as_deref(), Some("3px"));
+        assert_eq!(
+            offset_x,
+            &RustOwnedNestedPrimitiveValue::Length {
+                value: 1.0,
+                unit: "px".to_string(),
+            }
+        );
+        assert_eq!(
+            offset_y,
+            &RustOwnedNestedPrimitiveValue::Length {
+                value: 2.0,
+                unit: "px".to_string(),
+            }
+        );
+        assert_eq!(
+            radius.as_ref(),
+            Some(&RustOwnedNestedPrimitiveValue::Length {
+                value: 3.0,
+                unit: "px".to_string(),
+            })
+        );
     }
 
     #[test]

@@ -1814,6 +1814,43 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto materialize_rust_nested_length = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value()) {
+                    if (range.min >= 0)
+                        return parse_rust_source_as_non_negative_length(value.source_or_unit);
+                    return parse_rust_source_as_length(value.source_or_unit);
+                }
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
+                    return nullptr;
+                auto length_unit = string_to_length_unit(value.source_or_unit);
+                if (!length_unit.has_value())
+                    return nullptr;
+                Length length { *value.numeric_value, length_unit.release_value() };
+                if (!range.contains(length.raw_value()))
+                    return nullptr;
+                return LengthStyleValue::create(length);
+            };
+            auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_angle(value.source_or_unit);
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Angle)
+                    return nullptr;
+                auto angle_unit = string_to_angle_unit(value.source_or_unit);
+                if (!angle_unit.has_value())
+                    return nullptr;
+                return AngleStyleValue::create(Angle { *value.numeric_value, angle_unit.release_value() });
+            };
+            auto materialize_rust_nested_non_negative_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_non_negative_number_percentage(value.source_or_unit);
+                if (*value.numeric_value < 0)
+                    return nullptr;
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
+                    return NumberStyleValue::create(*value.numeric_value);
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage)
+                    return PercentageStyleValue::create(Percentage { *value.numeric_value });
+                return nullptr;
+            };
             auto rust_keyword_style_value = [](FlyString const& keyword_string) -> RefPtr<StyleValue const> {
                 auto maybe_keyword = keyword_from_string(keyword_string);
                 if (!maybe_keyword.has_value())
@@ -2959,7 +2996,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             VERIFY_NOT_REACHED();
                         case RustComponentValueParser::RustFilterValueListEventKind::Blur: {
                             auto radius = event.has_value
-                                ? parse_rust_source_as_non_negative_length(event.source)
+                                ? materialize_rust_nested_length(event.value, non_negative_range)
                                 : LengthStyleValue::create(Length::make_px(0));
                             if (!radius)
                                 break;
@@ -2967,14 +3004,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::DropShadow: {
-                            auto offset_x = parse_rust_source_as_length(event.source);
-                            auto offset_y = parse_rust_source_as_length(event.secondary_source);
+                            auto offset_x = materialize_rust_nested_length(event.value, infinite_range);
+                            auto offset_y = materialize_rust_nested_length(event.secondary_value, infinite_range);
                             if (!offset_x || !offset_y)
                                 break;
 
                             RefPtr<StyleValue const> radius;
-                            if (event.drop_shadow_radius_source.has_value()) {
-                                radius = parse_rust_source_as_length(*event.drop_shadow_radius_source);
+                            if (event.drop_shadow_radius.has_value()) {
+                                radius = materialize_rust_nested_length(*event.drop_shadow_radius, infinite_range);
                                 if (!radius)
                                     break;
                             }
@@ -2991,7 +3028,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::HueRotate: {
                             auto angle = event.has_value
-                                ? parse_rust_source_as_angle(event.source)
+                                ? materialize_rust_nested_angle(event.value)
                                 : AngleStyleValue::create(Angle::make_degrees(0));
                             if (!angle)
                                 break;
@@ -3000,7 +3037,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::Simple: {
                             auto amount = event.has_value
-                                ? parse_rust_source_as_non_negative_number_percentage(event.source)
+                                ? materialize_rust_nested_non_negative_number_percentage(event.value)
                                 : NumberStyleValue::create(1);
                             if (!amount)
                                 break;
@@ -3657,9 +3694,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     StyleValueVector shadows;
                     shadows.ensure_capacity(rust_style_value->shadows.size());
                     for (auto const& shadow : rust_style_value->shadows) {
-                        if (shadow.offset_x_source.is_empty() || shadow.offset_y_source.is_empty())
-                            break;
-
                         RefPtr<StyleValue const> color;
                         if (shadow.color_source.has_value()) {
                             color = parse_rust_source_as_color(*shadow.color_source);
@@ -3667,21 +3701,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                 break;
                         }
 
-                        auto offset_x = parse_rust_source_as_length(shadow.offset_x_source);
-                        auto offset_y = parse_rust_source_as_length(shadow.offset_y_source);
+                        auto offset_x = materialize_rust_nested_length(shadow.offset_x, infinite_range);
+                        auto offset_y = materialize_rust_nested_length(shadow.offset_y, infinite_range);
                         if (!offset_x || !offset_y)
                             break;
 
                         RefPtr<StyleValue const> blur_radius;
-                        if (shadow.blur_radius_source.has_value()) {
-                            blur_radius = parse_rust_source_as_non_negative_length(*shadow.blur_radius_source);
+                        if (shadow.blur_radius.has_value()) {
+                            blur_radius = materialize_rust_nested_length(*shadow.blur_radius, non_negative_range);
                             if (!blur_radius)
                                 break;
                         }
 
                         RefPtr<StyleValue const> spread_distance;
-                        if (shadow.spread_distance_source.has_value()) {
-                            spread_distance = parse_rust_source_as_length(*shadow.spread_distance_source);
+                        if (shadow.spread_distance.has_value()) {
+                            spread_distance = materialize_rust_nested_length(*shadow.spread_distance, infinite_range);
                             if (!spread_distance)
                                 break;
                         }
