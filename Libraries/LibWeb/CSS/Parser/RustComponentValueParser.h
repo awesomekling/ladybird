@@ -230,6 +230,18 @@ public:
         Sepia,
     };
 
+    enum class RustTransformLonghandFunction : u8 {
+        Rotate,
+        RotateX,
+        RotateY,
+        RotateZ,
+        Rotate3d,
+        Translate,
+        Translate3d,
+        Scale,
+        Scale3d,
+    };
+
     enum class RustFontVariantEventKind : u8 {
         Normal,
         Simple,
@@ -429,7 +441,7 @@ public:
         bool grid_track_size_list_is_none { false };
         Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
         bool transform_longhand_is_none { false };
-        FlyString transform_longhand_function_name;
+        Optional<RustTransformLonghandFunction> transform_longhand_function;
         Vector<String> transform_longhand_arguments;
         Optional<String> transform_origin_x_source;
         Optional<String> transform_origin_y_source;

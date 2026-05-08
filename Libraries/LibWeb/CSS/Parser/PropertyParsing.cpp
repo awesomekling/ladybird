@@ -3087,7 +3087,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
                 }
-                if (!rust_style_value->transform_longhand_function_name.is_empty()) {
+                if (rust_style_value->transform_longhand_function.has_value()) {
                     auto const& arguments = rust_style_value->transform_longhand_arguments;
                     auto materialize_rotation = [&](TransformFunction function) -> RefPtr<StyleValue const> {
                         if (arguments.size() != 1)
@@ -3148,24 +3148,35 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     };
 
                     RefPtr<StyleValue const> value;
-                    if (rust_style_value->transform_longhand_function_name == "rotate"sv)
+                    switch (*rust_style_value->transform_longhand_function) {
+                    case RustComponentValueParser::RustTransformLonghandFunction::Rotate:
                         value = materialize_rotation(TransformFunction::Rotate);
-                    else if (rust_style_value->transform_longhand_function_name == "rotateX"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::RotateX:
                         value = materialize_rotation(TransformFunction::RotateX);
-                    else if (rust_style_value->transform_longhand_function_name == "rotateY"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::RotateY:
                         value = materialize_rotation(TransformFunction::RotateY);
-                    else if (rust_style_value->transform_longhand_function_name == "rotateZ"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::RotateZ:
                         value = materialize_rotation(TransformFunction::RotateZ);
-                    else if (rust_style_value->transform_longhand_function_name == "rotate3d"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::Rotate3d:
                         value = materialize_rotate3d();
-                    else if (rust_style_value->transform_longhand_function_name == "translate"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::Translate:
                         value = materialize_translate();
-                    else if (rust_style_value->transform_longhand_function_name == "translate3d"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::Translate3d:
                         value = materialize_translate3d();
-                    else if (rust_style_value->transform_longhand_function_name == "scale"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::Scale:
                         value = materialize_scale();
-                    else if (rust_style_value->transform_longhand_function_name == "scale3d"sv)
+                        break;
+                    case RustComponentValueParser::RustTransformLonghandFunction::Scale3d:
                         value = materialize_scale3d();
+                        break;
+                    }
 
                     if (value) {
                         discard_rust_owned_property_value_tokens();

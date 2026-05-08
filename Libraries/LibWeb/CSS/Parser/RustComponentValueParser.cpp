@@ -1341,12 +1341,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == 0) {
+                enum : u8 {
+                    None,
+                    Function,
+                };
+
+                if (color_red == None) {
                     style_value->transform_longhand_is_none = true;
                     return;
                 }
 
-                style_value->transform_longhand_function_name = fly_string_from_ffi_bytes(value_type_ptr, value_type_len);
+                VERIFY(color_red == Function);
+                style_value->transform_longhand_function = static_cast<RustTransformLonghandFunction>(color_green);
                 style_value->transform_longhand_arguments.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
             } else if (kind == FFI::CssStyleValueKind::Shadow) {

@@ -2773,9 +2773,22 @@ pub(crate) struct RustOwnedTextDecoration {
 pub(crate) enum RustOwnedTransformLonghand {
     None,
     Function {
-        function_name: String,
+        function: RustOwnedTransformLonghandFunction,
         arguments: Vec<String>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedTransformLonghandFunction {
+    Rotate,
+    RotateX,
+    RotateY,
+    RotateZ,
+    Rotate3d,
+    Translate,
+    Translate3d,
+    Scale,
+    Scale3d,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7956,7 +7969,7 @@ where
             0.0,
             false,
             0.0,
-            0,
+            TRANSFORM_LONGHAND_CALLBACK_NONE,
             0,
             0,
             0,
@@ -8871,7 +8884,7 @@ where
             0.0,
             false,
             0.0,
-            0,
+            TRANSFORM_LONGHAND_CALLBACK_NONE,
             0,
             0,
             0,
@@ -9751,6 +9764,17 @@ const SIMPLE_FILTER_FUNCTION_INVERT: u8 = 3;
 const SIMPLE_FILTER_FUNCTION_OPACITY: u8 = 4;
 const SIMPLE_FILTER_FUNCTION_SATURATE: u8 = 5;
 const SIMPLE_FILTER_FUNCTION_SEPIA: u8 = 6;
+const TRANSFORM_LONGHAND_CALLBACK_NONE: u8 = 0;
+const TRANSFORM_LONGHAND_CALLBACK_FUNCTION: u8 = 1;
+const TRANSFORM_LONGHAND_FUNCTION_ROTATE: u8 = 0;
+const TRANSFORM_LONGHAND_FUNCTION_ROTATE_X: u8 = 1;
+const TRANSFORM_LONGHAND_FUNCTION_ROTATE_Y: u8 = 2;
+const TRANSFORM_LONGHAND_FUNCTION_ROTATE_Z: u8 = 3;
+const TRANSFORM_LONGHAND_FUNCTION_ROTATE_3D: u8 = 4;
+const TRANSFORM_LONGHAND_FUNCTION_TRANSLATE: u8 = 5;
+const TRANSFORM_LONGHAND_FUNCTION_TRANSLATE_3D: u8 = 6;
+const TRANSFORM_LONGHAND_FUNCTION_SCALE: u8 = 7;
+const TRANSFORM_LONGHAND_FUNCTION_SCALE_3D: u8 = 8;
 const FONT_VARIANT_CALLBACK_NORMAL: u8 = 0;
 const FONT_VARIANT_CALLBACK_SIMPLE: u8 = 1;
 const FONT_VARIANT_CALLBACK_ALTERNATES_VALUE: u8 = 2;
@@ -10469,10 +10493,18 @@ where
             &[],
             "",
         ),
-        RustOwnedTransformLonghand::Function {
-            function_name,
-            arguments,
-        } => {
+        RustOwnedTransformLonghand::Function { function, arguments } => {
+            let function = match function {
+                RustOwnedTransformLonghandFunction::Rotate => TRANSFORM_LONGHAND_FUNCTION_ROTATE,
+                RustOwnedTransformLonghandFunction::RotateX => TRANSFORM_LONGHAND_FUNCTION_ROTATE_X,
+                RustOwnedTransformLonghandFunction::RotateY => TRANSFORM_LONGHAND_FUNCTION_ROTATE_Y,
+                RustOwnedTransformLonghandFunction::RotateZ => TRANSFORM_LONGHAND_FUNCTION_ROTATE_Z,
+                RustOwnedTransformLonghandFunction::Rotate3d => TRANSFORM_LONGHAND_FUNCTION_ROTATE_3D,
+                RustOwnedTransformLonghandFunction::Translate => TRANSFORM_LONGHAND_FUNCTION_TRANSLATE,
+                RustOwnedTransformLonghandFunction::Translate3d => TRANSFORM_LONGHAND_FUNCTION_TRANSLATE_3D,
+                RustOwnedTransformLonghandFunction::Scale => TRANSFORM_LONGHAND_FUNCTION_SCALE,
+                RustOwnedTransformLonghandFunction::Scale3d => TRANSFORM_LONGHAND_FUNCTION_SCALE_3D,
+            };
             for (index, argument) in arguments.iter().enumerate() {
                 callback(
                     CssStyleValueKind::TransformLonghand,
@@ -10482,12 +10514,12 @@ where
                     0.0,
                     false,
                     0.0,
-                    u8::try_from(index + 1).expect("transform longhands have fewer than 255 arguments"),
-                    0,
-                    0,
+                    TRANSFORM_LONGHAND_CALLBACK_FUNCTION,
+                    function,
+                    u8::try_from(index).expect("transform longhands have fewer than 255 arguments"),
                     0,
                     argument.as_bytes(),
-                    function_name,
+                    "",
                 );
             }
         }
@@ -17995,7 +18027,7 @@ fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTr
     parser.discard_whitespace();
     if !parser.has_next_component_value() {
         return Some(RustOwnedTransformLonghand::Function {
-            function_name: "translate".to_string(),
+            function: RustOwnedTransformLonghandFunction::Translate,
             arguments: vec![x, "0px".to_string()],
         });
     }
@@ -18009,7 +18041,7 @@ fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTr
     parser.discard_whitespace();
     if !parser.has_next_component_value() {
         return Some(RustOwnedTransformLonghand::Function {
-            function_name: "translate".to_string(),
+            function: RustOwnedTransformLonghandFunction::Translate,
             arguments: vec![x, y],
         });
     }
@@ -18019,7 +18051,7 @@ fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTr
 
     parser.discard_whitespace();
     (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::Function {
-        function_name: "translate3d".to_string(),
+        function: RustOwnedTransformLonghandFunction::Translate3d,
         arguments: vec![x, y, z],
     })
 }
@@ -18056,7 +18088,11 @@ fn parse_rust_owned_scale_value(filtered_input: &[u8]) -> Option<RustOwnedTransf
         parser.discard_whitespace();
         if !parser.has_next_component_value() {
             return Some(RustOwnedTransformLonghand::Function {
-                function_name: if arguments.len() == 3 { "scale3d" } else { "scale" }.to_string(),
+                function: if arguments.len() == 3 {
+                    RustOwnedTransformLonghandFunction::Scale3d
+                } else {
+                    RustOwnedTransformLonghandFunction::Scale
+                },
                 arguments,
             });
         }
@@ -18096,7 +18132,7 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
         && !parser.has_next_component_value()
     {
         return Some(RustOwnedTransformLonghand::Function {
-            function_name: "rotate".to_string(),
+            function: RustOwnedTransformLonghandFunction::Rotate,
             arguments: vec![angle],
         });
     }
@@ -18116,12 +18152,11 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
                 return None;
             }
             return Some(RustOwnedTransformLonghand::Function {
-                function_name: match axis {
-                    RotateAxis::X => "rotateX",
-                    RotateAxis::Y => "rotateY",
-                    RotateAxis::Z => "rotateZ",
-                }
-                .to_string(),
+                function: match axis {
+                    RotateAxis::X => RustOwnedTransformLonghandFunction::RotateX,
+                    RotateAxis::Y => RustOwnedTransformLonghandFunction::RotateY,
+                    RotateAxis::Z => RustOwnedTransformLonghandFunction::RotateZ,
+                },
                 arguments: vec![angle],
             });
         }
@@ -18153,7 +18188,7 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
 
     numbers.push(angle);
     Some(RustOwnedTransformLonghand::Function {
-        function_name: "rotate3d".to_string(),
+        function: RustOwnedTransformLonghandFunction::Rotate3d,
         arguments: numbers,
     })
 }
@@ -29140,11 +29175,11 @@ mod tests {
         RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
+        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
+        RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
+        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
         component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
         parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
@@ -32323,7 +32358,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Translate,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
-                    function_name: "translate3d".to_string(),
+                    function: RustOwnedTransformLonghandFunction::Translate3d,
                     arguments: vec!["10px".to_string(), "20%".to_string(), "1em".to_string()],
                 }),
             })
@@ -32333,7 +32368,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Scale,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
-                    function_name: "scale3d".to_string(),
+                    function: RustOwnedTransformLonghandFunction::Scale3d,
                     arguments: vec!["1".to_string(), "50%".to_string(), "2".to_string()],
                 }),
             })
@@ -32343,7 +32378,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Scale,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
-                    function_name: "scale".to_string(),
+                    function: RustOwnedTransformLonghandFunction::Scale,
                     arguments: vec!["random(0, 10, 5)".to_string()],
                 }),
             })
@@ -32353,7 +32388,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
-                    function_name: "rotate3d".to_string(),
+                    function: RustOwnedTransformLonghandFunction::Rotate3d,
                     arguments: vec!["1".to_string(), "0".to_string(), "0".to_string(), "45deg".to_string()],
                 }),
             })
