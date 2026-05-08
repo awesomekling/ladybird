@@ -1953,8 +1953,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     AnimationName(RustOwnedAnimationName),
     AspectRatio(RustOwnedAspectRatio),
     BackgroundSize(RustOwnedBackgroundSizeList),
+    Color(RustOwnedColor),
     ColorScheme(RustOwnedColorScheme),
-    ColorFunction(RustOwnedSourceBackedStyleValue),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
     CornerShape(RustOwnedNestedPrimitiveValue),
@@ -2055,13 +2055,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     ViewTimeline(RustOwnedViewTimeline),
     Tuple(RustOwnedStyleValueList),
     ValueList(RustOwnedStyleValueList),
-    Color {
-        red: u8,
-        green: u8,
-        blue: u8,
-        alpha: u8,
-        name: Option<String>,
-    },
     Url(RustOwnedUrl),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedNestedPrimitiveValue),
@@ -3818,13 +3811,14 @@ fn parse_rust_owned_generated_longhand_value(
                 name,
             } => RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::Color {
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
                     red,
                     green,
                     blue,
                     alpha,
                     name: name.map(ToString::to_string),
-                },
+                }),
             },
             ParsedSimpleColor::Keyword { name } => RustOwnedStyleValue {
                 property_id,
@@ -3850,7 +3844,7 @@ fn parse_rust_owned_generated_longhand_value(
         {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::ColorFunction(RustOwnedSourceBackedStyleValue { source, value_type }),
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Source(source)),
             };
         }
     }
@@ -9435,36 +9429,7 @@ where
             let _ = value_list;
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
-        RustOwnedStyleValueKind::Color {
-            red,
-            green,
-            blue,
-            alpha,
-            name,
-        } => callback(
-            CssStyleValueKind::Color,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            *red,
-            *green,
-            *blue,
-            *alpha,
-            name.as_deref().unwrap_or("").as_bytes(),
-            "",
-        ),
-        RustOwnedStyleValueKind::ColorFunction(value) => {
-            callback_source_backed_value_type_kind_style_value(
-                callback,
-                CssStyleValueKind::ColorFunction,
-                property_id,
-                &value.source,
-                value.value_type,
-            );
-        }
+        RustOwnedStyleValueKind::Color(color) => callback_color_style_value(callback, property_id, color),
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::EasingFunction(value) => {
             callback_easing_function_style_value(callback, property_id, value);
@@ -10081,6 +10046,43 @@ fn callback_rust_owned_color<C>(
             0,
             source.as_bytes(),
             "",
+        ),
+    }
+}
+
+fn callback_color_style_value<C>(callback: &mut C, property_id: u16, color: &RustOwnedColor)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match color {
+        RustOwnedColor::Simple {
+            red,
+            green,
+            blue,
+            alpha,
+            name,
+            ..
+        } => callback(
+            CssStyleValueKind::Color,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            *red,
+            *green,
+            *blue,
+            *alpha,
+            name.as_deref().unwrap_or("").as_bytes(),
+            "",
+        ),
+        RustOwnedColor::Source(source) => callback_source_backed_value_type_kind_style_value(
+            callback,
+            CssStyleValueKind::ColorFunction,
+            property_id,
+            source,
+            PropertyValueType::Color,
         ),
     }
 }
@@ -34970,23 +34972,23 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Color], "red"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Color,
-                value: RustOwnedStyleValueKind::Color {
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
                     red: 255,
                     green: 0,
                     blue: 0,
                     alpha: 255,
                     name: Some("red".to_string()),
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Color], "color-mix(in oklab, red 40%, blue)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Color,
-                value: RustOwnedStyleValueKind::ColorFunction(RustOwnedSourceBackedStyleValue {
-                    source: "color-mix(in oklab, red 40%, blue)".to_string(),
-                    value_type: PropertyValueType::Color,
-                }),
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Source(
+                    "color-mix(in oklab, red 40%, blue)".to_string(),
+                )),
             })
         );
         assert_eq!(
