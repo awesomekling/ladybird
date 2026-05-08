@@ -8316,16 +8316,8 @@ where
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
-        RustOwnedStyleValueKind::Image(image) if image.kind == RustOwnedImageKind::Url && image.url.is_some() => {
+        RustOwnedStyleValueKind::Image(image) => {
             callback_image_style_value(callback, property_id, image);
-        }
-        RustOwnedStyleValueKind::Image(_) => {
-            callback_style_value_type(
-                callback,
-                CssStyleValueKind::ValueType,
-                property_id,
-                PropertyValueType::Image,
-            );
         }
         RustOwnedStyleValueKind::Anchor(value) => {
             callback_source_backed_value_type_style_value(
@@ -8341,12 +8333,15 @@ where
         RustOwnedStyleValueKind::CornerShape(value) => {
             callback_corner_shape_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::ImageSet(_) => {
-            callback_style_value_type(
+        RustOwnedStyleValueKind::ImageSet(image_set) => {
+            callback_image_style_value(
                 callback,
-                CssStyleValueKind::ValueType,
                 property_id,
-                PropertyValueType::Image,
+                &RustOwnedImage {
+                    kind: RustOwnedImageKind::ImageSet,
+                    source: image_set.source.clone(),
+                    url: None,
+                },
             );
         }
         RustOwnedStyleValueKind::FontStyle(value) => callback(
@@ -37171,6 +37166,45 @@ mod tests {
                 color: None,
                 value: "image.png".to_string(),
                 value_type: "Url".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BackgroundImage], "url(example.png)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Image,
+                property_id: PropertyId::BackgroundImage,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "example.png".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BackgroundImage], "linear-gradient(black, white)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Image,
+                property_id: PropertyId::BackgroundImage,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "linear-gradient(black, white)".to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Image,
+                property_id: PropertyId::BackgroundImage,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "image-set(url(example.png) 2x)".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

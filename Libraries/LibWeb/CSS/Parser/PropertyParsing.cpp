@@ -1304,6 +1304,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url) -> RefPtr<AbstractImageStyleValue const> {
+                switch (kind) {
+                case RustComponentValueParser::RustImageKind::Url:
+                    return materialize_rust_image(kind, source, typed_url);
+                case RustComponentValueParser::RustImageKind::Gradient:
+                case RustComponentValueParser::RustImageKind::ImageSet:
+                    // AD-HOC: Re-parsing substituted component values through Rust
+                    // would lose C++-side attr() taint metadata until that
+                    // metadata is carried over FFI.
+                    return parse_image_value(tokens);
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto parse_rust_basic_shape_group = [&](String const& source) {
                 return RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
             };
@@ -2988,8 +3001,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::Image:
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
-                    if (auto value = materialize_rust_image(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url)) {
-                        discard_rust_owned_property_value_tokens();
+                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url)) {
+                        if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url)
+                            discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, value };
                     }
