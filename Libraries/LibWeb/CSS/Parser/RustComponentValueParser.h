@@ -256,6 +256,16 @@ public:
         ShapeBox,
     };
 
+    enum class RustBasicShapeKind : u8 {
+        Inset,
+        Xywh,
+        Rect,
+        Circle,
+        Ellipse,
+        Polygon,
+        Path,
+    };
+
     struct RustContentEvent {
         RustContentEventKind kind { RustContentEventKind::Normal };
         String source;
@@ -335,6 +345,8 @@ public:
         Vector<String> background_size_sources;
         u8 easing_function_kind { 0 };
         Vector<String> easing_function_sources;
+        RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
+        Vector<String> basic_shape_argument_groups;
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };

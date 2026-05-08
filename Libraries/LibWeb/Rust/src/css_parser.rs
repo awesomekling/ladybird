@@ -9039,7 +9039,7 @@ where
             );
         }
         RustOwnedStyleValueKind::BasicShape(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::BasicShape, property_id, &value.source);
+            callback_basic_shape_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::Rect(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::Rect, property_id, &value.source);
@@ -9268,6 +9268,14 @@ const EASING_FUNCTION_CALLBACK_LINEAR: u8 = 1;
 const EASING_FUNCTION_CALLBACK_CUBIC_BEZIER: u8 = 2;
 const EASING_FUNCTION_CALLBACK_STEPS: u8 = 3;
 
+const BASIC_SHAPE_CALLBACK_INSET: u8 = 0;
+const BASIC_SHAPE_CALLBACK_XYWH: u8 = 1;
+const BASIC_SHAPE_CALLBACK_RECT: u8 = 2;
+const BASIC_SHAPE_CALLBACK_CIRCLE: u8 = 3;
+const BASIC_SHAPE_CALLBACK_ELLIPSE: u8 = 4;
+const BASIC_SHAPE_CALLBACK_POLYGON: u8 = 5;
+const BASIC_SHAPE_CALLBACK_PATH: u8 = 6;
+
 fn callback_easing_function_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedEasingFunction)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -9314,6 +9322,38 @@ where
         0,
         0,
         sources.as_bytes(),
+        "",
+    );
+}
+
+fn callback_basic_shape_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedBasicShape)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let kind = match value.kind {
+        RustOwnedBasicShapeKind::Inset => BASIC_SHAPE_CALLBACK_INSET,
+        RustOwnedBasicShapeKind::Xywh => BASIC_SHAPE_CALLBACK_XYWH,
+        RustOwnedBasicShapeKind::Rect => BASIC_SHAPE_CALLBACK_RECT,
+        RustOwnedBasicShapeKind::Circle => BASIC_SHAPE_CALLBACK_CIRCLE,
+        RustOwnedBasicShapeKind::Ellipse => BASIC_SHAPE_CALLBACK_ELLIPSE,
+        RustOwnedBasicShapeKind::Polygon => BASIC_SHAPE_CALLBACK_POLYGON,
+        RustOwnedBasicShapeKind::Path => BASIC_SHAPE_CALLBACK_PATH,
+    };
+    let argument_groups = value.argument_groups.join("\0");
+
+    callback(
+        CssStyleValueKind::BasicShape,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        argument_groups.as_bytes(),
         "",
     );
 }
