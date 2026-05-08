@@ -1959,9 +1959,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ContainerType(RustOwnedContainerType),
     CornerShape(RustOwnedNestedPrimitiveValue),
     Counter(RustOwnedCounterFunction),
-    CounterStyle {
-        value: CounterStyle,
-    },
+    CounterStyle(CounterStyle),
     CounterDefinitions(RustOwnedCounterDefinitions),
     BorderRadius(RustOwnedBorderRadius),
     Columns(RustOwnedColumns),
@@ -1970,22 +1968,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     Display(RustOwnedDisplay),
     FlexShorthand(RustOwnedFlexShorthand),
     FlexFlow(RustOwnedFlexFlow),
-    FilterValueList {
-        value: RustOwnedFilterValueList,
-    },
+    FilterValueList(RustOwnedFilterValueList),
     FontStyle(RustOwnedFontStyle),
-    FontVariantAlternates {
-        values: Vec<FontVariantAlternatesValue>,
-    },
-    FontVariantEastAsian {
-        values: Vec<FontVariantEastAsianValue>,
-    },
-    FontVariantLigatures {
-        values: Vec<FontVariantLigaturesValue>,
-    },
-    FontVariantNumeric {
-        values: Vec<FontVariantNumericValue>,
-    },
+    FontVariantLonghand(RustOwnedFontVariantLonghand),
     PlaceContent(RustOwnedPlaceShorthand),
     PlaceItems(RustOwnedPlaceShorthand),
     PlaceSelf(RustOwnedPlaceShorthand),
@@ -2003,16 +1988,10 @@ pub(crate) enum RustOwnedStyleValueKind {
         color: Option<RustOwnedColor>,
     },
     BorderImage(RustOwnedBorderImage),
-    BorderImageOutset {
-        values: Vec<RustOwnedBorderImageOutset>,
-    },
-    BorderImageRepeat {
-        values: Vec<RustOwnedBorderImageRepeat>,
-    },
+    BorderImageOutset(Vec<RustOwnedBorderImageOutset>),
+    BorderImageRepeat(Vec<RustOwnedBorderImageRepeat>),
     BorderImageSlice(RustOwnedBorderImageSlice),
-    BorderImageWidth {
-        values: Vec<RustOwnedNestedPrimitiveValue>,
-    },
+    BorderImageWidth(Vec<RustOwnedNestedPrimitiveValue>),
     Identifier(RustOwnedIdentifierValue),
     ListStyle(RustOwnedListStyle),
     MathDepth(RustOwnedMathDepth),
@@ -2027,9 +2006,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     PositionVisibility(RustOwnedPositionVisibility),
     Quotes(RustOwnedQuotes),
     RepeatStyle(RustOwnedRepeatStyleList),
-    OverflowClipMargin {
-        length: RustOwnedNestedPrimitiveValue,
-    },
+    OverflowClipMargin(RustOwnedNestedPrimitiveValue),
     Shadow(RustOwnedShadow),
     ShapeOutside(RustOwnedShapeOutside),
     TextDecoration(RustOwnedTextDecoration),
@@ -2058,17 +2035,13 @@ pub(crate) enum RustOwnedStyleValueKind {
     Url(RustOwnedUrl),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedNestedPrimitiveValue),
-    FontFamily {
-        values: Vec<FontFamilyValue>,
-    },
+    FontFamily(Vec<FontFamilyValue>),
     OpenTypeSettings(RustOwnedOpenTypeSettingsStyleValue),
     FontLanguageOverride {
         kind: CssFontLanguageOverrideKind,
         value: Option<String>,
     },
-    FontVariant {
-        value: FontVariant,
-    },
+    FontVariant(FontVariant),
     BasicShape(Box<RustOwnedBasicShape>),
     Rect(RustOwnedRect),
     StrokeDasharray(RustOwnedStrokeDasharray),
@@ -2119,6 +2092,14 @@ pub(crate) enum RustOwnedIdentifierValue {
         value_type: PropertyValueType,
     },
     CounterStyleName(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedFontVariantLonghand {
+    Alternates(Vec<FontVariantAlternatesValue>),
+    EastAsian(Vec<FontVariantEastAsianValue>),
+    Ligatures(Vec<FontVariantLigaturesValue>),
+    Numeric(Vec<FontVariantNumericValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3904,7 +3885,7 @@ fn parse_rust_owned_generated_longhand_value(
             },
             CounterStyle::SymbolsFunction { .. } => RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::CounterStyle { value: counter_style },
+                value: RustOwnedStyleValueKind::CounterStyle(counter_style),
             },
         };
     }
@@ -4637,7 +4618,7 @@ fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<Rust
     if !parse_a_font_family_value(filtered_input, |value| values.push(value.clone())) {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontFamily { values })
+    Some(RustOwnedStyleValueKind::FontFamily(values))
 }
 
 fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4683,7 +4664,7 @@ fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::FontVariant { value: font_variant })
+    Some(RustOwnedStyleValueKind::FontVariant(font_variant))
 }
 
 fn rust_owned_font_variation_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -4992,8 +4973,7 @@ fn rust_owned_flex_wrap_from_component_value(component_value: &ComponentValue) -
 }
 
 fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    parse_rust_owned_filter_value_list_value(filtered_input)
-        .map(|value| RustOwnedStyleValueKind::FilterValueList { value })
+    parse_rust_owned_filter_value_list_value(filtered_input).map(RustOwnedStyleValueKind::FilterValueList)
 }
 
 fn rust_owned_contain_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6162,7 +6142,7 @@ fn rust_owned_border_image_outset_style_value_kind(filtered_input: &[u8]) -> Opt
     // https://drafts.csswg.org/css-backgrounds-3/#border-image-outset
     // <'border-image-outset'> = [ <length [0,∞]> | <number [0,∞]> ]{1,4}
     let values = rust_owned_one_to_four_border_image_outsets(filtered_input)?;
-    Some(RustOwnedStyleValueKind::BorderImageOutset { values })
+    Some(RustOwnedStyleValueKind::BorderImageOutset(values))
 }
 
 fn rust_owned_one_to_four_border_image_outsets(filtered_input: &[u8]) -> Option<Vec<RustOwnedBorderImageOutset>> {
@@ -6260,7 +6240,7 @@ fn rust_owned_border_image_width_style_value_kind(filtered_input: &[u8]) -> Opti
     // https://drafts.csswg.org/css-backgrounds-3/#border-image-width
     // <'border-image-width'> = [ <length-percentage [0,∞]> | <number [0,∞]> | auto ]{1,4}
     let values = rust_owned_one_to_four_border_image_widths(filtered_input)?;
-    Some(RustOwnedStyleValueKind::BorderImageWidth { values })
+    Some(RustOwnedStyleValueKind::BorderImageWidth(values))
 }
 
 fn rust_owned_one_to_four_border_image_widths(filtered_input: &[u8]) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
@@ -6364,7 +6344,7 @@ fn rust_owned_border_image_repeat_style_value_kind(filtered_input: &[u8]) -> Opt
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::BorderImageRepeat { values })
+    Some(RustOwnedStyleValueKind::BorderImageRepeat(values))
 }
 
 fn consume_border_image_slice(parser: &mut ComponentValueParser, source: &str) -> Option<RustOwnedBorderImageSlice> {
@@ -6703,9 +6683,9 @@ fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Op
         return None;
     };
 
-    Some(RustOwnedStyleValueKind::OverflowClipMargin {
-        length: component_value_parse_as_nested_length(length, filtered_input_string)?,
-    })
+    Some(RustOwnedStyleValueKind::OverflowClipMargin(
+        component_value_parse_as_nested_length(length, filtered_input_string)?,
+    ))
 }
 
 fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
@@ -6722,9 +6702,9 @@ fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
         return None;
     };
 
-    Some(RustOwnedStyleValueKind::OverflowClipMargin {
-        length: component_value_parse_as_nested_length(length, filtered_input_string)?,
-    })
+    Some(RustOwnedStyleValueKind::OverflowClipMargin(
+        component_value_parse_as_nested_length(length, filtered_input_string)?,
+    ))
 }
 
 fn rust_owned_shadow_style_value_kind(
@@ -7566,22 +7546,30 @@ fn rust_owned_will_change_style_value_kind(filtered_input: &[u8]) -> Option<Rust
 
 fn rust_owned_font_variant_alternates_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_alternates)?;
-    Some(RustOwnedStyleValueKind::FontVariantAlternates { values })
+    Some(RustOwnedStyleValueKind::FontVariantLonghand(
+        RustOwnedFontVariantLonghand::Alternates(values),
+    ))
 }
 
 fn rust_owned_font_variant_east_asian_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_east_asian)?;
-    Some(RustOwnedStyleValueKind::FontVariantEastAsian { values })
+    Some(RustOwnedStyleValueKind::FontVariantLonghand(
+        RustOwnedFontVariantLonghand::EastAsian(values),
+    ))
 }
 
 fn rust_owned_font_variant_ligatures_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_ligatures)?;
-    Some(RustOwnedStyleValueKind::FontVariantLigatures { values })
+    Some(RustOwnedStyleValueKind::FontVariantLonghand(
+        RustOwnedFontVariantLonghand::Ligatures(values),
+    ))
 }
 
 fn rust_owned_font_variant_numeric_style_value_kind(source: String) -> Option<RustOwnedStyleValueKind> {
     let values = parse_all_component_values(source.as_bytes(), ComponentValueParser::parse_a_font_variant_numeric)?;
-    Some(RustOwnedStyleValueKind::FontVariantNumeric { values })
+    Some(RustOwnedStyleValueKind::FontVariantLonghand(
+        RustOwnedFontVariantLonghand::Numeric(values),
+    ))
 }
 
 fn rust_owned_image_style_value_kind(
@@ -8394,7 +8382,7 @@ where
                 callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 1, 0, radius);
             }
         }
-        RustOwnedStyleValueKind::BorderImageOutset { values } => {
+        RustOwnedStyleValueKind::BorderImageOutset(values) => {
             callback_border_image_outset_style_value(
                 callback,
                 CssStyleValueKind::BorderImageOutset,
@@ -8471,7 +8459,7 @@ where
                 callback_rust_owned_color(callback, CssStyleValueKind::Border, property_id, COLOR, color);
             }
         }
-        RustOwnedStyleValueKind::BorderImageRepeat { values } => {
+        RustOwnedStyleValueKind::BorderImageRepeat(values) => {
             callback_border_image_repeat_style_value(
                 callback,
                 CssStyleValueKind::BorderImageRepeat,
@@ -8482,7 +8470,7 @@ where
         RustOwnedStyleValueKind::BorderImageSlice(value) => {
             callback_border_image_slice_style_value(callback, CssStyleValueKind::BorderImageSlice, property_id, value);
         }
-        RustOwnedStyleValueKind::BorderImageWidth { values } => {
+        RustOwnedStyleValueKind::BorderImageWidth(values) => {
             callback_border_image_width_style_value(callback, CssStyleValueKind::BorderImageWidth, property_id, values);
         }
         RustOwnedStyleValueKind::Columns(value) => {
@@ -8668,7 +8656,7 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::FilterValueList { value } => {
+        RustOwnedStyleValueKind::FilterValueList(value) => {
             callback_filter_value_list_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
@@ -8922,7 +8910,7 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::OverflowClipMargin { length } => {
+        RustOwnedStyleValueKind::OverflowClipMargin(length) => {
             callback_nested_primitive(
                 callback,
                 CssStyleValueKind::OverflowClipMargin,
@@ -9347,85 +9335,11 @@ where
         RustOwnedStyleValueKind::SourceBacked(value) => {
             callback_rust_owned_source_backed_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::CounterStyle { value } => {
+        RustOwnedStyleValueKind::CounterStyle(value) => {
             callback_counter_style(callback, CssStyleValueKind::CounterStyle, property_id, value);
         }
-        RustOwnedStyleValueKind::FontVariantAlternates { values } => {
-            for value in values {
-                let feature_value_names = null_separated_string_list_bytes(&value.feature_value_names);
-                callback(
-                    CssStyleValueKind::FontVariantAlternates,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    value.kind as u8,
-                    0,
-                    0,
-                    0,
-                    &feature_value_names,
-                    "",
-                );
-            }
-        }
-        RustOwnedStyleValueKind::FontVariantEastAsian { values } => {
-            for value in values {
-                callback(
-                    CssStyleValueKind::FontVariantEastAsian,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    value.kind as u8,
-                    0,
-                    0,
-                    0,
-                    value.value.as_bytes(),
-                    "",
-                );
-            }
-        }
-        RustOwnedStyleValueKind::FontVariantLigatures { values } => {
-            for value in values {
-                callback(
-                    CssStyleValueKind::FontVariantLigatures,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    value.kind as u8,
-                    0,
-                    0,
-                    0,
-                    value.value.as_bytes(),
-                    "",
-                );
-            }
-        }
-        RustOwnedStyleValueKind::FontVariantNumeric { values } => {
-            for value in values {
-                callback(
-                    CssStyleValueKind::FontVariantNumeric,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    value.kind as u8,
-                    0,
-                    0,
-                    0,
-                    value.value.as_bytes(),
-                    "",
-                );
-            }
+        RustOwnedStyleValueKind::FontVariantLonghand(value) => {
+            callback_font_variant_longhand_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::Shorthand(value_list)
         | RustOwnedStyleValueKind::Tuple(value_list)
@@ -9449,7 +9363,7 @@ where
         RustOwnedStyleValueKind::FitContent(value) => {
             callback_fit_content_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::FontFamily { values } => {
+        RustOwnedStyleValueKind::FontFamily(values) => {
             for value in values {
                 let (kind, family_name, is_string) = match value {
                     FontFamilyValue::Generic(value) => (CssFontFamilyValueKind::Generic, value, false),
@@ -9492,7 +9406,7 @@ where
             value.as_ref().map_or(&[], |value| value.as_bytes()),
             "",
         ),
-        RustOwnedStyleValueKind::FontVariant { value } => {
+        RustOwnedStyleValueKind::FontVariant(value) => {
             callback_font_variant_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::BasicShape(value) => {
@@ -12690,6 +12604,94 @@ fn nested_primitive_callback_has_numeric_value(value: &RustOwnedNestedPrimitiveV
             | RustOwnedNestedPrimitiveValue::Source(_)
             | RustOwnedNestedPrimitiveValue::FlexSource(_)
     )
+}
+
+fn callback_font_variant_longhand_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    value: &RustOwnedFontVariantLonghand,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedFontVariantLonghand::Alternates(values) => {
+            for value in values {
+                let feature_value_names = null_separated_string_list_bytes(&value.feature_value_names);
+                callback(
+                    CssStyleValueKind::FontVariantAlternates,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    &feature_value_names,
+                    "",
+                );
+            }
+        }
+        RustOwnedFontVariantLonghand::EastAsian(values) => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantEastAsian,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedFontVariantLonghand::Ligatures(values) => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantLigatures,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedFontVariantLonghand::Numeric(values) => {
+            for value in values {
+                callback(
+                    CssStyleValueKind::FontVariantNumeric,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.kind as u8,
+                    0,
+                    0,
+                    0,
+                    value.value.as_bytes(),
+                    "",
+                );
+            }
+        }
+    }
 }
 
 fn callback_font_variant_style_value<C>(callback: &mut C, property_id: u16, value: &FontVariant)
@@ -33137,8 +33139,8 @@ mod tests {
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction,
         RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
         RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
@@ -35046,12 +35048,10 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ListStyleType,
-                value: RustOwnedStyleValueKind::CounterStyle {
-                    value: CounterStyle::SymbolsFunction {
-                        symbols_type: CssCounterStyleSymbolsType::Symbolic,
-                        symbols: vec!["*".to_string(), "**".to_string()],
-                    },
-                },
+                value: RustOwnedStyleValueKind::CounterStyle(CounterStyle::SymbolsFunction {
+                    symbols_type: CssCounterStyleSymbolsType::Symbolic,
+                    symbols: vec!["*".to_string(), "**".to_string()],
+                }),
             })
         );
         assert_eq!(
@@ -35246,20 +35246,18 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Filter], "blur(10px) opacity(50%)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Filter,
-                value: RustOwnedStyleValueKind::FilterValueList {
-                    value: RustOwnedFilterValueList::Filters(vec![
-                        RustOwnedFilterValue::Blur {
-                            radius: Some(RustOwnedNestedPrimitiveValue::Length {
-                                value: 10.0,
-                                unit: "px".to_string(),
-                            }),
-                        },
-                        RustOwnedFilterValue::Simple {
-                            function: RustOwnedSimpleFilterFunction::Opacity,
-                            amount: Some(RustOwnedNestedPrimitiveValue::Percentage(50.0)),
-                        },
-                    ]),
-                },
+                value: RustOwnedStyleValueKind::FilterValueList(RustOwnedFilterValueList::Filters(vec![
+                    RustOwnedFilterValue::Blur {
+                        radius: Some(RustOwnedNestedPrimitiveValue::Length {
+                            value: 10.0,
+                            unit: "px".to_string(),
+                        }),
+                    },
+                    RustOwnedFilterValue::Simple {
+                        function: RustOwnedSimpleFilterFunction::Opacity,
+                        amount: Some(RustOwnedNestedPrimitiveValue::Percentage(50.0)),
+                    },
+                ])),
             })
         );
         assert_eq!(
@@ -35309,15 +35307,13 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif, \"Bongo Sans\""),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontFamily,
-                value: RustOwnedStyleValueKind::FontFamily {
-                    values: vec![
-                        FontFamilyValue::Generic("serif".to_string()),
-                        FontFamilyValue::FamilyName(FamilyName {
-                            name: "Bongo Sans".to_string(),
-                            is_string: true,
-                        }),
-                    ],
-                },
+                value: RustOwnedStyleValueKind::FontFamily(vec![
+                    FontFamilyValue::Generic("serif".to_string()),
+                    FontFamilyValue::FamilyName(FamilyName {
+                        name: "Bongo Sans".to_string(),
+                        is_string: true,
+                    }),
+                ]),
             })
         );
         assert_eq!(
@@ -35351,16 +35347,14 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontVariant], "small-caps tabular-nums"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariant,
-                value: RustOwnedStyleValueKind::FontVariant {
-                    value: FontVariant {
-                        caps: Some("small-caps".to_string()),
-                        numeric: Some(vec![FontVariantNumericValue {
-                            kind: CssFontVariantNumericValueKind::Spacing,
-                            value: "tabular-nums".to_string(),
-                        }]),
-                        ..FontVariant::default()
-                    },
-                },
+                value: RustOwnedStyleValueKind::FontVariant(FontVariant {
+                    caps: Some("small-caps".to_string()),
+                    numeric: Some(vec![FontVariantNumericValue {
+                        kind: CssFontVariantNumericValueKind::Spacing,
+                        value: "tabular-nums".to_string(),
+                    }]),
+                    ..FontVariant::default()
+                }),
             })
         );
         assert_eq!(
@@ -35633,28 +35627,26 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageOutset], "1px 2 3px 4"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageOutset,
-                value: RustOwnedStyleValueKind::BorderImageOutset {
-                    values: vec![
-                        RustOwnedBorderImageOutset {
-                            value: RustOwnedNestedPrimitiveValue::Length {
-                                value: 1.0,
-                                unit: "px".to_string(),
-                            },
+                value: RustOwnedStyleValueKind::BorderImageOutset(vec![
+                    RustOwnedBorderImageOutset {
+                        value: RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
                         },
-                        RustOwnedBorderImageOutset {
-                            value: RustOwnedNestedPrimitiveValue::Number(2.0),
+                    },
+                    RustOwnedBorderImageOutset {
+                        value: RustOwnedNestedPrimitiveValue::Number(2.0),
+                    },
+                    RustOwnedBorderImageOutset {
+                        value: RustOwnedNestedPrimitiveValue::Length {
+                            value: 3.0,
+                            unit: "px".to_string(),
                         },
-                        RustOwnedBorderImageOutset {
-                            value: RustOwnedNestedPrimitiveValue::Length {
-                                value: 3.0,
-                                unit: "px".to_string(),
-                            },
-                        },
-                        RustOwnedBorderImageOutset {
-                            value: RustOwnedNestedPrimitiveValue::Number(4.0),
-                        },
-                    ],
-                },
+                    },
+                    RustOwnedBorderImageOutset {
+                        value: RustOwnedNestedPrimitiveValue::Number(4.0),
+                    },
+                ]),
             })
         );
         assert_eq!(
@@ -35665,17 +35657,15 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageWidth], "1px 2% 3 auto"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageWidth,
-                value: RustOwnedStyleValueKind::BorderImageWidth {
-                    values: vec![
-                        RustOwnedNestedPrimitiveValue::Length {
-                            value: 1.0,
-                            unit: "px".to_string(),
-                        },
-                        RustOwnedNestedPrimitiveValue::Percentage(2.0),
-                        RustOwnedNestedPrimitiveValue::Number(3.0),
-                        auto_keyword(),
-                    ],
-                },
+                value: RustOwnedStyleValueKind::BorderImageWidth(vec![
+                    RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    },
+                    RustOwnedNestedPrimitiveValue::Percentage(2.0),
+                    RustOwnedNestedPrimitiveValue::Number(3.0),
+                    auto_keyword(),
+                ]),
             })
         );
         assert_eq!(
@@ -35686,9 +35676,10 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageRepeat], "stretch round"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageRepeat,
-                value: RustOwnedStyleValueKind::BorderImageRepeat {
-                    values: vec![RustOwnedBorderImageRepeat::Stretch, RustOwnedBorderImageRepeat::Round],
-                },
+                value: RustOwnedStyleValueKind::BorderImageRepeat(vec![
+                    RustOwnedBorderImageRepeat::Stretch,
+                    RustOwnedBorderImageRepeat::Round
+                ]),
             })
         );
         assert_eq!(
@@ -35814,24 +35805,20 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::OverflowClipMarginTop], "2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMarginTop,
-                value: RustOwnedStyleValueKind::OverflowClipMargin {
-                    length: RustOwnedNestedPrimitiveValue::Length {
-                        value: 2.0,
-                        unit: "px".to_string(),
-                    },
-                },
+                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedNestedPrimitiveValue::Length {
+                    value: 2.0,
+                    unit: "px".to_string(),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::OverflowClipMargin], "2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMargin,
-                value: RustOwnedStyleValueKind::OverflowClipMargin {
-                    length: RustOwnedNestedPrimitiveValue::Length {
-                        value: 2.0,
-                        unit: "px".to_string(),
-                    },
-                },
+                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedNestedPrimitiveValue::Length {
+                    value: 2.0,
+                    unit: "px".to_string(),
+                }),
             })
         );
         assert_eq!(
@@ -36982,58 +36969,52 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontVariantNumeric], "tabular-nums slashed-zero"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariantNumeric,
-                value: RustOwnedStyleValueKind::FontVariantNumeric {
-                    values: vec![
-                        FontVariantNumericValue {
-                            kind: CssFontVariantNumericValueKind::Spacing,
-                            value: "tabular-nums".to_string(),
-                        },
-                        FontVariantNumericValue {
-                            kind: CssFontVariantNumericValueKind::SlashedZero,
-                            value: "slashed-zero".to_string(),
-                        },
-                    ],
-                },
+                value: RustOwnedStyleValueKind::FontVariantLonghand(RustOwnedFontVariantLonghand::Numeric(vec![
+                    FontVariantNumericValue {
+                        kind: CssFontVariantNumericValueKind::Spacing,
+                        value: "tabular-nums".to_string(),
+                    },
+                    FontVariantNumericValue {
+                        kind: CssFontVariantNumericValueKind::SlashedZero,
+                        value: "slashed-zero".to_string(),
+                    },
+                ])),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontVariantAlternates], "stylistic(foo) historical-forms"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariantAlternates,
-                value: RustOwnedStyleValueKind::FontVariantAlternates {
-                    values: vec![
-                        FontVariantAlternatesValue {
-                            kind: CssFontVariantAlternatesValueKind::Stylistic,
-                            feature_value_names: vec!["foo".to_string()],
-                        },
-                        FontVariantAlternatesValue {
-                            kind: CssFontVariantAlternatesValueKind::HistoricalForms,
-                            feature_value_names: Vec::new(),
-                        },
-                    ],
-                },
+                value: RustOwnedStyleValueKind::FontVariantLonghand(RustOwnedFontVariantLonghand::Alternates(vec![
+                    FontVariantAlternatesValue {
+                        kind: CssFontVariantAlternatesValueKind::Stylistic,
+                        feature_value_names: vec!["foo".to_string()],
+                    },
+                    FontVariantAlternatesValue {
+                        kind: CssFontVariantAlternatesValueKind::HistoricalForms,
+                        feature_value_names: Vec::new(),
+                    },
+                ])),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontVariantEastAsian], "jis78 proportional-width ruby"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariantEastAsian,
-                value: RustOwnedStyleValueKind::FontVariantEastAsian {
-                    values: vec![
-                        FontVariantEastAsianValue {
-                            kind: CssFontVariantEastAsianValueKind::Variant,
-                            value: "jis78".to_string(),
-                        },
-                        FontVariantEastAsianValue {
-                            kind: CssFontVariantEastAsianValueKind::Width,
-                            value: "proportional-width".to_string(),
-                        },
-                        FontVariantEastAsianValue {
-                            kind: CssFontVariantEastAsianValueKind::Ruby,
-                            value: "ruby".to_string(),
-                        },
-                    ],
-                },
+                value: RustOwnedStyleValueKind::FontVariantLonghand(RustOwnedFontVariantLonghand::EastAsian(vec![
+                    FontVariantEastAsianValue {
+                        kind: CssFontVariantEastAsianValueKind::Variant,
+                        value: "jis78".to_string(),
+                    },
+                    FontVariantEastAsianValue {
+                        kind: CssFontVariantEastAsianValueKind::Width,
+                        value: "proportional-width".to_string(),
+                    },
+                    FontVariantEastAsianValue {
+                        kind: CssFontVariantEastAsianValueKind::Ruby,
+                        value: "ruby".to_string(),
+                    },
+                ])),
             })
         );
         assert_eq!(
@@ -37043,18 +37024,16 @@ mod tests {
             ),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontVariantLigatures,
-                value: RustOwnedStyleValueKind::FontVariantLigatures {
-                    values: vec![
-                        FontVariantLigaturesValue {
-                            kind: CssFontVariantLigaturesValueKind::Common,
-                            value: "common-ligatures".to_string(),
-                        },
-                        FontVariantLigaturesValue {
-                            kind: CssFontVariantLigaturesValueKind::Discretionary,
-                            value: "no-discretionary-ligatures".to_string(),
-                        },
-                    ],
-                },
+                value: RustOwnedStyleValueKind::FontVariantLonghand(RustOwnedFontVariantLonghand::Ligatures(vec![
+                    FontVariantLigaturesValue {
+                        kind: CssFontVariantLigaturesValueKind::Common,
+                        value: "common-ligatures".to_string(),
+                    },
+                    FontVariantLigaturesValue {
+                        kind: CssFontVariantLigaturesValueKind::Discretionary,
+                        value: "no-discretionary-ligatures".to_string(),
+                    },
+                ])),
             })
         );
 
