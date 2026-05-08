@@ -32795,7 +32795,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "linear(0, 1)".to_string(),
+                value: "0\0\0\01\0\0".to_string(),
                 value_type: String::new(),
             })
         );
@@ -32808,7 +32808,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "fit-content(10px)".to_string(),
+                value: "10px".to_string(),
                 value_type: String::new(),
             })
         );
@@ -32821,7 +32821,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "inset(10px)".to_string(),
+                value: "10px".to_string(),
                 value_type: String::new(),
             })
         );
@@ -32834,7 +32834,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "rect(1px, auto, 2px, 3px)".to_string(),
+                value: "1px\0auto\02px\03px".to_string(),
                 value_type: String::new(),
             })
         );
@@ -33237,7 +33237,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "\")\"".to_string(),
+                value: ")".to_string(),
                 value_type: String::new(),
             })
         );
