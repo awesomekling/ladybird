@@ -1982,11 +1982,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     GuaranteedInvalid,
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
-    Border {
-        width: Option<RustOwnedNestedPrimitiveValue>,
-        style: Option<RustOwnedLineStyle>,
-        color: Option<RustOwnedColor>,
-    },
+    Border(RustOwnedBorder),
     BorderImage(RustOwnedBorderImage),
     BorderImageOutset(Vec<RustOwnedBorderImageOutset>),
     BorderImageRepeat(Vec<RustOwnedBorderImageRepeat>),
@@ -2037,27 +2033,15 @@ pub(crate) enum RustOwnedStyleValueKind {
     FitContent(RustOwnedNestedPrimitiveValue),
     FontFamily(Vec<FontFamilyValue>),
     OpenTypeSettings(RustOwnedOpenTypeSettingsStyleValue),
-    FontLanguageOverride {
-        kind: CssFontLanguageOverrideKind,
-        value: Option<String>,
-    },
+    FontLanguageOverride(RustOwnedFontLanguageOverride),
     FontVariant(FontVariant),
     BasicShape(Box<RustOwnedBasicShape>),
     Rect(RustOwnedRect),
     StrokeDasharray(RustOwnedStrokeDasharray),
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
-    ScrollFunction {
-        scroller: CssScrollFunctionScrollerKind,
-        axis: CssScrollFunctionAxisKind,
-    },
-    ViewTimelineInset {
-        values: Vec<RustOwnedNestedPrimitiveValue>,
-    },
-    ViewFunction {
-        axis: CssScrollFunctionAxisKind,
-        inset: CssViewFunctionInsetKind,
-        inset_position: CssViewFunctionInsetPosition,
-    },
+    ScrollFunction(RustOwnedScrollFunction),
+    ViewTimelineInset(RustOwnedViewTimelineInset),
+    ViewFunction(RustOwnedViewFunction),
     ViewTransitionName(RustOwnedViewTransitionName),
     WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
@@ -2100,6 +2084,37 @@ pub(crate) enum RustOwnedFontVariantLonghand {
     EastAsian(Vec<FontVariantEastAsianValue>),
     Ligatures(Vec<FontVariantLigaturesValue>),
     Numeric(Vec<FontVariantNumericValue>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorder {
+    width: Option<RustOwnedNestedPrimitiveValue>,
+    style: Option<RustOwnedLineStyle>,
+    color: Option<RustOwnedColor>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFontLanguageOverride {
+    kind: CssFontLanguageOverrideKind,
+    value: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedScrollFunction {
+    scroller: CssScrollFunctionScrollerKind,
+    axis: CssScrollFunctionAxisKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedViewTimelineInset {
+    values: Vec<RustOwnedNestedPrimitiveValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedViewFunction {
+    axis: CssScrollFunctionAxisKind,
+    inset: CssViewFunctionInsetKind,
+    inset_position: CssViewFunctionInsetPosition,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3455,7 +3470,7 @@ fn parse_rust_owned_style_value_for_property_with_mode(
                 if let Some(values) = parse_rust_owned_view_timeline_inset_value_prefix(filtered_input) {
                     return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
                         property_id,
-                        value: RustOwnedStyleValueKind::ViewTimelineInset { values },
+                        value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
                     });
                 }
                 continue;
@@ -3985,10 +4000,10 @@ fn parse_rust_owned_generated_longhand_value(
             if scroll_function.kind == CssScrollFunctionValueKind::Valid {
                 return RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::ScrollFunction {
+                    value: RustOwnedStyleValueKind::ScrollFunction(RustOwnedScrollFunction {
                         scroller: scroll_function.scroller,
                         axis: scroll_function.axis,
-                    },
+                    }),
                 };
             }
         }
@@ -3996,7 +4011,7 @@ fn parse_rust_owned_generated_longhand_value(
             if let Some(values) = parse_rust_owned_view_timeline_inset_value(filtered_input) {
                 return RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::ViewTimelineInset { values },
+                    value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
                 };
             }
         }
@@ -4005,11 +4020,11 @@ fn parse_rust_owned_generated_longhand_value(
             if view_function.kind == CssViewFunctionValueKind::Valid {
                 return RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::ViewFunction {
+                    value: RustOwnedStyleValueKind::ViewFunction(RustOwnedViewFunction {
                         axis: view_function.axis,
                         inset: view_function.inset,
                         inset_position: view_function.inset_position,
-                    },
+                    }),
                 };
             }
         }
@@ -4650,7 +4665,9 @@ fn rust_owned_font_language_override_style_value_kind(filtered_input: &[u8]) -> 
     }) {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontLanguageOverride { kind, value })
+    Some(RustOwnedStyleValueKind::FontLanguageOverride(
+        RustOwnedFontLanguageOverride { kind, value },
+    ))
 }
 
 fn rust_owned_font_variant_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5861,7 +5878,7 @@ fn rust_owned_border_shorthand_style_value_kind(
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::Border { width, style, color })
+    Some(RustOwnedStyleValueKind::Border(RustOwnedBorder { width, style, color }))
 }
 
 fn rust_owned_color_from_component_value(component_value: &ComponentValue, source: &str) -> Option<RustOwnedColor> {
@@ -8430,15 +8447,15 @@ where
                 callback_border_image_repeat_style_value(callback, CssStyleValueKind::BorderImage, property_id, repeat);
             }
         }
-        RustOwnedStyleValueKind::Border { width, style, color } => {
+        RustOwnedStyleValueKind::Border(value) => {
             const WIDTH: u8 = 0;
             const STYLE: u8 = 1;
             const COLOR: u8 = 2;
 
-            if let Some(width) = width {
+            if let Some(width) = &value.width {
                 callback_border_width_style_value(callback, CssStyleValueKind::Border, property_id, width);
             }
-            if let Some(style) = style {
+            if let Some(style) = value.style {
                 callback(
                     CssStyleValueKind::Border,
                     property_id,
@@ -8448,14 +8465,14 @@ where
                     false,
                     0.0,
                     STYLE,
-                    *style as u8,
+                    style as u8,
                     0,
                     0,
                     &[],
                     "",
                 );
             }
-            if let Some(color) = color {
+            if let Some(color) = &value.color {
                 callback_rust_owned_color(callback, CssStyleValueKind::Border, property_id, COLOR, color);
             }
         }
@@ -9391,7 +9408,7 @@ where
         RustOwnedStyleValueKind::OpenTypeSettings(value) => {
             callback_open_type_settings_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::FontLanguageOverride { kind, value } => callback(
+        RustOwnedStyleValueKind::FontLanguageOverride(value) => callback(
             CssStyleValueKind::FontLanguageOverride,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -9399,11 +9416,11 @@ where
             0.0,
             false,
             0.0,
-            *kind as u8,
+            value.kind as u8,
             0,
             0,
             0,
-            value.as_ref().map_or(&[], |value| value.as_bytes()),
+            value.value.as_ref().map_or(&[], |value| value.as_bytes()),
             "",
         ),
         RustOwnedStyleValueKind::FontVariant(value) => {
@@ -9415,7 +9432,7 @@ where
         RustOwnedStyleValueKind::Rect(value) => {
             callback_rect_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::ScrollFunction { scroller, axis } => callback(
+        RustOwnedStyleValueKind::ScrollFunction(value) => callback(
             CssStyleValueKind::ScrollFunction,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -9423,8 +9440,8 @@ where
             0.0,
             false,
             0.0,
-            *scroller as u8,
-            *axis as u8,
+            value.scroller as u8,
+            value.axis as u8,
             0,
             0,
             &[],
@@ -9468,16 +9485,12 @@ where
                 }
             }
         }
-        RustOwnedStyleValueKind::ViewTimelineInset { values } => {
-            for value in values {
-                callback_view_timeline_inset_value(callback, CssStyleValueKind::ViewTimelineInset, property_id, value);
+        RustOwnedStyleValueKind::ViewTimelineInset(value) => {
+            for inset in &value.values {
+                callback_view_timeline_inset_value(callback, CssStyleValueKind::ViewTimelineInset, property_id, inset);
             }
         }
-        RustOwnedStyleValueKind::ViewFunction {
-            axis,
-            inset,
-            inset_position,
-        } => callback(
+        RustOwnedStyleValueKind::ViewFunction(value) => callback(
             CssStyleValueKind::ViewFunction,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -9485,9 +9498,9 @@ where
             0.0,
             false,
             0.0,
-            *axis as u8,
-            *inset as u8,
-            *inset_position as u8,
+            value.axis as u8,
+            value.inset as u8,
+            value.inset_position as u8,
             0,
             &[],
             property_value_type_name(PropertyValueType::ViewFunction),
@@ -33131,16 +33144,17 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
         RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorderImage,
-        RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-        RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-        RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorder,
+        RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice,
+        RustOwnedBorderImageSource, RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
+        RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
+        RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
+        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontLanguageOverride, RustOwnedFontStyle,
+        RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
@@ -33149,17 +33163,18 @@ mod tests {
         RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem,
         RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect,
-        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
-        RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
-        RustOwnedSourceBackedValue, RustOwnedSourceBackedValueKind, RustOwnedStepPosition, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
-        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl,
-        RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollFunction,
+        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
+        RustOwnedSingleShadow, RustOwnedSourceBackedValue, RustOwnedSourceBackedValueKind, RustOwnedStepPosition,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
+        RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
+        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline,
+        RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
         TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, auto_keyword,
@@ -35337,10 +35352,10 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontLanguageOverride], "\"KSW\""),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontLanguageOverride,
-                value: RustOwnedStyleValueKind::FontLanguageOverride {
+                value: RustOwnedStyleValueKind::FontLanguageOverride(RustOwnedFontLanguageOverride {
                     kind: CssFontLanguageOverrideKind::String,
                     value: Some("KSW".to_string()),
-                },
+                }),
             })
         );
         assert_eq!(
@@ -35565,7 +35580,7 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Border], "1px solid red"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Border,
-                value: RustOwnedStyleValueKind::Border {
+                value: RustOwnedStyleValueKind::Border(RustOwnedBorder {
                     width: Some(RustOwnedNestedPrimitiveValue::Length {
                         value: 1.0,
                         unit: "px".to_string(),
@@ -35579,14 +35594,14 @@ mod tests {
                         alpha: 255,
                         name: Some("red".to_string()),
                     }),
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BorderBlock], "currentcolor thick dashed"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderBlock,
-                value: RustOwnedStyleValueKind::Border {
+                value: RustOwnedStyleValueKind::Border(RustOwnedBorder {
                     width: Some(RustOwnedNestedPrimitiveValue::Keyword("thick".to_string())),
                     style: Some(RustOwnedLineStyle::Dashed),
                     color: Some(RustOwnedColor::Simple {
@@ -35597,7 +35612,7 @@ mod tests {
                         alpha: 0,
                         name: Some("currentcolor".to_string()),
                     }),
-                },
+                }),
             })
         );
         assert_eq!(
@@ -35974,17 +35989,17 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::AnimationTimeline], "scroll(root y)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::AnimationTimeline,
-                value: RustOwnedStyleValueKind::ScrollFunction {
+                value: RustOwnedStyleValueKind::ScrollFunction(RustOwnedScrollFunction {
                     scroller: CssScrollFunctionScrollerKind::Root,
                     axis: CssScrollFunctionAxisKind::Y,
-                },
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::ViewTimelineInset], "1px 2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ViewTimelineInset,
-                value: RustOwnedStyleValueKind::ViewTimelineInset {
+                value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
                     values: vec![
                         RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
@@ -35995,7 +36010,7 @@ mod tests {
                             unit: "px".to_string(),
                         },
                     ],
-                },
+                }),
             })
         );
         assert_eq!(
@@ -36005,7 +36020,7 @@ mod tests {
             ),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ViewTimelineInset,
-                value: RustOwnedStyleValueKind::ViewTimelineInset {
+                value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
                     values: vec![
                         RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
@@ -36016,7 +36031,7 @@ mod tests {
                             unit: "px".to_string(),
                         },
                     ],
-                },
+                }),
             })
         );
         assert_eq!(
