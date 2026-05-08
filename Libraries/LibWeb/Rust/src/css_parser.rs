@@ -2421,14 +2421,8 @@ pub(crate) enum RustOwnedFitContentValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRect {
-    sides: Vec<RustOwnedRectSide>,
+    sides: Vec<RustOwnedNestedPrimitiveValue>,
     requires_commas: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedRectSide {
-    Auto,
-    Length(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2553,15 +2547,9 @@ pub(crate) enum RustOwnedBackgroundSize {
     Cover,
     Contain,
     Explicit {
-        width: RustOwnedBackgroundSizeComponent,
-        height: Option<RustOwnedBackgroundSizeComponent>,
+        width: RustOwnedNestedPrimitiveValue,
+        height: Option<RustOwnedNestedPrimitiveValue>,
     },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedBackgroundSizeComponent {
-    Auto,
-    LengthPercentage(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2708,6 +2696,7 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Length { value: f64, unit: String },
     Angle { value: f64, unit: String },
     Flex { value: f64, unit: String },
+    Keyword(String),
     Source(String),
 }
 
@@ -5734,20 +5723,18 @@ fn rust_owned_background_size_from_component_values(
 fn rust_owned_background_size_component_from_component_value(
     component_value: &ComponentValue,
     source: &str,
-) -> Option<RustOwnedBackgroundSizeComponent> {
+) -> Option<RustOwnedNestedPrimitiveValue> {
     if let ComponentValue::PreservedToken(Token {
         token_type: TokenType::Ident { value },
         ..
     }) = component_value
         && value.eq_ignore_ascii_case("auto")
     {
-        return Some(RustOwnedBackgroundSizeComponent::Auto);
+        return Some(RustOwnedNestedPrimitiveValue::Keyword("auto".to_string()));
     }
 
     if component_value_parse_as_non_negative_length_percentage(component_value) {
-        return Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
-            component_value_parse_as_nested_length_percentage(component_value, source)?,
-        ));
+        return component_value_parse_as_nested_length_percentage(component_value, source);
     }
 
     None
@@ -8141,7 +8128,10 @@ fn rust_owned_rect_style_value_kind(
     }))
 }
 
-fn rust_owned_rect_side(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<RustOwnedRectSide> {
+fn rust_owned_rect_side(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
     parser.discard_whitespace();
 
     let component_value = parser.next_component_value()?;
@@ -8153,12 +8143,12 @@ fn rust_owned_rect_side(parser: &mut ComponentValueParser, filtered_input_string
         }) if value.eq_ignore_ascii_case("auto")
     ) {
         parser.index += 1;
-        return Some(RustOwnedRectSide::Auto);
+        return Some(RustOwnedNestedPrimitiveValue::Keyword("auto".to_string()));
     }
 
     let value = component_value_parse_as_nested_length(component_value, filtered_input_string)?;
     parser.index += 1;
-    Some(RustOwnedRectSide::Length(value))
+    Some(value)
 }
 
 fn rust_owned_primitive_style_value_kind(
@@ -10564,7 +10554,7 @@ fn callback_basic_shape_position_component<C>(
         style_value_kind,
         property_id,
         primitive_kind,
-        !matches!(offset, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(offset),
         numeric_value,
         false,
         0.0,
@@ -10684,7 +10674,7 @@ fn callback_basic_shape_nested_primitive<C>(
         style_value_kind,
         property_id,
         primitive_kind,
-        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(value),
         numeric_value,
         false,
         0.0,
@@ -10716,31 +10706,14 @@ where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     for side in &value.sides {
-        match side {
-            RustOwnedRectSide::Auto => callback(
-                CssStyleValueKind::Rect,
-                property_id,
-                CssPrimitiveValueKind::Keyword,
-                false,
-                0.0,
-                false,
-                0.0,
-                u8::from(value.requires_commas),
-                0,
-                1,
-                0,
-                b"auto",
-                "",
-            ),
-            RustOwnedRectSide::Length(length) => callback_nested_primitive(
-                callback,
-                CssStyleValueKind::Rect,
-                property_id,
-                u8::from(value.requires_commas),
-                0,
-                length,
-            ),
-        }
+        callback_nested_primitive(
+            callback,
+            CssStyleValueKind::Rect,
+            property_id,
+            u8::from(value.requires_commas),
+            0,
+            side,
+        );
     }
 }
 
@@ -10979,7 +10952,7 @@ fn callback_explicit_grid_track<C>(
                     kind,
                     property_id,
                     primitive_kind,
-                    !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                    nested_primitive_callback_has_numeric_value(value),
                     numeric_value,
                     false,
                     0.0,
@@ -11002,7 +10975,7 @@ fn callback_explicit_grid_track<C>(
                 let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(count);
                 (
                     primitive_kind,
-                    !matches!(count, RustOwnedNestedPrimitiveValue::Source(_)),
+                    nested_primitive_callback_has_numeric_value(count),
                     numeric_value,
                     source_or_unit,
                 )
@@ -11060,7 +11033,7 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedGridTrackBreadth) -> G
             GridTrackBreadthCallbackPayload {
                 breadth_kind: GRID_TRACK_BREADTH_LENGTH_PERCENTAGE,
                 primitive_kind,
-                has_numeric_value: !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                has_numeric_value: nested_primitive_callback_has_numeric_value(value),
                 numeric_value,
                 source_or_unit,
             }
@@ -11070,7 +11043,7 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedGridTrackBreadth) -> G
             GridTrackBreadthCallbackPayload {
                 breadth_kind: GRID_TRACK_BREADTH_FLEX,
                 primitive_kind,
-                has_numeric_value: !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                has_numeric_value: nested_primitive_callback_has_numeric_value(value),
                 numeric_value,
                 source_or_unit,
             }
@@ -12262,7 +12235,7 @@ fn callback_shape_outside_basic_shape_position_component<C>(
         CssStyleValueKind::ShapeOutside,
         property_id,
         primitive_kind,
-        !matches!(offset, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(offset),
         numeric_value,
         false,
         0.0,
@@ -12291,7 +12264,7 @@ fn callback_shape_outside_basic_shape_nested_primitive<C>(
         CssStyleValueKind::ShapeOutside,
         property_id,
         primitive_kind,
-        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(value),
         numeric_value,
         false,
         0.0,
@@ -12565,9 +12538,9 @@ fn callback_nested_primitive_pair<C>(
         style_value_kind,
         property_id,
         primitive_kind,
-        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(value),
         numeric_value,
-        !matches!(secondary_value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(secondary_value),
         secondary_numeric_value,
         kind,
         secondary_kind,
@@ -12594,7 +12567,7 @@ fn callback_nested_primitive<C>(
         style_value_kind,
         property_id,
         primitive_kind,
-        !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(value),
         numeric_value,
         false,
         0.0,
@@ -12689,7 +12662,7 @@ fn callback_position_component<C>(
         CssStyleValueKind::Position,
         property_id,
         primitive_kind,
-        !matches!(offset, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(offset),
         numeric_value,
         false,
         0.0,
@@ -12794,18 +12767,11 @@ fn callback_background_size_component<C>(
     callback: &mut C,
     property_id: u16,
     kind: u8,
-    value: &RustOwnedBackgroundSizeComponent,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    match value {
-        RustOwnedBackgroundSizeComponent::Auto => {
-            callback_background_size_keyword(callback, property_id, kind, "auto");
-        }
-        RustOwnedBackgroundSizeComponent::LengthPercentage(value) => {
-            callback_nested_primitive(callback, CssStyleValueKind::BackgroundSize, property_id, kind, 0, value);
-        }
-    }
+    callback_nested_primitive(callback, CssStyleValueKind::BackgroundSize, property_id, kind, 0, value);
 }
 
 fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (CssPrimitiveValueKind, f64, &str) {
@@ -12816,8 +12782,16 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
         RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, *value, unit),
         RustOwnedNestedPrimitiveValue::Angle { value, unit } => (CssPrimitiveValueKind::Angle, *value, unit),
         RustOwnedNestedPrimitiveValue::Flex { value, unit } => (CssPrimitiveValueKind::Flex, *value, unit),
+        RustOwnedNestedPrimitiveValue::Keyword(keyword) => (CssPrimitiveValueKind::Keyword, 0.0, keyword),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
+}
+
+fn nested_primitive_callback_has_numeric_value(value: &RustOwnedNestedPrimitiveValue) -> bool {
+    !matches!(
+        value,
+        RustOwnedNestedPrimitiveValue::Keyword(_) | RustOwnedNestedPrimitiveValue::Source(_)
+    )
 }
 
 fn callback_font_variant_style_value<C>(callback: &mut C, property_id: u16, value: &FontVariant)
@@ -13301,7 +13275,7 @@ fn callback_transform_function_argument<C>(
         kind,
         property_id,
         primitive_kind,
-        !matches!(argument.value, RustOwnedNestedPrimitiveValue::Source(_)),
+        nested_primitive_callback_has_numeric_value(&argument.value),
         numeric_value,
         false,
         0.0,
@@ -33225,8 +33199,8 @@ mod tests {
         MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
-        RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList,
-        RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
+        RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
+        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
         RustOwnedBasicShapeRadiusComponent, RustOwnedBasicShapeRectangleComponent, RustOwnedBorderImage,
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
         RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
@@ -33246,9 +33220,9 @@ mod tests {
         RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
         RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
         RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
+        RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
         RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
         RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
         RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
@@ -35613,21 +35587,15 @@ mod tests {
                     values: vec![
                         RustOwnedBackgroundSize::Cover,
                         RustOwnedBackgroundSize::Explicit {
-                            width: RustOwnedBackgroundSizeComponent::Auto,
-                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
-                                RustOwnedNestedPrimitiveValue::Length {
-                                    value: 10.0,
-                                    unit: "px".to_string(),
-                                },
-                            )),
+                            width: RustOwnedNestedPrimitiveValue::Keyword("auto".to_string()),
+                            height: Some(RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            }),
                         },
                         RustOwnedBackgroundSize::Explicit {
-                            width: RustOwnedBackgroundSizeComponent::LengthPercentage(
-                                RustOwnedNestedPrimitiveValue::Percentage(2.0),
-                            ),
-                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
-                                RustOwnedNestedPrimitiveValue::Source("calc(3px + 4%)".to_string()),
-                            )),
+                            width: RustOwnedNestedPrimitiveValue::Percentage(2.0),
+                            height: Some(RustOwnedNestedPrimitiveValue::Source("calc(3px + 4%)".to_string())),
                         },
                     ],
                 }),
@@ -36080,19 +36048,19 @@ mod tests {
                 property_id: PropertyId::Clip,
                 value: RustOwnedStyleValueKind::Rect(RustOwnedRect {
                     sides: vec![
-                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
                             unit: "px".to_string(),
-                        }),
-                        RustOwnedRectSide::Auto,
-                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                        },
+                        RustOwnedNestedPrimitiveValue::Keyword("auto".to_string()),
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 2.0,
                             unit: "px".to_string(),
-                        }),
-                        RustOwnedRectSide::Length(RustOwnedNestedPrimitiveValue::Length {
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 3.0,
                             unit: "px".to_string(),
-                        }),
+                        },
                     ],
                     requires_commas: true,
                 }),
