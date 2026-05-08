@@ -1068,15 +1068,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_integer = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_integer_value(value_tokens, infinite_integer_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_source_as_integer_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -2575,8 +2566,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_grid_track_placement = [&](RustComponentValueParser::RustGridTrackPlacement const& grid_track_placement) -> RefPtr<GridTrackPlacementStyleValue const> {
                 RefPtr<StyleValue const> line_number;
-                if (grid_track_placement.line_number_source.has_value()) {
-                    line_number = parse_rust_source_as_integer(*grid_track_placement.line_number_source);
+                if (grid_track_placement.line_number.has_value()) {
+                    line_number = materialize_rust_nested_integer(*grid_track_placement.line_number, infinite_integer_range);
                     if (!line_number)
                         return nullptr;
                 }

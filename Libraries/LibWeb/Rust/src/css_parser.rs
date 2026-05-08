@@ -2565,11 +2565,11 @@ pub(crate) struct RustOwnedGridAutoFlow {
 pub(crate) enum RustOwnedGridTrackPlacement {
     Auto,
     Line {
-        line_number_source: Option<String>,
+        line_number: Option<RustOwnedNestedPrimitiveValue>,
         name: Option<String>,
     },
     Span {
-        line_number_source: Option<String>,
+        line_number: Option<RustOwnedNestedPrimitiveValue>,
         name: Option<String>,
     },
 }
@@ -10793,39 +10793,36 @@ fn callback_grid_track_placement_style_value<C>(callback: &mut C, property_id: u
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, line_number_source, name) = match value {
+    let (kind, line_number, name) = match value {
         RustOwnedGridTrackPlacement::Auto => (GRID_TRACK_PLACEMENT_CALLBACK_AUTO, None, None),
-        RustOwnedGridTrackPlacement::Line {
-            line_number_source,
-            name,
-        } => (
+        RustOwnedGridTrackPlacement::Line { line_number, name } => (
             GRID_TRACK_PLACEMENT_CALLBACK_LINE,
-            line_number_source.as_deref(),
+            line_number.as_ref(),
             name.as_deref(),
         ),
-        RustOwnedGridTrackPlacement::Span {
-            line_number_source,
-            name,
-        } => (
+        RustOwnedGridTrackPlacement::Span { line_number, name } => (
             GRID_TRACK_PLACEMENT_CALLBACK_SPAN,
-            line_number_source.as_deref(),
+            line_number.as_ref(),
             name.as_deref(),
         ),
     };
+    let (primitive_kind, numeric_value, source_or_unit) = line_number
+        .map(nested_primitive_callback_payload)
+        .unwrap_or((CssPrimitiveValueKind::Invalid, 0.0, ""));
 
     callback(
         CssStyleValueKind::GridTrackPlacement,
         property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
+        primitive_kind,
+        line_number.is_some() && primitive_kind != CssPrimitiveValueKind::Invalid,
+        numeric_value,
         false,
         0.0,
         kind,
         0,
         0,
         0,
-        line_number_source.unwrap_or("").as_bytes(),
+        source_or_unit.as_bytes(),
         name.unwrap_or(""),
     );
 }
@@ -13846,7 +13843,7 @@ fn grid_track_placement_is_custom_ident(grid_track_placement: &RustOwnedGridTrac
     matches!(
         grid_track_placement,
         RustOwnedGridTrackPlacement::Line {
-            line_number_source: None,
+            line_number: None,
             name: Some(_),
         }
     )
@@ -17889,7 +17886,7 @@ fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<
 
     let mut is_span = false;
     let mut parsed_custom_ident = None;
-    let mut parsed_integer_source = None;
+    let mut parsed_integer = None;
     let mut parsed_integer_value = 0.0;
     let mut parsed_integer_has_known_value = false;
 
@@ -17901,7 +17898,7 @@ fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<
 
             // NOTE: "span" must not appear in between <custom-ident> and <integer>.
             parser.discard_whitespace();
-            if parser.has_next_component_value() && (parsed_custom_ident.is_some() || parsed_integer_source.is_some()) {
+            if parser.has_next_component_value() && (parsed_custom_ident.is_some() || parsed_integer.is_some()) {
                 return None;
             }
 
@@ -17917,13 +17914,13 @@ fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<
             continue;
         }
 
-        if let Some((integer_source, integer_value)) =
-            consume_integer_component_value_source(&mut parser, &filtered_input_string)
+        if let Some((integer, integer_value)) =
+            consume_integer_component_value_payload(&mut parser, &filtered_input_string)
         {
-            if parsed_integer_source.is_some() {
+            if parsed_integer.is_some() {
                 return None;
             }
-            parsed_integer_source = Some(integer_source);
+            parsed_integer = Some(integer);
             parsed_integer_value = integer_value;
             parsed_integer_has_known_value = true;
             continue;
@@ -17932,30 +17929,32 @@ fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<
         if let Some(integer_source) =
             consume_integer_math_function_component_value_source(&mut parser, &filtered_input_string)
         {
-            if parsed_integer_source.is_some() {
+            if parsed_integer.is_some() {
                 return None;
             }
-            parsed_integer_source = Some(integer_source);
+            parsed_integer = Some(RustOwnedNestedPrimitiveValue::Source(integer_source));
             continue;
         }
 
         return None;
     }
 
-    if !is_span && (parsed_integer_source.is_some() || parsed_custom_ident.is_some()) {
-        return (parsed_integer_source.is_none() || !parsed_integer_has_known_value || parsed_integer_value != 0.0)
-            .then_some(RustOwnedGridTrackPlacement::Line {
-                line_number_source: parsed_integer_source,
+    if !is_span && (parsed_integer.is_some() || parsed_custom_ident.is_some()) {
+        return (parsed_integer.is_none() || !parsed_integer_has_known_value || parsed_integer_value != 0.0).then_some(
+            RustOwnedGridTrackPlacement::Line {
+                line_number: parsed_integer,
                 name: parsed_custom_ident,
-            });
+            },
+        );
     }
 
-    if is_span && (parsed_integer_source.is_some() || parsed_custom_ident.is_some()) {
-        return (parsed_integer_source.is_none() || !parsed_integer_has_known_value || parsed_integer_value > 0.0)
-            .then_some(RustOwnedGridTrackPlacement::Span {
-                line_number_source: parsed_integer_source,
+    if is_span && (parsed_integer.is_some() || parsed_custom_ident.is_some()) {
+        return (parsed_integer.is_none() || !parsed_integer_has_known_value || parsed_integer_value > 0.0).then_some(
+            RustOwnedGridTrackPlacement::Span {
+                line_number: parsed_integer,
                 name: parsed_custom_ident,
-            });
+            },
+        );
     }
 
     None
@@ -17999,10 +17998,10 @@ fn consume_integer_component_value(parser: &mut ComponentValueParser) -> Option<
     Some(value)
 }
 
-fn consume_integer_component_value_source(
+fn consume_integer_component_value_payload(
     parser: &mut ComponentValueParser,
     filtered_input_string: &str,
-) -> Option<(String, f64)> {
+) -> Option<(RustOwnedNestedPrimitiveValue, f64)> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value()?;
     let ComponentValue::PreservedToken(Token {
@@ -18021,7 +18020,12 @@ fn consume_integer_component_value_source(
         serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
     let value = number.value();
     parser.index += 1;
-    Some((source, value))
+    let integer = if value >= i32::MIN as f64 && value <= i32::MAX as f64 {
+        RustOwnedNestedPrimitiveValue::Integer(value as i32)
+    } else {
+        RustOwnedNestedPrimitiveValue::Source(source)
+    };
+    Some((integer, value))
 }
 
 fn consume_integer_math_function_component_value(parser: &mut ComponentValueParser) -> bool {
@@ -35584,7 +35588,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::GridColumnStart,
                 value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement::Span {
-                    line_number_source: Some("2".to_string()),
+                    line_number: Some(RustOwnedNestedPrimitiveValue::Integer(2)),
                     name: Some("main".to_string()),
                 }),
             })

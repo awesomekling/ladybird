@@ -316,7 +316,7 @@ public:
 
     struct RustGridTrackPlacement {
         RustGridTrackPlacementKind kind { RustGridTrackPlacementKind::Auto };
-        Optional<String> line_number_source;
+        Optional<RustNestedPrimitiveValue> line_number;
         Optional<String> name;
     };
 
