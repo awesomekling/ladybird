@@ -1845,6 +1845,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return nullptr;
             };
+            auto materialize_rust_nested_transform_origin_component = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                    auto maybe_keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
+                    if (!maybe_keyword.has_value())
+                        return nullptr;
+                    switch (*maybe_keyword) {
+                    case Keyword::Bottom:
+                    case Keyword::Center:
+                    case Keyword::Left:
+                    case Keyword::Right:
+                    case Keyword::Top:
+                        return KeywordStyleValue::create(*maybe_keyword);
+                    default:
+                        return nullptr;
+                    }
+                }
+                return materialize_rust_nested_length_percentage(value, infinite_range);
+            };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_angle(value.source_or_unit);
@@ -2127,32 +2145,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return Gfx::ColorFilterType::Sepia;
                 }
                 VERIFY_NOT_REACHED();
-            };
-            auto parse_rust_source_as_transform_origin_component = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-
-                RefPtr<StyleValue const> value;
-                if (auto keyword_value = parse_keyword_value(value_tokens)) {
-                    switch (keyword_value->to_keyword()) {
-                    case Keyword::Bottom:
-                    case Keyword::Center:
-                    case Keyword::Left:
-                    case Keyword::Right:
-                    case Keyword::Top:
-                        value = keyword_value;
-                        break;
-                    default:
-                        return nullptr;
-                    }
-                } else {
-                    value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
-                }
-
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
             };
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
@@ -3327,10 +3319,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TransformOrigin:
-                if (rust_style_value->transform_origin_x_source.has_value() && rust_style_value->transform_origin_y_source.has_value() && rust_style_value->transform_origin_z_source.has_value()) {
-                    auto x_value = parse_rust_source_as_transform_origin_component(*rust_style_value->transform_origin_x_source);
-                    auto y_value = parse_rust_source_as_transform_origin_component(*rust_style_value->transform_origin_y_source);
-                    auto z_value = parse_rust_source_as_length(*rust_style_value->transform_origin_z_source);
+                if (rust_style_value->transform_origin_x.has_value() && rust_style_value->transform_origin_y.has_value() && rust_style_value->transform_origin_z.has_value()) {
+                    auto x_value = materialize_rust_nested_transform_origin_component(*rust_style_value->transform_origin_x);
+                    auto y_value = materialize_rust_nested_transform_origin_component(*rust_style_value->transform_origin_y);
+                    auto z_value = materialize_rust_nested_length(*rust_style_value->transform_origin_z, infinite_range);
                     if (!x_value || !y_value || !z_value)
                         break;
                     discard_rust_owned_property_value_tokens();

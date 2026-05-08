@@ -485,9 +485,9 @@ public:
         bool transform_longhand_is_none { false };
         Optional<RustTransformLonghandFunction> transform_longhand_function;
         Vector<String> transform_longhand_arguments;
-        Optional<String> transform_origin_x_source;
-        Optional<String> transform_origin_y_source;
-        Optional<String> transform_origin_z_source;
+        Optional<RustNestedPrimitiveValue> transform_origin_x;
+        Optional<RustNestedPrimitiveValue> transform_origin_y;
+        Optional<RustNestedPrimitiveValue> transform_origin_z;
         FFI::CssTimelineNameValueKind timeline_name_kind { FFI::CssTimelineNameValueKind::Invalid };
         Vector<FFI::CssTimelineNameItemKind> timeline_name_item_kinds;
         Vector<FlyString> timeline_names;

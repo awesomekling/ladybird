@@ -1355,11 +1355,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (color_red == 0)
-                    style_value->transform_origin_x_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->transform_origin_x = nested_primitive_value_from_callback_payload();
                 else if (color_red == 1)
-                    style_value->transform_origin_y_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->transform_origin_y = nested_primitive_value_from_callback_payload();
                 else
-                    style_value->transform_origin_z_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->transform_origin_z = nested_primitive_value_from_callback_payload();
                 return;
             } else if (kind == FFI::CssStyleValueKind::TransformLonghand) {
                 if (!style_value.has_value())
