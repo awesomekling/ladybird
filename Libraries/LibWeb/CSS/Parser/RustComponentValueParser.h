@@ -216,6 +216,8 @@ public:
         DropShadow,
         HueRotate,
         Simple,
+        DropShadowRadius,
+        DropShadowColor,
     };
 
     enum class RustSimpleFilterFunction : u8 {
@@ -283,6 +285,8 @@ public:
         bool has_secondary_value { false };
         String source;
         String secondary_source;
+        Optional<String> drop_shadow_radius_source;
+        Optional<String> drop_shadow_color_source;
     };
 
     struct RustStyleValue {

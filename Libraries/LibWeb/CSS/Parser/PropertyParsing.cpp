@@ -2913,6 +2913,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             filter_value_list.append(url.release_value());
                             break;
                         }
+                        case RustComponentValueParser::RustFilterValueListEventKind::DropShadowRadius:
+                        case RustComponentValueParser::RustFilterValueListEventKind::DropShadowColor:
+                            VERIFY_NOT_REACHED();
                         case RustComponentValueParser::RustFilterValueListEventKind::Blur: {
                             auto radius = event.has_value
                                 ? parse_rust_source_as_non_negative_length(event.source)
@@ -2923,25 +2926,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::DropShadow: {
-                            auto secondary_sources = event.secondary_source.bytes_as_string_view().split_view('\0', SplitBehavior::KeepEmpty);
-                            if (secondary_sources.size() != 3)
-                                break;
-
                             auto offset_x = parse_rust_source_as_length(event.source);
-                            auto offset_y = parse_rust_source_as_length(String::from_utf8_without_validation(secondary_sources[0].bytes()));
+                            auto offset_y = parse_rust_source_as_length(event.secondary_source);
                             if (!offset_x || !offset_y)
                                 break;
 
                             RefPtr<StyleValue const> radius;
-                            if (event.has_value) {
-                                radius = parse_rust_source_as_length(String::from_utf8_without_validation(secondary_sources[1].bytes()));
+                            if (event.drop_shadow_radius_source.has_value()) {
+                                radius = parse_rust_source_as_length(*event.drop_shadow_radius_source);
                                 if (!radius)
                                     break;
                             }
 
                             RefPtr<StyleValue const> color;
-                            if (event.has_secondary_value) {
-                                color = parse_rust_source_as_color(String::from_utf8_without_validation(secondary_sources[2].bytes()));
+                            if (event.drop_shadow_color_source.has_value()) {
+                                color = parse_rust_source_as_color(*event.drop_shadow_color_source);
                                 if (!color)
                                     break;
                             }

@@ -1526,8 +1526,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 }
 
+                auto filter_event_kind = static_cast<RustFilterValueListEventKind>(color_red);
+                if (filter_event_kind == RustFilterValueListEventKind::DropShadowRadius) {
+                    VERIFY(!style_value->filter_value_list_events.is_empty());
+                    VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
+                    style_value->filter_value_list_events.last().drop_shadow_radius_source = string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+                if (filter_event_kind == RustFilterValueListEventKind::DropShadowColor) {
+                    VERIFY(!style_value->filter_value_list_events.is_empty());
+                    VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
+                    style_value->filter_value_list_events.last().drop_shadow_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
                 style_value->filter_value_list_events.append(RustFilterValueListEvent {
-                    .kind = static_cast<RustFilterValueListEventKind>(color_red),
+                    .kind = filter_event_kind,
                     .simple_function = static_cast<RustSimpleFilterFunction>(color_green),
                     .has_value = color_blue != 0,
                     .has_secondary_value = color_alpha != 0,

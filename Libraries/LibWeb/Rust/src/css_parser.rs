@@ -9741,6 +9741,8 @@ const FILTER_VALUE_LIST_CALLBACK_BLUR: u8 = 2;
 const FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW: u8 = 3;
 const FILTER_VALUE_LIST_CALLBACK_HUE_ROTATE: u8 = 4;
 const FILTER_VALUE_LIST_CALLBACK_SIMPLE: u8 = 5;
+const FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_RADIUS: u8 = 6;
+const FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_COLOR: u8 = 7;
 
 const SIMPLE_FILTER_FUNCTION_BRIGHTNESS: u8 = 0;
 const SIMPLE_FILTER_FUNCTION_CONTRAST: u8 = 1;
@@ -9983,12 +9985,6 @@ where
                         offset_y_source,
                         radius_source,
                     } => {
-                        let secondary_source = format!(
-                            "{}\0{}\0{}",
-                            offset_y_source,
-                            radius_source.as_deref().unwrap_or(" "),
-                            color_source.as_deref().unwrap_or(" ")
-                        );
                         callback(
                             CssStyleValueKind::FilterValueList,
                             property_id,
@@ -9999,11 +9995,29 @@ where
                             0.0,
                             FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW,
                             0,
-                            u8::from(radius_source.is_some()),
-                            u8::from(color_source.is_some()),
+                            0,
+                            0,
                             offset_x_source.as_bytes(),
-                            &secondary_source,
+                            offset_y_source,
                         );
+                        if let Some(radius_source) = radius_source {
+                            callback_filter_source(
+                                callback,
+                                property_id,
+                                FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_RADIUS,
+                                0,
+                                radius_source,
+                            );
+                        }
+                        if let Some(color_source) = color_source {
+                            callback_filter_source(
+                                callback,
+                                property_id,
+                                FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_COLOR,
+                                0,
+                                color_source,
+                            );
+                        }
                     }
                     RustOwnedFilterValue::HueRotate { angle_source } => callback_optional_filter_source(
                         callback,
@@ -10036,13 +10050,8 @@ where
     }
 }
 
-fn callback_optional_filter_source<C>(
-    callback: &mut C,
-    property_id: u16,
-    kind: u8,
-    secondary_kind: u8,
-    source: Option<&String>,
-) where
+fn callback_filter_source<C>(callback: &mut C, property_id: u16, kind: u8, secondary_kind: u8, source: &str)
+where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     callback(
@@ -10055,11 +10064,41 @@ fn callback_optional_filter_source<C>(
         0.0,
         kind,
         secondary_kind,
-        u8::from(source.is_some()),
+        1,
         0,
-        source.map_or(&[], |source| source.as_bytes()),
+        source.as_bytes(),
         "",
     );
+}
+
+fn callback_optional_filter_source<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    source: Option<&String>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    if let Some(source) = source {
+        callback_filter_source(callback, property_id, kind, secondary_kind, source);
+    } else {
+        callback(
+            CssStyleValueKind::FilterValueList,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            kind,
+            secondary_kind,
+            0,
+            0,
+            &[],
+            "",
+        );
+    }
 }
 
 fn callback_font_variant_style_value<C>(callback: &mut C, property_id: u16, value: &FontVariant)
