@@ -1423,7 +1423,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 switch (color_red) {
                 case 0:
-                    style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->border_image_source_kind = static_cast<RustBorderImageSourceKind>(color_green);
+                    if (*style_value->border_image_source_kind == RustBorderImageSourceKind::Source)
+                        style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
                     break;
                 case 1:
                     style_value->border_image_shorthand_has_slice = true;

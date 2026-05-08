@@ -2861,11 +2861,17 @@ pub(crate) struct RustOwnedScrollbarGutter {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImage {
-    source_source: Option<String>,
+    source: Option<RustOwnedBorderImageSource>,
     slice: Option<RustOwnedBorderImageSlice>,
     width: Option<Vec<RustOwnedBorderImageWidth>>,
     outset: Option<Vec<RustOwnedBorderImageOutset>>,
     repeat: Option<Vec<RustOwnedBorderImageRepeat>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedBorderImageSource {
+    None,
+    Source(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5899,7 +5905,7 @@ fn component_value_parse_as_border_image_source(component_value: &ComponentValue
         || matches!(component_value, ComponentValue::Function(function) if component_value_parse_as_image_set_function(function))
 }
 
-fn consume_border_image_source(parser: &mut ComponentValueParser, source: &str) -> Option<String> {
+fn consume_border_image_source(parser: &mut ComponentValueParser, source: &str) -> Option<RustOwnedBorderImageSource> {
     parser.discard_whitespace();
     let start = parser.index;
     let component_value = parser.next_component_value()?;
@@ -5907,8 +5913,15 @@ fn consume_border_image_source(parser: &mut ComponentValueParser, source: &str) 
         return None;
     }
 
+    let is_none = component_value_is_ident(Some(component_value), "none");
     parser.index += 1;
-    serialize_consumed_component_values(parser, start, source)
+    if is_none {
+        return Some(RustOwnedBorderImageSource::None);
+    }
+
+    Some(RustOwnedBorderImageSource::Source(serialize_consumed_component_values(
+        parser, start, source,
+    )?))
 }
 
 fn component_value_parse_as_border_image_outset(component_value: &ComponentValue) -> bool {
@@ -6181,7 +6194,7 @@ fn rust_owned_border_image_shorthand_style_value_kind(filtered_input: &[u8]) -> 
     let component_values = input_parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
 
-    let mut source_source = None;
+    let mut border_image_source = None;
     let mut slice = None;
     let mut width = None;
     let mut outset = None;
@@ -6189,10 +6202,10 @@ fn rust_owned_border_image_shorthand_style_value_kind(filtered_input: &[u8]) -> 
     let mut parsed_anything = false;
 
     while parser.has_next_component_value() {
-        if source_source.is_none()
+        if border_image_source.is_none()
             && let Some(value) = consume_border_image_source(&mut parser, &source)
         {
-            source_source = Some(value);
+            border_image_source = Some(value);
             parsed_anything = true;
             continue;
         }
@@ -6236,7 +6249,7 @@ fn rust_owned_border_image_shorthand_style_value_kind(filtered_input: &[u8]) -> 
     }
 
     parsed_anything.then_some(RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
-        source_source,
+        source: border_image_source,
         slice,
         width,
         outset,
@@ -8083,7 +8096,11 @@ where
         RustOwnedStyleValueKind::BorderImage(value) => {
             const SOURCE: u8 = 0;
 
-            if let Some(source) = &value.source_source {
+            if let Some(source) = &value.source {
+                let (kind, source) = match source {
+                    RustOwnedBorderImageSource::None => (0, ""),
+                    RustOwnedBorderImageSource::Source(source) => (1, source.as_str()),
+                };
                 callback(
                     CssStyleValueKind::BorderImage,
                     property_id,
@@ -8093,7 +8110,7 @@ where
                     false,
                     0.0,
                     SOURCE,
-                    0,
+                    kind,
                     0,
                     0,
                     source.as_bytes(),
@@ -30678,9 +30695,9 @@ mod tests {
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat,
-        RustOwnedBorderImageSlice, RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth,
-        RustOwnedColor, RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns,
-        RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+        RustOwnedBorderImageSlice, RustOwnedBorderImageSource, RustOwnedBorderImageWidth, RustOwnedBorderRadius,
+        RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength,
+        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
         RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
         RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage,
         RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
@@ -33079,7 +33096,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImage,
                 value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
-                    source_source: Some("url(border.png)".to_string()),
+                    source: Some(RustOwnedBorderImageSource::Source("url(border.png)".to_string())),
                     slice: Some(RustOwnedBorderImageSlice {
                         values: vec![
                             RustOwnedNestedPrimitiveValue::Number(10.0),
@@ -33104,7 +33121,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImage,
                 value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
-                    source_source: None,
+                    source: None,
                     slice: Some(RustOwnedBorderImageSlice {
                         values: vec![
                             RustOwnedNestedPrimitiveValue::Number(10.0),

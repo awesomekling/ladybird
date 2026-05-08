@@ -144,6 +144,11 @@ public:
         Outside,
     };
 
+    enum class RustBorderImageSourceKind : u8 {
+        None,
+        Source,
+    };
+
     enum class RustListStyleImageKind : u8 {
         None,
         Source,
@@ -475,6 +480,7 @@ public:
         Optional<RustNestedPrimitiveValue> border_width_length;
         Optional<LineStyle> border_style;
         Optional<RustStyleColor> border_color;
+        Optional<RustBorderImageSourceKind> border_image_source_kind;
         Optional<String> border_image_source_source;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };

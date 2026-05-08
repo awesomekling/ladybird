@@ -3053,9 +3053,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 };
             }
             case FFI::CssStyleValueKind::BorderImage: {
-                auto source = rust_style_value->border_image_source_source.has_value()
-                    ? parse_rust_source_as_property(PropertyID::BorderImageSource, *rust_style_value->border_image_source_source)
-                    : property_initial_value(PropertyID::BorderImageSource);
+                RefPtr<StyleValue const> source;
+                if (rust_style_value->border_image_source_kind.has_value()) {
+                    switch (*rust_style_value->border_image_source_kind) {
+                    case RustComponentValueParser::RustBorderImageSourceKind::None:
+                        source = KeywordStyleValue::create(Keyword::None);
+                        break;
+                    case RustComponentValueParser::RustBorderImageSourceKind::Source:
+                        if (!rust_style_value->border_image_source_source.has_value())
+                            break;
+                        source = parse_rust_source_as_property(PropertyID::BorderImageSource, *rust_style_value->border_image_source_source);
+                        break;
+                    }
+                } else {
+                    source = property_initial_value(PropertyID::BorderImageSource);
+                }
                 auto slice = rust_style_value->border_image_shorthand_has_slice
                     ? materialize_rust_border_image_slice(rust_style_value->border_image_slices)
                     : property_initial_value(PropertyID::BorderImageSlice);
