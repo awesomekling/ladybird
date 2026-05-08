@@ -1055,7 +1055,49 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     BasicShapeComponentRectangleAuto,
                     BasicShapeComponentRectangleBorderRadiusHorizontal,
                     BasicShapeComponentRectangleBorderRadiusVertical,
+                    BasicShapeComponentRadialExtent,
+                    BasicShapeComponentRadialLengthPercentage,
+                    BasicShapeComponentRadialPositionX,
+                    BasicShapeComponentRadialPositionY,
                 };
+                auto radial_position_component_from_callback_payload = [&]() {
+                    RustPositionComponent component {
+                        .edge = static_cast<RustPositionEdge>(color_green),
+                    };
+                    if (color_alpha != 0)
+                        component.offset = nested_primitive_value_from_callback_payload();
+                    return component;
+                };
+                if (value.basic_shape_kind == RustBasicShapeKind::Circle || value.basic_shape_kind == RustBasicShapeKind::Ellipse) {
+                    if (!style_value.has_value())
+                        style_value = move(value);
+                    else {
+                        VERIFY(style_value->kind == FFI::CssStyleValueKind::BasicShape);
+                        VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                    }
+
+                    style_value->basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
+                    style_value->basic_shape_radial_shape_is_typed = true;
+                    if (color_blue == BasicShapeComponentRadialExtent) {
+                        style_value->basic_shape_radial_shape_radius.append({
+                            .is_radial_extent = true,
+                            .radial_extent = static_cast<RustBasicShapeRadialExtent>(color_alpha),
+                        });
+                    } else if (color_blue == BasicShapeComponentRadialLengthPercentage) {
+                        style_value->basic_shape_radial_shape_radius.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
+                    } else if (color_blue == BasicShapeComponentRadialPositionX) {
+                        if (!style_value->basic_shape_radial_shape_position.has_value())
+                            style_value->basic_shape_radial_shape_position = RustPosition {};
+                        style_value->basic_shape_radial_shape_position->x = radial_position_component_from_callback_payload();
+                    } else if (color_blue == BasicShapeComponentRadialPositionY) {
+                        if (!style_value->basic_shape_radial_shape_position.has_value())
+                            style_value->basic_shape_radial_shape_position = RustPosition {};
+                        style_value->basic_shape_radial_shape_position->y = radial_position_component_from_callback_payload();
+                    } else {
+                        VERIFY(color_blue == BasicShapeComponentHeader);
+                    }
+                    return;
+                }
                 if (value.basic_shape_kind == RustBasicShapeKind::Inset || value.basic_shape_kind == RustBasicShapeKind::Xywh || value.basic_shape_kind == RustBasicShapeKind::Rect) {
                     if (!style_value.has_value())
                         style_value = move(value);
@@ -1634,7 +1676,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_image_source_kind = static_cast<RustImageKind>(color_green);
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
                     break;
-                case RustShapeOutsideEventKind::BasicShape:
+                case RustShapeOutsideEventKind::BasicShape: {
                     style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
                     enum : u8 {
                         BasicShapeComponentHeader,
@@ -1644,8 +1686,40 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         BasicShapeComponentRectangleAuto,
                         BasicShapeComponentRectangleBorderRadiusHorizontal,
                         BasicShapeComponentRectangleBorderRadiusVertical,
+                        BasicShapeComponentRadialExtent,
+                        BasicShapeComponentRadialLengthPercentage,
+                        BasicShapeComponentRadialPositionX,
+                        BasicShapeComponentRadialPositionY,
                     };
-                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Inset || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Xywh || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Rect) {
+                    auto shape_outside_radial_position_component_from_callback_payload = [&]() {
+                        RustPositionComponent component {
+                            .edge = static_cast<RustPositionEdge>(color_alpha & 0x7f),
+                        };
+                        if ((color_alpha & 0x80) != 0)
+                            component.offset = nested_primitive_value_from_callback_payload();
+                        return component;
+                    };
+                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Circle || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Ellipse) {
+                        style_value->shape_outside_basic_shape_radial_shape_is_typed = true;
+                        if (color_blue == BasicShapeComponentRadialExtent) {
+                            style_value->shape_outside_basic_shape_radial_shape_radius.append({
+                                .is_radial_extent = true,
+                                .radial_extent = static_cast<RustBasicShapeRadialExtent>(color_alpha),
+                            });
+                        } else if (color_blue == BasicShapeComponentRadialLengthPercentage) {
+                            style_value->shape_outside_basic_shape_radial_shape_radius.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
+                        } else if (color_blue == BasicShapeComponentRadialPositionX) {
+                            if (!style_value->shape_outside_basic_shape_radial_shape_position.has_value())
+                                style_value->shape_outside_basic_shape_radial_shape_position = RustPosition {};
+                            style_value->shape_outside_basic_shape_radial_shape_position->x = shape_outside_radial_position_component_from_callback_payload();
+                        } else if (color_blue == BasicShapeComponentRadialPositionY) {
+                            if (!style_value->shape_outside_basic_shape_radial_shape_position.has_value())
+                                style_value->shape_outside_basic_shape_radial_shape_position = RustPosition {};
+                            style_value->shape_outside_basic_shape_radial_shape_position->y = shape_outside_radial_position_component_from_callback_payload();
+                        } else {
+                            VERIFY(color_blue == BasicShapeComponentHeader);
+                        }
+                    } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Inset || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Xywh || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Rect) {
                         if (color_blue == BasicShapeComponentRectangleLengthPercentage) {
                             style_value->shape_outside_basic_shape_rectangle_components.append({ .value = nested_primitive_value_from_callback_payload() });
                         } else if (color_blue == BasicShapeComponentRectangleAuto) {
@@ -1673,6 +1747,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                             style_value->shape_outside_basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
                     }
                     break;
+                }
                 case RustShapeOutsideEventKind::ShapeBox:
                     style_value->shape_outside_shape_box = static_cast<ShapeBox>(color_green);
                     break;

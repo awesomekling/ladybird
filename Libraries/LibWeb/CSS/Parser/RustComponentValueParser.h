@@ -220,6 +220,19 @@ public:
         RustNestedPrimitiveValue value;
     };
 
+    enum class RustBasicShapeRadialExtent : u8 {
+        ClosestCorner,
+        ClosestSide,
+        FarthestCorner,
+        FarthestSide,
+    };
+
+    struct RustBasicShapeRadiusComponent {
+        bool is_radial_extent { false };
+        RustBasicShapeRadialExtent radial_extent { RustBasicShapeRadialExtent::ClosestSide };
+        RustNestedPrimitiveValue length_percentage;
+    };
+
     struct RustStyleColor {
         bool is_simple { false };
         FFI::CssParsedColorKind kind { FFI::CssParsedColorKind::Invalid };
@@ -550,6 +563,9 @@ public:
         Vector<RustBasicShapeRectangleComponent> basic_shape_rectangle_components;
         Vector<RustNestedPrimitiveValue> basic_shape_rectangle_border_radius_horizontal_radii;
         Vector<RustNestedPrimitiveValue> basic_shape_rectangle_border_radius_vertical_radii;
+        bool basic_shape_radial_shape_is_typed { false };
+        Vector<RustBasicShapeRadiusComponent> basic_shape_radial_shape_radius;
+        Optional<RustPosition> basic_shape_radial_shape_position;
         Vector<RustNestedPrimitiveValue> basic_shape_polygon_coordinates;
         Optional<String> basic_shape_path_data;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
@@ -594,6 +610,9 @@ public:
         Vector<RustBasicShapeRectangleComponent> shape_outside_basic_shape_rectangle_components;
         Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_rectangle_border_radius_horizontal_radii;
         Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_rectangle_border_radius_vertical_radii;
+        bool shape_outside_basic_shape_radial_shape_is_typed { false };
+        Vector<RustBasicShapeRadiusComponent> shape_outside_basic_shape_radial_shape_radius;
+        Optional<RustPosition> shape_outside_basic_shape_radial_shape_position;
         Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_polygon_coordinates;
         Optional<String> shape_outside_basic_shape_path_data;
         Optional<ShapeBox> shape_outside_shape_box;
