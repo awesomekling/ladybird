@@ -1957,7 +1957,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ColorFunction(RustOwnedSourceBackedStyleValue),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
-    CornerShape(RustOwnedCornerShape),
+    CornerShape(RustOwnedNestedPrimitiveValue),
     Counter(RustOwnedCounterFunction),
     CounterStyle {
         value: CounterStyle,
@@ -2517,12 +2517,6 @@ pub(crate) enum RustOwnedBackgroundSize {
 pub(crate) struct RustOwnedColorScheme {
     value: CssColorSchemeValue,
     schemes: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedCornerShape {
-    Keyword(String),
-    Superellipse { parameter: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -6017,9 +6011,9 @@ fn rust_owned_corner_shape_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         value.as_str(),
         &["round", "scoop", "bevel", "notch", "square", "squircle"],
     ) {
-        return Some(RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Keyword(
-            value.to_string(),
-        )));
+        return Some(RustOwnedStyleValueKind::CornerShape(
+            RustOwnedNestedPrimitiveValue::Keyword(value.to_string()),
+        ));
     }
 
     None
@@ -6072,9 +6066,7 @@ fn rust_owned_superellipse_style_value_kind(
         _ => return None,
     };
 
-    Some(RustOwnedStyleValueKind::CornerShape(
-        RustOwnedCornerShape::Superellipse { parameter },
-    ))
+    Some(RustOwnedStyleValueKind::CornerShape(parameter))
 }
 
 fn rust_owned_border_width_from_component_value(
@@ -11255,12 +11247,15 @@ where
     }
 }
 
-fn callback_corner_shape_style_value<C>(callback: &mut C, property_id: u16, corner_shape: &RustOwnedCornerShape)
-where
+fn callback_corner_shape_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    corner_shape: &RustOwnedNestedPrimitiveValue,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    match corner_shape {
-        RustOwnedCornerShape::Keyword(keyword) => callback(
+    if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = corner_shape {
+        callback(
             CssStyleValueKind::CornerShape,
             property_id,
             CssPrimitiveValueKind::Keyword,
@@ -11274,10 +11269,16 @@ where
             0,
             keyword.as_bytes(),
             property_value_type_name(PropertyValueType::CornerShape),
-        ),
-        RustOwnedCornerShape::Superellipse { parameter } => {
-            callback_nested_primitive(callback, CssStyleValueKind::CornerShape, property_id, 1, 0, parameter);
-        }
+        );
+    } else {
+        callback_nested_primitive(
+            callback,
+            CssStyleValueKind::CornerShape,
+            property_id,
+            1,
+            0,
+            corner_shape,
+        );
     }
 }
 
@@ -33196,7 +33197,7 @@ mod tests {
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
         RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
         RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCornerShape, RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
         RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
         RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
@@ -35093,16 +35094,16 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "squircle"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::CornerTopLeftShape,
-                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Keyword("squircle".to_string())),
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedNestedPrimitiveValue::Keyword(
+                    "squircle".to_string(),
+                )),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "superellipse(-infinity)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::CornerTopLeftShape,
-                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Superellipse {
-                    parameter: RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY),
-                }),
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY)),
             })
         );
         assert_eq!(
