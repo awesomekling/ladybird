@@ -3062,16 +3062,8 @@ pub(crate) struct RustOwnedTextWrapStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedTextIndentLengthPercentage {
-    primitive_kind: CssPrimitiveValueKind,
-    numeric_value: Option<f64>,
-    unit: String,
-    value_type: PropertyValueType,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextIndent {
-    length_percentage: RustOwnedTextIndentLengthPercentage,
+    length_percentage: RustOwnedNestedPrimitiveValue,
     has_hanging: bool,
     has_each_line: bool,
 }
@@ -7163,6 +7155,7 @@ fn rust_owned_text_wrap_style_style_value_kind(filtered_input: &[u8]) -> Option<
 
 fn rust_owned_text_indent_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let filtered_input_string = String::from_utf8_lossy(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
     if component_values.is_empty() {
@@ -7179,21 +7172,11 @@ fn rust_owned_text_indent_style_value_kind(filtered_input: &[u8]) -> Option<Rust
         .iter()
         .filter(|component_value| !is_whitespace_component_value(component_value))
     {
-        if length_percentage.is_none() && component_value_parse_as_length_percentage(component_value) {
-            let value_type = if parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage {
-                PropertyValueType::Percentage
-            } else {
-                PropertyValueType::Length
-            };
-            let primitive_kind = style_value_primitive_kind(value_type, std::slice::from_ref(component_value));
-            length_percentage = Some(RustOwnedTextIndentLengthPercentage {
-                primitive_kind,
-                numeric_value: style_value_numeric_value(value_type, std::slice::from_ref(component_value)),
-                unit: style_value_dimension_unit(value_type, std::slice::from_ref(component_value))
-                    .unwrap_or("")
-                    .to_string(),
-                value_type,
-            });
+        if length_percentage.is_none()
+            && let Some(value) =
+                component_value_parse_as_nested_length_percentage(component_value, &filtered_input_string)
+        {
+            length_percentage = Some(value);
             continue;
         }
 
@@ -9131,21 +9114,29 @@ where
             &[],
             "",
         ),
-        RustOwnedStyleValueKind::TextIndent(value) => callback(
-            CssStyleValueKind::TextIndent,
-            property_id,
-            value.length_percentage.primitive_kind,
-            value.length_percentage.numeric_value.is_some(),
-            value.length_percentage.numeric_value.unwrap_or(0.0),
-            false,
-            0.0,
-            u8::from(value.has_hanging),
-            u8::from(value.has_each_line),
-            0,
-            0,
-            value.length_percentage.unit.as_bytes(),
-            property_value_type_name(value.length_percentage.value_type),
-        ),
+        RustOwnedStyleValueKind::TextIndent(value) => {
+            let (primitive_kind, numeric_value, unit_or_source) =
+                nested_primitive_callback_payload(&value.length_percentage);
+            let value_type = match value.length_percentage {
+                RustOwnedNestedPrimitiveValue::Percentage(_) => PropertyValueType::Percentage,
+                _ => PropertyValueType::Length,
+            };
+            callback(
+                CssStyleValueKind::TextIndent,
+                property_id,
+                primitive_kind,
+                nested_primitive_callback_has_numeric_value(&value.length_percentage),
+                numeric_value,
+                false,
+                0.0,
+                u8::from(value.has_hanging),
+                u8::from(value.has_each_line),
+                0,
+                0,
+                unit_or_source.as_bytes(),
+                property_value_type_name(value_type),
+            );
+        }
         RustOwnedStyleValueKind::TextUnderlinePosition(value) => callback(
             CssStyleValueKind::TextUnderlinePosition,
             property_id,
@@ -33216,25 +33207,24 @@ mod tests {
         RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
         RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
         RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
-        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl,
-        RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
-        TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, auto_keyword,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_property_value_type, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type,
-        emit_rust_owned_style_value, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
+        RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
+        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction,
+        TransformFunctionParameterType, auto_keyword, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_property_value_type,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, emit_rust_owned_style_value, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -36843,11 +36833,9 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextIndent,
                 value: RustOwnedStyleValueKind::TextIndent(RustOwnedTextIndent {
-                    length_percentage: RustOwnedTextIndentLengthPercentage {
-                        primitive_kind: CssPrimitiveValueKind::Length,
-                        numeric_value: Some(2.0),
+                    length_percentage: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
                         unit: "em".to_string(),
-                        value_type: PropertyValueType::Length,
                     },
                     has_hanging: true,
                     has_each_line: true,
@@ -36859,12 +36847,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TextIndent,
                 value: RustOwnedStyleValueKind::TextIndent(RustOwnedTextIndent {
-                    length_percentage: RustOwnedTextIndentLengthPercentage {
-                        primitive_kind: CssPrimitiveValueKind::Percentage,
-                        numeric_value: Some(10.0),
-                        unit: String::new(),
-                        value_type: PropertyValueType::Percentage,
-                    },
+                    length_percentage: RustOwnedNestedPrimitiveValue::Percentage(10.0),
                     has_hanging: true,
                     has_each_line: true,
                 }),
