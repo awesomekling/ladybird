@@ -2565,7 +2565,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
                 } else if (primitive_kind == FFI::CssPrimitiveValueKind::String) {
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
-                } else if (primitive_kind == FFI::CssPrimitiveValueKind::Length || primitive_kind == FFI::CssPrimitiveValueKind::Time) {
+                } else if (first_is_one_of(primitive_kind,
+                               FFI::CssPrimitiveValueKind::Angle,
+                               FFI::CssPrimitiveValueKind::Flex,
+                               FFI::CssPrimitiveValueKind::Frequency,
+                               FFI::CssPrimitiveValueKind::Length,
+                               FFI::CssPrimitiveValueKind::Resolution,
+                               FFI::CssPrimitiveValueKind::Time)) {
                     value.dimension_unit = fly_string_from_ffi_bytes(value_ptr, value_len);
                 } else if (primitive_kind == FFI::CssPrimitiveValueKind::Ratio) {
                     value.ratio_has_denominator = StringView { value_ptr, value_len } == "has-denominator"sv;

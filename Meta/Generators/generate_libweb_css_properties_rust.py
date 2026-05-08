@@ -69,6 +69,22 @@ def valid_types_for_properties(properties: dict, enum_names: set[str]) -> list[s
             if type_name in enum_names:
                 continue
             value_types.add(type_name)
+
+    # Keep the Rust value-type enum in sync with primitive numeric CSS value
+    # types that the parser supports directly, even if no current property in
+    # Properties.json references them as a generated longhand value type.
+    value_types.update(
+        [
+            "angle",
+            "angle-percentage",
+            "flex",
+            "frequency",
+            "frequency-percentage",
+            "length-percentage",
+            "resolution",
+            "time-percentage",
+        ]
+    )
     return sorted(value_types)
 
 

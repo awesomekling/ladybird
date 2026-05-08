@@ -427,13 +427,33 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parse_integer_value(tokens, metadata->range);
                 case ValueType::Number:
                     return parse_number_value(tokens, metadata->range);
+                case ValueType::Angle:
+                case ValueType::AnglePercentage:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        VERIFY(metadata->percentage_range.has_value());
+                        return parse_angle_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                    }
+                    return parse_angle_value(tokens, metadata->range);
+                case ValueType::Flex:
+                    return parse_flex_value(tokens, metadata->range);
+                case ValueType::Frequency:
+                case ValueType::FrequencyPercentage:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        VERIFY(metadata->percentage_range.has_value());
+                        return parse_frequency_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                    }
+                    return parse_frequency_value(tokens, metadata->range);
                 case ValueType::Length:
+                case ValueType::LengthPercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
                         return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
                     }
                     return parse_length_value(tokens, metadata->range);
+                case ValueType::Resolution:
+                    return parse_resolution_value(tokens, metadata->range);
                 case ValueType::Time:
+                case ValueType::TimePercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
                         return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
@@ -476,7 +496,58 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Number)
                         return OpacityValueStyleValue::create(NumberStyleValue::create(*rust_style_value->numeric_value));
                     return nullptr;
-                case ValueType::Length: {
+                case ValueType::Angle:
+                case ValueType::AnglePercentage: {
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                        if (!metadata->percentage_range.has_value() || !metadata->percentage_range->contains(*rust_style_value->numeric_value))
+                            return nullptr;
+                        return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                    }
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto angle_unit = string_to_angle_unit(*rust_style_value->dimension_unit);
+                    if (!angle_unit.has_value())
+                        return nullptr;
+                    Angle angle { *rust_style_value->numeric_value, angle_unit.release_value() };
+                    if (!metadata->range.contains(angle.raw_value()))
+                        return nullptr;
+                    return AngleStyleValue::create(angle);
+                }
+                case ValueType::Flex: {
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto flex_unit = string_to_flex_unit(*rust_style_value->dimension_unit);
+                    if (!flex_unit.has_value())
+                        return nullptr;
+                    Flex flex { *rust_style_value->numeric_value, flex_unit.release_value() };
+                    if (!metadata->range.contains(flex.raw_value()))
+                        return nullptr;
+                    return FlexStyleValue::create(flex);
+                }
+                case ValueType::Frequency:
+                case ValueType::FrequencyPercentage: {
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                        if (!metadata->percentage_range.has_value() || !metadata->percentage_range->contains(*rust_style_value->numeric_value))
+                            return nullptr;
+                        return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                    }
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto frequency_unit = string_to_frequency_unit(*rust_style_value->dimension_unit);
+                    if (!frequency_unit.has_value())
+                        return nullptr;
+                    Frequency frequency { *rust_style_value->numeric_value, frequency_unit.release_value() };
+                    if (!metadata->range.contains(frequency.raw_value()))
+                        return nullptr;
+                    return FrequencyStyleValue::create(frequency);
+                }
+                case ValueType::Length:
+                case ValueType::LengthPercentage: {
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                        if (!metadata->percentage_range.has_value() || !metadata->percentage_range->contains(*rust_style_value->numeric_value))
+                            return nullptr;
+                        return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                    }
                     if (!rust_style_value->dimension_unit.has_value())
                         return nullptr;
                     auto length_unit = string_to_length_unit(*rust_style_value->dimension_unit);
@@ -487,7 +558,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     return LengthStyleValue::create(length);
                 }
-                case ValueType::Time: {
+                case ValueType::Resolution: {
+                    if (!rust_style_value->dimension_unit.has_value())
+                        return nullptr;
+                    auto resolution_unit = string_to_resolution_unit(*rust_style_value->dimension_unit);
+                    if (!resolution_unit.has_value())
+                        return nullptr;
+                    Resolution resolution { *rust_style_value->numeric_value, resolution_unit.release_value() };
+                    if (!metadata->range.contains(resolution.raw_value()))
+                        return nullptr;
+                    return ResolutionStyleValue::create(resolution);
+                }
+                case ValueType::Time:
+                case ValueType::TimePercentage: {
+                    if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                        if (!metadata->percentage_range.has_value() || !metadata->percentage_range->contains(*rust_style_value->numeric_value))
+                            return nullptr;
+                        return PercentageStyleValue::create(Percentage(*rust_style_value->numeric_value));
+                    }
                     if (!rust_style_value->dimension_unit.has_value())
                         return nullptr;
                     auto time_unit = string_to_time_unit(*rust_style_value->dimension_unit);
@@ -4851,7 +4939,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         maybe_parsed_value = StringStyleValue::create(*rust_style_value->string);
                     } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Number
                         && rust_style_value->numeric_value.has_value()
-                        && !first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
+                        && !first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = NumberStyleValue::create(*rust_style_value->numeric_value);
                     } else if (rust_style_value->primitive_kind == FFI::CssPrimitiveValueKind::Ratio) {
@@ -4863,10 +4951,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             tokens.discard_a_token();
                         }
                         maybe_parsed_value = materialize_rust_ratio_value();
-                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
+                    } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();
-                    } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Length, ValueType::Time, ValueType::Percentage, ValueType::OpacityValue)) {
+                    } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
                     } else if (rust_style_value->kind == FFI::CssStyleValueKind::ValueType && rust_style_value->string.has_value()) {
                         maybe_parsed_value = parse_rust_source_as_value_type(rust_style_value->string->bytes_as_string_view(), *rust_style_value->value_type);

@@ -8118,7 +8118,11 @@ fn rust_owned_primitive_style_value_kind(
             CssPrimitiveValueKind::Integer
                 | CssPrimitiveValueKind::Number
                 | CssPrimitiveValueKind::Percentage
+                | CssPrimitiveValueKind::Angle
+                | CssPrimitiveValueKind::Flex
+                | CssPrimitiveValueKind::Frequency
                 | CssPrimitiveValueKind::Length
+                | CssPrimitiveValueKind::Resolution
                 | CssPrimitiveValueKind::Time
                 | CssPrimitiveValueKind::Ratio
         )
@@ -8157,7 +8161,27 @@ fn rust_owned_primitive_style_value_kind(
             value: numeric_value.unwrap_or(0.0),
             value_type,
         },
+        CssPrimitiveValueKind::Angle => RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
+        CssPrimitiveValueKind::Flex => RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
+        CssPrimitiveValueKind::Frequency => RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
         CssPrimitiveValueKind::Length => RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
+            value: numeric_value.unwrap_or(0.0),
+            unit: value,
+            value_type,
+        }),
+        CssPrimitiveValueKind::Resolution => RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
             value: numeric_value.unwrap_or(0.0),
             unit: value,
             value_type,
@@ -14626,13 +14650,33 @@ fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[
         (TokenType::Number { number }, PropertyValueType::Number | PropertyValueType::OpacityValue) => {
             Some(number.value())
         }
-        (TokenType::Percentage { number }, PropertyValueType::Percentage | PropertyValueType::OpacityValue) => {
-            Some(number.value())
+        (
+            TokenType::Percentage { number },
+            PropertyValueType::AnglePercentage
+            | PropertyValueType::FrequencyPercentage
+            | PropertyValueType::LengthPercentage
+            | PropertyValueType::Percentage
+            | PropertyValueType::TimePercentage
+            | PropertyValueType::OpacityValue,
+        ) => Some(number.value()),
+        (
+            TokenType::Dimension { number, .. },
+            PropertyValueType::Angle
+            | PropertyValueType::AnglePercentage
+            | PropertyValueType::Flex
+            | PropertyValueType::Frequency
+            | PropertyValueType::FrequencyPercentage
+            | PropertyValueType::Length
+            | PropertyValueType::LengthPercentage
+            | PropertyValueType::Resolution
+            | PropertyValueType::Time
+            | PropertyValueType::TimePercentage,
+        ) => Some(number.value()),
+        (TokenType::Number { number }, PropertyValueType::Length | PropertyValueType::LengthPercentage)
+            if number.value() == 0.0 =>
+        {
+            Some(0.0)
         }
-        (TokenType::Dimension { number, .. }, PropertyValueType::Length | PropertyValueType::Time) => {
-            Some(number.value())
-        }
-        (TokenType::Number { number }, PropertyValueType::Length) if number.value() == 0.0 => Some(0.0),
         _ => None,
     }
 }
@@ -14709,8 +14753,24 @@ fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &
     };
 
     match (&token.token_type, value_type) {
-        (TokenType::Dimension { unit, .. }, PropertyValueType::Length | PropertyValueType::Time) => Some(unit),
-        (TokenType::Number { number }, PropertyValueType::Length) if number.value() == 0.0 => Some("px"),
+        (
+            TokenType::Dimension { unit, .. },
+            PropertyValueType::Angle
+            | PropertyValueType::AnglePercentage
+            | PropertyValueType::Flex
+            | PropertyValueType::Frequency
+            | PropertyValueType::FrequencyPercentage
+            | PropertyValueType::Length
+            | PropertyValueType::LengthPercentage
+            | PropertyValueType::Resolution
+            | PropertyValueType::Time
+            | PropertyValueType::TimePercentage,
+        ) => Some(unit),
+        (TokenType::Number { number }, PropertyValueType::Length | PropertyValueType::LengthPercentage)
+            if number.value() == 0.0 =>
+        {
+            Some("px")
+        }
         _ => None,
     }
 }
@@ -14734,8 +14794,32 @@ fn style_value_primitive_kind(
     match value_type {
         PropertyValueType::Integer => parse_integer_value_prefix(component_value),
         PropertyValueType::Number => parse_number_value_prefix(component_value),
+        PropertyValueType::Angle => parse_angle_value_prefix(component_value, CssPrimitiveValueOptions::default()),
+        PropertyValueType::AnglePercentage => {
+            match parse_angle_value_prefix(component_value, CssPrimitiveValueOptions::default()) {
+                CssPrimitiveValueKind::Angle => CssPrimitiveValueKind::Angle,
+                _ => parse_percentage_value_prefix(component_value),
+            }
+        }
+        PropertyValueType::Flex => parse_flex_value_prefix(component_value),
+        PropertyValueType::Frequency => parse_frequency_value_prefix(component_value),
+        PropertyValueType::FrequencyPercentage => match parse_frequency_value_prefix(component_value) {
+            CssPrimitiveValueKind::Frequency => CssPrimitiveValueKind::Frequency,
+            _ => parse_percentage_value_prefix(component_value),
+        },
         PropertyValueType::Length => parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default()),
+        PropertyValueType::LengthPercentage => {
+            match parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default()) {
+                CssPrimitiveValueKind::Length => CssPrimitiveValueKind::Length,
+                _ => parse_percentage_value_prefix(component_value),
+            }
+        }
+        PropertyValueType::Resolution => parse_resolution_value_prefix(component_value),
         PropertyValueType::Time => parse_time_value_prefix(component_value),
+        PropertyValueType::TimePercentage => match parse_time_value_prefix(component_value) {
+            CssPrimitiveValueKind::Time => CssPrimitiveValueKind::Time,
+            _ => parse_percentage_value_prefix(component_value),
+        },
         PropertyValueType::Percentage => parse_percentage_value_prefix(component_value),
         PropertyValueType::String => parse_string_value_prefix(component_value),
         PropertyValueType::OpacityValue => match parse_number_value_prefix(component_value) {
@@ -14802,8 +14886,16 @@ fn generated_property_value_type_order() -> &'static [PropertyValueType] {
         PropertyValueType::Integer,
         PropertyValueType::Number,
         PropertyValueType::FitContent,
+        PropertyValueType::Angle,
+        PropertyValueType::AnglePercentage,
+        PropertyValueType::Flex,
+        PropertyValueType::Frequency,
+        PropertyValueType::FrequencyPercentage,
         PropertyValueType::Length,
+        PropertyValueType::LengthPercentage,
+        PropertyValueType::Resolution,
         PropertyValueType::Time,
+        PropertyValueType::TimePercentage,
         PropertyValueType::Percentage,
         PropertyValueType::Paint,
     ]
@@ -14874,6 +14966,51 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
                 CssPrimitiveValueOptions::default(),
             ) == CssPrimitiveValueKind::Number
         }
+        PropertyValueType::Angle => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Angle,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Angle
+        }
+        PropertyValueType::AnglePercentage => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Angle,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Angle
+                || parse_primitive_value(
+                    filtered_input,
+                    CssPrimitiveValueType::Percentage,
+                    CssPrimitiveValueOptions::default(),
+                ) == CssPrimitiveValueKind::Percentage
+        }
+        PropertyValueType::Flex => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Flex,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Flex
+        }
+        PropertyValueType::Frequency => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Frequency,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Frequency
+        }
+        PropertyValueType::FrequencyPercentage => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Frequency,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Frequency
+                || parse_primitive_value(
+                    filtered_input,
+                    CssPrimitiveValueType::Percentage,
+                    CssPrimitiveValueOptions::default(),
+                ) == CssPrimitiveValueKind::Percentage
+        }
         PropertyValueType::Length => {
             parse_primitive_value(
                 filtered_input,
@@ -14881,12 +15018,43 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
                 CssPrimitiveValueOptions::default(),
             ) == CssPrimitiveValueKind::Length
         }
+        PropertyValueType::LengthPercentage => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Length,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Length
+                || parse_primitive_value(
+                    filtered_input,
+                    CssPrimitiveValueType::Percentage,
+                    CssPrimitiveValueOptions::default(),
+                ) == CssPrimitiveValueKind::Percentage
+        }
+        PropertyValueType::Resolution => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Resolution,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Resolution
+        }
         PropertyValueType::Time => {
             parse_primitive_value(
                 filtered_input,
                 CssPrimitiveValueType::Time,
                 CssPrimitiveValueOptions::default(),
             ) == CssPrimitiveValueKind::Time
+        }
+        PropertyValueType::TimePercentage => {
+            parse_primitive_value(
+                filtered_input,
+                CssPrimitiveValueType::Time,
+                CssPrimitiveValueOptions::default(),
+            ) == CssPrimitiveValueKind::Time
+                || parse_primitive_value(
+                    filtered_input,
+                    CssPrimitiveValueType::Percentage,
+                    CssPrimitiveValueOptions::default(),
+                ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::Percentage => {
             parse_primitive_value(
@@ -32970,14 +33138,14 @@ mod tests {
         TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
         TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        component_values_parse_as_property_value_type, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -40650,6 +40818,82 @@ mod tests {
             parse_primitive("ident", CssPrimitiveValueType::String),
             CssPrimitiveValueKind::Invalid
         );
+    }
+
+    #[test]
+    fn parses_primitive_generated_property_value_types() {
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::Angle,
+            b"1deg"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::AnglePercentage,
+            b"1deg"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::AnglePercentage,
+            b"50%"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::Flex,
+            b"1fr"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::Frequency,
+            b"1Hz"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::FrequencyPercentage,
+            b"1Hz"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::FrequencyPercentage,
+            b"50%"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::LengthPercentage,
+            b"1px"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::LengthPercentage,
+            b"50%"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::Resolution,
+            b"96dpi"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::TimePercentage,
+            b"1s"
+        ));
+        assert!(component_values_parse_as_property_value_type(
+            PropertyValueType::TimePercentage,
+            b"50%"
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_primitive_generated_property_value_types() {
+        assert!(!component_values_parse_as_property_value_type(
+            PropertyValueType::Angle,
+            b"50%"
+        ));
+        assert!(!component_values_parse_as_property_value_type(
+            PropertyValueType::Flex,
+            b"1px"
+        ));
+        assert!(!component_values_parse_as_property_value_type(
+            PropertyValueType::Frequency,
+            b"50%"
+        ));
+        assert!(!component_values_parse_as_property_value_type(
+            PropertyValueType::Resolution,
+            b"-1dpi"
+        ));
+        assert!(!component_values_parse_as_property_value_type(
+            PropertyValueType::TimePercentage,
+            b"1px"
+        ));
     }
 
     #[test]
