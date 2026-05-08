@@ -1309,10 +1309,41 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 if (color_red == 0)
                     style_value->list_style_position = static_cast<RustListStylePosition>(color_green);
-                else if (color_red == 1)
-                    style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
-                else
-                    style_value->list_style_type_source = string_from_ffi_bytes(value_ptr, value_len);
+                else if (color_red == 1) {
+                    style_value->list_style_image_kind = static_cast<RustListStyleImageKind>(color_green);
+                    if (*style_value->list_style_image_kind == RustListStyleImageKind::Source)
+                        style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
+                } else {
+                    auto type_kind = static_cast<RustListStyleTypeKind>(color_green);
+                    style_value->list_style_type_kind = type_kind;
+                    switch (type_kind) {
+                    case RustListStyleTypeKind::None:
+                        break;
+                    case RustListStyleTypeKind::String:
+                        style_value->list_style_type_string = string_from_ffi_bytes(value_ptr, value_len);
+                        break;
+                    case RustListStyleTypeKind::CounterStyleName:
+                        style_value->list_style_type_counter_style = CounterStyle {
+                            .kind = FFI::CssCounterStyleKind::Name,
+                            .symbols_type = FFI::CssCounterStyleSymbolsType::Symbolic,
+                            .name = fly_string_from_ffi_bytes(value_ptr, value_len),
+                            .symbols = {},
+                        };
+                        break;
+                    case RustListStyleTypeKind::CounterStyleSymbols:
+                        style_value->list_style_type_counter_style = CounterStyle {
+                            .kind = FFI::CssCounterStyleKind::SymbolsFunction,
+                            .symbols_type = static_cast<FFI::CssCounterStyleSymbolsType>(color_blue),
+                            .name = {},
+                            .symbols = {},
+                        };
+                        break;
+                    case RustListStyleTypeKind::CounterStyleSymbol:
+                        VERIFY(style_value->list_style_type_counter_style.has_value());
+                        style_value->list_style_type_counter_style->symbols.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+                        break;
+                    }
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::MathDepth) {
                 value.color_red = color_red;

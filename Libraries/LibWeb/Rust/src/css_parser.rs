@@ -2266,8 +2266,8 @@ pub(crate) struct RustOwnedImageSetOption {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedListStyle {
     position: Option<RustOwnedListStylePosition>,
-    image_source: Option<String>,
-    type_source: Option<String>,
+    image: Option<RustOwnedListStyleImage>,
+    list_style_type: Option<RustOwnedListStyleType>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2275,6 +2275,19 @@ pub(crate) struct RustOwnedListStyle {
 pub(crate) enum RustOwnedListStylePosition {
     Inside,
     Outside,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedListStyleImage {
+    None,
+    Source(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedListStyleType {
+    None,
+    String(String),
+    CounterStyle(CounterStyle),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5003,8 +5016,8 @@ fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustO
     }
 
     let mut position = None;
-    let mut image_source = None;
-    let mut type_source = None;
+    let mut image = None;
+    let mut list_style_type = None;
     let mut found_nones = 0_u8;
 
     for component_value in &component_values {
@@ -5013,11 +5026,11 @@ fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustO
             continue;
         }
 
-        if image_source.is_none() && component_value_parse_as_list_style_image(component_value) {
-            image_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+        if image.is_none()
+            && let Some(value) =
+                rust_owned_list_style_image_from_component_value(component_value, filtered_input_string)
+        {
+            image = Some(value);
             continue;
         }
 
@@ -5026,11 +5039,10 @@ fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustO
             continue;
         }
 
-        if type_source.is_none() && component_value_parse_as_list_style_type(component_value) {
-            type_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+        if list_style_type.is_none()
+            && let Some(value) = rust_owned_list_style_type_from_component_value(component_value)
+        {
+            list_style_type = Some(value);
             continue;
         }
 
@@ -5048,27 +5060,27 @@ fn rust_owned_list_style_style_value_kind(filtered_input: &[u8]) -> Option<RustO
     // shorthand needs to defer assigning it until the unambiguous components are
     // known.
     if found_nones == 2 {
-        if image_source.is_some() || type_source.is_some() {
+        if image.is_some() || list_style_type.is_some() {
             return None;
         }
-        image_source = Some("none".to_string());
-        type_source = Some("none".to_string());
+        image = Some(RustOwnedListStyleImage::None);
+        list_style_type = Some(RustOwnedListStyleType::None);
     } else if found_nones == 1 {
-        if image_source.is_some() && type_source.is_some() {
+        if image.is_some() && list_style_type.is_some() {
             return None;
         }
-        if image_source.is_none() {
-            image_source = Some("none".to_string());
+        if image.is_none() {
+            image = Some(RustOwnedListStyleImage::None);
         }
-        if type_source.is_none() {
-            type_source = Some("none".to_string());
+        if list_style_type.is_none() {
+            list_style_type = Some(RustOwnedListStyleType::None);
         }
     }
 
     Some(RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
         position,
-        image_source,
-        type_source,
+        image,
+        list_style_type,
     }))
 }
 
@@ -8370,20 +8382,12 @@ where
                     "",
                 );
             }
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::ListStyle,
-                property_id,
-                1,
-                value.image_source.as_ref(),
-            );
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::ListStyle,
-                property_id,
-                2,
-                value.type_source.as_ref(),
-            );
+            if let Some(image) = value.image.as_ref() {
+                callback_list_style_image(callback, property_id, image);
+            }
+            if let Some(list_style_type) = value.list_style_type.as_ref() {
+                callback_list_style_type(callback, property_id, list_style_type);
+            }
         }
         RustOwnedStyleValueKind::MathDepth(value) => match value {
             RustOwnedMathDepth::AutoAdd => callback(
@@ -10304,6 +10308,13 @@ const FLEX_SHORTHAND_CALLBACK_NONE: u8 = 0;
 const FLEX_SHORTHAND_CALLBACK_GROW: u8 = 1;
 const FLEX_SHORTHAND_CALLBACK_SHRINK: u8 = 2;
 const FLEX_SHORTHAND_CALLBACK_BASIS: u8 = 3;
+const LIST_STYLE_IMAGE_CALLBACK_NONE: u8 = 0;
+const LIST_STYLE_IMAGE_CALLBACK_SOURCE: u8 = 1;
+const LIST_STYLE_TYPE_CALLBACK_NONE: u8 = 0;
+const LIST_STYLE_TYPE_CALLBACK_STRING: u8 = 1;
+const LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_NAME: u8 = 2;
+const LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_SYMBOLS: u8 = 3;
+const LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_SYMBOL: u8 = 4;
 
 const SIMPLE_FILTER_FUNCTION_BRIGHTNESS: u8 = 0;
 const SIMPLE_FILTER_FUNCTION_CONTRAST: u8 = 1;
@@ -10388,6 +10399,93 @@ where
         0,
         0,
         value.predefined.as_bytes(),
+        "",
+    );
+}
+
+fn callback_list_style_image<C>(callback: &mut C, property_id: u16, value: &RustOwnedListStyleImage)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, source) = match value {
+        RustOwnedListStyleImage::None => (LIST_STYLE_IMAGE_CALLBACK_NONE, ""),
+        RustOwnedListStyleImage::Source(source) => (LIST_STYLE_IMAGE_CALLBACK_SOURCE, source.as_str()),
+    };
+    callback(
+        CssStyleValueKind::ListStyle,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        1,
+        kind,
+        0,
+        0,
+        source.as_bytes(),
+        "",
+    );
+}
+
+fn callback_list_style_type<C>(callback: &mut C, property_id: u16, value: &RustOwnedListStyleType)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedListStyleType::None => {
+            callback_list_style_type_event(callback, property_id, LIST_STYLE_TYPE_CALLBACK_NONE, 0, "");
+        }
+        RustOwnedListStyleType::String(source) => {
+            callback_list_style_type_event(callback, property_id, LIST_STYLE_TYPE_CALLBACK_STRING, 0, source);
+        }
+        RustOwnedListStyleType::CounterStyle(CounterStyle::Name(name)) => {
+            callback_list_style_type_event(
+                callback,
+                property_id,
+                LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_NAME,
+                0,
+                name,
+            );
+        }
+        RustOwnedListStyleType::CounterStyle(CounterStyle::SymbolsFunction { symbols_type, symbols }) => {
+            callback_list_style_type_event(
+                callback,
+                property_id,
+                LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_SYMBOLS,
+                *symbols_type as u8,
+                "",
+            );
+            for symbol in symbols {
+                callback_list_style_type_event(
+                    callback,
+                    property_id,
+                    LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_SYMBOL,
+                    0,
+                    symbol,
+                );
+            }
+        }
+    }
+}
+
+fn callback_list_style_type_event<C>(callback: &mut C, property_id: u16, kind: u8, symbols_type: u8, source: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::ListStyle,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        2,
+        kind,
+        symbols_type,
+        0,
+        source.as_bytes(),
         "",
     );
 }
@@ -20098,11 +20196,36 @@ fn component_value_parse_as_list_style_image(component_value: &ComponentValue) -
         )
 }
 
+fn rust_owned_list_style_image_from_component_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedListStyleImage> {
+    if component_value_parse_as_list_style_image(component_value) {
+        return Some(RustOwnedListStyleImage::Source(
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?,
+        ));
+    }
+    None
+}
+
 fn component_value_parse_as_list_style_type(component_value: &ComponentValue) -> bool {
     parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String || {
         let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
         parser.parse_a_counter_style().is_some()
     }
+}
+
+fn rust_owned_list_style_type_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedListStyleType> {
+    if let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::String { value },
+        ..
+    }) = component_value
+    {
+        return Some(RustOwnedListStyleType::String(value.clone()));
+    }
+
+    let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+    Some(RustOwnedListStyleType::CounterStyle(parser.parse_a_counter_style()?))
 }
 
 pub(crate) fn parse_filter_value_list_value(filtered_input: &[u8]) -> bool {
@@ -30528,11 +30651,11 @@ mod tests {
         RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
         RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedListStylePosition, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
+        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
         RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
@@ -32331,8 +32454,10 @@ mod tests {
                 property_id: PropertyId::ListStyle,
                 value: RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
                     position: Some(RustOwnedListStylePosition::Inside),
-                    image_source: Some("url(marker.png)".to_string()),
-                    type_source: Some("square".to_string()),
+                    image: Some(RustOwnedListStyleImage::Source("url(marker.png)".to_string())),
+                    list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
+                        "square".to_string()
+                    ))),
                 }),
             })
         );

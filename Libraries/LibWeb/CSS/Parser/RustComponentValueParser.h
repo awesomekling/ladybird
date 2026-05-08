@@ -144,6 +144,19 @@ public:
         Outside,
     };
 
+    enum class RustListStyleImageKind : u8 {
+        None,
+        Source,
+    };
+
+    enum class RustListStyleTypeKind : u8 {
+        None,
+        String,
+        CounterStyleName,
+        CounterStyleSymbols,
+        CounterStyleSymbol,
+    };
+
     enum class RustTextDecorationStyle : u8 {
         Solid,
         Double,
@@ -447,8 +460,11 @@ public:
         Optional<RustTextDecorationStyle> text_decoration_style;
         Optional<RustStyleColor> text_decoration_color;
         Optional<RustListStylePosition> list_style_position;
+        Optional<RustListStyleImageKind> list_style_image_kind;
         Optional<String> list_style_image_source;
-        Optional<String> list_style_type_source;
+        Optional<RustListStyleTypeKind> list_style_type_kind;
+        Optional<String> list_style_type_string;
+        Optional<CounterStyle> list_style_type_counter_style;
         Optional<RustNestedPrimitiveValue> math_depth_integer;
         bool aspect_ratio_has_auto { false };
         Optional<RustNestedPrimitiveValue> aspect_ratio_numerator;

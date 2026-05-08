@@ -1937,6 +1937,38 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_rust_list_style_image = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->list_style_image_kind.has_value())
+                    return property_initial_value(PropertyID::ListStyleImage);
+                switch (*rust_style_value->list_style_image_kind) {
+                case RustComponentValueParser::RustListStyleImageKind::None:
+                    return KeywordStyleValue::create(Keyword::None);
+                case RustComponentValueParser::RustListStyleImageKind::Source:
+                    if (!rust_style_value->list_style_image_source.has_value())
+                        return nullptr;
+                    return parse_rust_source_as_property(PropertyID::ListStyleImage, *rust_style_value->list_style_image_source);
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto materialize_rust_list_style_type = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->list_style_type_kind.has_value())
+                    return property_initial_value(PropertyID::ListStyleType);
+                switch (*rust_style_value->list_style_type_kind) {
+                case RustComponentValueParser::RustListStyleTypeKind::None:
+                    return KeywordStyleValue::create(Keyword::None);
+                case RustComponentValueParser::RustListStyleTypeKind::String:
+                    if (!rust_style_value->list_style_type_string.has_value())
+                        return nullptr;
+                    return StringStyleValue::create(*rust_style_value->list_style_type_string);
+                case RustComponentValueParser::RustListStyleTypeKind::CounterStyleName:
+                case RustComponentValueParser::RustListStyleTypeKind::CounterStyleSymbols:
+                case RustComponentValueParser::RustListStyleTypeKind::CounterStyleSymbol:
+                    if (!rust_style_value->list_style_type_counter_style.has_value())
+                        return nullptr;
+                    return materialize_rust_counter_style(rust_style_value->list_style_type_counter_style);
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto materialize_rust_keyword_list = [](Vector<String> const& keywords) -> RefPtr<StyleValue const> {
                 if (keywords.is_empty())
                     return nullptr;
@@ -3361,16 +3393,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ListStyle:
-                if (rust_style_value->list_style_position.has_value() || rust_style_value->list_style_image_source.has_value() || rust_style_value->list_style_type_source.has_value()) {
+                if (rust_style_value->list_style_position.has_value() || rust_style_value->list_style_image_kind.has_value() || rust_style_value->list_style_type_kind.has_value()) {
                     RefPtr<StyleValue const> list_position = rust_style_value->list_style_position.has_value()
                         ? KeywordStyleValue::create(list_style_position_keyword_from_rust(*rust_style_value->list_style_position))
                         : property_initial_value(PropertyID::ListStylePosition);
-                    auto list_image = rust_style_value->list_style_image_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ListStyleImage, *rust_style_value->list_style_image_source)
-                        : property_initial_value(PropertyID::ListStyleImage);
-                    auto list_type = rust_style_value->list_style_type_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ListStyleType, *rust_style_value->list_style_type_source)
-                        : property_initial_value(PropertyID::ListStyleType);
+                    auto list_image = materialize_rust_list_style_image();
+                    auto list_type = materialize_rust_list_style_type();
                     if (!list_position || !list_image || !list_type)
                         break;
                     discard_rust_owned_property_value_tokens();
