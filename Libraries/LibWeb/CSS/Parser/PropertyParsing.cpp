@@ -1241,7 +1241,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return Gfx::WindingRule::EvenOdd;
                 return {};
             };
-            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups) -> RefPtr<StyleValue const> {
+            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups, Optional<u8> fill_rule_value, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
+                auto materialize_rust_fill_rule = [](Optional<u8> fill_rule_value) -> Optional<Gfx::WindingRule> {
+                    if (!fill_rule_value.has_value() || *fill_rule_value == 0)
+                        return Gfx::WindingRule::Nonzero;
+                    if (*fill_rule_value == 1)
+                        return Gfx::WindingRule::EvenOdd;
+                    return {};
+                };
                 auto parse_optional_round_border_radius = [&](TokenStream<ComponentValue>& arguments_tokens) -> RefPtr<StyleValue const> {
                     NonnullRefPtr<StyleValue const> border_radius = BorderRadiusRectStyleValue::create_zero();
                     arguments_tokens.discard_whitespace();
@@ -1440,6 +1447,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustBasicShapeKind::Path: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "path"sv });
+                    if (path_data_string.has_value()) {
+                        auto fill_rule = materialize_rust_fill_rule(fill_rule_value);
+                        if (!fill_rule.has_value())
+                            return nullptr;
+
+                        auto path_data = SVG::AttributeParser::parse_path_data(*path_data_string);
+                        if (path_data.instructions().is_empty())
+                            return nullptr;
+
+                        return BasicShapeStyleValue::create(Path { *fill_rule, move(path_data) });
+                    }
+
                     if (argument_groups.is_empty() || argument_groups.size() > 2)
                         return nullptr;
 
@@ -1603,7 +1622,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 RefPtr<StyleValue const> basic_shape_value;
                 RefPtr<StyleValue const> shape_box_value;
                 if (rust_style_value->shape_outside_basic_shape_kind.has_value()) {
-                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups);
+                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups, rust_style_value->shape_outside_basic_shape_fill_rule, rust_style_value->shape_outside_basic_shape_path_data);
                     if (!basic_shape_value)
                         return nullptr;
                 }
@@ -2541,7 +2560,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BasicShape:
-                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups)) {
+                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_path_data)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

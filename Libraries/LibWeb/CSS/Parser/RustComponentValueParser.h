@@ -541,6 +541,8 @@ public:
         StepPosition easing_function_step_position { StepPosition::End };
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Vector<String> basic_shape_argument_groups;
+        Optional<u8> basic_shape_fill_rule;
+        Optional<String> basic_shape_path_data;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
         Optional<RustNestedPrimitiveValue> fit_content_argument;
         Vector<RustNestedPrimitiveValue> rect_sides;
@@ -579,6 +581,8 @@ public:
         Optional<String> shape_outside_image_source;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Vector<String> shape_outside_basic_shape_argument_groups;
+        Optional<u8> shape_outside_basic_shape_fill_rule;
+        Optional<String> shape_outside_basic_shape_path_data;
         Optional<ShapeBox> shape_outside_shape_box;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
