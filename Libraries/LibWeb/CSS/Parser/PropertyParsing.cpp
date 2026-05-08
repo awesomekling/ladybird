@@ -2895,6 +2895,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value };
                 }
                 break;
+            case FFI::CssStyleValueKind::Image:
+                if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
+                    if (auto value = materialize_rust_image(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url)) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value };
+                    }
+                }
+                break;
             case FFI::CssStyleValueKind::BasicShape:
                 if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_rectangle_components, rust_style_value->basic_shape_rectangle_border_radius_horizontal_radii, rust_style_value->basic_shape_rectangle_border_radius_vertical_radii, rust_style_value->basic_shape_radial_shape_is_typed, rust_style_value->basic_shape_radial_shape_radius, rust_style_value->basic_shape_radial_shape_position, rust_style_value->basic_shape_polygon_coordinates, rust_style_value->basic_shape_path_data)) {
                     discard_rust_owned_property_value_tokens();

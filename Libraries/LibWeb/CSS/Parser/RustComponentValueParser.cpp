@@ -1011,6 +1011,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.keyword = keyword.release_value();
             } else if (kind == FFI::CssStyleValueKind::CustomIdent) {
                 value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::Image) {
+                value.image_kind = static_cast<RustImageKind>(color_red);
+                value.image_source = string_from_ffi_bytes(value_ptr, value_len);
+                value.image_url = image_url_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::Color) {
                 if (value_len > 0)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);

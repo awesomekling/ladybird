@@ -1844,6 +1844,7 @@ pub enum CssStyleValueKind {
     CounterStyle,
     EasingFunction,
     FitContent,
+    Image,
     FontFamily,
     FontFeatureSettings,
     FontLanguageOverride,
@@ -8082,6 +8083,9 @@ where
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
+        RustOwnedStyleValueKind::Image(image) if image.kind == RustOwnedImageKind::Url && image.url.is_some() => {
+            callback_image_style_value(callback, property_id, image);
+        }
         RustOwnedStyleValueKind::Image(_) => {
             callback_style_value_type(
                 callback,
@@ -10950,6 +10954,28 @@ fn image_callback_payload(image: &RustOwnedImage) -> (u8, u8, &str) {
         );
     }
     (image.kind as u8, IMAGE_URL_FUNCTION_TYPE_NONE, &image.source)
+}
+
+fn callback_image_style_value<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (image_kind, url_function_type, payload) = image_callback_payload(image);
+    callback(
+        CssStyleValueKind::Image,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        image_kind,
+        0,
+        0,
+        url_function_type,
+        payload.as_bytes(),
+        "",
+    );
 }
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)

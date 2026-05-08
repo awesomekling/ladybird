@@ -647,6 +647,9 @@ public:
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
+        Optional<RustImageKind> image_kind;
+        Optional<String> image_source;
+        Optional<URL> image_url;
         Vector<RustPosition> positions;
         Vector<RustPositionComponent> position_components;
         FFI::CssPositionAnchorValueKind position_anchor_kind { FFI::CssPositionAnchorValueKind::Invalid };
