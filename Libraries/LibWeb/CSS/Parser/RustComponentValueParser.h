@@ -927,12 +927,6 @@ public:
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding);
-    static Optional<FFI::CssCounterStyleNegativeSymbolCount> parse_counter_style_negative(StringView input, StringView encoding);
-    static Optional<FFI::CssCounterStyleSystemKind> parse_counter_style_system(StringView input, StringView encoding);
-    static bool parse_counter_style_symbol(StringView input, StringView encoding);
-    static Optional<size_t> parse_counter_style_symbols(StringView input, StringView encoding);
-    static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
-    static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
     static Optional<Vector<String>> parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding);
     static Optional<Vector<String>> parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
@@ -967,12 +961,7 @@ public:
     static FFI::CssColorFunctionValueKind parse_color_function(StringView input, StringView encoding);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static FFI::CssImageSetValueKind parse_image_set(StringView input, StringView encoding);
-    static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);
     static Optional<Vector<String>> parse_font_weight_absolute_pair_descriptor_sources(StringView input, StringView encoding);
-    static bool parse_string_descriptor(StringView input, StringView encoding);
-    static bool parse_length_descriptor(StringView input, StringView encoding);
-    static bool parse_positive_percentage_descriptor(StringView input, StringView encoding);
-    static bool parse_page_size_descriptor(StringView input, StringView encoding);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);

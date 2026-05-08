@@ -2786,153 +2786,6 @@ pub unsafe extern "C" fn rust_css_parse_nonnegative_integer_symbol_pair(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_negative(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    count_callback: unsafe extern "C" fn(ctx: *mut c_void, count: CssCounterStyleNegativeSymbolCount),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_negative(input, |count| {
-                count_callback(ctx, count);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_system(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    system_callback: unsafe extern "C" fn(ctx: *mut c_void, system: CssCounterStyleSystemKind),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_system(input, |system| {
-                system_callback(ctx, system);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_symbols(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    count_callback: unsafe extern "C" fn(ctx: *mut c_void, count: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_symbols(input, |count| {
-                count_callback(ctx, count);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_symbol(input: *const u8, input_len: usize) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_symbol(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_string_descriptor(input: *const u8, input_len: usize) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_string_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_length_descriptor(input: *const u8, input_len: usize) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_length_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_positive_percentage_descriptor(input: *const u8, input_len: usize) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_positive_percentage_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_page_size_descriptor(input: *const u8, input_len: usize) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_page_size_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
     input: *const u8,
@@ -2945,30 +2798,6 @@ pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
             };
 
             css_parser::parse_optional_declaration_value_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_range(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    range_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssCounterStyleRangeKind, count: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_range(input, |kind, count| {
-                range_callback(ctx, kind, count);
-            })
         })
     }
 }
@@ -3416,30 +3245,6 @@ pub unsafe extern "C" fn rust_css_parse_string_descriptor_source(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_additive_symbols(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    count_callback: unsafe extern "C" fn(ctx: *mut c_void, count: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_counter_style_additive_symbols(input, |count| {
-                count_callback(ctx, count);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_crop_or_cross(
     input: *const u8,
     input_len: usize,
@@ -3454,30 +3259,6 @@ pub unsafe extern "C" fn rust_css_parse_crop_or_cross(
 
             css_parser::parse_crop_or_cross(input, |kind| {
                 kind_callback(ctx, kind);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_font_weight_absolute_pair(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    count_callback: unsafe extern "C" fn(ctx: *mut c_void, count: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_font_weight_absolute_pair(input, |count| {
-                count_callback(ctx, count);
             })
         })
     }

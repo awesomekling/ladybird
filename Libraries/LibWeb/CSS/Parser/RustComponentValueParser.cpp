@@ -4410,119 +4410,6 @@ Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> RustComponentValueParser::pa
     return order;
 }
 
-Optional<FFI::CssCounterStyleNegativeSymbolCount> RustComponentValueParser::parse_counter_style_negative(StringView input, StringView encoding)
-{
-    Optional<FFI::CssCounterStyleNegativeSymbolCount> count;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_negative(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &count,
-        [](void* raw_count, FFI::CssCounterStyleNegativeSymbolCount parsed_count) {
-            auto& count = *static_cast<Optional<FFI::CssCounterStyleNegativeSymbolCount>*>(raw_count);
-            count = parsed_count;
-        });
-
-    if (!parsed || !count.has_value())
-        return {};
-
-    return count;
-}
-
-Optional<FFI::CssCounterStyleSystemKind> RustComponentValueParser::parse_counter_style_system(StringView input, StringView encoding)
-{
-    Optional<FFI::CssCounterStyleSystemKind> system;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_system(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &system,
-        [](void* raw_system, FFI::CssCounterStyleSystemKind parsed_system) {
-            auto& system = *static_cast<Optional<FFI::CssCounterStyleSystemKind>*>(raw_system);
-            system = parsed_system;
-        });
-
-    if (!parsed || !system.has_value())
-        return {};
-
-    return system;
-}
-
-bool RustComponentValueParser::parse_counter_style_symbol(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_counter_style_symbol(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-Optional<size_t> RustComponentValueParser::parse_counter_style_symbols(StringView input, StringView encoding)
-{
-    Optional<size_t> count;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_symbols(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &count,
-        [](void* raw_count, size_t parsed_count) {
-            auto& count = *static_cast<Optional<size_t>*>(raw_count);
-            count = parsed_count;
-        });
-
-    if (!parsed || !count.has_value())
-        return {};
-
-    return count;
-}
-
-Optional<RustComponentValueParser::CounterStyleRangeSyntax> RustComponentValueParser::parse_counter_style_range(StringView input, StringView encoding)
-{
-    Optional<CounterStyleRangeSyntax> range;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_range(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &range,
-        [](void* raw_range, FFI::CssCounterStyleRangeKind kind, size_t count) {
-            auto& range = *static_cast<Optional<CounterStyleRangeSyntax>*>(raw_range);
-            range = CounterStyleRangeSyntax { .kind = kind, .count = count };
-        });
-
-    if (!parsed || !range.has_value())
-        return {};
-
-    return range;
-}
-
-Optional<size_t> RustComponentValueParser::parse_counter_style_additive_symbols(StringView input, StringView encoding)
-{
-    Optional<size_t> count;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_additive_symbols(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &count,
-        [](void* raw_count, size_t parsed_count) {
-            auto& count = *static_cast<Optional<size_t>*>(raw_count);
-            count = parsed_count;
-        });
-
-    if (!parsed || !count.has_value())
-        return {};
-
-    return count;
-}
-
 Optional<Vector<String>> RustComponentValueParser::parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding)
 {
     Vector<String> symbols;
@@ -4792,38 +4679,6 @@ Optional<String> RustComponentValueParser::parse_string_descriptor_source(String
         return {};
 
     return source;
-}
-
-bool RustComponentValueParser::parse_string_descriptor(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_string_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-bool RustComponentValueParser::parse_length_descriptor(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_length_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-bool RustComponentValueParser::parse_positive_percentage_descriptor(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_positive_percentage_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-bool RustComponentValueParser::parse_page_size_descriptor(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_page_size_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
 bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
@@ -5130,27 +4985,6 @@ FFI::CssImageSetValueKind RustComponentValueParser::parse_image_set(StringView i
     return FFI::rust_css_parse_image_set(
         filtered_input_bytes.data(),
         filtered_input_bytes.size());
-}
-
-Optional<size_t> RustComponentValueParser::parse_font_weight_absolute_pair(StringView input, StringView encoding)
-{
-    Optional<size_t> count;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_weight_absolute_pair(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &count,
-        [](void* raw_count, size_t parsed_count) {
-            auto& count = *static_cast<Optional<size_t>*>(raw_count);
-            count = parsed_count;
-        });
-
-    if (!parsed || !count.has_value())
-        return {};
-
-    return count;
 }
 
 Optional<Vector<String>> RustComponentValueParser::parse_font_weight_absolute_pair_descriptor_sources(StringView input, StringView encoding)
