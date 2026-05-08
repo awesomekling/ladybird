@@ -17,6 +17,11 @@ PARAMETER_TYPE_NAMES = {
 }
 
 
+def title_casify_transform_function(name: str) -> str:
+    # Transform function names look like `fooBar`, so we just have to make the first character uppercase.
+    return name[0].upper() + name[1:]
+
+
 def write_generated_file(transforms_data: dict, output_path: str) -> None:
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(
@@ -30,6 +35,17 @@ def write_generated_file(transforms_data: dict, output_path: str) -> None:
 // Do not edit.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum TransformFunction {
+"""
+        )
+        for name in transforms_data:
+            output_file.write(f"    {title_casify_transform_function(name)},\n")
+        output_file.write(
+            """}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum TransformFunctionParameterType {
     Angle,
     Length,
@@ -63,17 +79,33 @@ pub(crate) struct TransformFunctionParameter {
             output_file.write("];\n\n")
 
         output_file.write(
-            """pub(crate) fn transform_function_parameters_from_name(name: &str) -> Option<&'static [TransformFunctionParameter]> {
+            """pub(crate) fn transform_function_from_name(name: &str) -> Option<TransformFunction> {
 """
         )
         for name in transforms_data:
             output_file.write(f"""    if name.eq_ignore_ascii_case("{name}") {{
-        return Some({name.upper()}_PARAMETERS);
+        return Some(TransformFunction::{title_casify_transform_function(name)});
     }}
 """)
         output_file.write(
             """
     None
+}
+
+pub(crate) fn transform_function_parameters(function: TransformFunction) -> &'static [TransformFunctionParameter] {
+    match function {
+"""
+        )
+        for name in transforms_data:
+            output_file.write(
+                f"        TransformFunction::{title_casify_transform_function(name)} => {name.upper()}_PARAMETERS,\n"
+            )
+        output_file.write(
+            """    }
+}
+
+pub(crate) fn transform_function_parameters_from_name(name: &str) -> Option<&'static [TransformFunctionParameter]> {
+    transform_function_from_name(name).map(transform_function_parameters)
 }
 """
         )

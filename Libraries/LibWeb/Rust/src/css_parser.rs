@@ -27,7 +27,10 @@ use crate::generated_pseudo_elements::{
     PseudoElementId, PseudoElementParameterType, aliased_pseudo_element_id_from_string, is_has_allowed_pseudo_element,
     pseudo_element_id_from_string, pseudo_element_metadata,
 };
-use crate::generated_transform_functions::{TransformFunctionParameterType, transform_function_parameters_from_name};
+use crate::generated_transform_functions::{
+    TransformFunction, TransformFunctionParameterType, transform_function_from_name, transform_function_parameters,
+    transform_function_parameters_from_name,
+};
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::{
     GeneratedValueTypeStyleValueKind, ValueTypeId, component_values_parse_as_generated_value_type,
@@ -1912,6 +1915,7 @@ pub enum CssStyleValueKind {
     TextIndent,
     TextUnderlinePosition,
     TouchAction,
+    Transformation,
     TransformLonghand,
     TransformOrigin,
     TransitionBehavior,
@@ -3024,7 +3028,7 @@ pub(crate) enum RustOwnedTransformLonghand {
     None,
     Function {
         function: RustOwnedTransformLonghandFunction,
-        arguments: Vec<String>,
+        arguments: Vec<RustOwnedTransformationArgument>,
     },
 }
 
@@ -3056,15 +3060,14 @@ pub(crate) enum RustOwnedTransformOriginComponentValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformation {
-    function_name: String,
+    function: TransformFunction,
     arguments: Vec<RustOwnedTransformationArgument>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformationArgument {
     parameter_type: TransformFunctionParameterType,
-    source: String,
+    value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4562,12 +4565,13 @@ fn rust_owned_basic_shape_style_value_kind(
 
 fn rust_owned_transformation_style_value_kind(
     function: &Function,
-    component_value: &ComponentValue,
+    _component_value: &ComponentValue,
     filtered_input_string: &str,
 ) -> Option<RustOwnedTransformation> {
     // https://drafts.csswg.org/css-transforms-1/#typedef-transform-function
     // <transform-function> = <matrix()> | <translate()> | <translateX()> | <translateY()> | <scale()> | <scaleX()> | <scaleY()> | <rotate()> | <skew()> | <skewX()> | <skewY()>
-    let parameters = transform_function_parameters_from_name(&function.name)?;
+    let transform_function = transform_function_from_name(&function.name)?;
+    let parameters = transform_function_parameters(transform_function);
     let arguments = parse_comma_separated_component_values(function.value.clone(), |component_values| {
         let [component_value] = strip_whitespace(&component_values) else {
             return None;
@@ -4590,14 +4594,17 @@ fn rust_owned_transformation_style_value_kind(
 
         rust_owned_arguments.push(RustOwnedTransformationArgument {
             parameter_type: parameter.parameter_type,
-            source: serialize_component_values_for_reparsing(std::slice::from_ref(argument), filtered_input_string)?,
+            value: component_value_parse_as_nested_transform_function_argument(
+                argument,
+                parameter.parameter_type,
+                filtered_input_string,
+            )?,
         });
     }
 
     Some(RustOwnedTransformation {
-        function_name: function.name.clone(),
+        function: transform_function,
         arguments: rust_owned_arguments,
-        source: serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?,
     })
 }
 
@@ -8961,7 +8968,9 @@ where
         RustOwnedStyleValueKind::TransformLonghand(value) => {
             callback_transform_longhand_style_value(callback, property_id, value);
         }
-        RustOwnedStyleValueKind::Transformation(_) => {}
+        RustOwnedStyleValueKind::Transformation(value) => {
+            callback_transformation_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::TouchAction(value) => callback(
             CssStyleValueKind::TouchAction,
             property_id,
@@ -9301,6 +9310,14 @@ where
         RustOwnedStyleValueKind::Shorthand(value_list)
         | RustOwnedStyleValueKind::Tuple(value_list)
         | RustOwnedStyleValueKind::ValueList(value_list) => {
+            if value_list.value_type == Some(PropertyValueType::TransformList) {
+                for value in &value_list.values {
+                    if let RustOwnedStyleValueKind::Transformation(transformation) = value {
+                        callback_transformation_style_value(callback, property_id, transformation);
+                    }
+                }
+                return;
+            }
             if let Some(value_type) = value_list.value_type {
                 if let Some(source) = value_list.source.as_ref() {
                     callback_source_backed_value_type_style_value(callback, property_id, source, value_type);
@@ -10877,6 +10894,8 @@ const TRANSFORM_LONGHAND_FUNCTION_TRANSLATE: u8 = 5;
 const TRANSFORM_LONGHAND_FUNCTION_TRANSLATE_3D: u8 = 6;
 const TRANSFORM_LONGHAND_FUNCTION_SCALE: u8 = 7;
 const TRANSFORM_LONGHAND_FUNCTION_SCALE_3D: u8 = 8;
+const TRANSFORMATION_CALLBACK_BEGIN_FUNCTION: u8 = 0;
+const TRANSFORMATION_CALLBACK_ARGUMENT: u8 = 1;
 const FONT_VARIANT_CALLBACK_NORMAL: u8 = 0;
 const FONT_VARIANT_CALLBACK_SIMPLE: u8 = 1;
 const FONT_VARIANT_CALLBACK_ALTERNATES_VALUE: u8 = 2;
@@ -12609,24 +12628,80 @@ where
                 RustOwnedTransformLonghandFunction::Scale3d => TRANSFORM_LONGHAND_FUNCTION_SCALE_3D,
             };
             for (index, argument) in arguments.iter().enumerate() {
-                callback(
+                callback_transform_function_argument(
+                    callback,
                     CssStyleValueKind::TransformLonghand,
                     property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
                     TRANSFORM_LONGHAND_CALLBACK_FUNCTION,
                     function,
                     u8::try_from(index).expect("transform longhands have fewer than 255 arguments"),
-                    0,
-                    argument.as_bytes(),
-                    "",
+                    argument,
                 );
             }
         }
     }
+}
+
+fn callback_transformation_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedTransformation)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Transformation,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        TRANSFORMATION_CALLBACK_BEGIN_FUNCTION,
+        value.function as u8,
+        0,
+        0,
+        &[],
+        "",
+    );
+
+    for argument in &value.arguments {
+        callback_transform_function_argument(
+            callback,
+            CssStyleValueKind::Transformation,
+            property_id,
+            TRANSFORMATION_CALLBACK_ARGUMENT,
+            value.function as u8,
+            argument.parameter_type as u8,
+            argument,
+        );
+    }
+}
+
+fn callback_transform_function_argument<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    event_kind: u8,
+    function: u8,
+    parameter_type: u8,
+    argument: &RustOwnedTransformationArgument,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(&argument.value);
+    callback(
+        kind,
+        property_id,
+        primitive_kind,
+        !matches!(argument.value, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        false,
+        0.0,
+        event_kind,
+        function,
+        parameter_type,
+        0,
+        unit_or_source.as_bytes(),
+        "",
+    );
 }
 
 fn callback_place_shorthand_style_value<C>(
@@ -17053,6 +17128,50 @@ fn component_value_matches_transform_function_parameter(
     }
 }
 
+fn component_value_parse_as_nested_transform_function_argument(
+    component_value: &ComponentValue,
+    parameter_type: TransformFunctionParameterType,
+    filtered_input_string: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    if !component_value_matches_transform_function_parameter(component_value, parameter_type) {
+        return None;
+    }
+
+    match parameter_type {
+        TransformFunctionParameterType::Angle => {
+            if component_value_is_zero_number(component_value) {
+                return Some(RustOwnedNestedPrimitiveValue::Angle {
+                    value: 0.0,
+                    unit: "deg".to_string(),
+                });
+            }
+            component_value_parse_as_nested_angle(component_value, filtered_input_string)
+        }
+        TransformFunctionParameterType::Length => {
+            component_value_parse_as_nested_length(component_value, filtered_input_string)
+        }
+        TransformFunctionParameterType::LengthNone => {
+            if component_value_ref_is_ident(component_value, "none") {
+                return serialize_component_values_for_reparsing(
+                    std::slice::from_ref(component_value),
+                    filtered_input_string,
+                )
+                .map(RustOwnedNestedPrimitiveValue::Source);
+            }
+            component_value_parse_as_nested_length(component_value, filtered_input_string)
+        }
+        TransformFunctionParameterType::LengthPercentage => {
+            component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)
+        }
+        TransformFunctionParameterType::Number => {
+            component_value_parse_as_nested_number(component_value, filtered_input_string)
+        }
+        TransformFunctionParameterType::NumberPercentage => {
+            component_value_parse_as_nested_number_percentage(component_value, filtered_input_string)
+        }
+    }
+}
+
 fn component_value_is_zero_number(component_value: &ComponentValue) -> bool {
     matches!(
         component_value,
@@ -20862,24 +20981,30 @@ fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTr
         return (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::None);
     }
 
-    let x = consume_component_value_source_matching(
+    let x = consume_component_value_as_nested_transform_function_argument(
         &mut parser,
         &filtered_input_string,
-        component_value_parse_as_length_percentage,
+        TransformFunctionParameterType::LengthPercentage,
     )?;
 
     parser.discard_whitespace();
     if !parser.has_next_component_value() {
         return Some(RustOwnedTransformLonghand::Function {
             function: RustOwnedTransformLonghandFunction::Translate,
-            arguments: vec![x, "0px".to_string()],
+            arguments: vec![
+                x,
+                RustOwnedTransformationArgument {
+                    parameter_type: TransformFunctionParameterType::LengthPercentage,
+                    value: zero_pixel_length(),
+                },
+            ],
         });
     }
 
-    let y = consume_component_value_source_matching(
+    let y = consume_component_value_as_nested_transform_function_argument(
         &mut parser,
         &filtered_input_string,
-        component_value_parse_as_length_percentage,
+        TransformFunctionParameterType::LengthPercentage,
     )?;
 
     parser.discard_whitespace();
@@ -20890,8 +21015,11 @@ fn parse_rust_owned_translate_value(filtered_input: &[u8]) -> Option<RustOwnedTr
         });
     }
 
-    let z =
-        consume_component_value_source_matching(&mut parser, &filtered_input_string, component_value_parse_as_length)?;
+    let z = consume_component_value_as_nested_transform_function_argument(
+        &mut parser,
+        &filtered_input_string,
+        TransformFunctionParameterType::Length,
+    )?;
 
     parser.discard_whitespace();
     (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::Function {
@@ -20923,10 +21051,10 @@ fn parse_rust_owned_scale_value(filtered_input: &[u8]) -> Option<RustOwnedTransf
 
     let mut arguments = Vec::new();
     for _ in 0..3 {
-        let argument = consume_component_value_source_matching(
+        let argument = consume_component_value_as_nested_transform_function_argument(
             &mut parser,
             &filtered_input_string,
-            component_value_parse_as_number_percentage,
+            TransformFunctionParameterType::NumberPercentage,
         )?;
         arguments.push(argument);
         parser.discard_whitespace();
@@ -20966,11 +21094,8 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
         return (!parser.has_next_component_value()).then_some(RustOwnedTransformLonghand::None);
     }
 
-    let angle = consume_component_value_source_matching(
-        &mut parser,
-        &filtered_input_string,
-        component_value_parse_as_angle_for_transform_longhand,
-    );
+    let angle =
+        consume_component_value_as_nested_transform_longhand_angle_argument(&mut parser, &filtered_input_string);
     parser.discard_whitespace();
     if let Some(angle) = angle.clone()
         && !parser.has_next_component_value()
@@ -20984,11 +21109,7 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
     if let Some(axis) = consume_rotate_axis(&mut parser) {
         parser.discard_whitespace();
         let angle = angle.or_else(|| {
-            consume_component_value_source_matching(
-                &mut parser,
-                &filtered_input_string,
-                component_value_parse_as_angle_for_transform_longhand,
-            )
+            consume_component_value_as_nested_transform_longhand_angle_argument(&mut parser, &filtered_input_string)
         });
         if let Some(angle) = angle {
             parser.discard_whitespace();
@@ -21009,20 +21130,16 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
 
     let mut numbers = Vec::new();
     for _ in 0..3 {
-        numbers.push(consume_component_value_source_matching(
+        numbers.push(consume_component_value_as_nested_transform_function_argument(
             &mut parser,
             &filtered_input_string,
-            component_value_parse_as_number_prefix,
+            TransformFunctionParameterType::Number,
         )?);
     }
 
     parser.discard_whitespace();
     let angle = angle.or_else(|| {
-        consume_component_value_source_matching(
-            &mut parser,
-            &filtered_input_string,
-            component_value_parse_as_angle_for_transform_longhand,
-        )
+        consume_component_value_as_nested_transform_longhand_angle_argument(&mut parser, &filtered_input_string)
     })?;
 
     parser.discard_whitespace();
@@ -21037,20 +21154,44 @@ fn parse_rust_owned_rotate_value(filtered_input: &[u8]) -> Option<RustOwnedTrans
     })
 }
 
-fn consume_component_value_source_matching(
+fn consume_component_value_as_nested_transform_function_argument(
     parser: &mut ComponentValueParser,
     filtered_input_string: &str,
-    predicate: fn(&ComponentValue) -> bool,
-) -> Option<String> {
+    parameter_type: TransformFunctionParameterType,
+) -> Option<RustOwnedTransformationArgument> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value()?;
-    if !predicate(component_value) {
+    let value = component_value_parse_as_nested_transform_function_argument(
+        component_value,
+        parameter_type,
+        filtered_input_string,
+    )?;
+    parser.index += 1;
+    Some(RustOwnedTransformationArgument { parameter_type, value })
+}
+
+fn consume_component_value_as_nested_transform_longhand_angle_argument(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedTransformationArgument> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if !component_value_parse_as_angle_for_transform_longhand(component_value) {
         return None;
     }
-    let source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    let value = if component_value_is_zero_number(component_value) {
+        RustOwnedNestedPrimitiveValue::Angle {
+            value: 0.0,
+            unit: "deg".to_string(),
+        }
+    } else {
+        component_value_parse_as_nested_angle(component_value, filtered_input_string)?
+    };
     parser.index += 1;
-    Some(source)
+    Some(RustOwnedTransformationArgument {
+        parameter_type: TransformFunctionParameterType::Angle,
+        value,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32350,16 +32491,16 @@ mod tests {
         RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace,
         RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction,
+        TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -35925,20 +36066,21 @@ mod tests {
                 value: RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
                     values: vec![
                         RustOwnedStyleValueKind::Transformation(RustOwnedTransformation {
-                            function_name: "translateX".to_string(),
+                            function: TransformFunction::TranslateX,
                             arguments: vec![RustOwnedTransformationArgument {
                                 parameter_type: TransformFunctionParameterType::LengthPercentage,
-                                source: "10px".to_string(),
+                                value: RustOwnedNestedPrimitiveValue::Length {
+                                    value: 10.0,
+                                    unit: "px".to_string(),
+                                },
                             }],
-                            source: "translateX(10px)".to_string(),
                         }),
                         RustOwnedStyleValueKind::Transformation(RustOwnedTransformation {
-                            function_name: "scale".to_string(),
+                            function: TransformFunction::Scale,
                             arguments: vec![RustOwnedTransformationArgument {
                                 parameter_type: TransformFunctionParameterType::NumberPercentage,
-                                source: "2".to_string(),
+                                value: RustOwnedNestedPrimitiveValue::Number(2.0),
                             }],
-                            source: "scale(2)".to_string(),
                         }),
                     ],
                     separator: RustOwnedStyleValueListSeparator::Space,
@@ -35953,7 +36095,26 @@ mod tests {
                 property_id: PropertyId::Translate,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                     function: RustOwnedTransformLonghandFunction::Translate3d,
-                    arguments: vec!["10px".to_string(), "20%".to_string(), "1em".to_string()],
+                    arguments: vec![
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::LengthPercentage,
+                            value: RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            },
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::LengthPercentage,
+                            value: RustOwnedNestedPrimitiveValue::Percentage(20.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::Length,
+                            value: RustOwnedNestedPrimitiveValue::Length {
+                                value: 1.0,
+                                unit: "em".to_string(),
+                            },
+                        },
+                    ],
                 }),
             })
         );
@@ -35963,7 +36124,20 @@ mod tests {
                 property_id: PropertyId::Scale,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                     function: RustOwnedTransformLonghandFunction::Scale3d,
-                    arguments: vec!["1".to_string(), "50%".to_string(), "2".to_string()],
+                    arguments: vec![
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::NumberPercentage,
+                            value: RustOwnedNestedPrimitiveValue::Number(1.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::NumberPercentage,
+                            value: RustOwnedNestedPrimitiveValue::Percentage(50.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::NumberPercentage,
+                            value: RustOwnedNestedPrimitiveValue::Number(2.0),
+                        },
+                    ],
                 }),
             })
         );
@@ -35973,7 +36147,10 @@ mod tests {
                 property_id: PropertyId::Scale,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                     function: RustOwnedTransformLonghandFunction::Scale,
-                    arguments: vec!["random(0, 10, 5)".to_string()],
+                    arguments: vec![RustOwnedTransformationArgument {
+                        parameter_type: TransformFunctionParameterType::NumberPercentage,
+                        value: RustOwnedNestedPrimitiveValue::Source("random(0, 10, 5)".to_string()),
+                    }],
                 }),
             })
         );
@@ -35983,7 +36160,27 @@ mod tests {
                 property_id: PropertyId::Rotate,
                 value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                     function: RustOwnedTransformLonghandFunction::Rotate3d,
-                    arguments: vec!["1".to_string(), "0".to_string(), "0".to_string(), "45deg".to_string()],
+                    arguments: vec![
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::Number,
+                            value: RustOwnedNestedPrimitiveValue::Number(1.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::Number,
+                            value: RustOwnedNestedPrimitiveValue::Number(0.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::Number,
+                            value: RustOwnedNestedPrimitiveValue::Number(0.0),
+                        },
+                        RustOwnedTransformationArgument {
+                            parameter_type: TransformFunctionParameterType::Angle,
+                            value: RustOwnedNestedPrimitiveValue::Angle {
+                                value: 45.0,
+                                unit: "deg".to_string(),
+                            },
+                        },
+                    ],
                 }),
             })
         );
@@ -36639,14 +36836,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::Transform], "translateX(10px) scale(2)"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::ValueType,
+                kind: CssStyleValueKind::Transformation,
                 property_id: PropertyId::Transform,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Number,
+                numeric_value: Some(2.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "translateX(10px) scale(2)".to_string(),
-                value_type: "TransformList".to_string(),
+                value: String::new(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

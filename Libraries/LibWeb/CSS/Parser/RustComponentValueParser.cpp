@@ -1610,7 +1610,38 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 VERIFY(color_red == Function);
                 style_value->transform_longhand_function = static_cast<RustTransformLonghandFunction>(color_green);
-                style_value->transform_longhand_arguments.append(string_from_ffi_bytes(value_ptr, value_len));
+                style_value->transform_longhand_arguments.append(RustTransformationArgument {
+                    .parameter_type = static_cast<TransformFunctionParameterType>(color_blue),
+                    .value = nested_primitive_value_from_callback_payload(),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::Transformation) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Transformation);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                enum : u8 {
+                    BeginFunction,
+                    Argument,
+                };
+
+                if (color_red == BeginFunction) {
+                    style_value->transformations.append(RustTransformation {
+                        .function = static_cast<TransformFunction>(color_green),
+                    });
+                    return;
+                }
+
+                VERIFY(color_red == Argument);
+                VERIFY(!style_value->transformations.is_empty());
+                VERIFY(style_value->transformations.last().function == static_cast<TransformFunction>(color_green));
+                style_value->transformations.last().arguments.append(RustTransformationArgument {
+                    .parameter_type = static_cast<TransformFunctionParameterType>(color_blue),
+                    .value = nested_primitive_value_from_callback_payload(),
+                });
                 return;
             } else if (kind == FFI::CssStyleValueKind::Shadow) {
                 enum : u8 {

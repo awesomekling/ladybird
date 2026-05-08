@@ -2420,6 +2420,49 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 return nullptr;
             };
+            auto materialize_rust_nested_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_number_percentage(value.source_or_unit);
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
+                    return NumberStyleValue::create(*value.numeric_value);
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage)
+                    return PercentageStyleValue::create(Percentage { *value.numeric_value });
+                return nullptr;
+            };
+            auto materialize_rust_transformation = [&](RustComponentValueParser::RustTransformation const& transformation, PropertyID property_id) -> RefPtr<StyleValue const> {
+                StyleValueVector arguments;
+                arguments.ensure_capacity(transformation.arguments.size());
+                for (auto const& argument : transformation.arguments) {
+                    RefPtr<StyleValue const> value;
+                    switch (argument.parameter_type) {
+                    case TransformFunctionParameterType::Angle:
+                        value = materialize_rust_nested_angle(argument.value);
+                        break;
+                    case TransformFunctionParameterType::Length:
+                        value = materialize_rust_nested_length(argument.value, infinite_range);
+                        break;
+                    case TransformFunctionParameterType::LengthNone:
+                        if (!argument.value.numeric_value.has_value() && argument.value.source_or_unit.equals_ignoring_ascii_case("none"sv))
+                            value = KeywordStyleValue::create(Keyword::None);
+                        else
+                            value = materialize_rust_nested_length(argument.value, infinite_range);
+                        break;
+                    case TransformFunctionParameterType::LengthPercentage:
+                        value = materialize_rust_nested_length_percentage(argument.value, infinite_range);
+                        break;
+                    case TransformFunctionParameterType::Number:
+                        value = materialize_rust_nested_number(argument.value);
+                        break;
+                    case TransformFunctionParameterType::NumberPercentage:
+                        value = materialize_rust_nested_number_percentage(argument.value);
+                        break;
+                    }
+                    if (!value)
+                        return nullptr;
+                    arguments.append(value.release_nonnull());
+                }
+                return TransformationStyleValue::create(property_id, transformation.function, move(arguments));
+            };
             auto materialize_rust_nested_non_negative_number_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value()) {
                     if (auto number_value = parse_rust_source_as_non_negative_number(value.source_or_unit))
@@ -3800,7 +3843,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_rotation = [&](TransformFunction function) -> RefPtr<StyleValue const> {
                         if (arguments.size() != 1)
                             return nullptr;
-                        auto angle = parse_rust_source_as_angle(arguments[0]);
+                        auto angle = materialize_rust_nested_angle(arguments[0].value);
                         if (!angle)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, function, { angle.release_nonnull() });
@@ -3808,8 +3851,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_translate = [&]() -> RefPtr<StyleValue const> {
                         if (arguments.size() != 2)
                             return nullptr;
-                        auto x = parse_rust_source_as_length_percentage(arguments[0]);
-                        auto y = parse_rust_source_as_length_percentage(arguments[1]);
+                        auto x = materialize_rust_nested_length_percentage(arguments[0].value, infinite_range);
+                        auto y = materialize_rust_nested_length_percentage(arguments[1].value, infinite_range);
                         if (!x || !y)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Translate, { x.release_nonnull(), y.release_nonnull() });
@@ -3817,9 +3860,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_translate3d = [&]() -> RefPtr<StyleValue const> {
                         if (arguments.size() != 3)
                             return nullptr;
-                        auto x = parse_rust_source_as_length_percentage(arguments[0]);
-                        auto y = parse_rust_source_as_length_percentage(arguments[1]);
-                        auto z = parse_rust_source_as_length(arguments[2]);
+                        auto x = materialize_rust_nested_length_percentage(arguments[0].value, infinite_range);
+                        auto y = materialize_rust_nested_length_percentage(arguments[1].value, infinite_range);
+                        auto z = materialize_rust_nested_length(arguments[2].value, infinite_range);
                         if (!x || !y || !z)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Translate3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull() });
@@ -3827,8 +3870,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_scale = [&]() -> RefPtr<StyleValue const> {
                         if (arguments.size() != 1 && arguments.size() != 2)
                             return nullptr;
-                        auto x = parse_rust_source_as_number_percentage(arguments[0]);
-                        auto y = arguments.size() == 1 ? x : parse_rust_source_as_number_percentage(arguments[1]);
+                        auto x = materialize_rust_nested_number_percentage(arguments[0].value);
+                        auto y = arguments.size() == 1 ? x : materialize_rust_nested_number_percentage(arguments[1].value);
                         if (!x || !y)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Scale, { x.release_nonnull(), y.release_nonnull() });
@@ -3836,9 +3879,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_scale3d = [&]() -> RefPtr<StyleValue const> {
                         if (arguments.size() != 3)
                             return nullptr;
-                        auto x = parse_rust_source_as_number_percentage(arguments[0]);
-                        auto y = parse_rust_source_as_number_percentage(arguments[1]);
-                        auto z = parse_rust_source_as_number_percentage(arguments[2]);
+                        auto x = materialize_rust_nested_number_percentage(arguments[0].value);
+                        auto y = materialize_rust_nested_number_percentage(arguments[1].value);
+                        auto z = materialize_rust_nested_number_percentage(arguments[2].value);
                         if (!x || !y || !z)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Scale3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull() });
@@ -3846,10 +3889,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_rotate3d = [&]() -> RefPtr<StyleValue const> {
                         if (arguments.size() != 4)
                             return nullptr;
-                        auto x = parse_rust_source_as_number(arguments[0]);
-                        auto y = parse_rust_source_as_number(arguments[1]);
-                        auto z = parse_rust_source_as_number(arguments[2]);
-                        auto angle = parse_rust_source_as_angle(arguments[3]);
+                        auto x = materialize_rust_nested_number(arguments[0].value);
+                        auto y = materialize_rust_nested_number(arguments[1].value);
+                        auto z = materialize_rust_nested_number(arguments[2].value);
+                        auto angle = materialize_rust_nested_angle(arguments[3].value);
                         if (!x || !y || !z || !angle)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Rotate3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull(), angle.release_nonnull() });
@@ -3891,6 +3934,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, value };
                     }
+                }
+                break;
+            case FFI::CssStyleValueKind::Transformation:
+                if (!rust_style_value->transformations.is_empty()) {
+                    StyleValueVector transformations;
+                    transformations.ensure_capacity(rust_style_value->transformations.size());
+                    for (auto const& transformation : rust_style_value->transformations) {
+                        auto value = materialize_rust_transformation(transformation, rust_style_value->property_id);
+                        if (!value)
+                            break;
+                        transformations.append(value.release_nonnull());
+                    }
+                    if (transformations.size() != rust_style_value->transformations.size())
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(transformations), StyleValueList::Separator::Space) };
                 }
                 break;
             case FFI::CssStyleValueKind::TransformOrigin:

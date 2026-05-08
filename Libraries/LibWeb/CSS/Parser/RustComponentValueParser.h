@@ -27,6 +27,7 @@
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/TransformFunctions.h>
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/Export.h>
@@ -204,6 +205,16 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
+    };
+
+    struct RustTransformationArgument {
+        TransformFunctionParameterType parameter_type { TransformFunctionParameterType::Number };
+        RustNestedPrimitiveValue value;
+    };
+
+    struct RustTransformation {
+        TransformFunction function { TransformFunction::Matrix };
+        Vector<RustTransformationArgument> arguments;
     };
 
     struct RustBorderImageWidth {
@@ -665,7 +676,8 @@ public:
         Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
         bool transform_longhand_is_none { false };
         Optional<RustTransformLonghandFunction> transform_longhand_function;
-        Vector<String> transform_longhand_arguments;
+        Vector<RustTransformationArgument> transform_longhand_arguments;
+        Vector<RustTransformation> transformations;
         Optional<RustNestedPrimitiveValue> transform_origin_x;
         Optional<RustNestedPrimitiveValue> transform_origin_y;
         Optional<RustNestedPrimitiveValue> transform_origin_z;
