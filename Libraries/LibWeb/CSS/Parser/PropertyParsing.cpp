@@ -146,6 +146,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::GridTemplateAreas:
     case PropertyID::GridTemplateColumns:
     case PropertyID::GridTemplateRows:
+    case PropertyID::InsetBlockEnd:
+    case PropertyID::InsetBlockStart:
+    case PropertyID::InsetInlineEnd:
+    case PropertyID::InsetInlineStart:
     case PropertyID::ListStyle:
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:

@@ -252,6 +252,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            | PropertyId::InsetBlockEnd
+            | PropertyId::InsetBlockStart
+            | PropertyId::InsetInlineEnd
+            | PropertyId::InsetInlineStart
             | PropertyId::ListStyle
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
@@ -326,7 +330,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::InsetBlockEnd
         | PropertyId::InsetInline
         | PropertyId::InsetInlineStart
-        | PropertyId::InsetInlineEnd => rust_owned_anchor_function_style_value_kind(filtered_input),
+        | PropertyId::InsetInlineEnd => rust_owned_inset_property_style_value_kind(property_id, filtered_input),
         PropertyId::BackgroundSize | PropertyId::MaskSize => {
             rust_owned_background_size_style_value_kind(filtered_input)
         }
@@ -448,6 +452,56 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::WillChange => rust_owned_will_change_style_value_kind(filtered_input),
         _ => None,
     }
+}
+
+fn rust_owned_inset_property_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-position-3/#insets
+    // Value: auto | <length-percentage>
+    //
+    // https://drafts.csswg.org/css-anchor-position-1/#anchor-pos
+    // The anchor() function resolves to a <length>.
+    if let Some(value) = rust_owned_anchor_function_style_value_kind(filtered_input) {
+        return Some(value);
+    }
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    if let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = component_values
+        && property_accepts_keyword(property_id, value)
+    {
+        let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
+        return Some(RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+            resolved_keyword.to_string(),
+        )));
+    }
+
+    for value_type in [
+        PropertyValueType::Length,
+        PropertyValueType::Percentage,
+        PropertyValueType::Anchor,
+    ] {
+        if !property_accepts_value_type(property_id, value_type) {
+            continue;
+        }
+        if !component_values_parse_as_property_value_type(value_type, filtered_input) {
+            continue;
+        }
+        return Some(
+            parse_rust_owned_generated_longhand_value(property_id, value_type, filtered_input, component_values).value,
+        );
+    }
+
+    None
 }
 
 pub(super) fn parse_rust_owned_generated_longhand_value(

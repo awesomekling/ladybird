@@ -52,12 +52,12 @@ use super::{
     RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontFamilyList, RustOwnedFontLanguageOverride,
     RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
     RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-    RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-    RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
-    RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
-    RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
-    RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder,
-    RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+    RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
+    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle,
+    RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
+    RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
+    RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint,
+    RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
     RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
     RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
@@ -2442,6 +2442,27 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Top], "auto"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Top,
+            value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword("auto".to_string())),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::InsetBlockStart], "12px"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::InsetBlockStart,
+            value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                value: RustOwnedNestedPrimitiveValue::Length {
+                    value: 12.0,
+                    unit: "px".to_string(),
+                },
+                value_type: PropertyValueType::Length,
+            }),
+        })
+    );
+    assert_eq!(parse_rust_owned_style_value(&[PropertyId::Top], "red"), None);
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Width], "anchor-size(--target width, 10px)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Width,
@@ -4442,6 +4463,46 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_style_value(&[PropertyId::Top], "auto"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::Top,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "auto".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::InsetBlockStart], "12px"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::InsetBlockStart,
+            primitive_kind: CssPrimitiveValueKind::Length,
+            numeric_value: Some(12.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: "px".to_string(),
+            value_type: "Length".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::InsetInlineEnd], "25%"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::InsetInlineEnd,
+            primitive_kind: CssPrimitiveValueKind::Percentage,
+            numeric_value: Some(25.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: String::new(),
+            value_type: "Percentage".to_string(),
+        })
+    );
+    assert_eq!(parse_style_value(&[PropertyId::Top], "red"), None);
+    assert_eq!(
         parse_style_value(&[PropertyId::Width], "anchor-size(--target width, 10px)"),
         Some(ParsedStyleValue {
             kind: CssStyleValueKind::AnchorSize,
@@ -5016,6 +5077,25 @@ fn parses_positional_value_list_shorthands() {
     assert_eq!(
         parse_positional_shorthand(PropertyId::BorderBlockWidth, "thin 2px"),
         Some(vec![(0, "thin".to_string()), (1, "2px".to_string())])
+    );
+    let rust_items =
+        parse_rust_owned_positional_shorthand(PropertyId::Inset, "anchor(--target bottom, calc(1px + 2%)) 2% auto 4px")
+            .unwrap();
+    assert_eq!(
+        rust_items
+            .iter()
+            .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                0,
+                PropertyId::Inset,
+                "anchor(--target bottom, calc(1px + 2%))".to_string()
+            ),
+            (1, PropertyId::Inset, "2%".to_string()),
+            (2, PropertyId::Inset, "auto".to_string()),
+            (3, PropertyId::Inset, "4px".to_string()),
+        ]
     );
     assert_eq!(parse_positional_shorthand(PropertyId::Margin, ""), None);
     assert_eq!(
