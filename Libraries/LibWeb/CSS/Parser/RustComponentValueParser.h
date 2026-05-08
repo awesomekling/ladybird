@@ -363,6 +363,14 @@ public:
         Optional<RustNestedPrimitiveValue> y;
     };
 
+    struct RustImageSetOption {
+        bool image_is_string { false };
+        String image_source;
+        Optional<URL> image_url;
+        Optional<String> resolution;
+        Optional<String> type;
+    };
+
     struct RustBackgroundSize {
         Optional<Keyword> keyword;
         Optional<RustNestedPrimitiveValue> width;
@@ -585,6 +593,7 @@ public:
         Vector<RustNestedPrimitiveValue> easing_function_values;
         Vector<RustLinearEasingStop> linear_easing_stops;
         StepPosition easing_function_step_position { StepPosition::End };
+        Vector<RustImageSetOption> image_set_options;
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Optional<u8> basic_shape_fill_rule;
         Vector<RustBasicShapeRectangleComponent> basic_shape_rectangle_components;

@@ -46,6 +46,7 @@
 #include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
@@ -1303,6 +1304,43 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parse_rust_source_as_image(source);
                 }
                 VERIFY_NOT_REACHED();
+            };
+            auto materialize_rust_image_set = [&]() -> RefPtr<ImageSetStyleValue const> {
+                Vector<ImageSetStyleValue::Option> options;
+                options.ensure_capacity(rust_style_value->image_set_options.size());
+                for (auto const& option : rust_style_value->image_set_options) {
+                    RefPtr<AbstractImageStyleValue const> image;
+                    if (option.image_is_string) {
+                        image = ImageStyleValue::create(URL { option.image_source });
+                    } else if (option.image_url.has_value()) {
+                        image = ImageStyleValue::create(*option.image_url);
+                    } else {
+                        image = parse_rust_source_as_image(option.image_source);
+                    }
+                    if (!image)
+                        return nullptr;
+
+                    RefPtr<StyleValue const> resolution;
+                    if (option.resolution.has_value()) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*option.resolution, "utf-8"sv);
+                        TokenStream resolution_tokens { component_values };
+                        resolution = parse_resolution_value(resolution_tokens, infinite_range);
+                        resolution_tokens.discard_whitespace();
+                        if (!resolution || resolution_tokens.has_next_token())
+                            return nullptr;
+                    } else {
+                        resolution = ResolutionStyleValue::create(Resolution { 1, ResolutionUnit::X });
+                    }
+
+                    options.append({
+                        .image = image.release_nonnull(),
+                        .resolution = resolution.release_nonnull(),
+                        .type = option.type,
+                    });
+                }
+                if (options.is_empty())
+                    return nullptr;
+                return ImageSetStyleValue::create(move(options));
             };
             auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
@@ -2752,6 +2790,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Image:
+                if (rust_style_value->image_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->image_set_options.is_empty()) {
+                    auto image_set_tokens_contain_attr_tainted_value = tokens.remaining_tokens().first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value();
+                    auto value = image_set_tokens_contain_attr_tainted_value ? parse_image_set_function(tokens) : materialize_rust_image_set();
+                    if (value) {
+                        // AD-HOC: Re-parsing substituted component values through Rust
+                        // loses C++-side attr() taint metadata until that
+                        // metadata is carried over FFI.
+                        if (!image_set_tokens_contain_attr_tainted_value)
+                            discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                    }
+                }
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
                     if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url)) {
                         if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url)

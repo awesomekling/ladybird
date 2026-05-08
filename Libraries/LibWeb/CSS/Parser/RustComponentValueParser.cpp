@@ -1013,6 +1013,36 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::Image) {
                 value.image_kind = static_cast<RustImageKind>(color_red);
+                if (value.image_kind == RustImageKind::ImageSet) {
+                    if (!style_value.has_value()) {
+                        style_value = move(value);
+                    } else {
+                        VERIFY(style_value->kind == FFI::CssStyleValueKind::Image);
+                        VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                        VERIFY(style_value->image_kind == RustImageKind::ImageSet);
+                    }
+
+                    Optional<String> resolution;
+                    Optional<String> type;
+                    if (value_type_len > 0) {
+                        size_t metadata_index = 0;
+                        for (auto metadata : StringView { value_type_ptr, value_type_len }.split_view('\0', SplitBehavior::KeepEmpty)) {
+                            if (metadata_index == 0 && !metadata.is_empty())
+                                resolution = String::from_utf8_without_validation(metadata.bytes());
+                            else if (metadata_index == 1 && !metadata.is_empty())
+                                type = String::from_utf8_without_validation(metadata.bytes());
+                            ++metadata_index;
+                        }
+                    }
+                    style_value->image_set_options.append({
+                        .image_is_string = color_green != 0,
+                        .image_source = string_from_ffi_bytes(value_ptr, value_len),
+                        .image_url = image_url_from_callback_payload(),
+                        .resolution = move(resolution),
+                        .type = move(type),
+                    });
+                    return;
+                }
                 value.image_source = string_from_ffi_bytes(value_ptr, value_len);
                 value.image_url = image_url_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::Color) {

@@ -2326,11 +2326,11 @@ pub(crate) enum RustOwnedBasicShapeRadialExtent {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImageSet {
     options: Vec<RustOwnedImageSetOption>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImageSetOption {
+    image_is_string: bool,
     image_source: String,
     resolution: Option<String>,
     mime_type: Option<String>,
@@ -7830,10 +7830,7 @@ fn rust_owned_image_set_style_value_kind(
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
-        options,
-        source: serialize_component_values_for_reparsing(component_values, filtered_input_string)?,
-    }))
+    Some(RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet { options }))
 }
 
 fn rust_owned_image_set_option(
@@ -7849,17 +7846,15 @@ fn rust_owned_image_set_option(
     parser.discard_whitespace();
 
     let image = parser.next_component_value()?;
-    let image_source = if component_value_parse_as_image_set_string(image)
-        || component_value_parse_as_image_set_image(image)
-        || component_value_parse_as_image_set_gradient(image)
-    {
-        let image_source =
-            serialize_component_values_for_reparsing(std::slice::from_ref(image), filtered_input_string)?;
-        parser.index += 1;
-        image_source
+    let image_is_string = component_value_parse_as_image_set_string(image);
+    let image_source = if image_is_string {
+        component_values_string_value(std::slice::from_ref(image))?.to_string()
+    } else if component_value_parse_as_image_set_image(image) || component_value_parse_as_image_set_gradient(image) {
+        serialize_component_values_for_reparsing(std::slice::from_ref(image), filtered_input_string)?
     } else {
         return None;
     };
+    parser.index += 1;
 
     let mut resolution = None;
     let mut mime_type = None;
@@ -7890,6 +7885,7 @@ fn rust_owned_image_set_option(
     }
 
     Some(RustOwnedImageSetOption {
+        image_is_string,
         image_source,
         resolution,
         mime_type,
@@ -8384,15 +8380,7 @@ where
             callback_corner_shape_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::ImageSet(image_set) => {
-            callback_image_style_value(
-                callback,
-                property_id,
-                &RustOwnedImage {
-                    kind: RustOwnedImageKind::ImageSet,
-                    source: image_set.source.clone(),
-                    url: None,
-                },
-            );
+            callback_image_set_style_value(callback, property_id, image_set);
         }
         RustOwnedStyleValueKind::FontStyle(value) => callback(
             CssStyleValueKind::FontStyle,
@@ -11389,6 +11377,59 @@ where
         payload.as_bytes(),
         "",
     );
+}
+
+fn callback_image_set_style_value<C>(callback: &mut C, property_id: u16, image_set: &RustOwnedImageSet)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    for option in &image_set.options {
+        let url = image_set_option_url_payload(option);
+        let (url_function_type, image_source) = if option.image_is_string {
+            (IMAGE_URL_FUNCTION_TYPE_URL, option.image_source.as_str())
+        } else if let Some(url) = &url {
+            (
+                image_url_function_type_callback_payload(url.function_type),
+                url.url.as_str(),
+            )
+        } else {
+            (IMAGE_URL_FUNCTION_TYPE_NONE, option.image_source.as_str())
+        };
+        let metadata = image_set_option_metadata(option);
+        callback(
+            CssStyleValueKind::Image,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            RustOwnedImageKind::ImageSet as u8,
+            u8::from(option.image_is_string),
+            0,
+            url_function_type,
+            image_source.as_bytes(),
+            &metadata,
+        );
+    }
+}
+
+fn image_set_option_metadata(option: &RustOwnedImageSetOption) -> String {
+    format!(
+        "{}\0{}",
+        option.resolution.as_deref().unwrap_or(""),
+        option.mime_type.as_deref().unwrap_or("")
+    )
+}
+
+fn image_set_option_url_payload(option: &RustOwnedImageSetOption) -> Option<RustOwnedUrlPayload> {
+    if option.image_is_string {
+        return Some(RustOwnedUrlPayload {
+            function_type: CssUrlFunctionType::Url,
+            url: option.image_source.clone(),
+        });
+    }
+    rust_owned_url_from_source(&option.image_source).url
 }
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
@@ -35477,11 +35518,11 @@ mod tests {
                 property_id: PropertyId::BackgroundImage,
                 value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
                     options: vec![RustOwnedImageSetOption {
+                        image_is_string: false,
                         image_source: "url(example.png)".to_string(),
                         resolution: Some("2x".to_string()),
                         mime_type: None,
                     }],
-                    source: "image-set(url(example.png) 2x)".to_string(),
                 }),
             })
         );
@@ -35520,18 +35561,18 @@ mod tests {
                 value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
                     options: vec![
                         RustOwnedImageSetOption {
-                            image_source: "\"example.png\"".to_string(),
+                            image_is_string: true,
+                            image_source: "example.png".to_string(),
                             resolution: None,
                             mime_type: Some("image/png".to_string()),
                         },
                         RustOwnedImageSetOption {
+                            image_is_string: false,
                             image_source: "linear-gradient(black, white)".to_string(),
                             resolution: Some("2x".to_string()),
                             mime_type: None,
                         },
                     ],
-                    source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
-                        .to_string(),
                 }),
             })
         );
@@ -37283,8 +37324,8 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "image-set(url(example.png) 2x)".to_string(),
-                value_type: String::new(),
+                value: "example.png".to_string(),
+                value_type: "2x\0".to_string(),
             })
         );
         assert_eq!(
