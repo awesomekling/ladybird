@@ -2698,14 +2698,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::CounterDefinitions:
                 if (!rust_style_value->counter_definitions.is_empty()) {
-                    VERIFY(rust_style_value->counter_definitions.size() == rust_style_value->counter_definition_value_sources.size());
+                    VERIFY(rust_style_value->counter_definitions.size() == rust_style_value->counter_definition_values.size());
 
                     for (size_t i = 0; i < rust_style_value->counter_definitions.size(); ++i) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->counter_definition_value_sources[i].bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> value_tokens { component_values };
-                        auto value = parse_integer_value(value_tokens, infinite_integer_range);
-                        value_tokens.discard_whitespace();
-                        if (!value || value_tokens.has_next_token())
+                        auto value = materialize_rust_nested_integer(rust_style_value->counter_definition_values[i], infinite_integer_range);
+                        if (!value)
                             return {};
                         rust_style_value->counter_definitions[i].value = value.release_nonnull();
                     }

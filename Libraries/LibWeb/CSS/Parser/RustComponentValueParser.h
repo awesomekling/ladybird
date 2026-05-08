@@ -492,7 +492,7 @@ public:
         FlyString counter_join_string;
         Optional<CounterStyle> counter_style;
         Vector<CounterDefinition> counter_definitions;
-        Vector<String> counter_definition_value_sources;
+        Vector<RustNestedPrimitiveValue> counter_definition_values;
         Vector<RustBackgroundSize> background_sizes;
         u8 easing_function_kind { 0 };
         Vector<RustNestedPrimitiveValue> easing_function_values;

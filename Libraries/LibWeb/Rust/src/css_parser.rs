@@ -2491,7 +2491,7 @@ pub(crate) struct RustOwnedColorScheme {
 pub(crate) struct RustOwnedCounterDefinition {
     name: String,
     is_reversed: bool,
-    value_source: String,
+    value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4912,21 +4912,18 @@ fn rust_owned_counter_definitions_style_value_kind(
         };
         parser.discard_whitespace();
 
-        let mut value_source = None;
+        let mut value = None;
         if let Some(component_value) = parser.next_component_value()
             && parse_integer_value_prefix(component_value) == CssPrimitiveValueKind::Integer
         {
-            value_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                &source,
-            )?);
+            value = Some(component_value_parse_as_nested_integer(component_value, &source)?);
             parser.index += 1;
         }
 
         definitions.push(RustOwnedCounterDefinition {
             name,
             is_reversed,
-            value_source: value_source.unwrap_or_else(|| default_value_if_not_reversed.to_string()),
+            value: value.unwrap_or(RustOwnedNestedPrimitiveValue::Integer(default_value_if_not_reversed)),
         });
     }
 
@@ -8212,12 +8209,21 @@ where
         ),
         RustOwnedStyleValueKind::CounterDefinitions(value) => {
             for definition in &value.definitions {
+                let (primitive_kind, has_numeric_value, numeric_value, source) = match &definition.value {
+                    RustOwnedNestedPrimitiveValue::Integer(value) => {
+                        (CssPrimitiveValueKind::Integer, true, *value as f64, "")
+                    }
+                    RustOwnedNestedPrimitiveValue::Source(source) => {
+                        (CssPrimitiveValueKind::Invalid, false, 0.0, source.as_str())
+                    }
+                    _ => unreachable!("counter definitions only use integer values"),
+                };
                 callback(
                     CssStyleValueKind::CounterDefinitions,
                     property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
+                    primitive_kind,
+                    has_numeric_value,
+                    numeric_value,
                     false,
                     0.0,
                     u8::from(definition.is_reversed),
@@ -8225,7 +8231,7 @@ where
                     0,
                     0,
                     definition.name.as_bytes(),
-                    &definition.value_source,
+                    source,
                 );
             }
         }
@@ -33438,12 +33444,12 @@ mod tests {
                         RustOwnedCounterDefinition {
                             name: "chapter".to_string(),
                             is_reversed: false,
-                            value_source: "1".to_string(),
+                            value: RustOwnedNestedPrimitiveValue::Integer(1),
                         },
                         RustOwnedCounterDefinition {
                             name: "page".to_string(),
                             is_reversed: false,
-                            value_source: "2".to_string(),
+                            value: RustOwnedNestedPrimitiveValue::Integer(2),
                         },
                     ],
                 }),
@@ -33457,7 +33463,7 @@ mod tests {
                     definitions: vec![RustOwnedCounterDefinition {
                         name: "chapter".to_string(),
                         is_reversed: false,
-                        value_source: "-1".to_string(),
+                        value: RustOwnedNestedPrimitiveValue::Integer(-1),
                     }],
                 }),
             })

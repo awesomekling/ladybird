@@ -1957,7 +1957,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .is_reversed = color_red != 0,
                     .value = nullptr,
                 });
-                style_value->counter_definition_value_sources.append(string_from_ffi_bytes(value_type_ptr, value_type_len));
+                style_value->counter_definition_values.append(RustNestedPrimitiveValue {
+                    .primitive_kind = primitive_kind,
+                    .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
+                    .source_or_unit = string_from_ffi_bytes(value_type_ptr, value_type_len),
+                });
                 return;
             } else if (kind == FFI::CssStyleValueKind::Display) {
                 value.display_kind = static_cast<RustDisplayValueKind>(color_red);
