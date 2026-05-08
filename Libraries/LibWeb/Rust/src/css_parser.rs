@@ -2170,6 +2170,18 @@ pub(crate) struct RustOwnedGridPlacementShorthandItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGridTemplateShorthandItem {
+    property_id: PropertyId,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum GridTemplateRowTrackSourceItem {
+    LineNames(Vec<String>),
+    Track(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     index: usize,
     style_value: RustOwnedStyleValue,
@@ -10807,6 +10819,399 @@ fn parse_rust_owned_grid_area_shorthand(filtered_input: &[u8]) -> Option<Vec<Rus
     ])
 }
 
+pub(crate) fn parse_grid_template_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, &str),
+{
+    let Some(property_id) = property_id_from_u16(property_id) else {
+        return false;
+    };
+    let Some(items) = parse_rust_owned_grid_template_shorthand(property_id, filtered_input) else {
+        return false;
+    };
+
+    for item in items {
+        callback(item.property_id as u16, &item.source);
+    }
+
+    true
+}
+
+fn parse_rust_owned_grid_template_shorthand(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedGridTemplateShorthandItem>> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let stripped_component_values = strip_whitespace(&component_values);
+
+    match property_id {
+        PropertyId::GridTemplate => {
+            parse_rust_owned_grid_template_value(&component_values, stripped_component_values, &source)
+        }
+        PropertyId::Grid => parse_rust_owned_grid_value(&component_values, stripped_component_values, &source),
+        _ => None,
+    }
+}
+
+fn parse_rust_owned_grid_template_value(
+    component_values: &[ComponentValue],
+    stripped_component_values: &[ComponentValue],
+    source: &str,
+) -> Option<Vec<RustOwnedGridTemplateShorthandItem>> {
+    // https://www.w3.org/TR/css-grid-2/#explicit-grid-shorthand
+    // none | [ <'grid-template-rows'> / <'grid-template-columns'> ] |
+    // [ <line-names>? <string> <track-size>? <line-names>? ]+
+    // [ / <explicit-track-list> ]?
+    if matches!(stripped_component_values, [component_value] if component_value_is_ident(Some(component_value), "none"))
+    {
+        return Some(vec![]);
+    }
+
+    if let Some(parts) = split_component_values_on_top_level_slashes(component_values, source)
+        && let [rows_source, columns_source] = parts.as_slice()
+        && parse_rust_owned_grid_track_size_list_value(rows_source.as_bytes(), GridTrackSizeListSyntax::TrackList)
+            .is_some()
+        && parse_rust_owned_grid_track_size_list_value(columns_source.as_bytes(), GridTrackSizeListSyntax::TrackList)
+            .is_some()
+    {
+        return Some(vec![
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridTemplateRows,
+                source: rows_source.clone(),
+            },
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridTemplateColumns,
+                source: columns_source.clone(),
+            },
+        ]);
+    }
+
+    parse_rust_owned_grid_template_areas_syntax(component_values, source)
+}
+
+fn parse_rust_owned_grid_value(
+    component_values: &[ComponentValue],
+    stripped_component_values: &[ComponentValue],
+    source: &str,
+) -> Option<Vec<RustOwnedGridTemplateShorthandItem>> {
+    // https://www.w3.org/TR/css-grid-2/#grid-shorthand
+    // <'grid-template'> |
+    // <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>? |
+    // [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
+    if let Some(items) = parse_rust_owned_grid_template_value(component_values, stripped_component_values, source) {
+        return Some(items);
+    }
+
+    let parts = split_component_values_on_top_level_slashes(component_values, source)?;
+    let [left_source, right_source] = parts.as_slice() else {
+        return None;
+    };
+
+    if let Some((grid_auto_flow_source, grid_auto_rows_source)) =
+        parse_grid_auto_flow_prefix_with_optional_auto_track_sizes(left_source, CssGridAutoFlowAxis::Row)
+        && parse_rust_owned_grid_track_size_list_value(right_source.as_bytes(), GridTrackSizeListSyntax::TrackList)
+            .is_some()
+    {
+        let mut items = vec![
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridAutoFlow,
+                source: grid_auto_flow_source,
+            },
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridTemplateColumns,
+                source: right_source.clone(),
+            },
+        ];
+        if let Some(source) = grid_auto_rows_source {
+            items.push(RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridAutoRows,
+                source,
+            });
+        }
+        return Some(items);
+    }
+
+    if parse_rust_owned_grid_track_size_list_value(left_source.as_bytes(), GridTrackSizeListSyntax::TrackList).is_some()
+        && let Some((grid_auto_flow_source, grid_auto_columns_source)) =
+            parse_grid_auto_flow_prefix_with_optional_auto_track_sizes(right_source, CssGridAutoFlowAxis::Column)
+    {
+        let mut items = vec![
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridTemplateRows,
+                source: left_source.clone(),
+            },
+            RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridAutoFlow,
+                source: grid_auto_flow_source,
+            },
+        ];
+        if let Some(source) = grid_auto_columns_source {
+            items.push(RustOwnedGridTemplateShorthandItem {
+                property_id: PropertyId::GridAutoColumns,
+                source,
+            });
+        }
+        return Some(items);
+    }
+
+    None
+}
+
+fn parse_grid_auto_flow_prefix_with_optional_auto_track_sizes(
+    input: &str,
+    axis: CssGridAutoFlowAxis,
+) -> Option<(String, Option<String>)> {
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(input.as_bytes());
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    parser.discard_whitespace();
+    let mut found_auto_flow = false;
+    let mut found_dense = false;
+
+    for _ in 0..2 {
+        parser.discard_whitespace();
+        if component_value_is_ident(parser.next_component_value(), "auto-flow") && !found_auto_flow {
+            found_auto_flow = true;
+            parser.index += 1;
+        } else if component_value_is_ident(parser.next_component_value(), "dense") && !found_dense {
+            found_dense = true;
+            parser.index += 1;
+        } else {
+            break;
+        }
+    }
+    if !found_auto_flow {
+        return None;
+    }
+
+    let grid_auto_flow_source = match (axis, found_dense) {
+        (CssGridAutoFlowAxis::Row, false) => "row".to_string(),
+        (CssGridAutoFlowAxis::Row, true) => "row dense".to_string(),
+        (CssGridAutoFlowAxis::Column, false) => "column".to_string(),
+        (CssGridAutoFlowAxis::Column, true) => "column dense".to_string(),
+    };
+
+    let auto_track_sizes_start = parser.index;
+    let auto_track_sizes = parse_one_or_more_grid_track_sizes(&mut parser, input);
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    let grid_auto_track_sizes_source = if auto_track_sizes.is_some() {
+        Some(serialize_component_values_for_reparsing(
+            strip_whitespace(&parser.component_values[auto_track_sizes_start..parser.index]),
+            input,
+        )?)
+    } else {
+        None
+    };
+
+    Some((grid_auto_flow_source, grid_auto_track_sizes_source))
+}
+
+fn parse_rust_owned_grid_template_areas_syntax(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<Vec<RustOwnedGridTemplateShorthandItem>> {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let mut area_sources = Vec::new();
+    let mut row_track_source_items = Vec::new();
+
+    loop {
+        parser.discard_whitespace();
+        if component_value_is_delim(parser.next_component_value(), '/') || !parser.has_next_component_value() {
+            break;
+        }
+
+        let line_names_before = parser.index;
+        let leading_line_names = parse_grid_line_names(&mut parser);
+        let line_names_after = parser.index;
+
+        parser.discard_whitespace();
+        let component_value = parser.next_component_value()?;
+        if !matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { .. },
+                ..
+            })
+        ) {
+            return None;
+        }
+        area_sources.push(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            source,
+        )?);
+        parser.index += 1;
+
+        let track_size_start = parser.index;
+        let track_size_source = if parse_grid_track_size(&mut parser, source).is_some() {
+            serialize_component_values_for_reparsing(
+                strip_whitespace(&parser.component_values[track_size_start..parser.index]),
+                source,
+            )?
+        } else {
+            "auto".to_string()
+        };
+
+        let trailing_line_names_before = parser.index;
+        let trailing_line_names = parse_grid_line_names(&mut parser);
+        let trailing_line_names_after = parser.index;
+
+        serialize_component_values_for_reparsing(
+            strip_whitespace(&parser.component_values[line_names_before..line_names_after]),
+            source,
+        )?;
+        push_grid_template_line_names(&mut row_track_source_items, leading_line_names);
+        row_track_source_items.push(GridTemplateRowTrackSourceItem::Track(track_size_source));
+        serialize_component_values_for_reparsing(
+            strip_whitespace(&parser.component_values[trailing_line_names_before..trailing_line_names_after]),
+            source,
+        )?;
+        push_grid_template_line_names(&mut row_track_source_items, trailing_line_names);
+    }
+
+    if area_sources.is_empty() {
+        return None;
+    }
+
+    let grid_template_areas_source = area_sources.join(" ");
+    parse_rust_owned_grid_template_areas_value(grid_template_areas_source.as_bytes())?;
+    let grid_template_rows_source = serialize_grid_template_row_track_source_items(&row_track_source_items);
+
+    let mut items = vec![
+        RustOwnedGridTemplateShorthandItem {
+            property_id: PropertyId::GridTemplateAreas,
+            source: grid_template_areas_source,
+        },
+        RustOwnedGridTemplateShorthandItem {
+            property_id: PropertyId::GridTemplateRows,
+            source: grid_template_rows_source,
+        },
+    ];
+
+    parser.discard_whitespace();
+    if component_value_is_delim(parser.next_component_value(), '/') {
+        parser.index += 1;
+        parser.discard_whitespace();
+        let columns_start = parser.index;
+        let columns = parse_grid_track_list(&mut parser, source)?;
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+        if columns.is_empty() {
+            return None;
+        }
+        items.push(RustOwnedGridTemplateShorthandItem {
+            property_id: PropertyId::GridTemplateColumns,
+            source: serialize_component_values_for_reparsing(
+                strip_whitespace(&parser.component_values[columns_start..parser.index]),
+                source,
+            )?,
+        });
+    } else if parser.has_next_component_value() {
+        return None;
+    }
+
+    Some(items)
+}
+
+fn parse_rust_owned_grid_template_areas_value(filtered_input: &[u8]) -> Option<()> {
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let stripped_component_values = strip_whitespace(&component_values);
+
+    if matches!(stripped_component_values, [component_value] if component_value_is_ident(Some(component_value), "none"))
+    {
+        return Some(());
+    }
+
+    let mut column_count = None;
+    let mut grid_area_rows = Vec::new();
+    for component_value in stripped_component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+    {
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::String { value },
+            ..
+        }) = component_value
+        else {
+            return None;
+        };
+        let row = parse_grid_template_area_string(value)?;
+        if row.is_empty() {
+            return None;
+        }
+        if let Some(column_count) = column_count {
+            if row.len() != column_count {
+                return None;
+            }
+        } else {
+            column_count = Some(row.len());
+        }
+        grid_area_rows.push(row);
+    }
+
+    if grid_area_rows.is_empty() {
+        return None;
+    }
+
+    Some(())
+}
+
+fn parse_grid_template_area_string(input: &str) -> Option<Vec<String>> {
+    let mut row = Vec::new();
+    for token in input.split_whitespace() {
+        if token.chars().all(|character| character == '.') {
+            row.push(".".to_string());
+        } else if token
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+        {
+            row.push(token.to_string());
+        } else {
+            return None;
+        }
+    }
+    Some(row)
+}
+
+fn push_grid_template_line_names(
+    row_track_source_items: &mut Vec<GridTemplateRowTrackSourceItem>,
+    line_names: Option<Vec<String>>,
+) {
+    let Some(line_names) = line_names else {
+        return;
+    };
+    if line_names.is_empty() {
+        return;
+    }
+
+    if let Some(GridTemplateRowTrackSourceItem::LineNames(previous_line_names)) = row_track_source_items.last_mut() {
+        previous_line_names.extend(line_names);
+    } else {
+        row_track_source_items.push(GridTemplateRowTrackSourceItem::LineNames(line_names));
+    }
+}
+
+fn serialize_grid_template_row_track_source_items(items: &[GridTemplateRowTrackSourceItem]) -> String {
+    let mut sources = Vec::new();
+    for item in items {
+        match item {
+            GridTemplateRowTrackSourceItem::LineNames(line_names) => {
+                sources.push(format!("[{}]", line_names.join(" ")));
+            }
+            GridTemplateRowTrackSourceItem::Track(source) => sources.push(source.clone()),
+        }
+    }
+    sources.join(" ")
+}
+
 fn split_component_values_on_top_level_slashes(
     component_values: &[ComponentValue],
     source: &str,
@@ -14792,7 +15197,7 @@ fn parse_grid_auto_track_list(
         items
     } else {
         let mut items = Vec::new();
-        if let Some(line_names) = parse_grid_line_names(parser).filter(|line_names| !line_names.is_empty()) {
+        for line_names in parse_grid_line_names_list(parser) {
             items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
         }
         items
@@ -14827,12 +15232,12 @@ where
     let mut has_track = false;
     loop {
         let before_track = parser.index;
-        let line_names = parse_grid_line_names(parser);
+        let line_names = parse_grid_line_names_list(parser);
         let Some(track) = track_parser(parser, filtered_input_string) else {
             parser.index = before_track;
             break;
         };
-        if let Some(line_names) = line_names.filter(|line_names| !line_names.is_empty()) {
+        for line_names in line_names {
             items.push(RustOwnedGridTrackSizeListItem::LineNames(line_names));
         }
         items.push(RustOwnedGridTrackSizeListItem::Track(track));
@@ -14844,6 +15249,16 @@ where
     }
 
     has_track.then_some(items)
+}
+
+fn parse_grid_line_names_list(parser: &mut ComponentValueParser) -> Vec<Vec<String>> {
+    let mut line_names_list = Vec::new();
+    while let Some(line_names) = parse_grid_line_names(parser) {
+        if !line_names.is_empty() {
+            line_names_list.push(line_names);
+        }
+    }
+    line_names_list
 }
 
 fn parse_grid_line_names(parser: &mut ComponentValueParser) -> Option<Vec<String>> {
@@ -28422,27 +28837,27 @@ mod tests {
         parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
-        parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_track_placement_value,
-        parse_grid_track_size_list_value, parse_image_set_value, parse_layer_shorthand, parse_length_descriptor,
-        parse_list_style_value, parse_math_depth_value, parse_optional_declaration_value_descriptor,
-        parse_overflow_clip_margin_value, parse_page_size_descriptor, parse_paint_order_value,
-        parse_place_content_value, parse_place_items_value, parse_place_self_value, parse_position_anchor_value,
-        parse_position_area_value, parse_position_try_fallbacks_value, parse_position_try_order_value,
-        parse_position_value, parse_position_visibility_value, parse_positional_value_list_shorthand,
-        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
-        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value,
-        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_filter_value_list_value,
-        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
-        parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
-        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
-        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
-        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
-        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
-        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
-        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
-        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-        parse_will_change_value, strip_whitespace,
+        parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_template_shorthand,
+        parse_grid_track_placement_value, parse_grid_track_size_list_value, parse_image_set_value,
+        parse_layer_shorthand, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
+        parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
+        parse_paint_order_value, parse_place_content_value, parse_place_items_value, parse_place_self_value,
+        parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
+        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
+        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+        parse_rust_owned_filter_value_list_value, parse_rust_owned_positional_value_list_shorthand,
+        parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
+        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
+        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
+        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
+        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+        parse_transition_property_value, parse_translate_value, parse_view_function_value,
+        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
+        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -29583,6 +29998,17 @@ mod tests {
     fn parse_grid_placement_shorthand_items(property_id: PropertyId, input: &str) -> Option<Vec<(PropertyId, String)>> {
         let mut items = Vec::new();
         parse_grid_placement_shorthand(property_id as u16, input.as_bytes(), |property_id, value| {
+            items.push((
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                value.to_string(),
+            ));
+        })
+        .then_some(items)
+    }
+
+    fn parse_grid_template_shorthand_items(property_id: PropertyId, input: &str) -> Option<Vec<(PropertyId, String)>> {
+        let mut items = Vec::new();
+        parse_grid_template_shorthand(property_id as u16, input.as_bytes(), |property_id, value| {
             items.push((
                 crate::generated_properties::property_id_from_u16(property_id).unwrap(),
                 value.to_string(),
@@ -36205,6 +36631,76 @@ mod tests {
         );
         assert_eq!(
             parse_grid_placement_shorthand_items(PropertyId::GridArea, "1 / 2 / 3 / 4 / 5"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_grid_template_shorthands() {
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::GridTemplate, "none"),
+            Some(vec![])
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::GridTemplate, "1fr / [main] 10px"),
+            Some(vec![
+                (PropertyId::GridTemplateRows, "1fr".to_string()),
+                (PropertyId::GridTemplateColumns, "[main] 10px".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::GridTemplate, "\"a a\" 10px [b] \"c c\" / 1fr 2fr"),
+            Some(vec![
+                (PropertyId::GridTemplateAreas, "\"a a\" \"c c\"".to_string()),
+                (PropertyId::GridTemplateRows, "10px [b] auto".to_string()),
+                (PropertyId::GridTemplateColumns, "1fr 2fr".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(
+                PropertyId::GridTemplate,
+                "[header-left] \"head head\" 30px [header-right] [main-left] \"nav main\" 1fr [main-right] [footer-left] \"nav foot\" 30px [footer-right] / 120px 1fr"
+            ),
+            Some(vec![
+                (
+                    PropertyId::GridTemplateAreas,
+                    "\"head head\" \"nav main\" \"nav foot\"".to_string()
+                ),
+                (
+                    PropertyId::GridTemplateRows,
+                    "[header-left] 30px [header-right main-left] 1fr [main-right footer-left] 30px [footer-right]"
+                        .to_string(),
+                ),
+                (PropertyId::GridTemplateColumns, "120px 1fr".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::Grid, "auto-flow dense 20px / 1fr 2fr"),
+            Some(vec![
+                (PropertyId::GridAutoFlow, "row dense".to_string()),
+                (PropertyId::GridTemplateColumns, "1fr 2fr".to_string()),
+                (PropertyId::GridAutoRows, "20px".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::Grid, "1fr 2fr / dense auto-flow 10px"),
+            Some(vec![
+                (PropertyId::GridTemplateRows, "1fr 2fr".to_string()),
+                (PropertyId::GridAutoFlow, "column dense".to_string()),
+                (PropertyId::GridAutoColumns, "10px".to_string()),
+            ])
+        );
+
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::GridTemplate, "1fr /"),
+            None
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::GridTemplate, "\"a\" \"b b\""),
+            None
+        );
+        assert_eq!(
+            parse_grid_template_shorthand_items(PropertyId::Grid, "dense / 1fr"),
             None
         );
     }

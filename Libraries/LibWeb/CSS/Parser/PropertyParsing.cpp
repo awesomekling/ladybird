@@ -5168,106 +5168,70 @@ RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(Prop
 // 7.4. Explicit Grid Shorthand: the grid-template property
 RefPtr<StyleValue const> Parser::parse_grid_track_size_list_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens, bool include_grid_auto_properties)
 {
+    auto transaction = tokens.begin_transaction();
+    auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto rust_items = RustComponentValueParser::parse_grid_template_shorthand(property_id, source.bytes_as_string_view());
+    if (!rust_items.has_value())
+        return nullptr;
+
     Vector<PropertyID> sub_properties;
     Vector<ValueComparingNonnullRefPtr<StyleValue const>> values;
     if (include_grid_auto_properties) {
         sub_properties.append(PropertyID::GridAutoFlow);
         sub_properties.append(PropertyID::GridAutoRows);
         sub_properties.append(PropertyID::GridAutoColumns);
-        values.append(property_initial_value(PropertyID::GridAutoFlow));
-        values.append(property_initial_value(PropertyID::GridAutoRows));
-        values.append(property_initial_value(PropertyID::GridAutoColumns));
     }
     sub_properties.append(PropertyID::GridTemplateAreas);
     sub_properties.append(PropertyID::GridTemplateRows);
     sub_properties.append(PropertyID::GridTemplateColumns);
+
     values.ensure_capacity(sub_properties.size());
+    for (auto property_id : sub_properties)
+        values.unchecked_append(property_initial_value(property_id));
 
-    // none
-    {
-        if (parse_all_as_single_keyword_value(tokens, Keyword::None)) {
-            values.unchecked_append(property_initial_value(PropertyID::GridTemplateAreas));
-            values.unchecked_append(property_initial_value(PropertyID::GridTemplateRows));
-            values.unchecked_append(property_initial_value(PropertyID::GridTemplateColumns));
-            return ShorthandStyleValue::create(property_id, move(sub_properties), move(values));
+    auto materialize_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+        TokenStream property_tokens { component_values };
+        RefPtr<StyleValue const> value;
+        switch (property_id) {
+        case PropertyID::GridAutoFlow:
+            value = parse_grid_auto_flow_value(property_tokens);
+            break;
+        case PropertyID::GridAutoRows:
+        case PropertyID::GridAutoColumns:
+            value = parse_grid_auto_track_sizes(property_tokens);
+            break;
+        case PropertyID::GridTemplateAreas:
+            value = parse_grid_template_areas_value(property_tokens);
+            break;
+        case PropertyID::GridTemplateRows:
+        case PropertyID::GridTemplateColumns:
+            value = parse_grid_track_size_list(property_tokens);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
         }
+        property_tokens.discard_whitespace();
+        if (!value || property_tokens.has_next_token())
+            return nullptr;
+        return value;
+    };
+
+    for (auto const& item : rust_items.value()) {
+        auto value = materialize_source_as_property(item.property_id, item.value);
+        if (!value)
+            return nullptr;
+
+        auto index = sub_properties.find_first_index(item.property_id);
+        if (!index.has_value())
+            return nullptr;
+        values[index.value()] = value.release_nonnull();
     }
 
-    // [ <'grid-template-rows'> / <'grid-template-columns'> ]
-    {
-        auto transaction = tokens.begin_transaction();
-        if (auto parsed_template_rows_values = parse_grid_track_size_list(tokens)) {
-            tokens.discard_whitespace();
-            if (tokens.has_next_token() && tokens.next_token().is_delim('/')) {
-                tokens.discard_a_token(); // /
-                tokens.discard_whitespace();
-                if (auto parsed_template_columns_values = parse_grid_track_size_list(tokens)) {
-                    transaction.commit();
-                    values.unchecked_append(property_initial_value(PropertyID::GridTemplateAreas));
-                    values.unchecked_append(parsed_template_rows_values.release_nonnull());
-                    values.unchecked_append(parsed_template_columns_values.release_nonnull());
-                    return ShorthandStyleValue::create(property_id, move(sub_properties), move(values));
-                }
-            }
-        }
-    }
-
-    // [ <line-names>? <string> <track-size>? <line-names>? ]+ [ / <explicit-track-list> ]?
-    {
-        auto transaction = tokens.begin_transaction();
-
-        GridTrackSizeList track_list;
-        Vector<ComponentValue> area_tokens;
-
-        GridTrackParser parse_grid_track = [&](TokenStream<ComponentValue>& tokens) -> Optional<ExplicitGridTrack> {
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                return {};
-            auto const& token = tokens.consume_a_token();
-            if (!token.is(Token::Type::String))
-                return {};
-            area_tokens.append(token);
-            tokens.discard_whitespace();
-            if (auto track_size = parse_grid_track_size(tokens); track_size.has_value())
-                return track_size.release_value();
-            tokens.discard_whitespace();
-            return ExplicitGridTrack(GridSize::make_auto());
-        };
-
-        auto parsed_track_count = parse_track_list_impl(tokens, track_list, parse_grid_track, AllowTrailingLineNamesForEachTrack::Yes);
-        if (parsed_track_count > 0) {
-            TokenStream area_tokens_stream { area_tokens };
-            auto grid_areas = parse_grid_template_areas_value(area_tokens_stream);
-            if (!grid_areas)
-                return nullptr;
-
-            auto rows_track_list = GridTrackSizeListStyleValue::create(move(track_list));
-
-            tokens.discard_whitespace();
-
-            RefPtr columns_track_list = property_initial_value(PropertyID::GridTemplateColumns);
-            if (tokens.has_next_token() && tokens.next_token().is_delim('/')) {
-                tokens.discard_a_token(); // /
-                tokens.discard_whitespace();
-                if (auto parsed_columns = parse_explicit_track_list(tokens); !parsed_columns.is_empty()) {
-                    transaction.commit();
-                    columns_track_list = GridTrackSizeListStyleValue::create(move(parsed_columns));
-                } else {
-                    return nullptr;
-                }
-            } else if (tokens.has_next_token()) {
-                return nullptr;
-            }
-
-            transaction.commit();
-            values.unchecked_append(grid_areas.release_nonnull());
-            values.unchecked_append(rows_track_list);
-            values.unchecked_append(columns_track_list.release_nonnull());
-            return ShorthandStyleValue::create(property_id, move(sub_properties), move(values));
-        }
-    }
-
-    return nullptr;
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+    transaction.commit();
+    return ShorthandStyleValue::create(property_id, move(sub_properties), move(values));
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_area_shorthand_value(TokenStream<ComponentValue>& tokens)
@@ -5303,101 +5267,7 @@ RefPtr<StyleValue const> Parser::parse_grid_area_shorthand_value(TokenStream<Com
 
 RefPtr<StyleValue const> Parser::parse_grid_shorthand_value(TokenStream<ComponentValue>& tokens)
 {
-    // <'grid-template'>
-    if (auto grid_template = parse_grid_track_size_list_shorthand_value(PropertyID::Grid, tokens, true)) {
-        return grid_template;
-    }
-
-    auto parse_auto_flow_and_dense = [&](GridAutoFlowStyleValue::Axis axis) -> RefPtr<GridAutoFlowStyleValue const> {
-        bool found_auto_flow = false;
-        auto dense = GridAutoFlowStyleValue::Dense::No;
-        for (int i = 0; i < 2 && tokens.has_next_token(); ++i) {
-            auto const& token = tokens.next_token();
-            if (token.is_ident("auto-flow"sv) && !found_auto_flow) {
-                tokens.discard_a_token(); // auto-flow
-                tokens.discard_whitespace();
-                found_auto_flow = true;
-            } else if (token.is_ident("dense"sv) && dense == GridAutoFlowStyleValue::Dense::No) {
-                tokens.discard_a_token(); // dense
-                tokens.discard_whitespace();
-                dense = GridAutoFlowStyleValue::Dense::Yes;
-            } else {
-                break;
-            }
-        }
-
-        if (found_auto_flow)
-            return GridAutoFlowStyleValue::create(axis, dense);
-        return {};
-    };
-
-    // [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
-    auto parse_shorthand_branch_1 = [&] -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        auto grid_auto_flow = parse_auto_flow_and_dense(GridAutoFlowStyleValue::Axis::Row);
-        if (!grid_auto_flow)
-            return nullptr;
-
-        auto grid_auto_rows = parse_grid_auto_track_sizes(tokens);
-        if (grid_auto_rows->as_grid_track_size_list().grid_track_size_list().is_empty())
-            grid_auto_rows = property_initial_value(PropertyID::GridAutoRows);
-
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token() || !tokens.next_token().is_delim('/'))
-            return nullptr;
-        tokens.discard_a_token(); // /
-        tokens.discard_whitespace();
-
-        auto grid_template_columns = parse_grid_track_size_list(tokens);
-        if (!grid_template_columns)
-            return nullptr;
-
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::Grid,
-            { PropertyID::GridAutoFlow, PropertyID::GridAutoRows, PropertyID::GridAutoColumns, PropertyID::GridTemplateAreas, PropertyID::GridTemplateRows, PropertyID::GridTemplateColumns },
-            { grid_auto_flow.release_nonnull(), grid_auto_rows.release_nonnull(), property_initial_value(PropertyID::GridAutoColumns), property_initial_value(PropertyID::GridTemplateAreas), property_initial_value(PropertyID::GridTemplateRows), grid_template_columns.release_nonnull() });
-    };
-
-    // <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>?
-    auto parse_shorthand_branch_2 = [&] -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        auto grid_template_rows = parse_grid_track_size_list(tokens);
-        if (!grid_template_rows)
-            return nullptr;
-
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token() || !tokens.next_token().is_delim('/'))
-            return nullptr;
-        tokens.discard_a_token(); // /
-        tokens.discard_whitespace();
-
-        auto grid_auto_flow = parse_auto_flow_and_dense(GridAutoFlowStyleValue::Axis::Column);
-        if (!grid_auto_flow)
-            return nullptr;
-
-        auto grid_auto_columns = parse_grid_auto_track_sizes(tokens);
-        if (grid_auto_columns->as_grid_track_size_list().grid_track_size_list().is_empty())
-            grid_auto_columns = property_initial_value(PropertyID::GridAutoColumns);
-
-        transaction.commit();
-        return ShorthandStyleValue::create(PropertyID::Grid,
-            { PropertyID::GridAutoFlow, PropertyID::GridAutoRows, PropertyID::GridAutoColumns, PropertyID::GridTemplateAreas, PropertyID::GridTemplateRows, PropertyID::GridTemplateColumns },
-            { grid_auto_flow.release_nonnull(), property_initial_value(PropertyID::GridAutoRows), grid_auto_columns.release_nonnull(), property_initial_value(PropertyID::GridTemplateAreas), grid_template_rows.release_nonnull(), property_initial_value(PropertyID::GridTemplateColumns) });
-    };
-
-    if (auto grid = parse_shorthand_branch_1()) {
-        return grid;
-    }
-
-    if (auto grid = parse_shorthand_branch_2()) {
-        return grid;
-    }
-
-    return nullptr;
+    return parse_grid_track_size_list_shorthand_value(PropertyID::Grid, tokens, true);
 }
 
 // https://www.w3.org/TR/css-grid-1/#grid-template-areas-property

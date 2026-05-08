@@ -1986,6 +1986,27 @@ Optional<Vector<RustComponentValueParser::GridPlacementShorthandItem>> RustCompo
     return items;
 }
 
+Optional<Vector<RustComponentValueParser::GridTemplateShorthandItem>> RustComponentValueParser::parse_grid_template_shorthand(PropertyID property_id, StringView input)
+{
+    Vector<GridTemplateShorthandItem> items;
+    auto input_bytes = input.bytes();
+    if (!FFI::rust_css_parse_grid_template_shorthand(
+            static_cast<u16>(to_underlying(property_id)),
+            input_bytes.data(),
+            input_bytes.size(),
+            &items,
+            [](void* raw_items, u16 property_id, u8 const* value_ptr, size_t value_len) {
+                auto& items = *static_cast<Vector<GridTemplateShorthandItem>*>(raw_items);
+                items.append(GridTemplateShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = String::from_utf8_without_validation({ value_ptr, value_len }),
+                });
+            }))
+        return {};
+
+    return items;
+}
+
 Optional<Vector<RustComponentValueParser::PositionalValueListShorthandItem>> RustComponentValueParser::parse_positional_value_list_shorthand(PropertyID property_id, StringView input)
 {
     Vector<PositionalValueListShorthandItem> items;
