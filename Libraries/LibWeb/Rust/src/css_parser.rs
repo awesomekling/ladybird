@@ -2648,8 +2648,25 @@ pub(crate) struct RustOwnedPaintOrder {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFlexFlow {
-    flex_direction_source: Option<String>,
-    flex_wrap_source: Option<String>,
+    flex_direction: Option<RustOwnedFlexDirection>,
+    flex_wrap: Option<RustOwnedFlexWrap>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedFlexDirection {
+    Row,
+    RowReverse,
+    Column,
+    ColumnReverse,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedFlexWrap {
+    Nowrap,
+    Wrap,
+    WrapReverse,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4669,7 +4686,7 @@ fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<R
 }
 
 fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
-    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = remove_whitespace_component_values(&component_values);
 
@@ -4679,29 +4696,23 @@ fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOw
         return None;
     }
 
-    let mut flex_direction_source = None;
-    let mut flex_wrap_source = None;
+    let mut flex_direction = None;
+    let mut flex_wrap = None;
 
     for component_value in &component_values {
-        if component_value_parse_as_flex_direction(component_value) {
-            if flex_direction_source.is_some() {
+        if let Some(value) = rust_owned_flex_direction_from_component_value(component_value) {
+            if flex_direction.is_some() {
                 return None;
             }
-            flex_direction_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+            flex_direction = Some(value);
             continue;
         }
 
-        if component_value_parse_as_flex_wrap(component_value) {
-            if flex_wrap_source.is_some() {
+        if let Some(value) = rust_owned_flex_wrap_from_component_value(component_value) {
+            if flex_wrap.is_some() {
                 return None;
             }
-            flex_wrap_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+            flex_wrap = Some(value);
             continue;
         }
 
@@ -4709,9 +4720,40 @@ fn rust_owned_flex_flow_style_value_kind(filtered_input: &[u8]) -> Option<RustOw
     }
 
     Some(RustOwnedStyleValueKind::FlexFlow(RustOwnedFlexFlow {
-        flex_direction_source,
-        flex_wrap_source,
+        flex_direction,
+        flex_wrap,
     }))
+}
+
+fn rust_owned_flex_direction_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedFlexDirection> {
+    let ident = component_value_ident(component_value)?;
+    if ident.eq_ignore_ascii_case("row") {
+        return Some(RustOwnedFlexDirection::Row);
+    }
+    if ident.eq_ignore_ascii_case("row-reverse") {
+        return Some(RustOwnedFlexDirection::RowReverse);
+    }
+    if ident.eq_ignore_ascii_case("column") {
+        return Some(RustOwnedFlexDirection::Column);
+    }
+    if ident.eq_ignore_ascii_case("column-reverse") {
+        return Some(RustOwnedFlexDirection::ColumnReverse);
+    }
+    None
+}
+
+fn rust_owned_flex_wrap_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedFlexWrap> {
+    let ident = component_value_ident(component_value)?;
+    if ident.eq_ignore_ascii_case("nowrap") {
+        return Some(RustOwnedFlexWrap::Nowrap);
+    }
+    if ident.eq_ignore_ascii_case("wrap") {
+        return Some(RustOwnedFlexWrap::Wrap);
+    }
+    if ident.eq_ignore_ascii_case("wrap-reverse") {
+        return Some(RustOwnedFlexWrap::WrapReverse);
+    }
+    None
 }
 
 fn rust_owned_filter_value_list_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -8061,20 +8103,40 @@ where
             );
         }
         RustOwnedStyleValueKind::FlexFlow(value) => {
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::FlexFlow,
-                property_id,
-                0,
-                value.flex_direction_source.as_ref(),
-            );
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::FlexFlow,
-                property_id,
-                1,
-                value.flex_wrap_source.as_ref(),
-            );
+            if let Some(flex_direction) = value.flex_direction {
+                callback(
+                    CssStyleValueKind::FlexFlow,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    flex_direction as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
+            if let Some(flex_wrap) = value.flex_wrap {
+                callback(
+                    CssStyleValueKind::FlexFlow,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    1,
+                    flex_wrap as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
         }
         RustOwnedStyleValueKind::FilterValueList { value } => {
             callback_filter_value_list_style_value(callback, property_id, value);
@@ -30155,37 +30217,37 @@ mod tests {
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
         RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
         RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStylePosition, RustOwnedMathDepth,
-        RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
-        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextDecorationThickness, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedListStylePosition, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue,
+        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
+        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
+        RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -32058,8 +32120,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FlexFlow,
                 value: RustOwnedStyleValueKind::FlexFlow(RustOwnedFlexFlow {
-                    flex_direction_source: Some("row-reverse".to_string()),
-                    flex_wrap_source: Some("wrap".to_string()),
+                    flex_direction: Some(RustOwnedFlexDirection::RowReverse),
+                    flex_wrap: Some(RustOwnedFlexWrap::Wrap),
                 }),
             })
         );
@@ -34192,7 +34254,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "wrap".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );

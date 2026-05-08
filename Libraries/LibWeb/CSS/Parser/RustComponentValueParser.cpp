@@ -1232,9 +1232,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (color_red == 0)
-                    style_value->flex_direction_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->flex_direction = static_cast<FlexDirection>(color_green);
                 else
-                    style_value->flex_wrap_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->flex_wrap = static_cast<FlexWrap>(color_green);
                 return;
             } else if (kind == FFI::CssStyleValueKind::Flex) {
                 if (!style_value.has_value())

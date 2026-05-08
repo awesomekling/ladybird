@@ -3086,12 +3086,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FlexFlow:
-                if (rust_style_value->flex_direction_source.has_value() || rust_style_value->flex_wrap_source.has_value()) {
-                    auto flex_direction = rust_style_value->flex_direction_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::FlexDirection, *rust_style_value->flex_direction_source)
+                if (rust_style_value->flex_direction.has_value() || rust_style_value->flex_wrap.has_value()) {
+                    RefPtr<StyleValue const> flex_direction = rust_style_value->flex_direction.has_value()
+                        ? KeywordStyleValue::create(to_keyword(*rust_style_value->flex_direction))
                         : property_initial_value(PropertyID::FlexDirection);
-                    auto flex_wrap = rust_style_value->flex_wrap_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::FlexWrap, *rust_style_value->flex_wrap_source)
+                    RefPtr<StyleValue const> flex_wrap = rust_style_value->flex_wrap.has_value()
+                        ? KeywordStyleValue::create(to_keyword(*rust_style_value->flex_wrap))
                         : property_initial_value(PropertyID::FlexWrap);
                     if (!flex_direction || !flex_wrap)
                         break;

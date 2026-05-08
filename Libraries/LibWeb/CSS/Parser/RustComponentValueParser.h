@@ -416,8 +416,8 @@ public:
         Optional<String> flex_grow_source;
         Optional<String> flex_shrink_source;
         Optional<String> flex_basis_source;
-        Optional<String> flex_direction_source;
-        Optional<String> flex_wrap_source;
+        Optional<FlexDirection> flex_direction;
+        Optional<FlexWrap> flex_wrap;
         Optional<u8> text_decoration_line_bits;
         Optional<RustTextDecorationThicknessKind> text_decoration_thickness_kind;
         Optional<RustNestedPrimitiveValue> text_decoration_thickness;
