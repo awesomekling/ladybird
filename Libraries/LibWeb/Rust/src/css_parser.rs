@@ -2164,6 +2164,12 @@ pub(crate) struct RustOwnedFontShorthandItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGridPlacementShorthandItem {
+    property_id: PropertyId,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     index: usize,
     style_value: RustOwnedStyleValue,
@@ -10649,6 +10655,198 @@ fn source_parses_as_property(property_id: PropertyId, source: &str) -> bool {
     matches!(
         parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
         RustOwnedStyleValueParseResult::Parsed(_)
+    )
+}
+
+pub(crate) fn parse_grid_placement_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, &str),
+{
+    let Some(property_id) = property_id_from_u16(property_id) else {
+        return false;
+    };
+    let Some(items) = parse_rust_owned_grid_placement_shorthand(property_id, filtered_input) else {
+        return false;
+    };
+
+    for item in items {
+        callback(item.property_id as u16, &item.source);
+    }
+
+    true
+}
+
+fn parse_rust_owned_grid_placement_shorthand(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedGridPlacementShorthandItem>> {
+    match property_id {
+        PropertyId::GridColumn | PropertyId::GridRow => {
+            parse_rust_owned_grid_track_placement_shorthand(property_id, filtered_input)
+        }
+        PropertyId::GridArea => parse_rust_owned_grid_area_shorthand(filtered_input),
+        _ => None,
+    }
+}
+
+fn parse_rust_owned_grid_track_placement_shorthand(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedGridPlacementShorthandItem>> {
+    let (start_property, end_property) = match property_id {
+        PropertyId::GridColumn => (PropertyId::GridColumnStart, PropertyId::GridColumnEnd),
+        PropertyId::GridRow => (PropertyId::GridRowStart, PropertyId::GridRowEnd),
+        _ => return None,
+    };
+    let source = filtered_input_to_string(filtered_input);
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let parts = split_component_values_on_top_level_slashes(&component_values, &source)?;
+    let ([start_source] | [start_source, _]) = parts.as_slice() else {
+        return None;
+    };
+    let start_placement = parse_rust_owned_grid_track_placement_value(start_source.as_bytes())?;
+
+    let end_source = if let Some(end_source) = parts.get(1) {
+        parse_rust_owned_grid_track_placement_value(end_source.as_bytes())?;
+        end_source.clone()
+    } else if grid_track_placement_is_custom_ident(&start_placement) {
+        start_source.clone()
+    } else {
+        "auto".to_string()
+    };
+
+    Some(vec![
+        RustOwnedGridPlacementShorthandItem {
+            property_id: start_property,
+            source: start_source.clone(),
+        },
+        RustOwnedGridPlacementShorthandItem {
+            property_id: end_property,
+            source: end_source,
+        },
+    ])
+}
+
+fn parse_rust_owned_grid_area_shorthand(filtered_input: &[u8]) -> Option<Vec<RustOwnedGridPlacementShorthandItem>> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let parts = split_component_values_on_top_level_slashes(&component_values, &source)?;
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+
+    let row_start = parse_rust_owned_grid_track_placement_value(parts[0].as_bytes())?;
+    let column_start = if let Some(source) = parts.get(1) {
+        Some(parse_rust_owned_grid_track_placement_value(source.as_bytes())?)
+    } else {
+        None
+    };
+    if let Some(source) = parts.get(2) {
+        parse_rust_owned_grid_track_placement_value(source.as_bytes())?;
+    }
+    if let Some(source) = parts.get(3) {
+        parse_rust_owned_grid_track_placement_value(source.as_bytes())?;
+    }
+
+    // https://www.w3.org/TR/css-grid-2/#placement-shorthands
+    // If grid-column-start is omitted, if grid-row-start is a <custom-ident>,
+    // all four longhands are set to that value. Otherwise, it is set to auto.
+    let column_start_source = parts.get(1).cloned().unwrap_or_else(|| {
+        if grid_track_placement_is_custom_ident(&row_start) {
+            parts[0].clone()
+        } else {
+            "auto".to_string()
+        }
+    });
+
+    // https://www.w3.org/TR/css-grid-2/#placement-shorthands
+    // If grid-row-end is omitted, if grid-row-start is a <custom-ident>,
+    // grid-row-end is set to that <custom-ident>; otherwise, it is set to auto.
+    let row_end_source = parts.get(2).cloned().unwrap_or_else(|| {
+        if grid_track_placement_is_custom_ident(&row_start) {
+            parts[0].clone()
+        } else {
+            "auto".to_string()
+        }
+    });
+
+    // https://www.w3.org/TR/css-grid-2/#placement-shorthands
+    // If grid-column-end is omitted, if grid-column-start is a <custom-ident>,
+    // grid-column-end is set to that <custom-ident>; otherwise, it is set to auto.
+    let column_end_source = parts.get(3).cloned().unwrap_or_else(|| {
+        let column_start_is_custom_ident = column_start
+            .as_ref()
+            .map(grid_track_placement_is_custom_ident)
+            .unwrap_or_else(|| grid_track_placement_is_custom_ident(&row_start));
+        if column_start_is_custom_ident {
+            column_start_source.clone()
+        } else {
+            "auto".to_string()
+        }
+    });
+
+    Some(vec![
+        RustOwnedGridPlacementShorthandItem {
+            property_id: PropertyId::GridRowStart,
+            source: parts[0].clone(),
+        },
+        RustOwnedGridPlacementShorthandItem {
+            property_id: PropertyId::GridColumnStart,
+            source: column_start_source,
+        },
+        RustOwnedGridPlacementShorthandItem {
+            property_id: PropertyId::GridRowEnd,
+            source: row_end_source,
+        },
+        RustOwnedGridPlacementShorthandItem {
+            property_id: PropertyId::GridColumnEnd,
+            source: column_end_source,
+        },
+    ])
+}
+
+fn split_component_values_on_top_level_slashes(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (index, component_value) in component_values.iter().enumerate() {
+        if !matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            }) if *value == '/' as u32
+        ) {
+            continue;
+        }
+
+        let part = serialize_component_values_for_reparsing(strip_whitespace(&component_values[start..index]), source)?;
+        if part.is_empty() {
+            return None;
+        }
+        parts.push(part);
+        start = index + 1;
+    }
+
+    let part = serialize_component_values_for_reparsing(strip_whitespace(&component_values[start..]), source)?;
+    if part.is_empty() {
+        return None;
+    }
+    parts.push(part);
+    Some(parts)
+}
+
+fn grid_track_placement_is_custom_ident(grid_track_placement: &RustOwnedGridTrackPlacement) -> bool {
+    matches!(
+        grid_track_placement,
+        RustOwnedGridTrackPlacement::Line {
+            line_number_source: None,
+            name: Some(_),
+        }
     )
 }
 
@@ -28224,15 +28422,15 @@ mod tests {
         parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
-        parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_layer_shorthand, parse_length_descriptor, parse_list_style_value,
-        parse_math_depth_value, parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value,
-        parse_page_size_descriptor, parse_paint_order_value, parse_place_content_value, parse_place_items_value,
-        parse_place_self_value, parse_position_anchor_value, parse_position_area_value,
-        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
-        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
-        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
-        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
+        parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_track_placement_value,
+        parse_grid_track_size_list_value, parse_image_set_value, parse_layer_shorthand, parse_length_descriptor,
+        parse_list_style_value, parse_math_depth_value, parse_optional_declaration_value_descriptor,
+        parse_overflow_clip_margin_value, parse_page_size_descriptor, parse_paint_order_value,
+        parse_place_content_value, parse_place_items_value, parse_place_self_value, parse_position_anchor_value,
+        parse_position_area_value, parse_position_try_fallbacks_value, parse_position_try_order_value,
+        parse_position_value, parse_position_visibility_value, parse_positional_value_list_shorthand,
+        parse_positive_percentage_descriptor, parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value,
+        parse_ratio_value_prefix, parse_rect_value, parse_repeat_style_value, parse_rotate_value,
         parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_filter_value_list_value,
         parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
         parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
@@ -29374,6 +29572,17 @@ mod tests {
     fn parse_font_shorthand_items(input: &str) -> Option<Vec<(PropertyId, String)>> {
         let mut items = Vec::new();
         parse_font_shorthand(input.as_bytes(), |property_id, value| {
+            items.push((
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                value.to_string(),
+            ));
+        })
+        .then_some(items)
+    }
+
+    fn parse_grid_placement_shorthand_items(property_id: PropertyId, input: &str) -> Option<Vec<(PropertyId, String)>> {
+        let mut items = Vec::new();
+        parse_grid_placement_shorthand(property_id as u16, input.as_bytes(), |property_id, value| {
             items.push((
                 crate::generated_properties::property_id_from_u16(property_id).unwrap(),
                 value.to_string(),
@@ -35937,6 +36146,66 @@ mod tests {
         assert_eq!(
             parse_grid_track_placement("auto foo"),
             CssGridTrackPlacementValueKind::Invalid
+        );
+    }
+
+    #[test]
+    fn parses_grid_placement_shorthands() {
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridColumn, "main"),
+            Some(vec![
+                (PropertyId::GridColumnStart, "main".to_string()),
+                (PropertyId::GridColumnEnd, "main".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridRow, "2 / span 3"),
+            Some(vec![
+                (PropertyId::GridRowStart, "2".to_string()),
+                (PropertyId::GridRowEnd, "span 3".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridRow, "2"),
+            Some(vec![
+                (PropertyId::GridRowStart, "2".to_string()),
+                (PropertyId::GridRowEnd, "auto".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridArea, "sidebar"),
+            Some(vec![
+                (PropertyId::GridRowStart, "sidebar".to_string()),
+                (PropertyId::GridColumnStart, "sidebar".to_string()),
+                (PropertyId::GridRowEnd, "sidebar".to_string()),
+                (PropertyId::GridColumnEnd, "sidebar".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridArea, "1 / main / span 2 / auto"),
+            Some(vec![
+                (PropertyId::GridRowStart, "1".to_string()),
+                (PropertyId::GridColumnStart, "main".to_string()),
+                (PropertyId::GridRowEnd, "span 2".to_string()),
+                (PropertyId::GridColumnEnd, "auto".to_string()),
+            ])
+        );
+
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridColumn, "1 /"),
+            None
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridColumn, "1 / 2 / 3"),
+            None
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridArea, "/ main"),
+            None
+        );
+        assert_eq!(
+            parse_grid_placement_shorthand_items(PropertyId::GridArea, "1 / 2 / 3 / 4 / 5"),
+            None
         );
     }
 

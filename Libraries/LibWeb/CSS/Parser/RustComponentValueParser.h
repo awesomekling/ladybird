@@ -451,6 +451,8 @@ public:
         String value;
     };
 
+    using GridPlacementShorthandItem = FontShorthandItem;
+
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         String value;
@@ -561,6 +563,7 @@ public:
     static Optional<Vector<CoordinatingValueListShorthandItem>> parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID>, StringView input);
     static Optional<Vector<LayerShorthandItem>> parse_layer_shorthand(PropertyID, StringView input);
     static Optional<Vector<FontShorthandItem>> parse_font_shorthand(StringView input);
+    static Optional<Vector<GridPlacementShorthandItem>> parse_grid_placement_shorthand(PropertyID, StringView input);
     static Optional<Vector<PositionalValueListShorthandItem>> parse_positional_value_list_shorthand(PropertyID, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);

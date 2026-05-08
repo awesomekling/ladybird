@@ -5135,63 +5135,33 @@ RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentVal
 
 RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
 {
-    auto start_property = (property_id == PropertyID::GridColumn) ? PropertyID::GridColumnStart : PropertyID::GridRowStart;
-    auto end_property = (property_id == PropertyID::GridColumn) ? PropertyID::GridColumnEnd : PropertyID::GridRowEnd;
-
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    NonnullRawPtr<ComponentValue const> current_token = tokens.consume_a_token();
+    auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto rust_items = RustComponentValueParser::parse_grid_placement_shorthand(property_id, source.bytes_as_string_view());
+    if (!rust_items.has_value())
+        return nullptr;
 
-    Vector<ComponentValue> track_start_placement_tokens;
-    while (true) {
-        if (current_token->is_delim('/')) {
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                return nullptr;
-            break;
-        }
-        track_start_placement_tokens.append(current_token);
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-        current_token = tokens.consume_a_token();
+    Vector<PropertyID> longhands;
+    StyleValueVector longhand_values;
+    longhands.ensure_capacity(rust_items->size());
+    longhand_values.ensure_capacity(rust_items->size());
+
+    for (auto const& item : rust_items.value()) {
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+        TokenStream placement_tokens { component_values };
+        auto value = parse_grid_track_placement(placement_tokens);
+        placement_tokens.discard_whitespace();
+        if (!value || placement_tokens.has_next_token())
+            return nullptr;
+
+        longhands.unchecked_append(item.property_id);
+        longhand_values.unchecked_append(value.release_nonnull());
     }
 
-    Vector<ComponentValue> track_end_placement_tokens;
-    if (tokens.has_next_token()) {
-        current_token = tokens.consume_a_token();
-        while (true) {
-            track_end_placement_tokens.append(current_token);
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            current_token = tokens.consume_a_token();
-        }
-    }
-
-    TokenStream track_start_placement_token_stream { track_start_placement_tokens };
-    auto parsed_start_value = parse_grid_track_placement(track_start_placement_token_stream);
-    if (parsed_start_value && track_end_placement_tokens.is_empty()) {
-        transaction.commit();
-        if (parsed_start_value->grid_track_placement().is_custom_ident()) {
-            auto custom_ident = parsed_start_value.release_nonnull();
-            return ShorthandStyleValue::create(property_id, { start_property, end_property }, { custom_ident, custom_ident });
-        }
-        return ShorthandStyleValue::create(property_id,
-            { start_property, end_property },
-            { parsed_start_value.release_nonnull(), GridTrackPlacementStyleValue::create(GridTrackPlacement::make_auto()) });
-    }
-
-    TokenStream track_end_placement_token_stream { track_end_placement_tokens };
-    auto parsed_end_value = parse_grid_track_placement(track_end_placement_token_stream);
-    if (parsed_start_value && parsed_end_value) {
-        transaction.commit();
-        return ShorthandStyleValue::create(property_id,
-            { start_property, end_property },
-            { parsed_start_value.release_nonnull(), parsed_end_value.release_nonnull() });
-    }
-
-    return nullptr;
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+    transaction.commit();
+    return ShorthandStyleValue::create(property_id, move(longhands), move(longhand_values));
 }
 
 // https://www.w3.org/TR/css-grid-2/#explicit-grid-shorthand
@@ -5303,92 +5273,32 @@ RefPtr<StyleValue const> Parser::parse_grid_track_size_list_shorthand_value(Prop
 RefPtr<StyleValue const> Parser::parse_grid_area_shorthand_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-
-    auto parse_placement_tokens = [&](Vector<ComponentValue>& placement_tokens, bool check_for_delimiter = true) -> void {
-        tokens.discard_whitespace();
-        while (tokens.has_next_token()) {
-            auto& current_token = tokens.consume_a_token();
-            if (check_for_delimiter && current_token.is_delim('/'))
-                break;
-            placement_tokens.append(current_token);
-            tokens.discard_whitespace();
-        }
-    };
-
-    Vector<ComponentValue> row_start_placement_tokens;
-    parse_placement_tokens(row_start_placement_tokens);
-
-    Vector<ComponentValue> column_start_placement_tokens;
-    if (tokens.has_next_token())
-        parse_placement_tokens(column_start_placement_tokens);
-
-    Vector<ComponentValue> row_end_placement_tokens;
-    if (tokens.has_next_token())
-        parse_placement_tokens(row_end_placement_tokens);
-
-    Vector<ComponentValue> column_end_placement_tokens;
-    if (tokens.has_next_token())
-        parse_placement_tokens(column_end_placement_tokens, false);
-
-    // https://www.w3.org/TR/css-grid-2/#placement-shorthands
-    // The grid-area property is a shorthand for grid-row-start, grid-column-start, grid-row-end and
-    // grid-column-end.
-    TokenStream row_start_placement_token_stream { row_start_placement_tokens };
-    auto row_start_style_value = parse_grid_track_placement(row_start_placement_token_stream);
-    if (row_start_placement_token_stream.has_next_token())
+    auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto rust_items = RustComponentValueParser::parse_grid_placement_shorthand(PropertyID::GridArea, source.bytes_as_string_view());
+    if (!rust_items.has_value())
         return nullptr;
 
-    TokenStream column_start_placement_token_stream { column_start_placement_tokens };
-    auto column_start_style_value = parse_grid_track_placement(column_start_placement_token_stream);
-    if (column_start_placement_token_stream.has_next_token())
-        return nullptr;
+    Vector<PropertyID> longhands;
+    StyleValueVector longhand_values;
+    longhands.ensure_capacity(rust_items->size());
+    longhand_values.ensure_capacity(rust_items->size());
 
-    TokenStream row_end_placement_token_stream { row_end_placement_tokens };
-    auto row_end_style_value = parse_grid_track_placement(row_end_placement_token_stream);
-    if (row_end_placement_token_stream.has_next_token())
-        return nullptr;
+    for (auto const& item : rust_items.value()) {
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+        TokenStream placement_tokens { component_values };
+        auto value = parse_grid_track_placement(placement_tokens);
+        placement_tokens.discard_whitespace();
+        if (!value || placement_tokens.has_next_token())
+            return nullptr;
 
-    TokenStream column_end_placement_token_stream { column_end_placement_tokens };
-    auto column_end_style_value = parse_grid_track_placement(column_end_placement_token_stream);
-    if (column_end_placement_token_stream.has_next_token())
-        return nullptr;
+        longhands.unchecked_append(item.property_id);
+        longhand_values.unchecked_append(value.release_nonnull());
+    }
 
-    // If four <grid-line> values are specified, grid-row-start is set to the first value, grid-column-start
-    // is set to the second value, grid-row-end is set to the third value, and grid-column-end is set to the
-    // fourth value.
-    auto row_start = GridTrackPlacement::make_auto();
-    auto column_start = GridTrackPlacement::make_auto();
-    auto row_end = GridTrackPlacement::make_auto();
-    auto column_end = GridTrackPlacement::make_auto();
-
-    if (row_start_style_value)
-        row_start = row_start_style_value.release_nonnull()->as_grid_track_placement().grid_track_placement();
-
-    // When grid-column-start is omitted, if grid-row-start is a <custom-ident>, all four longhands are set to
-    // that value. Otherwise, it is set to auto.
-    if (column_start_style_value)
-        column_start = column_start_style_value.release_nonnull()->as_grid_track_placement().grid_track_placement();
-    else if (row_start.is_custom_ident())
-        column_start = row_start;
-
-    // When grid-row-end is omitted, if grid-row-start is a <custom-ident>, grid-row-end is set to that
-    // <custom-ident>; otherwise, it is set to auto.
-    if (row_end_style_value)
-        row_end = row_end_style_value.release_nonnull()->as_grid_track_placement().grid_track_placement();
-    else if (row_start.is_custom_ident())
-        row_end = row_start;
-
-    // When grid-column-end is omitted, if grid-column-start is a <custom-ident>, grid-column-end is set to
-    // that <custom-ident>; otherwise, it is set to auto.
-    if (column_end_style_value)
-        column_end = column_end_style_value.release_nonnull()->as_grid_track_placement().grid_track_placement();
-    else if (column_start.is_custom_ident())
-        column_end = column_start;
-
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
     transaction.commit();
-    return ShorthandStyleValue::create(PropertyID::GridArea,
-        { PropertyID::GridRowStart, PropertyID::GridColumnStart, PropertyID::GridRowEnd, PropertyID::GridColumnEnd },
-        { GridTrackPlacementStyleValue::create(row_start), GridTrackPlacementStyleValue::create(column_start), GridTrackPlacementStyleValue::create(row_end), GridTrackPlacementStyleValue::create(column_end) });
+    return ShorthandStyleValue::create(PropertyID::GridArea, move(longhands), move(longhand_values));
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_shorthand_value(TokenStream<ComponentValue>& tokens)
