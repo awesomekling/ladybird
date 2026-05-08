@@ -2273,8 +2273,8 @@ pub(crate) struct RustOwnedListStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedMathDepth {
     AutoAdd,
-    Add { integer_source: String },
-    Integer { integer_source: String },
+    Add { integer: RustOwnedNestedPrimitiveValue },
+    Integer { integer: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2361,8 +2361,8 @@ pub(crate) struct RustOwnedAnimationName {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAspectRatio {
     has_auto: bool,
-    numerator_source: Option<String>,
-    denominator_source: Option<String>,
+    numerator: Option<RustOwnedNestedPrimitiveValue>,
+    denominator: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2527,6 +2527,7 @@ pub(crate) enum RustOwnedFilterValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedNestedPrimitiveValue {
+    Integer(i32),
     Number(f64),
     Percentage(f64),
     Length { value: f64, unit: String },
@@ -4912,9 +4913,13 @@ fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustO
         if !component_values_parse_as_property_value_type(PropertyValueType::Integer, integer_source.as_bytes()) {
             return None;
         }
-        return Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add {
-            integer_source,
-        }));
+        let integer = match remove_whitespace_component_values(&function.value).as_slice() {
+            [component_value] => component_value_parse_as_nested_integer(component_value, filtered_input_string)?,
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing and range-checking function values still happens in C++.
+            _ => RustOwnedNestedPrimitiveValue::Source(integer_source),
+        };
+        return Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add { integer }));
     }
 
     if component_values.len() != 1 {
@@ -4926,7 +4931,7 @@ fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> Option<RustO
         return None;
     }
     Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Integer {
-        integer_source,
+        integer: component_value_parse_as_nested_integer(&component_values[0], filtered_input_string)?,
     }))
 }
 
@@ -5362,8 +5367,8 @@ fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         [component_value] if component_value_is_ident(Some(component_value), "auto") => {
             return Some(RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
                 has_auto: true,
-                numerator_source: None,
-                denominator_source: None,
+                numerator: None,
+                denominator: None,
             }));
         }
         [first, rest @ ..] if component_value_is_ident(Some(first), "auto") => {
@@ -5391,15 +5396,14 @@ fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<Rus
     if !component_value_parse_as_non_negative_number(numerator) {
         return None;
     }
-    let numerator_source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(numerator), filtered_input_string)?;
+    let numerator = component_value_parse_as_nested_non_negative_number(numerator, filtered_input_string)?;
 
-    let denominator_source = if let Some(denominator) = denominator {
+    let denominator = if let Some(denominator) = denominator {
         if !component_value_parse_as_non_negative_number(denominator) {
             return None;
         }
-        Some(serialize_component_values_for_reparsing(
-            std::slice::from_ref(denominator),
+        Some(component_value_parse_as_nested_non_negative_number(
+            denominator,
             filtered_input_string,
         )?)
     } else {
@@ -5408,8 +5412,8 @@ fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<Rus
 
     Some(RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
         has_auto,
-        numerator_source: Some(numerator_source),
-        denominator_source,
+        numerator: Some(numerator),
+        denominator,
     }))
 }
 
@@ -7618,7 +7622,7 @@ where
             );
         }
         RustOwnedStyleValueKind::AspectRatio(value) => {
-            if value.numerator_source.is_none() {
+            if value.numerator.is_none() {
                 callback(
                     CssStyleValueKind::AspectRatio,
                     property_id,
@@ -7635,14 +7639,10 @@ where
                     "",
                 );
             }
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::AspectRatio,
-                property_id,
-                0,
-                value.numerator_source.as_ref(),
-            );
-            if value.has_auto && value.numerator_source.is_some() {
+            if let Some(numerator) = &value.numerator {
+                callback_nested_primitive(callback, CssStyleValueKind::AspectRatio, property_id, 0, 0, numerator);
+            }
+            if value.has_auto && value.numerator.is_some() {
                 callback(
                     CssStyleValueKind::AspectRatio,
                     property_id,
@@ -7659,13 +7659,9 @@ where
                     "",
                 );
             }
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::AspectRatio,
-                property_id,
-                1,
-                value.denominator_source.as_ref(),
-            );
+            if let Some(denominator) = &value.denominator {
+                callback_nested_primitive(callback, CssStyleValueKind::AspectRatio, property_id, 1, 0, denominator);
+            }
         }
         RustOwnedStyleValueKind::BackgroundSize(value) => {
             for value in &value.values {
@@ -8091,36 +8087,12 @@ where
                 &[],
                 "",
             ),
-            RustOwnedMathDepth::Add { integer_source } => callback(
-                CssStyleValueKind::MathDepth,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                1,
-                0,
-                0,
-                0,
-                integer_source.as_bytes(),
-                "",
-            ),
-            RustOwnedMathDepth::Integer { integer_source } => callback(
-                CssStyleValueKind::MathDepth,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                2,
-                0,
-                0,
-                0,
-                integer_source.as_bytes(),
-                "",
-            ),
+            RustOwnedMathDepth::Add { integer } => {
+                callback_nested_primitive(callback, CssStyleValueKind::MathDepth, property_id, 1, 0, integer);
+            }
+            RustOwnedMathDepth::Integer { integer } => {
+                callback_nested_primitive(callback, CssStyleValueKind::MathDepth, property_id, 2, 0, integer);
+            }
         },
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
@@ -10397,6 +10369,7 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
     match value {
         RustOwnedNestedPrimitiveValue::Number(value) => (CssPrimitiveValueKind::Number, *value, ""),
         RustOwnedNestedPrimitiveValue::Percentage(value) => (CssPrimitiveValueKind::Percentage, *value, ""),
+        RustOwnedNestedPrimitiveValue::Integer(value) => (CssPrimitiveValueKind::Integer, *value as f64, ""),
         RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, *value, unit),
         RustOwnedNestedPrimitiveValue::Angle { value, unit } => (CssPrimitiveValueKind::Angle, *value, unit),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
@@ -19585,6 +19558,44 @@ fn component_value_parse_as_nested_number_percentage(
             token_type: TokenType::Percentage { number },
             ..
         }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_integer(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => numeric_value_to_i32(*number).map(RustOwnedNestedPrimitiveValue::Integer),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_non_negative_number(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() >= 0.0 => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
         ComponentValue::Function(_) => {
@@ -31380,8 +31391,8 @@ mod tests {
                 property_id: PropertyId::AspectRatio,
                 value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
                     has_auto: true,
-                    numerator_source: None,
-                    denominator_source: None,
+                    numerator: None,
+                    denominator: None,
                 }),
             })
         );
@@ -31391,8 +31402,8 @@ mod tests {
                 property_id: PropertyId::AspectRatio,
                 value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
                     has_auto: false,
-                    numerator_source: Some("16".to_string()),
-                    denominator_source: Some("9".to_string()),
+                    numerator: Some(RustOwnedNestedPrimitiveValue::Number(16.0)),
+                    denominator: Some(RustOwnedNestedPrimitiveValue::Number(9.0)),
                 }),
             })
         );
@@ -31402,8 +31413,8 @@ mod tests {
                 property_id: PropertyId::AspectRatio,
                 value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
                     has_auto: true,
-                    numerator_source: Some("calc(16 / 9)".to_string()),
-                    denominator_source: None,
+                    numerator: Some(RustOwnedNestedPrimitiveValue::Source("calc(16 / 9)".to_string())),
+                    denominator: None,
                 }),
             })
         );
@@ -32353,7 +32364,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MathDepth,
                 value: RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add {
-                    integer_source: "-2".to_string(),
+                    integer: RustOwnedNestedPrimitiveValue::Integer(-2),
                 }),
             })
         );
@@ -33326,11 +33337,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::AspectRatio,
                 property_id: PropertyId::AspectRatio,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Number,
+                numeric_value: Some(9.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "9".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
@@ -33339,11 +33350,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::AspectRatio,
                 property_id: PropertyId::AspectRatio,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Number,
+                numeric_value: Some(1.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "1".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );

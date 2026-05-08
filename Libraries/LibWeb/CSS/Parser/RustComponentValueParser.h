@@ -375,10 +375,10 @@ public:
         Optional<String> list_style_position_source;
         Optional<String> list_style_image_source;
         Optional<String> list_style_type_source;
-        Optional<String> math_depth_integer_source;
+        Optional<RustNestedPrimitiveValue> math_depth_integer;
         bool aspect_ratio_has_auto { false };
-        Optional<String> aspect_ratio_numerator_source;
-        Optional<String> aspect_ratio_denominator_source;
+        Optional<RustNestedPrimitiveValue> aspect_ratio_numerator;
+        Optional<RustNestedPrimitiveValue> aspect_ratio_denominator;
         Vector<RustNestedPrimitiveValue> border_radius_horizontal_radii;
         Vector<RustNestedPrimitiveValue> border_radius_vertical_radii;
         Optional<String> border_width_source;

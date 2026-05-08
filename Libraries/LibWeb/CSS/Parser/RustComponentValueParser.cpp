@@ -1226,7 +1226,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::MathDepth) {
                 value.color_red = color_red;
                 if (color_red != 0)
-                    value.math_depth_integer_source = string_from_ffi_bytes(value_ptr, value_len);
+                    value.math_depth_integer = nested_primitive_value_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::AspectRatio) {
                 if (!style_value.has_value())
                     style_value = move(value);
@@ -1238,9 +1238,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_green != 0)
                     style_value->aspect_ratio_has_auto = true;
                 if (color_red == 0)
-                    style_value->aspect_ratio_numerator_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->aspect_ratio_numerator = nested_primitive_value_from_callback_payload();
                 else if (color_red == 1)
-                    style_value->aspect_ratio_denominator_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->aspect_ratio_denominator = nested_primitive_value_from_callback_payload();
                 return;
             } else if (kind == FFI::CssStyleValueKind::BorderRadius) {
                 if (!style_value.has_value())

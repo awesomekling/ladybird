@@ -1855,6 +1855,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return AngleStyleValue::create(Angle { *value.numeric_value, angle_unit.release_value() });
             };
+            auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_integer(value.source_or_unit);
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer)
+                    return nullptr;
+                if (*value.numeric_value < AK::NumericLimits<i32>::min() || *value.numeric_value > AK::NumericLimits<i32>::max())
+                    return nullptr;
+                return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
+            };
+            auto materialize_rust_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value())
+                    return parse_rust_source_as_non_negative_number(value.source_or_unit);
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
+                    return nullptr;
+                if (*value.numeric_value < 0)
+                    return nullptr;
+                return NumberStyleValue::create(*value.numeric_value);
+            };
             auto materialize_rust_nested_non_negative_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_non_negative_number_percentage(value.source_or_unit);
@@ -2340,10 +2358,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::AspectRatio:
-                if (rust_style_value->aspect_ratio_numerator_source.has_value()) {
-                    auto numerator = parse_rust_source_as_non_negative_number(*rust_style_value->aspect_ratio_numerator_source);
-                    auto denominator = rust_style_value->aspect_ratio_denominator_source.has_value()
-                        ? parse_rust_source_as_non_negative_number(*rust_style_value->aspect_ratio_denominator_source)
+                if (rust_style_value->aspect_ratio_numerator.has_value()) {
+                    auto numerator = materialize_rust_nested_non_negative_number(*rust_style_value->aspect_ratio_numerator);
+                    auto denominator = rust_style_value->aspect_ratio_denominator.has_value()
+                        ? materialize_rust_nested_non_negative_number(*rust_style_value->aspect_ratio_denominator)
                         : NumberStyleValue::create(1);
                     if (!numerator || !denominator)
                         break;
@@ -3161,8 +3179,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::AutoAdd) };
                 }
-                if (rust_style_value->math_depth_integer_source.has_value()) {
-                    auto integer_value = parse_rust_source_as_integer(*rust_style_value->math_depth_integer_source);
+                if (rust_style_value->math_depth_integer.has_value()) {
+                    auto integer_value = materialize_rust_nested_integer(*rust_style_value->math_depth_integer);
                     if (!integer_value)
                         break;
                     discard_rust_owned_property_value_tokens();
