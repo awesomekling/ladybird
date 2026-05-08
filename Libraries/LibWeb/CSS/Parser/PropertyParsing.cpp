@@ -55,6 +55,7 @@
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RadialSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ScrollbarColorStyleValue.h>
@@ -1191,14 +1192,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 }
             };
-            auto parse_rust_source_as_fit_content = [&](StringView source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_fit_content_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
+            auto materialize_rust_fit_content = [&]() -> RefPtr<StyleValue const> {
+                switch (rust_style_value->fit_content_kind) {
+                case RustComponentValueParser::RustFitContentKind::Keyword:
+                    return KeywordStyleValue::create(Keyword::FitContent);
+                case RustComponentValueParser::RustFitContentKind::Function: {
+                    if (!rust_style_value->fit_content_argument_source.has_value())
+                        return nullptr;
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*rust_style_value->fit_content_argument_source, "utf-8"sv);
+                    TokenStream argument_tokens { component_values };
+                    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
+                    auto length_percentage_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range);
+                    argument_tokens.discard_whitespace();
+                    if (!length_percentage_value || argument_tokens.has_next_token())
+                        return nullptr;
+                    return FunctionStyleValue::create("fit-content"_fly_string, length_percentage_value.release_nonnull());
+                }
+                }
+                VERIFY_NOT_REACHED();
             };
             auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
@@ -1465,14 +1476,39 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_rect = [&](StringView source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_rect_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
+            auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
+                if (rust_style_value->rect_sources.size() != 4)
                     return nullptr;
-                return value.release_nonnull();
+
+                auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
+                auto parse_rust_rect_side_source = [&](String const& source) -> RefPtr<StyleValue const> {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                    TokenStream side_tokens { component_values };
+
+                    side_tokens.discard_whitespace();
+                    if (side_tokens.next_token().is_ident("auto"sv)) {
+                        side_tokens.discard_a_token();
+                        side_tokens.discard_whitespace();
+                        if (side_tokens.has_next_token())
+                            return nullptr;
+                        return KeywordStyleValue::create(Keyword::Auto);
+                    }
+
+                    auto length = parse_length_value(side_tokens, infinite_range);
+                    side_tokens.discard_whitespace();
+                    if (!length || side_tokens.has_next_token())
+                        return nullptr;
+                    return length.release_nonnull();
+                };
+
+                auto top = parse_rust_rect_side_source(rust_style_value->rect_sources[0]);
+                auto right = parse_rust_rect_side_source(rust_style_value->rect_sources[1]);
+                auto bottom = parse_rust_rect_side_source(rust_style_value->rect_sources[2]);
+                auto left = parse_rust_rect_side_source(rust_style_value->rect_sources[3]);
+                if (!top || !right || !bottom || !left)
+                    return nullptr;
+
+                return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
             };
             auto parse_rust_source_as_value_type = [&](StringView source, ValueType value_type) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
@@ -2158,10 +2194,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::FitContent:
-                if (rust_style_value->string.has_value()) {
-                    auto value = parse_rust_source_as_fit_content(rust_style_value->string->bytes_as_string_view());
-                    if (!value)
-                        break;
+                if (auto value = materialize_rust_fit_content()) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };
@@ -2175,10 +2208,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Rect:
-                if (rust_style_value->string.has_value()) {
-                    auto value = parse_rust_source_as_rect(rust_style_value->string->bytes_as_string_view());
-                    if (!value)
-                        break;
+                if (auto value = materialize_rust_rect()) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

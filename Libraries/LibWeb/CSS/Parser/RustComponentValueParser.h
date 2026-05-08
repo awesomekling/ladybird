@@ -266,6 +266,11 @@ public:
         Path,
     };
 
+    enum class RustFitContentKind : u8 {
+        Keyword,
+        Function,
+    };
+
     struct RustContentEvent {
         RustContentEventKind kind { RustContentEventKind::Normal };
         String source;
@@ -347,6 +352,10 @@ public:
         Vector<String> easing_function_sources;
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Vector<String> basic_shape_argument_groups;
+        RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
+        Optional<String> fit_content_argument_source;
+        Vector<String> rect_sources;
+        bool rect_requires_commas { false };
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };

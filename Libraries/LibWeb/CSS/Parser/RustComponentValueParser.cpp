@@ -965,8 +965,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
                 for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
                     value.basic_shape_argument_groups.append(String::from_utf8_without_validation(source.bytes()));
-            } else if (kind == FFI::CssStyleValueKind::FitContent || kind == FFI::CssStyleValueKind::Rect) {
-                value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::FitContent) {
+                value.fit_content_kind = static_cast<RustFitContentKind>(color_red);
+                if (value_len > 0)
+                    value.fit_content_argument_source = String::from_utf8_without_validation({ value_ptr, value_len });
+            } else if (kind == FFI::CssStyleValueKind::Rect) {
+                value.rect_requires_commas = color_red;
+                for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
+                    value.rect_sources.append(String::from_utf8_without_validation(source.bytes()));
             } else if (kind == FFI::CssStyleValueKind::AnchorNameOrScope) {
                 value.anchor_name_or_scope_kind = static_cast<FFI::CssAnchorNameOrScopeValueKind>(color_red);
                 for (auto name : StringView { value_ptr, value_len }.split_view('\0'))

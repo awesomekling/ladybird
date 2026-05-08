@@ -8977,7 +8977,7 @@ where
             callback_easing_function_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::FitContent(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::FitContent, property_id, &value.source);
+            callback_fit_content_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::FontFamily { values } => {
             for value in values {
@@ -9042,7 +9042,7 @@ where
             callback_basic_shape_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::Rect(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::Rect, property_id, &value.source);
+            callback_rect_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::ScrollFunction { scroller, axis } => callback(
             CssStyleValueKind::ScrollFunction,
@@ -9276,6 +9276,9 @@ const BASIC_SHAPE_CALLBACK_ELLIPSE: u8 = 4;
 const BASIC_SHAPE_CALLBACK_POLYGON: u8 = 5;
 const BASIC_SHAPE_CALLBACK_PATH: u8 = 6;
 
+const FIT_CONTENT_CALLBACK_KEYWORD: u8 = 0;
+const FIT_CONTENT_CALLBACK_FUNCTION: u8 = 1;
+
 fn callback_easing_function_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedEasingFunction)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -9326,6 +9329,32 @@ where
     );
 }
 
+fn callback_fit_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedFitContent)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, argument) = match &value.value {
+        RustOwnedFitContentValue::Keyword => (FIT_CONTENT_CALLBACK_KEYWORD, ""),
+        RustOwnedFitContentValue::Function { argument } => (FIT_CONTENT_CALLBACK_FUNCTION, argument.as_str()),
+    };
+
+    callback(
+        CssStyleValueKind::FitContent,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        argument.as_bytes(),
+        "",
+    );
+}
+
 fn callback_basic_shape_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedBasicShape)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -9354,6 +9383,28 @@ where
         0,
         0,
         argument_groups.as_bytes(),
+        "",
+    );
+}
+
+fn callback_rect_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedRect)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let sources = format!("{}\0{}\0{}\0{}", value.top, value.right, value.bottom, value.left);
+    callback(
+        CssStyleValueKind::Rect,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        u8::from(value.requires_commas),
+        0,
+        0,
+        0,
+        sources.as_bytes(),
         "",
     );
 }
