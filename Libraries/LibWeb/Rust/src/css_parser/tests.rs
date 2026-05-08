@@ -44,16 +44,17 @@ use super::{
     RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
     RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
     RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
-    RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
-    RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-    RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
-    RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
-    RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
-    RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-    RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop,
-    RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
-    RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
+    RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
+    RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStyleRangeDescriptor, RustOwnedCursor, RustOwnedCursorImage,
+    RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+    RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFlexBasis, RustOwnedFlexDirection,
+    RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontFamilyList,
+    RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow,
+    RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+    RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
+    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle,
+    RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
+    RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
     RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPaint, RustOwnedPaintOrder,
     RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
@@ -105,6 +106,8 @@ use super::{
     parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
     parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
     parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+    parse_rust_owned_counter_style_additive_symbols_descriptor, parse_rust_owned_counter_style_negative_descriptor,
+    parse_rust_owned_counter_style_range_descriptor, parse_rust_owned_counter_style_symbols_descriptor,
     parse_rust_owned_filter_value_list_value, parse_rust_owned_generated_longhand_value,
     parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
     parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
@@ -6615,6 +6618,18 @@ fn rejects_invalid_counter_style_negative_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_counter_style_negative_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_negative_descriptor("\"-\" \"\"".as_bytes()),
+        Some(vec!["\"-\"".to_string(), "\"\"".to_string()])
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_negative_descriptor("minus".as_bytes()),
+        Some(vec!["minus".to_string()])
+    );
+}
+
+#[test]
 fn parses_counter_style_system_descriptors() {
     assert_eq!(
         parse_counter_style_system_descriptor("cyclic"),
@@ -6681,6 +6696,14 @@ fn rejects_invalid_counter_style_symbols_descriptors() {
     assert_eq!(parse_counter_style_symbols_descriptor("\"*\" 1"), None);
     assert_eq!(parse_counter_style_symbols_descriptor("inherit"), None);
     assert_eq!(parse_counter_style_symbols_descriptor("default"), None);
+}
+
+#[test]
+fn parses_rust_owned_counter_style_symbols_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_symbols_descriptor("\"*\" symbol".as_bytes()),
+        Some(vec!["\"*\"".to_string(), "symbol".to_string()])
+    );
 }
 
 #[test]
@@ -6828,6 +6851,21 @@ fn rejects_invalid_counter_style_range_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_counter_style_range_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_range_descriptor("auto".as_bytes()),
+        Some(RustOwnedCounterStyleRangeDescriptor::Auto)
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_range_descriptor("infinite 0, 5 10".as_bytes()),
+        Some(RustOwnedCounterStyleRangeDescriptor::List(vec![
+            "infinite 0".to_string(),
+            "5 10".to_string()
+        ]))
+    );
+}
+
+#[test]
 fn parses_counter_style_additive_symbols_descriptors() {
     assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\""), Some(1));
     assert_eq!(parse_counter_style_additive_symbols_descriptor("\"I\" 1"), Some(1));
@@ -6849,6 +6887,23 @@ fn rejects_invalid_counter_style_additive_symbols_descriptors() {
     assert_eq!(parse_counter_style_additive_symbols_descriptor("1 \"I\" 2"), None);
     assert_eq!(parse_counter_style_additive_symbols_descriptor("-1 \"I\""), None);
     assert_eq!(parse_counter_style_additive_symbols_descriptor("default 1"), None);
+}
+
+#[test]
+fn parses_rust_owned_counter_style_additive_symbols_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_additive_symbols_descriptor("2 \"II\", \"I\" 1".as_bytes()),
+        Some(vec![
+            RustOwnedCounterStyleAdditiveTuple {
+                order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
+                source: "2 \"II\"".to_string(),
+            },
+            RustOwnedCounterStyleAdditiveTuple {
+                order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
+                source: "\"I\" 1".to_string(),
+            },
+        ])
+    );
 }
 
 #[test]

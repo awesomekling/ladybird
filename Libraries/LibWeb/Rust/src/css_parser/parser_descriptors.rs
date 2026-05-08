@@ -6,6 +6,150 @@
 
 use super::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedCounterStyleRangeDescriptor {
+    Auto,
+    List(Vec<String>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCounterStyleAdditiveTuple {
+    pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
+    pub(crate) source: String,
+}
+
+pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut symbols = Vec::new();
+
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
+    // <symbol> <symbol>?
+    parser.discard_whitespace();
+    symbols.push(parser.consume_symbol_source(&filtered_input)?);
+
+    parser.discard_whitespace();
+    if let Some(symbol) = parser.consume_symbol_source(&filtered_input) {
+        symbols.push(symbol);
+    }
+
+    parser.discard_whitespace();
+    (!parser.has_next_component_value()).then_some(symbols)
+}
+
+pub(crate) fn parse_rust_owned_counter_style_symbols_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut symbols = Vec::new();
+
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-symbols
+    // <symbol>+
+    loop {
+        parser.discard_whitespace();
+        let Some(symbol) = parser.consume_symbol_source(&filtered_input) else {
+            break;
+        };
+        symbols.push(symbol);
+    }
+
+    parser.discard_whitespace();
+    (!symbols.is_empty() && !parser.has_next_component_value()).then_some(symbols)
+}
+
+pub(crate) fn parse_rust_owned_counter_style_range_descriptor(
+    filtered_input: &[u8],
+) -> Option<RustOwnedCounterStyleRangeDescriptor> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
+    // [ [ <integer> | infinite ]{2} ]# | auto
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("auto") {
+        parser.discard_whitespace();
+        return (!parser.has_next_component_value()).then_some(RustOwnedCounterStyleRangeDescriptor::Auto);
+    }
+
+    let mut ranges = Vec::new();
+    loop {
+        parser.discard_whitespace();
+        let start = parser.index;
+        if !parser.consume_counter_style_range_bound_syntax() {
+            break;
+        }
+
+        parser.discard_whitespace();
+        if !parser.consume_counter_style_range_bound_syntax() {
+            return None;
+        }
+
+        ranges.push(serialize_component_values_for_reparsing(
+            &parser.component_values[start..parser.index],
+            &filtered_input,
+        )?);
+
+        parser.discard_whitespace();
+        if !parser.consume_comma() {
+            break;
+        }
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            return None;
+        }
+    }
+
+    parser.discard_whitespace();
+    (!ranges.is_empty() && !parser.has_next_component_value())
+        .then_some(RustOwnedCounterStyleRangeDescriptor::List(ranges))
+}
+
+pub(crate) fn parse_rust_owned_counter_style_additive_symbols_descriptor(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedCounterStyleAdditiveTuple>> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut tuples = Vec::new();
+
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-symbols
+    // <additive-symbols> = <additive-tuple>#
+    loop {
+        parser.discard_whitespace();
+        let start = parser.index;
+        let order = parser.parse_a_nonnegative_integer_symbol_pair()?;
+        tuples.push(RustOwnedCounterStyleAdditiveTuple {
+            order,
+            source: serialize_component_values_for_reparsing(
+                &parser.component_values[start..parser.index],
+                &filtered_input,
+            )?,
+        });
+
+        parser.discard_whitespace();
+        if !parser.consume_comma() {
+            break;
+        }
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            return None;
+        }
+    }
+
+    parser.discard_whitespace();
+    (!tuples.is_empty() && !parser.has_next_component_value()).then_some(tuples)
+}
+
 pub(crate) fn parse_a_counter_style_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool
 where
     N: FnMut(&str),
@@ -20,6 +164,16 @@ where
 
     name_callback(&name);
     true
+}
+
+impl ComponentValueParser {
+    fn consume_symbol_source(&mut self, filtered_input: &str) -> Option<String> {
+        let start = self.index;
+        if !self.consume_symbol_syntax() {
+            return None;
+        }
+        serialize_component_values_for_reparsing(&self.component_values[start..self.index], filtered_input)
+    }
 }
 
 pub(crate) fn parse_a_counter_style<C, S>(
