@@ -636,7 +636,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto discard_rust_view_timeline_inset_value_tokens = [&] {
                 if (property_ids.size() > 1) {
-                    for (size_t i = 0; i < rust_style_value->view_timeline_inset_sources.size(); ++i) {
+                    for (size_t i = 0; i < rust_style_value->view_timeline_insets.size(); ++i) {
                         tokens.discard_whitespace();
                         tokens.discard_a_token();
                     }
@@ -1511,55 +1511,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_view_timeline_inset_value = [&]() -> RefPtr<StyleValue const> {
-                if (rust_style_value->view_timeline_inset_sources.is_empty())
-                    return nullptr;
-
-                StyleValueVector inset_values;
-                inset_values.ensure_capacity(2);
-                for (auto const& source : rust_style_value->view_timeline_inset_sources) {
-                    if (source == "auto"sv) {
-                        inset_values.append(KeywordStyleValue::create(Keyword::Auto));
-                        continue;
-                    }
-
-                    auto value = parse_rust_source_as_value_type(source.bytes_as_string_view(), ValueType::LengthPercentage);
-                    if (!value)
-                        return nullptr;
-                    inset_values.append(value.release_nonnull());
-                }
-
-                // If the second value is omitted, it is set to the first.
-                if (inset_values.size() == 1)
-                    return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
-
-                return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
-            };
-            auto materialize_rust_view_timeline_inset_sources = [&](size_t source_offset, size_t source_count) -> RefPtr<StyleValue const> {
-                if (source_count == 0)
-                    return nullptr;
-
-                StyleValueVector inset_values;
-                inset_values.ensure_capacity(source_count);
-                for (size_t i = 0; i < source_count; ++i) {
-                    auto const& source = rust_style_value->view_timeline_inset_sources[source_offset + i];
-                    if (source == "auto"sv) {
-                        inset_values.append(KeywordStyleValue::create(Keyword::Auto));
-                        continue;
-                    }
-
-                    auto value = parse_rust_source_as_value_type(source.bytes_as_string_view(), ValueType::LengthPercentage);
-                    if (!value)
-                        return nullptr;
-                    inset_values.append(value.release_nonnull());
-                }
-
-                // If the second value is omitted, it is set to the first.
-                if (inset_values.size() == 1)
-                    return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
-
-                return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
-            };
             auto materialize_rust_content_value = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->content_keyword.has_value())
                     return KeywordStyleValue::create(*rust_style_value->content_keyword);
@@ -1819,6 +1770,31 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 }
                 return nullptr;
+            };
+            auto materialize_rust_view_timeline_insets = [&](ReadonlySpan<RustComponentValueParser::RustViewTimelineInset> insets) -> RefPtr<StyleValue const> {
+                if (insets.is_empty())
+                    return nullptr;
+
+                StyleValueVector inset_values;
+                inset_values.ensure_capacity(insets.size());
+                for (auto const& inset : insets) {
+                    if (inset.is_auto) {
+                        inset_values.append(KeywordStyleValue::create(Keyword::Auto));
+                        continue;
+                    }
+
+                    auto value = materialize_rust_nested_length_percentage(inset.length_percentage, infinite_range);
+                    if (!value)
+                        return nullptr;
+                    inset_values.append(value.release_nonnull());
+                }
+
+                // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+                // If the second value is omitted, it is set to the first.
+                if (inset_values.size() == 1)
+                    return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
+
+                return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
             };
             auto materialize_rust_flex_basis = [&](RustComponentValueParser::RustStyleValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.flex_basis_kind.has_value())
@@ -4231,7 +4207,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::ViewTimeline: {
                 VERIFY(rust_style_value->timeline_name_item_kinds.size() == rust_style_value->timeline_names.size());
                 VERIFY(rust_style_value->timeline_names.size() == rust_style_value->scroll_timeline_axes.size());
-                VERIFY(rust_style_value->timeline_names.size() == rust_style_value->view_timeline_inset_source_counts.size());
+                VERIFY(rust_style_value->timeline_names.size() == rust_style_value->view_timeline_inset_counts.size());
 
                 StyleValueVector names;
                 names.ensure_capacity(rust_style_value->timeline_names.size());
@@ -4258,18 +4234,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     break;
 
                 StyleValueVector insets;
-                insets.ensure_capacity(rust_style_value->view_timeline_inset_source_counts.size());
-                size_t source_offset = 0;
-                for (auto source_count : rust_style_value->view_timeline_inset_source_counts) {
-                    auto inset = materialize_rust_view_timeline_inset_sources(source_offset, source_count);
+                insets.ensure_capacity(rust_style_value->view_timeline_inset_counts.size());
+                size_t inset_offset = 0;
+                for (auto inset_count : rust_style_value->view_timeline_inset_counts) {
+                    auto inset = materialize_rust_view_timeline_insets(rust_style_value->view_timeline_insets.span().slice(inset_offset, inset_count));
                     if (!inset)
                         break;
                     insets.unchecked_append(inset.release_nonnull());
-                    source_offset += source_count;
+                    inset_offset += inset_count;
                 }
-                if (insets.size() != rust_style_value->view_timeline_inset_source_counts.size())
+                if (insets.size() != rust_style_value->view_timeline_inset_counts.size())
                     break;
-                VERIFY(source_offset == rust_style_value->view_timeline_inset_sources.size());
+                VERIFY(inset_offset == rust_style_value->view_timeline_insets.size());
 
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
@@ -4281,7 +4257,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::create(move(insets), StyleValueList::Separator::Comma) }) };
             }
             case FFI::CssStyleValueKind::ViewTimelineInset:
-                if (auto value = materialize_rust_view_timeline_inset_value()) {
+                if (auto value = materialize_rust_view_timeline_insets(rust_style_value->view_timeline_insets)) {
                     discard_rust_view_timeline_inset_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

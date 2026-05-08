@@ -2122,40 +2122,67 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 for (auto property : StringView { value_ptr, value_len }.split_view('\0'))
                     value.transition_properties.append(FlyString::from_utf8_without_validation(property.bytes()));
             } else if (kind == FFI::CssStyleValueKind::ViewTimeline) {
-                for (size_t offset = 0; offset < value_len;) {
-                    auto item_kind = static_cast<FFI::CssTimelineNameItemKind>(value_ptr[offset++]);
-                    auto name_start = offset;
-                    while (offset < value_len && value_ptr[offset] != 0)
-                        ++offset;
-                    value.timeline_name_item_kinds.append(item_kind);
-                    value.timeline_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
-                    if (offset < value_len)
-                        ++offset;
+                enum : u8 {
+                    Header,
+                    InsetCount,
+                    InsetAuto,
+                    InsetLengthPercentage,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::ViewTimeline);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (value_type_len < value.timeline_names.size())
-                    return;
-
-                value.scroll_timeline_axes.ensure_capacity(value.timeline_names.size());
-                for (size_t i = 0; i < value.timeline_names.size(); ++i)
-                    value.scroll_timeline_axes.unchecked_append(static_cast<FFI::CssScrollFunctionAxisKind>(value_type_ptr[i]));
-
-                for (size_t offset = value.timeline_names.size(); offset < value_type_len;) {
-                    auto count = value_type_ptr[offset++];
-                    value.view_timeline_inset_source_counts.append(count);
-                    for (size_t i = 0; i < count; ++i) {
-                        auto source_start = offset;
-                        while (offset < value_type_len && value_type_ptr[offset] != 0)
+                if (color_red == Header) {
+                    for (size_t offset = 0; offset < value_len;) {
+                        auto item_kind = static_cast<FFI::CssTimelineNameItemKind>(value_ptr[offset++]);
+                        auto name_start = offset;
+                        while (offset < value_len && value_ptr[offset] != 0)
                             ++offset;
-                        value.view_timeline_inset_sources.append(String::from_utf8_without_validation({ value_type_ptr + source_start, offset - source_start }));
-                        if (offset < value_type_len)
+                        style_value->timeline_name_item_kinds.append(item_kind);
+                        style_value->timeline_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
+                        if (offset < value_len)
                             ++offset;
                     }
+
+                    if (value_type_len != style_value->timeline_names.size())
+                        return;
+
+                    style_value->scroll_timeline_axes.ensure_capacity(style_value->timeline_names.size());
+                    for (size_t i = 0; i < style_value->timeline_names.size(); ++i)
+                        style_value->scroll_timeline_axes.unchecked_append(static_cast<FFI::CssScrollFunctionAxisKind>(value_type_ptr[i]));
+                } else if (color_red == InsetCount) {
+                    style_value->view_timeline_inset_counts.append(color_green);
+                } else if (color_red == InsetAuto) {
+                    style_value->view_timeline_insets.append({ .is_auto = true });
+                } else {
+                    VERIFY(color_red == InsetLengthPercentage);
+                    style_value->view_timeline_insets.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
                 }
+                return;
             } else if (kind == FFI::CssStyleValueKind::ViewTimelineInset) {
-                value.view_timeline_inset_sources.ensure_capacity(color_red);
-                for (auto source : StringView { value_ptr, value_len }.split_view('\0'))
-                    value.view_timeline_inset_sources.append(String::from_utf8_without_validation(source.bytes()));
+                enum : u8 {
+                    Auto,
+                    LengthPercentage,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::ViewTimelineInset);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == Auto)
+                    style_value->view_timeline_insets.append({ .is_auto = true });
+                else {
+                    VERIFY(color_red == LengthPercentage);
+                    style_value->view_timeline_insets.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::ViewFunction) {
                 value.scroll_function_axis = static_cast<FFI::CssScrollFunctionAxisKind>(color_red);
                 value.view_function_inset = static_cast<FFI::CssViewFunctionInsetKind>(color_green);
