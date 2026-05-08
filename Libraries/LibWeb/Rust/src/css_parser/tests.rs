@@ -1947,6 +1947,40 @@ fn parses_style_values_with_rust_owned_ast() {
             )),
         })
     );
+    for property_id in [
+        PropertyId::AccentColor,
+        PropertyId::CaretColor,
+        PropertyId::FloodColor,
+        PropertyId::OutlineColor,
+        PropertyId::StopColor,
+        PropertyId::TextDecorationColor,
+    ] {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], "red"),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                    alpha: 255,
+                    name: Some("red".to_string()),
+                }),
+            })
+        );
+    }
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AccentColor], "auto"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AccentColor,
+            value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword("auto".to_string())),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::TextDecorationColor], "red blue"),
+        None
+    );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Fill], "none"),
         Some(RustOwnedStyleValue {
@@ -1958,6 +1992,29 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::Fill], "url(#paint) red"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Fill,
+            value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
+                url: RustOwnedUrl {
+                    source: "url(#paint)".to_string(),
+                    url: Some(RustOwnedUrlPayload {
+                        function_type: CssUrlFunctionType::Url,
+                        url: "#paint".to_string(),
+                    }),
+                },
+                fallback_color: Some(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                    alpha: 255,
+                    name: Some("red".to_string()),
+                }),
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Stroke], "url(#paint) red"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Stroke,
             value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
                 url: RustOwnedUrl {
                     source: "url(#paint)".to_string(),
@@ -4064,6 +4121,42 @@ fn parses_style_values_with_rust_owned_ast() {
             value_type: String::new(),
         })
     );
+    for property_id in [
+        PropertyId::AccentColor,
+        PropertyId::CaretColor,
+        PropertyId::FloodColor,
+        PropertyId::OutlineColor,
+        PropertyId::StopColor,
+        PropertyId::TextDecorationColor,
+    ] {
+        assert_eq!(
+            parse_style_value(&[property_id], "red"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Color,
+                property_id,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: Some((255, 0, 0, 255)),
+                value: "red".to_string(),
+                value_type: String::new(),
+            })
+        );
+    }
+    assert_eq!(
+        parse_style_value(&[PropertyId::CaretColor], "auto"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::CaretColor,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "auto".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(parse_style_value(&[PropertyId::TextDecorationColor], "red blue"), None);
     assert_eq!(
         parse_style_value(&[PropertyId::Color], "currentColor"),
         Some(ParsedStyleValue {

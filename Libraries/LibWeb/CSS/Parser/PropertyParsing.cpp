@@ -90,6 +90,7 @@ static void remove_property(Vector<PropertyID>& properties, PropertyID property_
 static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
 {
     switch (property_id) {
+    case PropertyID::AccentColor:
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
     case PropertyID::AnimationName:
@@ -118,6 +119,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderTopRightRadius:
     case PropertyID::BoxShadow:
     case PropertyID::BackdropFilter:
+    case PropertyID::CaretColor:
     case PropertyID::ColorScheme:
     case PropertyID::Columns:
     case PropertyID::Contain:
@@ -128,6 +130,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::CounterSet:
     case PropertyID::Cursor:
     case PropertyID::Display:
+    case PropertyID::Fill:
     case PropertyID::Filter:
     case PropertyID::Flex:
     case PropertyID::FlexFlow:
@@ -136,6 +139,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FontLanguageOverride:
     case PropertyID::FontVariant:
     case PropertyID::FontVariationSettings:
+    case PropertyID::FloodColor:
     case PropertyID::GridAutoColumns:
     case PropertyID::GridAutoFlow:
     case PropertyID::GridAutoRows:
@@ -167,6 +171,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowClipMarginLeft:
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
+    case PropertyID::OutlineColor:
     case PropertyID::PaintOrder:
     case PropertyID::PlaceContent:
     case PropertyID::PlaceItems:
@@ -185,8 +190,11 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ScrollbarColor:
     case PropertyID::ScrollbarGutter:
     case PropertyID::ShapeOutside:
+    case PropertyID::StopColor:
+    case PropertyID::Stroke:
     case PropertyID::StrokeDasharray:
     case PropertyID::TextDecoration:
+    case PropertyID::TextDecorationColor:
     case PropertyID::TextDecorationLine:
     case PropertyID::TextIndent:
     case PropertyID::TextShadow:

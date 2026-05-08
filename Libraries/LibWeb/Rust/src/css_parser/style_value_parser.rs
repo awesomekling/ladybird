@@ -196,7 +196,8 @@ fn property_parses_as_coordinating_shorthand_item(property_id: PropertyId) -> bo
 fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
     matches!(
         property_id,
-        PropertyId::AnchorName
+        PropertyId::AccentColor
+            | PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
             | PropertyId::AspectRatio
@@ -224,6 +225,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderTopRightRadius
             | PropertyId::BoxShadow
             | PropertyId::BackdropFilter
+            | PropertyId::CaretColor
             | PropertyId::ColorScheme
             | PropertyId::Columns
             | PropertyId::Contain
@@ -234,6 +236,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::CounterSet
             | PropertyId::Cursor
             | PropertyId::Display
+            | PropertyId::Fill
             | PropertyId::Filter
             | PropertyId::Flex
             | PropertyId::FlexFlow
@@ -242,6 +245,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontLanguageOverride
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
+            | PropertyId::FloodColor
             | PropertyId::GridAutoColumns
             | PropertyId::GridAutoFlow
             | PropertyId::GridAutoRows
@@ -273,6 +277,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowClipMarginLeft
             | PropertyId::OverflowClipMarginRight
             | PropertyId::OverflowClipMarginTop
+            | PropertyId::OutlineColor
             | PropertyId::PaintOrder
             | PropertyId::PlaceContent
             | PropertyId::PlaceItems
@@ -291,8 +296,11 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
             | PropertyId::ShapeOutside
+            | PropertyId::StopColor
+            | PropertyId::Stroke
             | PropertyId::StrokeDasharray
             | PropertyId::TextDecoration
+            | PropertyId::TextDecorationColor
             | PropertyId::TextDecorationLine
             | PropertyId::TextIndent
             | PropertyId::TextShadow
@@ -369,6 +377,16 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::AccentColor
+        | PropertyId::CaretColor
+        | PropertyId::Fill
+        | PropertyId::FloodColor
+        | PropertyId::OutlineColor
+        | PropertyId::StopColor
+        | PropertyId::Stroke
+        | PropertyId::TextDecorationColor => {
+            rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input)
+        }
         PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
         PropertyId::Content => rust_owned_content_style_value_kind(filtered_input),
         PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
@@ -502,6 +520,29 @@ fn rust_owned_inset_property_style_value_kind(
         }
         return Some(
             parse_rust_owned_generated_longhand_value(property_id, value_type, filtered_input, component_values).value,
+        );
+    }
+
+    None
+}
+
+fn rust_owned_generated_property_specific_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    for value_type in generated_property_value_type_order() {
+        if !property_accepts_value_type(property_id, *value_type) {
+            continue;
+        }
+        if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+            continue;
+        }
+        return Some(
+            parse_rust_owned_generated_longhand_value(property_id, *value_type, filtered_input, component_values).value,
         );
     }
 
