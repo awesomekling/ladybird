@@ -174,6 +174,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FontLanguageOverride:
     case PropertyID::FontVariant:
     case PropertyID::FontVariationSettings:
+    case PropertyID::FontWeight:
     case PropertyID::FontWidth:
     case PropertyID::FloodColor:
     case PropertyID::FloodOpacity:

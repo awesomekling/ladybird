@@ -3300,7 +3300,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     name: "calc".to_string(),
                 },
                 source: "calc(600 + 100)".to_string(),
-                value_type: PropertyValueType::FontWeightAbsolute,
+                value_type: PropertyValueType::Number,
             }),
         })
     );
@@ -3311,7 +3311,7 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
                 kind: RustOwnedSourceBackedValueKind::TreeCountingFunction,
                 source: "sibling-count()".to_string(),
-                value_type: PropertyValueType::FontWeightAbsolute,
+                value_type: PropertyValueType::Number,
             }),
         })
     );
@@ -4787,7 +4787,7 @@ fn parses_style_values_with_rust_owned_ast() {
             secondary_numeric_value: None,
             color: None,
             value: String::new(),
-            value_type: "FontWeightAbsolute".to_string(),
+            value_type: "Number".to_string(),
         })
     );
     assert_eq!(
@@ -4800,7 +4800,7 @@ fn parses_style_values_with_rust_owned_ast() {
             secondary_numeric_value: None,
             color: None,
             value: "sibling-count()".to_string(),
-            value_type: "FontWeightAbsolute".to_string(),
+            value_type: "Number".to_string(),
         })
     );
     assert_eq!(

@@ -285,6 +285,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontLanguageOverride
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
+            | PropertyId::FontWeight
             | PropertyId::FontWidth
             | PropertyId::FloodColor
             | PropertyId::FloodOpacity
@@ -526,6 +527,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::FlexBasis
         | PropertyId::FlexGrow
         | PropertyId::FlexShrink
+        | PropertyId::FontWeight
         | PropertyId::FontWidth
         | PropertyId::InlineSize
         | PropertyId::LetterSpacing
@@ -720,6 +722,24 @@ fn rust_owned_generated_property_specific_style_value_kind(
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
+
+    if property_id == PropertyId::FontWeight
+        && component_values_parse_as_property_value_type(PropertyValueType::Number, filtered_input)
+        && component_values_satisfy_property_numeric_range(property_id, PropertyValueType::Number, component_values)
+    {
+        // AD-HOC: Keep calculated font-weight numbers on the plain <number>
+        // path so variable-dependent math keeps the same computed-value
+        // behavior as the existing C++ parser.
+        return Some(
+            parse_rust_owned_generated_longhand_value(
+                property_id,
+                PropertyValueType::Number,
+                filtered_input,
+                component_values,
+            )
+            .value,
+        );
+    }
 
     for value_type in generated_property_value_type_order() {
         if !property_accepts_value_type(property_id, *value_type) {
