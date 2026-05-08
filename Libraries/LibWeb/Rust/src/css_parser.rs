@@ -2280,7 +2280,6 @@ pub(crate) enum RustOwnedMathDepth {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedEasingFunction {
     value: RustOwnedEasingFunctionValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2288,22 +2287,32 @@ pub(crate) enum RustOwnedEasingFunctionValue {
     Keyword(String),
     Linear(Vec<RustOwnedLinearEasingStop>),
     CubicBezier {
-        x1: String,
-        y1: String,
-        x2: String,
-        y2: String,
+        x1: RustOwnedNestedPrimitiveValue,
+        y1: RustOwnedNestedPrimitiveValue,
+        x2: RustOwnedNestedPrimitiveValue,
+        y2: RustOwnedNestedPrimitiveValue,
     },
     Steps {
-        intervals: String,
-        position: Option<String>,
+        intervals: RustOwnedNestedPrimitiveValue,
+        position: Option<RustOwnedStepPosition>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedLinearEasingStop {
-    output: String,
-    first_stop_length: Option<String>,
-    second_stop_length: Option<String>,
+    output: RustOwnedNestedPrimitiveValue,
+    first_stop_length: Option<RustOwnedNestedPrimitiveValue>,
+    second_stop_length: Option<RustOwnedNestedPrimitiveValue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum RustOwnedStepPosition {
+    JumpStart,
+    JumpEnd,
+    JumpNone,
+    JumpBoth,
+    Start,
+    End,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7089,7 +7098,6 @@ fn rust_owned_easing_function_style_value_kind(
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
-    let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
 
     let value = match component_values {
         [
@@ -7116,10 +7124,10 @@ fn rust_owned_easing_function_style_value_kind(
                 return None;
             }
             RustOwnedEasingFunctionValue::CubicBezier {
-                x1: serialize_component_values_for_reparsing(std::slice::from_ref(x1), filtered_input_string)?,
-                y1: serialize_component_values_for_reparsing(std::slice::from_ref(y1), filtered_input_string)?,
-                x2: serialize_component_values_for_reparsing(std::slice::from_ref(x2), filtered_input_string)?,
-                y2: serialize_component_values_for_reparsing(std::slice::from_ref(y2), filtered_input_string)?,
+                x1: component_value_parse_as_nested_number(x1, filtered_input_string)?,
+                y1: component_value_parse_as_nested_number(y1, filtered_input_string)?,
+                x2: component_value_parse_as_nested_number(x2, filtered_input_string)?,
+                y2: component_value_parse_as_nested_number(y2, filtered_input_string)?,
             }
         }
         [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("steps") => {
@@ -7143,7 +7151,7 @@ fn rust_owned_easing_function_style_value_kind(
                 if value.eq_ignore_ascii_case("jump-none") {
                     min_intervals = 2.0;
                 }
-                Some(value.clone())
+                Some(rust_owned_step_position(value)?)
             } else {
                 None
             };
@@ -7153,10 +7161,7 @@ fn rust_owned_easing_function_style_value_kind(
             }
 
             RustOwnedEasingFunctionValue::Steps {
-                intervals: serialize_component_values_for_reparsing(
-                    std::slice::from_ref(&groups[0]),
-                    filtered_input_string,
-                )?,
+                intervals: component_value_parse_as_nested_integer(&groups[0], filtered_input_string)?,
                 position,
             }
         }
@@ -7165,7 +7170,6 @@ fn rust_owned_easing_function_style_value_kind(
 
     Some(RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
         value,
-        source,
     }))
 }
 
@@ -7199,8 +7203,8 @@ fn rust_owned_linear_easing_stop(
         .peek()
         .is_some_and(component_value_parse_as_number_prefix)
     {
-        output = Some(serialize_component_values_for_reparsing(
-            std::slice::from_ref(&component_values.next()?),
+        output = Some(component_value_parse_as_nested_number(
+            &component_values.next()?,
             filtered_input_string,
         )?);
     }
@@ -7210,8 +7214,8 @@ fn rust_owned_linear_easing_stop(
         if component_values.peek().is_some_and(|component_value| {
             parse_percentage_value_prefix(component_value) == CssPrimitiveValueKind::Percentage
         }) {
-            stop_lengths.push(serialize_component_values_for_reparsing(
-                std::slice::from_ref(&component_values.next()?),
+            stop_lengths.push(component_value_parse_as_nested_percentage(
+                &component_values.next()?,
                 filtered_input_string,
             )?);
         }
@@ -7224,8 +7228,8 @@ fn rust_owned_linear_easing_stop(
         if output.is_some() {
             return None;
         }
-        output = Some(serialize_component_values_for_reparsing(
-            std::slice::from_ref(&component_values.next()?),
+        output = Some(component_value_parse_as_nested_number(
+            &component_values.next()?,
             filtered_input_string,
         )?);
     }
@@ -9196,50 +9200,90 @@ fn callback_easing_function_style_value<C>(callback: &mut C, property_id: u16, v
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, sources) = match &value.value {
-        RustOwnedEasingFunctionValue::Keyword(keyword) => (EASING_FUNCTION_CALLBACK_KEYWORD, keyword.clone()),
+    const LINEAR_OUTPUT: u8 = 0;
+    const LINEAR_FIRST_STOP_LENGTH: u8 = 1;
+    const LINEAR_SECOND_STOP_LENGTH: u8 = 2;
+
+    match &value.value {
+        RustOwnedEasingFunctionValue::Keyword(keyword) => callback(
+            CssStyleValueKind::EasingFunction,
+            property_id,
+            CssPrimitiveValueKind::Keyword,
+            false,
+            0.0,
+            false,
+            0.0,
+            EASING_FUNCTION_CALLBACK_KEYWORD,
+            0,
+            1,
+            0,
+            keyword.as_bytes(),
+            "",
+        ),
         RustOwnedEasingFunctionValue::Linear(stops) => {
-            let mut sources = String::new();
             for stop in stops {
-                if !sources.is_empty() {
-                    sources.push('\0');
-                }
-                sources.push_str(&stop.output);
-                sources.push('\0');
+                callback_nested_primitive(
+                    callback,
+                    CssStyleValueKind::EasingFunction,
+                    property_id,
+                    EASING_FUNCTION_CALLBACK_LINEAR,
+                    LINEAR_OUTPUT,
+                    &stop.output,
+                );
                 if let Some(first_stop_length) = &stop.first_stop_length {
-                    sources.push_str(first_stop_length);
+                    callback_nested_primitive(
+                        callback,
+                        CssStyleValueKind::EasingFunction,
+                        property_id,
+                        EASING_FUNCTION_CALLBACK_LINEAR,
+                        LINEAR_FIRST_STOP_LENGTH,
+                        first_stop_length,
+                    );
                 }
-                sources.push('\0');
                 if let Some(second_stop_length) = &stop.second_stop_length {
-                    sources.push_str(second_stop_length);
+                    callback_nested_primitive(
+                        callback,
+                        CssStyleValueKind::EasingFunction,
+                        property_id,
+                        EASING_FUNCTION_CALLBACK_LINEAR,
+                        LINEAR_SECOND_STOP_LENGTH,
+                        second_stop_length,
+                    );
                 }
             }
-            (EASING_FUNCTION_CALLBACK_LINEAR, sources)
         }
         RustOwnedEasingFunctionValue::CubicBezier { x1, y1, x2, y2 } => {
-            (EASING_FUNCTION_CALLBACK_CUBIC_BEZIER, format!("{x1}\0{y1}\0{x2}\0{y2}"))
+            for (index, value) in [x1, y1, x2, y2].iter().enumerate() {
+                callback_nested_primitive(
+                    callback,
+                    CssStyleValueKind::EasingFunction,
+                    property_id,
+                    EASING_FUNCTION_CALLBACK_CUBIC_BEZIER,
+                    index as u8,
+                    value,
+                );
+            }
         }
-        RustOwnedEasingFunctionValue::Steps { intervals, position } => (
+        RustOwnedEasingFunctionValue::Steps { intervals, position } => callback_nested_primitive(
+            callback,
+            CssStyleValueKind::EasingFunction,
+            property_id,
             EASING_FUNCTION_CALLBACK_STEPS,
-            format!("{}\0{}", intervals, position.as_deref().unwrap_or("")),
+            position.map(rust_owned_step_position_callback_payload).unwrap_or(5),
+            intervals,
         ),
-    };
+    }
+}
 
-    callback(
-        CssStyleValueKind::EasingFunction,
-        property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
-        false,
-        0.0,
-        kind,
-        0,
-        0,
-        0,
-        sources.as_bytes(),
-        "",
-    );
+fn rust_owned_step_position_callback_payload(position: RustOwnedStepPosition) -> u8 {
+    match position {
+        RustOwnedStepPosition::JumpStart => 0,
+        RustOwnedStepPosition::JumpEnd => 1,
+        RustOwnedStepPosition::JumpNone => 2,
+        RustOwnedStepPosition::JumpBoth => 3,
+        RustOwnedStepPosition::Start => 4,
+        RustOwnedStepPosition::End => 5,
+    }
 }
 
 fn callback_fit_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedFitContent)
@@ -15228,6 +15272,28 @@ fn is_step_position_keyword(input: &str) -> bool {
         || input.eq_ignore_ascii_case("end")
 }
 
+fn rust_owned_step_position(input: &str) -> Option<RustOwnedStepPosition> {
+    if input.eq_ignore_ascii_case("jump-start") {
+        return Some(RustOwnedStepPosition::JumpStart);
+    }
+    if input.eq_ignore_ascii_case("jump-end") {
+        return Some(RustOwnedStepPosition::JumpEnd);
+    }
+    if input.eq_ignore_ascii_case("jump-none") {
+        return Some(RustOwnedStepPosition::JumpNone);
+    }
+    if input.eq_ignore_ascii_case("jump-both") {
+        return Some(RustOwnedStepPosition::JumpBoth);
+    }
+    if input.eq_ignore_ascii_case("start") {
+        return Some(RustOwnedStepPosition::Start);
+    }
+    if input.eq_ignore_ascii_case("end") {
+        return Some(RustOwnedStepPosition::End);
+    }
+    None
+}
+
 pub(crate) fn parse_transform_function_value(filtered_input: &[u8]) -> CssTransformFunctionValueKind {
     // https://drafts.csswg.org/css-transforms-1/#typedef-transform-function
     // <transform-function> = <matrix()> | <translate()> | <translateX()> | <translateY()> | <scale()> | <scaleX()> | <scaleY()> | <rotate()> | <skew()> | <skewX()> | <skewY()>
@@ -19720,6 +19786,25 @@ fn component_value_parse_as_nested_integer(
             token_type: TokenType::Number { number },
             ..
         }) => numeric_value_to_i32(*number).map(RustOwnedNestedPrimitiveValue::Integer),
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => {
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_percentage(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
         ComponentValue::Function(_) => {
@@ -29728,8 +29813,8 @@ mod tests {
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
         RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
@@ -32148,17 +32233,16 @@ mod tests {
                 value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
                     value: RustOwnedEasingFunctionValue::Linear(vec![
                         RustOwnedLinearEasingStop {
-                            output: "0".to_string(),
+                            output: RustOwnedNestedPrimitiveValue::Number(0.0),
                             first_stop_length: None,
                             second_stop_length: None,
                         },
                         RustOwnedLinearEasingStop {
-                            output: "1".to_string(),
+                            output: RustOwnedNestedPrimitiveValue::Number(1.0),
                             first_stop_length: None,
                             second_stop_length: None,
                         },
                     ]),
-                    source: "linear(0, 1)".to_string(),
                 }),
             })
         );
@@ -32168,12 +32252,11 @@ mod tests {
                 property_id: PropertyId::TransitionTimingFunction,
                 value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
                     value: RustOwnedEasingFunctionValue::CubicBezier {
-                        x1: "0".to_string(),
-                        y1: "0".to_string(),
-                        x2: "1".to_string(),
-                        y2: "1".to_string(),
+                        x1: RustOwnedNestedPrimitiveValue::Number(0.0),
+                        y1: RustOwnedNestedPrimitiveValue::Number(0.0),
+                        x2: RustOwnedNestedPrimitiveValue::Number(1.0),
+                        y2: RustOwnedNestedPrimitiveValue::Number(1.0),
                     },
-                    source: "cubic-bezier(0, 0, 1, 1)".to_string(),
                 }),
             })
         );
@@ -32183,10 +32266,9 @@ mod tests {
                 property_id: PropertyId::TransitionTimingFunction,
                 value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
                     value: RustOwnedEasingFunctionValue::Steps {
-                        intervals: "2".to_string(),
-                        position: Some("jump-none".to_string()),
+                        intervals: RustOwnedNestedPrimitiveValue::Integer(2),
+                        position: Some(RustOwnedStepPosition::JumpNone),
                     },
-                    source: "steps(2, jump-none)".to_string(),
                 }),
             })
         );
@@ -33201,11 +33283,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::EasingFunction,
                 property_id: PropertyId::TransitionTimingFunction,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Number,
+                numeric_value: Some(1.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "0\0\0\01\0\0".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );

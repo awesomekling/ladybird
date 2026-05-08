@@ -342,6 +342,12 @@ public:
         Optional<String> drop_shadow_color_source;
     };
 
+    struct RustLinearEasingStop {
+        RustNestedPrimitiveValue output;
+        Optional<RustNestedPrimitiveValue> first_stop_length;
+        Optional<RustNestedPrimitiveValue> second_stop_length;
+    };
+
     struct RustStyleValue {
         FFI::CssStyleValueKind kind;
         PropertyID property_id;
@@ -413,7 +419,9 @@ public:
         Vector<String> counter_definition_value_sources;
         Vector<RustBackgroundSize> background_sizes;
         u8 easing_function_kind { 0 };
-        Vector<String> easing_function_sources;
+        Vector<RustNestedPrimitiveValue> easing_function_values;
+        Vector<RustLinearEasingStop> linear_easing_stops;
+        StepPosition easing_function_step_position { StepPosition::End };
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Vector<String> basic_shape_argument_groups;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };

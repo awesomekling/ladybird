@@ -976,9 +976,55 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
             } else if (kind == FFI::CssStyleValueKind::EasingFunction) {
-                value.easing_function_kind = color_red;
-                for (auto source : StringView { value_ptr, value_len }.split_view('\0', SplitBehavior::KeepEmpty))
-                    value.easing_function_sources.append(String::from_utf8_without_validation(source.bytes()));
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::EasingFunction);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->easing_function_kind = color_red;
+                enum : u8 {
+                    Keyword,
+                    Linear,
+                    CubicBezier,
+                    Steps,
+                };
+                enum : u8 {
+                    LinearOutput,
+                    LinearFirstStopLength,
+                    LinearSecondStopLength,
+                };
+                if (color_red == Keyword) {
+                    auto keyword = StringView { value_ptr, value_len };
+                    if (keyword.equals_ignoring_ascii_case("step-start"sv))
+                        style_value->easing_function_step_position = StepPosition::Start;
+                    else if (keyword.equals_ignoring_ascii_case("step-end"sv))
+                        style_value->easing_function_step_position = StepPosition::End;
+                    else
+                        return;
+                } else if (color_red == Linear) {
+                    if (color_green == LinearOutput) {
+                        style_value->linear_easing_stops.append({
+                            .output = nested_primitive_value_from_callback_payload(),
+                        });
+                    } else {
+                        VERIFY(!style_value->linear_easing_stops.is_empty());
+                        if (color_green == LinearFirstStopLength)
+                            style_value->linear_easing_stops.last().first_stop_length = nested_primitive_value_from_callback_payload();
+                        else {
+                            VERIFY(color_green == LinearSecondStopLength);
+                            style_value->linear_easing_stops.last().second_stop_length = nested_primitive_value_from_callback_payload();
+                        }
+                    }
+                } else if (color_red == CubicBezier) {
+                    style_value->easing_function_values.append(nested_primitive_value_from_callback_payload());
+                } else {
+                    VERIFY(color_red == Steps);
+                    style_value->easing_function_step_position = static_cast<StepPosition>(color_green);
+                    style_value->easing_function_values.append(nested_primitive_value_from_callback_payload());
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::BasicShape) {
                 value.basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
                 if (value_len == 0) {

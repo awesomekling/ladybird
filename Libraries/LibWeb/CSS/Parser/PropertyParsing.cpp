@@ -1113,36 +1113,50 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return value.release_nonnull();
             };
             auto materialize_rust_easing_function = [&]() -> RefPtr<StyleValue const> {
+                auto materialize_easing_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.numeric_value.has_value())
+                        return parse_rust_source_as_number_in_range(value.source_or_unit, range);
+                    if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || !range.contains(*value.numeric_value))
+                        return nullptr;
+                    return NumberStyleValue::create(*value.numeric_value);
+                };
+                auto materialize_easing_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                    if (!value.numeric_value.has_value())
+                        return parse_rust_source_as_percentage(value.source_or_unit);
+                    if (value.primitive_kind != FFI::CssPrimitiveValueKind::Percentage)
+                        return nullptr;
+                    return PercentageStyleValue::create(Percentage { *value.numeric_value });
+                };
+                auto materialize_easing_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.numeric_value.has_value())
+                        return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
+                    if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer || !range.contains(*value.numeric_value))
+                        return nullptr;
+                    return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
+                };
+
                 switch (rust_style_value->easing_function_kind) {
                 case 0:
-                    if (rust_style_value->easing_function_sources.size() != 1)
-                        return nullptr;
-                    if (rust_style_value->easing_function_sources[0].equals_ignoring_ascii_case("step-start"sv))
-                        return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), StepPosition::Start });
-                    if (rust_style_value->easing_function_sources[0].equals_ignoring_ascii_case("step-end"sv))
-                        return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), StepPosition::End });
-                    return nullptr;
+                    return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), rust_style_value->easing_function_step_position });
                 case 1: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "linear"sv });
-                    if (rust_style_value->easing_function_sources.size() % 3 != 0)
-                        return nullptr;
                     Vector<EasingStyleValue::Linear::Stop> stops;
-                    for (size_t i = 0; i < rust_style_value->easing_function_sources.size(); i += 3) {
-                        auto output = parse_rust_source_as_number(rust_style_value->easing_function_sources[i]);
+                    for (auto const& stop : rust_style_value->linear_easing_stops) {
+                        auto output = materialize_easing_number(stop.output, infinite_range);
                         if (!output)
                             return nullptr;
 
                         RefPtr<StyleValue const> first_input;
-                        if (!rust_style_value->easing_function_sources[i + 1].is_empty()) {
-                            first_input = parse_rust_source_as_percentage(rust_style_value->easing_function_sources[i + 1]);
+                        if (stop.first_stop_length.has_value()) {
+                            first_input = materialize_easing_percentage(*stop.first_stop_length);
                             if (!first_input)
                                 return nullptr;
                         }
 
                         auto output_value = output.release_nonnull();
                         stops.append({ output_value, first_input });
-                        if (!rust_style_value->easing_function_sources[i + 2].is_empty()) {
-                            auto second_input = parse_rust_source_as_percentage(rust_style_value->easing_function_sources[i + 2]);
+                        if (stop.second_stop_length.has_value()) {
+                            auto second_input = materialize_easing_percentage(*stop.second_stop_length);
                             if (!second_input)
                                 return nullptr;
                             stops.append({ output_value, second_input.release_nonnull() });
@@ -1154,12 +1168,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case 2: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "cubic-bezier"sv });
-                    if (rust_style_value->easing_function_sources.size() != 4)
+                    if (rust_style_value->easing_function_values.size() != 4)
                         return nullptr;
-                    auto x1 = parse_rust_source_as_number_in_range(rust_style_value->easing_function_sources[0], { .min = 0, .max = 1 });
-                    auto y1 = parse_rust_source_as_number(rust_style_value->easing_function_sources[1]);
-                    auto x2 = parse_rust_source_as_number_in_range(rust_style_value->easing_function_sources[2], { .min = 0, .max = 1 });
-                    auto y2 = parse_rust_source_as_number(rust_style_value->easing_function_sources[3]);
+                    auto x1 = materialize_easing_number(rust_style_value->easing_function_values[0], { .min = 0, .max = 1 });
+                    auto y1 = materialize_easing_number(rust_style_value->easing_function_values[1], infinite_range);
+                    auto x2 = materialize_easing_number(rust_style_value->easing_function_values[2], { .min = 0, .max = 1 });
+                    auto y2 = materialize_easing_number(rust_style_value->easing_function_values[3], infinite_range);
                     if (!x1 || !y1 || !x2 || !y2)
                         return nullptr;
                     return EasingStyleValue::create(EasingStyleValue::CubicBezier {
@@ -1171,20 +1185,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case 3: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "steps"sv });
-                    if (rust_style_value->easing_function_sources.size() != 2)
+                    if (rust_style_value->easing_function_values.size() != 1)
                         return nullptr;
-                    auto position = StepPosition::End;
-                    if (!rust_style_value->easing_function_sources[1].is_empty()) {
-                        auto keyword = keyword_from_string(rust_style_value->easing_function_sources[1]);
-                        if (!keyword.has_value())
-                            return nullptr;
-                        auto step_position = keyword_to_step_position(*keyword);
-                        if (!step_position.has_value())
-                            return nullptr;
-                        position = *step_position;
-                    }
+                    auto position = rust_style_value->easing_function_step_position;
                     auto min_intervals = position == StepPosition::JumpNone ? 2.0 : 1.0;
-                    auto intervals = parse_rust_source_as_integer_in_range(rust_style_value->easing_function_sources[0], NumericRange { .min = min_intervals, .max = AK::NumericLimits<i32>::max() });
+                    auto intervals = materialize_easing_integer(rust_style_value->easing_function_values[0], NumericRange { .min = min_intervals, .max = AK::NumericLimits<i32>::max() });
                     if (!intervals)
                         return nullptr;
                     return EasingStyleValue::create(EasingStyleValue::Steps { intervals.release_nonnull(), position });
