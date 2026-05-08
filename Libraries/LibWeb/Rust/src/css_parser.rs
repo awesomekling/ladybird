@@ -3083,15 +3083,9 @@ pub(crate) enum RustOwnedTransformLonghandFunction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformOrigin {
-    x: RustOwnedTransformOriginComponentValue,
-    y: RustOwnedTransformOriginComponentValue,
+    x: RustOwnedNestedPrimitiveValue,
+    y: RustOwnedNestedPrimitiveValue,
     z: RustOwnedNestedPrimitiveValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedTransformOriginComponentValue {
-    Keyword(String),
-    Offset(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7338,13 +7332,13 @@ fn rust_owned_transform_origin_style_value_kind(filtered_input: &[u8]) -> Option
 
     let value = match first_value.axis {
         Some(TransformOriginAxis::Y) => RustOwnedTransformOrigin {
-            x: RustOwnedTransformOriginComponentValue::Keyword("center".to_string()),
+            x: RustOwnedNestedPrimitiveValue::Keyword("center".to_string()),
             y: first_value.value,
             z: zero_pixel_length(),
         },
         Some(TransformOriginAxis::X) | None => RustOwnedTransformOrigin {
             x: first_value.value,
-            y: RustOwnedTransformOriginComponentValue::Keyword("center".to_string()),
+            y: RustOwnedNestedPrimitiveValue::Keyword("center".to_string()),
             z: zero_pixel_length(),
         },
     };
@@ -12689,37 +12683,18 @@ fn callback_transform_origin_component<C>(
     callback: &mut C,
     property_id: u16,
     kind: u8,
-    value: &RustOwnedTransformOriginComponentValue,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    match value {
-        RustOwnedTransformOriginComponentValue::Keyword(keyword) => callback(
-            CssStyleValueKind::TransformOrigin,
-            property_id,
-            CssPrimitiveValueKind::Keyword,
-            false,
-            0.0,
-            false,
-            0.0,
-            kind,
-            0,
-            1,
-            0,
-            keyword.as_bytes(),
-            "",
-        ),
-        RustOwnedTransformOriginComponentValue::Offset(offset) => {
-            callback_nested_primitive(
-                callback,
-                CssStyleValueKind::TransformOrigin,
-                property_id,
-                kind,
-                0,
-                offset,
-            );
-        }
-    }
+    callback_nested_primitive(
+        callback,
+        CssStyleValueKind::TransformOrigin,
+        property_id,
+        kind,
+        0,
+        value,
+    );
 }
 
 fn callback_background_size<C>(callback: &mut C, property_id: u16, value: &RustOwnedBackgroundSize)
@@ -21971,7 +21946,7 @@ struct TransformOriginComponent {
 struct RustOwnedTransformOriginComponent {
     axis: Option<TransformOriginAxis>,
     is_offset: bool,
-    value: RustOwnedTransformOriginComponentValue,
+    value: RustOwnedNestedPrimitiveValue,
 }
 
 fn transform_origin_component(
@@ -21982,10 +21957,7 @@ fn transform_origin_component(
         return Some(RustOwnedTransformOriginComponent {
             axis: None,
             is_offset: true,
-            value: RustOwnedTransformOriginComponentValue::Offset(component_value_parse_as_nested_length_percentage(
-                component_value,
-                filtered_input_string,
-            )?),
+            value: component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?,
         });
     }
 
@@ -22010,7 +21982,7 @@ fn transform_origin_component(
     Some(RustOwnedTransformOriginComponent {
         axis,
         is_offset: false,
-        value: RustOwnedTransformOriginComponentValue::Keyword(value.to_ascii_lowercase()),
+        value: RustOwnedNestedPrimitiveValue::Keyword(value.to_ascii_lowercase()),
     })
 }
 
@@ -33230,10 +33202,10 @@ mod tests {
         RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
         RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
         RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload,
-        RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline,
+        RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
         TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
@@ -36528,8 +36500,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::TransformOrigin,
                 value: RustOwnedStyleValueKind::TransformOrigin(RustOwnedTransformOrigin {
-                    x: RustOwnedTransformOriginComponentValue::Keyword("right".to_string()),
-                    y: RustOwnedTransformOriginComponentValue::Offset(RustOwnedNestedPrimitiveValue::Percentage(25.0)),
+                    x: RustOwnedNestedPrimitiveValue::Keyword("right".to_string()),
+                    y: RustOwnedNestedPrimitiveValue::Percentage(25.0),
                     z: RustOwnedNestedPrimitiveValue::Length {
                         value: 3.0,
                         unit: "px".to_string(),
