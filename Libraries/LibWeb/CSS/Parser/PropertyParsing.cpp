@@ -283,6 +283,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::Contain:
         case PropertyID::ContainerType:
         case PropertyID::Content:
+        case PropertyID::CounterIncrement:
+        case PropertyID::CounterReset:
+        case PropertyID::CounterSet:
         case PropertyID::Cursor:
         case PropertyID::Display:
         case PropertyID::Filter:
@@ -327,6 +330,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::Quotes:
         case PropertyID::Rotate:
         case PropertyID::Scale:
+        case PropertyID::ScrollTimeline:
         case PropertyID::ScrollTimelineName:
         case PropertyID::ScrollbarColor:
         case PropertyID::ScrollbarGutter:
@@ -346,8 +350,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::TransitionBehavior:
         case PropertyID::TransitionProperty:
         case PropertyID::Translate:
+        case PropertyID::ViewTimeline:
         case PropertyID::ViewTimelineName:
         case PropertyID::ViewTransitionName:
+        case PropertyID::WhiteSpace:
         case PropertyID::WhiteSpaceTrim:
         case PropertyID::WillChange:
             return true;
@@ -1872,6 +1878,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             }
             case FFI::CssStyleValueKind::CounterDefinitions:
                 if (!rust_style_value->counter_definitions.is_empty()) {
+                    VERIFY(rust_style_value->counter_definitions.size() == rust_style_value->counter_definition_value_sources.size());
+
+                    for (size_t i = 0; i < rust_style_value->counter_definitions.size(); ++i) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->counter_definition_value_sources[i].bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> value_tokens { component_values };
+                        auto value = parse_integer_value(value_tokens, infinite_integer_range);
+                        value_tokens.discard_whitespace();
+                        if (!value || value_tokens.has_next_token())
+                            return {};
+                        rust_style_value->counter_definitions[i].value = value.release_nonnull();
+                    }
+
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, CounterDefinitionsStyleValue::create(move(rust_style_value->counter_definitions)) };
@@ -3668,11 +3686,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::Content:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::CounterIncrement:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_counter_increment_value(tokens); });
     case PropertyID::CounterReset:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_counter_reset_value(tokens); });
     case PropertyID::CounterSet:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_counter_set_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Cursor:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Display:
@@ -3938,96 +3954,6 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
         parsed_values.append(parsed_value.release_nonnull());
 
     return create_shorthand_value(parsed_values);
-}
-
-RefPtr<StyleValue const> Parser::parse_counter_definitions_value(TokenStream<ComponentValue>& tokens, AllowReversed allow_reversed, i32 default_value_if_not_reversed)
-{
-    // If AllowReversed is Yes, parses:
-    //   [ <counter-name> <integer>? | <reversed-counter-name> <integer>? ]+
-    // Otherwise parses:
-    //   [ <counter-name> <integer>? ]+
-
-    // FIXME: This disabled parsing of `reversed()` counters. Remove this line once they're supported.
-    allow_reversed = AllowReversed::No;
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    Vector<CounterDefinition> counter_definitions;
-    while (tokens.has_next_token()) {
-        auto per_item_transaction = tokens.begin_transaction();
-        CounterDefinition definition {};
-
-        // <counter-name> | <reversed-counter-name>
-        auto& token = tokens.next_token();
-
-        // A <counter-name> name cannot match the keyword none; such an identifier is invalid as a <counter-name>.
-        if (auto counter_name = parse_custom_ident_value(tokens, { { "none"sv } })) {
-            definition.name = counter_name->custom_ident();
-            definition.is_reversed = false;
-        } else if (allow_reversed == AllowReversed::Yes && token.is_function("reversed"sv)) {
-            TokenStream function_tokens { token.function().value };
-            tokens.discard_a_token();
-            function_tokens.discard_whitespace();
-            auto& name_token = function_tokens.consume_a_token();
-            if (!name_token.is(Token::Type::Ident))
-                break;
-            function_tokens.discard_whitespace();
-            if (function_tokens.has_next_token())
-                break;
-
-            definition.name = name_token.token().ident();
-            definition.is_reversed = true;
-        } else {
-            break;
-        }
-        tokens.discard_whitespace();
-
-        // <integer>?
-        definition.value = parse_integer_value(tokens, infinite_integer_range);
-        if (!definition.value && !definition.is_reversed)
-            definition.value = IntegerStyleValue::create(default_value_if_not_reversed);
-
-        counter_definitions.append(move(definition));
-        tokens.discard_whitespace();
-        per_item_transaction.commit();
-    }
-
-    if (counter_definitions.is_empty())
-        return {};
-
-    transaction.commit();
-    return CounterDefinitionsStyleValue::create(move(counter_definitions));
-}
-
-// https://drafts.csswg.org/css-lists-3/#propdef-counter-increment
-RefPtr<StyleValue const> Parser::parse_counter_increment_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <counter-name> <integer>? ]+ | none
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    return parse_counter_definitions_value(tokens, AllowReversed::No, 1);
-}
-
-// https://drafts.csswg.org/css-lists-3/#propdef-counter-reset
-RefPtr<StyleValue const> Parser::parse_counter_reset_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <counter-name> <integer>? | <reversed-counter-name> <integer>? ]+ | none
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    return parse_counter_definitions_value(tokens, AllowReversed::Yes, 0);
-}
-
-// https://drafts.csswg.org/css-lists-3/#propdef-counter-set
-RefPtr<StyleValue const> Parser::parse_counter_set_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <counter-name> <integer>? ]+ | none
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
-
-    return parse_counter_definitions_value(tokens, AllowReversed::No, 0);
 }
 
 // https://drafts.csswg.org/css-animations-1/#animation

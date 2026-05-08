@@ -318,6 +318,7 @@ public:
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;
+        Vector<String> counter_definition_value_sources;
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };

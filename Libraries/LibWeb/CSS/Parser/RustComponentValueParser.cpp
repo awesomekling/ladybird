@@ -1574,8 +1574,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->counter_definitions.append(CounterDefinition {
                     .name = fly_string_from_ffi_bytes(value_ptr, value_len),
                     .is_reversed = color_red != 0,
-                    .value = IntegerStyleValue::create(static_cast<i32>(numeric_value)),
+                    .value = nullptr,
                 });
+                style_value->counter_definition_value_sources.append(string_from_ffi_bytes(value_type_ptr, value_type_len));
                 return;
             } else if (kind == FFI::CssStyleValueKind::Display) {
                 value.display_kind = static_cast<RustDisplayValueKind>(color_red);

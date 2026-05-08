@@ -2351,7 +2351,7 @@ pub(crate) struct RustOwnedColorScheme {
 pub(crate) struct RustOwnedCounterDefinition {
     name: String,
     is_reversed: bool,
-    value: i32,
+    value_source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3258,6 +3258,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Contain
             | PropertyId::ContainerType
             | PropertyId::Content
+            | PropertyId::CounterIncrement
+            | PropertyId::CounterReset
+            | PropertyId::CounterSet
             | PropertyId::Cursor
             | PropertyId::Display
             | PropertyId::Filter
@@ -3302,6 +3305,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Quotes
             | PropertyId::Rotate
             | PropertyId::Scale
+            | PropertyId::ScrollTimeline
             | PropertyId::ScrollTimelineName
             | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
@@ -3321,8 +3325,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TransitionBehavior
             | PropertyId::TransitionProperty
             | PropertyId::Translate
+            | PropertyId::ViewTimeline
             | PropertyId::ViewTimelineName
             | PropertyId::ViewTransitionName
+            | PropertyId::WhiteSpace
             | PropertyId::WhiteSpaceTrim
             | PropertyId::WillChange
     )
@@ -4496,6 +4502,7 @@ fn rust_owned_counter_definitions_style_value_kind(
     allow_reversed: bool,
     default_value_if_not_reversed: i32,
 ) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     if let [
@@ -4536,23 +4543,21 @@ fn rust_owned_counter_definitions_style_value_kind(
         };
         parser.discard_whitespace();
 
-        let mut value = None;
+        let mut value_source = None;
         if let Some(component_value) = parser.next_component_value()
             && parse_integer_value_prefix(component_value) == CssPrimitiveValueKind::Integer
         {
-            let numeric_value =
-                style_value_numeric_value(PropertyValueType::Integer, std::slice::from_ref(component_value))?;
-            if numeric_value < f64::from(i32::MIN) || numeric_value > f64::from(i32::MAX) {
-                return None;
-            }
-            value = Some(numeric_value as i32);
+            value_source = Some(serialize_component_values_for_reparsing(
+                std::slice::from_ref(component_value),
+                &source,
+            )?);
             parser.index += 1;
         }
 
         definitions.push(RustOwnedCounterDefinition {
             name,
             is_reversed,
-            value: value.unwrap_or(default_value_if_not_reversed),
+            value_source: value_source.unwrap_or_else(|| default_value_if_not_reversed.to_string()),
         });
     }
 
@@ -7104,9 +7109,9 @@ where
                 callback(
                     CssStyleValueKind::CounterDefinitions,
                     property_id,
-                    CssPrimitiveValueKind::Integer,
-                    true,
-                    f64::from(definition.value),
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
                     false,
                     0.0,
                     u8::from(definition.is_reversed),
@@ -7114,7 +7119,7 @@ where
                     0,
                     0,
                     definition.name.as_bytes(),
-                    "",
+                    &definition.value_source,
                 );
             }
         }
@@ -29266,12 +29271,12 @@ mod tests {
                         RustOwnedCounterDefinition {
                             name: "chapter".to_string(),
                             is_reversed: false,
-                            value: 1,
+                            value_source: "1".to_string(),
                         },
                         RustOwnedCounterDefinition {
                             name: "page".to_string(),
                             is_reversed: false,
-                            value: 2,
+                            value_source: "2".to_string(),
                         },
                     ],
                 }),
@@ -29285,7 +29290,7 @@ mod tests {
                     definitions: vec![RustOwnedCounterDefinition {
                         name: "chapter".to_string(),
                         is_reversed: false,
-                        value: -1,
+                        value_source: "-1".to_string(),
                     }],
                 }),
             })
