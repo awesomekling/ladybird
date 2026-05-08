@@ -256,7 +256,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_negative = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_sources = RustComponentValueParser::parse_counter_style_negative_descriptor_sources(serialized_negative.bytes_as_string_view(), "utf-8"sv);
+                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::CounterStyleNegative, serialized_negative.bytes_as_string_view(), "utf-8"sv);
                     if (!symbol_sources.has_value())
                         return nullptr;
 
@@ -413,7 +413,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_font_src_list = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto source_lists = RustComponentValueParser::parse_font_src_list_descriptor_sources(serialized_font_src_list.bytes_as_string_view(), "utf-8"sv);
+                    auto source_lists = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::FontSrcList, serialized_font_src_list.bytes_as_string_view(), "utf-8"sv);
                     if (!source_lists.has_value())
                         return nullptr;
 
@@ -473,7 +473,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_font_weight_absolute_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto weight_sources = RustComponentValueParser::parse_font_weight_absolute_pair_descriptor_sources(serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
+                    auto weight_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::FontWeightAbsolutePair, serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
                     if (!weight_sources.has_value())
                         return nullptr;
 
@@ -498,11 +498,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_length = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto length_source = RustComponentValueParser::parse_length_descriptor_source(serialized_length.bytes_as_string_view(), "utf-8"sv);
-                    if (!length_source.has_value())
+                    auto length_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Length, serialized_length.bytes_as_string_view(), "utf-8"sv);
+                    if (!length_sources.has_value())
                         return nullptr;
+                    VERIFY(length_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_source->bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_sources->first().bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> length_tokens { component_values };
 
                     auto length = parse_length_value(length_tokens, infinite_range);
@@ -628,11 +629,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_percentage = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto percentage_source = RustComponentValueParser::parse_positive_percentage_descriptor_source(serialized_percentage.bytes_as_string_view(), "utf-8"sv);
-                    if (!percentage_source.has_value())
+                    auto percentage_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::PositivePercentage, serialized_percentage.bytes_as_string_view(), "utf-8"sv);
+                    if (!percentage_sources.has_value())
                         return nullptr;
+                    VERIFY(percentage_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_source->bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_sources->first().bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> percentage_tokens { component_values };
 
                     if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
@@ -662,11 +664,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_string = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto string_source = RustComponentValueParser::parse_string_descriptor_source(serialized_string.bytes_as_string_view(), "utf-8"sv);
-                    if (!string_source.has_value())
+                    auto string_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::String, serialized_string.bytes_as_string_view(), "utf-8"sv);
+                    if (!string_sources.has_value())
                         return nullptr;
+                    VERIFY(string_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_source->bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_sources->first().bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> string_tokens { component_values };
 
                     auto string = parse_string_value(string_tokens);
@@ -687,11 +690,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbol = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_source = RustComponentValueParser::parse_counter_style_symbol_descriptor_source(serialized_symbol.bytes_as_string_view(), "utf-8"sv);
-                    if (!symbol_source.has_value())
+                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Symbol, serialized_symbol.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_sources.has_value())
                         return nullptr;
+                    VERIFY(symbol_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_source->bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->first().bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> symbol_tokens { component_values };
 
                     auto symbol = parse_symbol_value(symbol_tokens);
@@ -712,7 +716,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_sources = RustComponentValueParser::parse_counter_style_symbols_descriptor_sources(serialized_symbols.bytes_as_string_view(), "utf-8"sv);
+                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Symbols, serialized_symbols.bytes_as_string_view(), "utf-8"sv);
                     if (!symbol_sources.has_value())
                         return nullptr;
 

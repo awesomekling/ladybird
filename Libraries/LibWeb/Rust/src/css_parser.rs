@@ -282,6 +282,44 @@ where
     })
 }
 
+pub(crate) fn parse_descriptor_sources<C>(
+    value_type: CssDescriptorValueType,
+    filtered_input: &[u8],
+    mut source_callback: C,
+) -> bool
+where
+    C: FnMut(&str),
+{
+    let sources = match value_type {
+        CssDescriptorValueType::CounterStyleNegative => {
+            parse_rust_owned_counter_style_negative_descriptor(filtered_input)
+        }
+        CssDescriptorValueType::FontSrcList => parse_rust_owned_font_src_list_descriptor(filtered_input),
+        CssDescriptorValueType::FontWeightAbsolutePair => {
+            parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input)
+        }
+        CssDescriptorValueType::Length => parse_rust_owned_length_descriptor(filtered_input).map(|source| vec![source]),
+        CssDescriptorValueType::PositivePercentage => {
+            parse_rust_owned_positive_percentage_descriptor(filtered_input).map(|source| vec![source])
+        }
+        CssDescriptorValueType::String => parse_rust_owned_string_descriptor(filtered_input).map(|source| vec![source]),
+        CssDescriptorValueType::Symbol => {
+            parse_rust_owned_counter_style_symbol_descriptor(filtered_input).map(|source| vec![source])
+        }
+        CssDescriptorValueType::Symbols => parse_rust_owned_counter_style_symbols_descriptor(filtered_input),
+        _ => None,
+    };
+
+    let Some(sources) = sources else {
+        return false;
+    };
+
+    for source in &sources {
+        source_callback(source);
+    }
+    true
+}
+
 pub(crate) fn property_accepting_type<C>(property_ids: &[u16], value_type: &[u8], mut callback: C) -> bool
 where
     C: FnMut(u16),

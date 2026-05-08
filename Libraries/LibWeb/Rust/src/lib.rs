@@ -477,6 +477,30 @@ pub unsafe extern "C" fn rust_css_for_each_descriptor_syntax(
 }
 
 /// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_descriptor_sources(
+    value_type: CssDescriptorValueType,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(ctx: *mut c_void, source: *const u8, source_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_descriptor_sources(value_type, input, |source| {
+                callback(ctx, source.as_ptr(), source.len());
+            })
+        })
+    }
+}
+
+/// # Safety
 /// - `property_ids` and `property_ids_len` must point to valid PropertyID values
 /// - `value_type` and `value_type_len` must point to a valid string
 /// - Parameters provided to `callback` must be valid pointers
@@ -2849,64 +2873,6 @@ pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_negative_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(symbols) = css_parser::parse_rust_owned_counter_style_negative_descriptor(input) else {
-                return false;
-            };
-
-            for symbol in symbols {
-                symbol_callback(ctx, symbol.as_ptr(), symbol.len());
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_symbols_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(symbols) = css_parser::parse_rust_owned_counter_style_symbols_descriptor(input) else {
-                return false;
-            };
-
-            for symbol in symbols {
-                symbol_callback(ctx, symbol.as_ptr(), symbol.len());
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_counter_style_range_descriptor_sources(
     input: *const u8,
     input_len: usize,
@@ -3074,145 +3040,6 @@ pub unsafe extern "C" fn rust_css_parse_counter_style_pad_descriptor_source(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_symbol_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(symbol) = css_parser::parse_rust_owned_counter_style_symbol_descriptor(input) else {
-                return false;
-            };
-
-            symbol_callback(ctx, symbol.as_ptr(), symbol.len());
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_font_src_list_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(sources) = css_parser::parse_rust_owned_font_src_list_descriptor(input) else {
-                return false;
-            };
-
-            for source in sources {
-                source_callback(ctx, source.as_ptr(), source.len());
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_font_weight_absolute_pair_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    weight_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(weights) = css_parser::parse_rust_owned_font_weight_absolute_pair_descriptor(input) else {
-                return false;
-            };
-
-            for weight in weights {
-                weight_callback(ctx, weight.as_ptr(), weight.len());
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_length_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(source) = css_parser::parse_rust_owned_length_descriptor(input) else {
-                return false;
-            };
-
-            source_callback(ctx, source.as_ptr(), source.len());
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_positive_percentage_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(source) = css_parser::parse_rust_owned_positive_percentage_descriptor(input) else {
-                return false;
-            };
-
-            source_callback(ctx, source.as_ptr(), source.len());
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_page_size_descriptor_sources(
     input: *const u8,
     input_len: usize,
@@ -3250,33 +3077,6 @@ pub unsafe extern "C" fn rust_css_parse_page_size_descriptor_sources(
                     }
                 }
             }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_string_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(source) = css_parser::parse_rust_owned_string_descriptor(input) else {
-                return false;
-            };
-
-            source_callback(ctx, source.as_ptr(), source.len());
             true
         })
     }

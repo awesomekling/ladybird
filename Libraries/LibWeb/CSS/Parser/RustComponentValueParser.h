@@ -880,6 +880,7 @@ public:
     static bool property_accepts_keyword(PropertyID, Keyword);
     static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
     static DescriptorMetadata descriptor_metadata(AtRuleID, DescriptorID);
+    static Optional<Vector<String>> parse_descriptor_sources(DescriptorMetadata::ValueType, StringView input, StringView encoding);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
@@ -930,18 +931,11 @@ public:
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding);
-    static Optional<Vector<String>> parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding);
-    static Optional<Vector<String>> parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
     static Optional<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>> parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<CounterStyleSystemDescriptor> parse_counter_style_system_descriptor_source(StringView input, StringView encoding);
     static Optional<CounterStylePadDescriptor> parse_counter_style_pad_descriptor_source(StringView input, StringView encoding);
-    static Optional<String> parse_counter_style_symbol_descriptor_source(StringView input, StringView encoding);
-    static Optional<Vector<String>> parse_font_src_list_descriptor_sources(StringView input, StringView encoding);
-    static Optional<String> parse_length_descriptor_source(StringView input, StringView encoding);
-    static Optional<String> parse_positive_percentage_descriptor_source(StringView input, StringView encoding);
     static Optional<PageSizeDescriptor> parse_page_size_descriptor_sources(StringView input, StringView encoding);
-    static Optional<String> parse_string_descriptor_source(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
@@ -964,7 +958,6 @@ public:
     static FFI::CssColorFunctionValueKind parse_color_function(StringView input, StringView encoding);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static FFI::CssImageSetValueKind parse_image_set(StringView input, StringView encoding);
-    static Optional<Vector<String>> parse_font_weight_absolute_pair_descriptor_sources(StringView input, StringView encoding);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<FamilyName> parse_a_family_name(StringView input, StringView encoding);
     static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);

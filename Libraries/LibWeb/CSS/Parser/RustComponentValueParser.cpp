@@ -836,6 +836,49 @@ static DescriptorMetadata::ValueType descriptor_value_type_from_ffi(FFI::CssDesc
     VERIFY_NOT_REACHED();
 }
 
+static FFI::CssDescriptorValueType descriptor_value_type_to_ffi(DescriptorMetadata::ValueType value_type)
+{
+    switch (value_type) {
+    case DescriptorMetadata::ValueType::CounterStyleSystem:
+        return FFI::CssDescriptorValueType::CounterStyleSystem;
+    case DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols:
+        return FFI::CssDescriptorValueType::CounterStyleAdditiveSymbols;
+    case DescriptorMetadata::ValueType::CounterStyleName:
+        return FFI::CssDescriptorValueType::CounterStyleName;
+    case DescriptorMetadata::ValueType::CounterStyleNegative:
+        return FFI::CssDescriptorValueType::CounterStyleNegative;
+    case DescriptorMetadata::ValueType::CounterStylePad:
+        return FFI::CssDescriptorValueType::CounterStylePad;
+    case DescriptorMetadata::ValueType::CounterStyleRange:
+        return FFI::CssDescriptorValueType::CounterStyleRange;
+    case DescriptorMetadata::ValueType::CropOrCross:
+        return FFI::CssDescriptorValueType::CropOrCross;
+    case DescriptorMetadata::ValueType::FamilyName:
+        return FFI::CssDescriptorValueType::FamilyName;
+    case DescriptorMetadata::ValueType::FontSrcList:
+        return FFI::CssDescriptorValueType::FontSrcList;
+    case DescriptorMetadata::ValueType::FontWeightAbsolutePair:
+        return FFI::CssDescriptorValueType::FontWeightAbsolutePair;
+    case DescriptorMetadata::ValueType::Length:
+        return FFI::CssDescriptorValueType::Length;
+    case DescriptorMetadata::ValueType::OptionalDeclarationValue:
+        return FFI::CssDescriptorValueType::OptionalDeclarationValue;
+    case DescriptorMetadata::ValueType::PageSize:
+        return FFI::CssDescriptorValueType::PageSize;
+    case DescriptorMetadata::ValueType::PositivePercentage:
+        return FFI::CssDescriptorValueType::PositivePercentage;
+    case DescriptorMetadata::ValueType::String:
+        return FFI::CssDescriptorValueType::String;
+    case DescriptorMetadata::ValueType::Symbol:
+        return FFI::CssDescriptorValueType::Symbol;
+    case DescriptorMetadata::ValueType::Symbols:
+        return FFI::CssDescriptorValueType::Symbols;
+    case DescriptorMetadata::ValueType::UnicodeRangeTokens:
+        return FFI::CssDescriptorValueType::UnicodeRangeTokens;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 bool RustComponentValueParser::at_rule_supports_descriptor(AtRuleID at_rule_id, DescriptorID descriptor_id)
 {
     return FFI::rust_css_at_rule_supports_descriptor(
@@ -873,6 +916,28 @@ DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rul
         });
     VERIFY(parsed);
     return metadata;
+}
+
+Optional<Vector<String>> RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
+{
+    Vector<String> sources;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_descriptor_sources(
+        descriptor_value_type_to_ffi(value_type),
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &sources,
+        [](void* raw_sources, u8 const* source_ptr, size_t source_len) {
+            auto& sources = *static_cast<Vector<String>*>(raw_sources);
+            sources.append(string_from_ffi_bytes(source_ptr, source_len));
+        });
+
+    if (!parsed)
+        return {};
+
+    return sources;
 }
 
 Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
@@ -4492,48 +4557,6 @@ Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> RustComponentValueParser::pa
     return order;
 }
 
-Optional<Vector<String>> RustComponentValueParser::parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding)
-{
-    Vector<String> symbols;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_negative_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &symbols,
-        [](void* raw_symbols, u8 const* symbol_ptr, size_t symbol_len) {
-            auto& symbols = *static_cast<Vector<String>*>(raw_symbols);
-            symbols.append(string_from_ffi_bytes(symbol_ptr, symbol_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return symbols;
-}
-
-Optional<Vector<String>> RustComponentValueParser::parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding)
-{
-    Vector<String> symbols;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_symbols_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &symbols,
-        [](void* raw_symbols, u8 const* symbol_ptr, size_t symbol_len) {
-            auto& symbols = *static_cast<Vector<String>*>(raw_symbols);
-            symbols.append(string_from_ffi_bytes(symbol_ptr, symbol_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return symbols;
-}
-
 Optional<RustComponentValueParser::CounterStyleRangeDescriptor> RustComponentValueParser::parse_counter_style_range_descriptor_sources(StringView input, StringView encoding)
 {
     Optional<CounterStyleRangeDescriptor> range;
@@ -4632,90 +4655,6 @@ Optional<RustComponentValueParser::CounterStylePadDescriptor> RustComponentValue
     return pad;
 }
 
-Optional<String> RustComponentValueParser::parse_counter_style_symbol_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<String> symbol;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_symbol_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &symbol,
-        [](void* raw_symbol, u8 const* symbol_ptr, size_t symbol_len) {
-            auto& symbol = *static_cast<Optional<String>*>(raw_symbol);
-            symbol = string_from_ffi_bytes(symbol_ptr, symbol_len);
-        });
-
-    if (!parsed || !symbol.has_value())
-        return {};
-
-    return symbol;
-}
-
-Optional<Vector<String>> RustComponentValueParser::parse_font_src_list_descriptor_sources(StringView input, StringView encoding)
-{
-    Vector<String> sources;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_src_list_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &sources,
-        [](void* raw_sources, u8 const* source_ptr, size_t source_len) {
-            auto& sources = *static_cast<Vector<String>*>(raw_sources);
-            sources.append(string_from_ffi_bytes(source_ptr, source_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return sources;
-}
-
-Optional<String> RustComponentValueParser::parse_length_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<String> source;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_length_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &source,
-        [](void* raw_source, u8 const* source_ptr, size_t source_len) {
-            auto& source = *static_cast<Optional<String>*>(raw_source);
-            source = string_from_ffi_bytes(source_ptr, source_len);
-        });
-
-    if (!parsed || !source.has_value())
-        return {};
-
-    return source;
-}
-
-Optional<String> RustComponentValueParser::parse_positive_percentage_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<String> source;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_positive_percentage_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &source,
-        [](void* raw_source, u8 const* source_ptr, size_t source_len) {
-            auto& source = *static_cast<Optional<String>*>(raw_source);
-            source = string_from_ffi_bytes(source_ptr, source_len);
-        });
-
-    if (!parsed || !source.has_value())
-        return {};
-
-    return source;
-}
-
 Optional<RustComponentValueParser::PageSizeDescriptor> RustComponentValueParser::parse_page_size_descriptor_sources(StringView input, StringView encoding)
 {
     Optional<PageSizeDescriptor> page_size;
@@ -4740,27 +4679,6 @@ Optional<RustComponentValueParser::PageSizeDescriptor> RustComponentValueParser:
         return {};
 
     return page_size;
-}
-
-Optional<String> RustComponentValueParser::parse_string_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<String> source;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_string_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &source,
-        [](void* raw_source, u8 const* source_ptr, size_t source_len) {
-            auto& source = *static_cast<Optional<String>*>(raw_source);
-            source = string_from_ffi_bytes(source_ptr, source_len);
-        });
-
-    if (!parsed || !source.has_value())
-        return {};
-
-    return source;
 }
 
 bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
@@ -5067,27 +4985,6 @@ FFI::CssImageSetValueKind RustComponentValueParser::parse_image_set(StringView i
     return FFI::rust_css_parse_image_set(
         filtered_input_bytes.data(),
         filtered_input_bytes.size());
-}
-
-Optional<Vector<String>> RustComponentValueParser::parse_font_weight_absolute_pair_descriptor_sources(StringView input, StringView encoding)
-{
-    Vector<String> weights;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_weight_absolute_pair_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &weights,
-        [](void* raw_weights, u8 const* weight_ptr, size_t weight_len) {
-            auto& weights = *static_cast<Vector<String>*>(raw_weights);
-            weights.append(string_from_ffi_bytes(weight_ptr, weight_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return weights;
 }
 
 Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
