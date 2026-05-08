@@ -2207,6 +2207,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::GridAutoFlow) {
                 value.grid_auto_flow_axis = color_red;
                 value.grid_auto_flow_dense = color_green;
+            } else if (kind == FFI::CssStyleValueKind::CornerShape) {
+                if (primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    value.corner_shape_keyword = keyword.release_value();
+                } else {
+                    value.corner_shape_superellipse_parameter = nested_primitive_value_from_callback_payload();
+                }
             } else if (kind == FFI::CssStyleValueKind::Paint) {
                 enum : u8 {
                     None,

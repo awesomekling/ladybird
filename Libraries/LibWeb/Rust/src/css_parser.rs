@@ -1871,6 +1871,7 @@ pub enum CssStyleValueKind {
     ColorScheme,
     Contain,
     ContainerType,
+    CornerShape,
     Counter,
     CounterDefinitions,
     BorderRadius,
@@ -1951,6 +1952,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ColorScheme(RustOwnedColorScheme),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
+    CornerShape(RustOwnedCornerShape),
     Counter(RustOwnedCounterFunction),
     CounterStyle {
         value: CounterStyle,
@@ -2557,6 +2559,12 @@ pub(crate) enum RustOwnedBackgroundSizeComponent {
 pub(crate) struct RustOwnedColorScheme {
     value: CssColorSchemeValue,
     schemes: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedCornerShape {
+    Keyword(String),
+    Superellipse { parameter: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4008,6 +4016,12 @@ fn parse_rust_owned_generated_longhand_value(
 
     if value_type == PropertyValueType::Counter
         && let Some(value) = rust_owned_counter_function_style_value_kind(filtered_input)
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::CornerShape
+        && let Some(value) = rust_owned_corner_shape_style_value_kind(filtered_input)
     {
         return RustOwnedStyleValue { property_id, value };
     }
@@ -6011,6 +6025,85 @@ fn rust_owned_paint_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedS
         url,
         fallback_color,
     }))
+}
+
+fn rust_owned_corner_shape_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-borders-4/#typedef-corner-shape-value
+    // <corner-shape-value> = round | scoop | bevel | notch | square | squircle | <superellipse()>
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+    ] = strip_whitespace(&component_values)
+    else {
+        return rust_owned_superellipse_style_value_kind(strip_whitespace(&component_values), filtered_input_string);
+    };
+
+    if first_is_one_of(
+        value.as_str(),
+        &["round", "scoop", "bevel", "notch", "square", "squircle"],
+    ) {
+        return Some(RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Keyword(
+            value.to_string(),
+        )));
+    }
+
+    None
+}
+
+fn rust_owned_superellipse_style_value_kind(
+    component_values: &[ComponentValue],
+    filtered_input_string: &str,
+) -> Option<RustOwnedStyleValueKind> {
+    let [ComponentValue::Function(function)] = component_values else {
+        return None;
+    };
+    if !function.name.eq_ignore_ascii_case("superellipse") {
+        return None;
+    }
+
+    // https://drafts.csswg.org/css-borders-4/#funcdef-superellipse
+    // superellipse() = superellipse(<number> | infinity | -infinity)
+    let parameter_component_values = strip_whitespace(&function.value)
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .collect::<Vec<_>>();
+    let [parameter_component_value] = parameter_component_values.as_slice() else {
+        return None;
+    };
+
+    let parameter = match parameter_component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("infinity") => RustOwnedNestedPrimitiveValue::Number(f64::INFINITY),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("-infinity") => RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY),
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => RustOwnedNestedPrimitiveValue::Number(number.value()),
+        ComponentValue::Function(_) => {
+            let source = serialize_component_values_for_reparsing(
+                std::slice::from_ref(*parameter_component_value),
+                filtered_input_string,
+            )?;
+            if !component_values_parse_as_property_value_type(PropertyValueType::Number, source.as_bytes()) {
+                return None;
+            }
+            RustOwnedNestedPrimitiveValue::Source(source)
+        }
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::CornerShape(
+        RustOwnedCornerShape::Superellipse { parameter },
+    ))
 }
 
 fn rust_owned_border_width_from_component_value(
@@ -8212,6 +8305,9 @@ where
         }
         RustOwnedStyleValueKind::Counter(value) => {
             callback_counter_function_style_value(callback, CssStyleValueKind::Counter, property_id, value);
+        }
+        RustOwnedStyleValueKind::CornerShape(value) => {
+            callback_corner_shape_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::ImageSet(_) => {
             callback_style_value_type(
@@ -11142,6 +11238,32 @@ where
                     fallback_color,
                 );
             }
+        }
+    }
+}
+
+fn callback_corner_shape_style_value<C>(callback: &mut C, property_id: u16, corner_shape: &RustOwnedCornerShape)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match corner_shape {
+        RustOwnedCornerShape::Keyword(keyword) => callback(
+            CssStyleValueKind::CornerShape,
+            property_id,
+            CssPrimitiveValueKind::Keyword,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            keyword.as_bytes(),
+            property_value_type_name(PropertyValueType::CornerShape),
+        ),
+        RustOwnedCornerShape::Superellipse { parameter } => {
+            callback_nested_primitive(callback, CssStyleValueKind::CornerShape, property_id, 1, 0, parameter);
         }
     }
 }
@@ -14692,6 +14814,7 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
         PropertyValueType::Anchor => rust_owned_anchor_function_style_value_kind(filtered_input).is_some(),
         PropertyValueType::Color => parse_color_value(filtered_input, false) == CssColorValueKind::Valid,
         PropertyValueType::Counter => rust_owned_counter_function_style_value_kind(filtered_input).is_some(),
+        PropertyValueType::CornerShape => rust_owned_corner_shape_style_value_kind(filtered_input).is_some(),
         PropertyValueType::DashedIdent => parse_a_dashed_ident(filtered_input, |_| {}),
         PropertyValueType::EasingFunction => parse_easing_value(filtered_input) == CssEasingValueKind::Valid,
         PropertyValueType::FitContent => parse_fit_content_value(filtered_input) == CssFitContentValueKind::Valid,
@@ -32815,7 +32938,7 @@ mod tests {
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
         RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
         RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
         RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
         RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
@@ -34659,6 +34782,22 @@ mod tests {
                         alpha: 255,
                         name: Some("red".to_string()),
                     }),
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "squircle"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::CornerTopLeftShape,
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Keyword("squircle".to_string())),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "superellipse(-infinity)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::CornerTopLeftShape,
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape::Superellipse {
+                    parameter: RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY),
                 }),
             })
         );

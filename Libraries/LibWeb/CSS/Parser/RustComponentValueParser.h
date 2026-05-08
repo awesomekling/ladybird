@@ -648,6 +648,8 @@ public:
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
+        Optional<Keyword> corner_shape_keyword;
+        Optional<RustNestedPrimitiveValue> corner_shape_superellipse_parameter;
         bool paint_is_none { false };
         Optional<RustStyleColor> paint_color;
         Optional<String> paint_url_source;

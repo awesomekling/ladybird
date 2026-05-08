@@ -67,6 +67,7 @@
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
+#include <LibWeb/CSS/StyleValues/SuperellipseStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TextIndentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
@@ -3977,6 +3978,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         StyleValueList::create(
                             StyleValueVector { x_value.release_nonnull(), y_value.release_nonnull(), z_value.release_nonnull() },
                             StyleValueList::Separator::Space) };
+                }
+                break;
+            case FFI::CssStyleValueKind::CornerShape:
+                if (rust_style_value->corner_shape_keyword.has_value()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(*rust_style_value->corner_shape_keyword) };
+                }
+                if (rust_style_value->corner_shape_superellipse_parameter.has_value()) {
+                    auto parameter = materialize_rust_nested_number(*rust_style_value->corner_shape_superellipse_parameter);
+                    if (!parameter)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, SuperellipseStyleValue::create(parameter.release_nonnull()) };
                 }
                 break;
             case FFI::CssStyleValueKind::Paint:
