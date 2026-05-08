@@ -79,6 +79,125 @@ static void remove_property(Vector<PropertyID>& properties, PropertyID property_
     properties.remove_first_matching([&](auto it) { return it == property_to_remove; });
 }
 
+static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
+{
+    switch (property_id) {
+    case PropertyID::AnchorName:
+    case PropertyID::AnchorScope:
+    case PropertyID::AnimationName:
+    case PropertyID::AspectRatio:
+    case PropertyID::BackgroundPosition:
+    case PropertyID::BackgroundPositionX:
+    case PropertyID::BackgroundPositionY:
+    case PropertyID::BackgroundRepeat:
+    case PropertyID::BackgroundSize:
+    case PropertyID::Border:
+    case PropertyID::BorderBlock:
+    case PropertyID::BorderImage:
+    case PropertyID::BorderImageOutset:
+    case PropertyID::BorderImageRepeat:
+    case PropertyID::BorderImageSlice:
+    case PropertyID::BorderImageWidth:
+    case PropertyID::BorderInline:
+    case PropertyID::BorderBottomLeftRadius:
+    case PropertyID::BorderBottomRightRadius:
+    case PropertyID::BorderEndEndRadius:
+    case PropertyID::BorderEndStartRadius:
+    case PropertyID::BorderRadius:
+    case PropertyID::BorderStartEndRadius:
+    case PropertyID::BorderStartStartRadius:
+    case PropertyID::BorderTopLeftRadius:
+    case PropertyID::BorderTopRightRadius:
+    case PropertyID::BoxShadow:
+    case PropertyID::BackdropFilter:
+    case PropertyID::ColorScheme:
+    case PropertyID::Columns:
+    case PropertyID::Contain:
+    case PropertyID::ContainerType:
+    case PropertyID::Content:
+    case PropertyID::CounterIncrement:
+    case PropertyID::CounterReset:
+    case PropertyID::CounterSet:
+    case PropertyID::Cursor:
+    case PropertyID::Display:
+    case PropertyID::Filter:
+    case PropertyID::Flex:
+    case PropertyID::FlexFlow:
+    case PropertyID::FontFamily:
+    case PropertyID::FontFeatureSettings:
+    case PropertyID::FontLanguageOverride:
+    case PropertyID::FontVariant:
+    case PropertyID::FontVariationSettings:
+    case PropertyID::GridAutoColumns:
+    case PropertyID::GridAutoFlow:
+    case PropertyID::GridAutoRows:
+    case PropertyID::GridColumnEnd:
+    case PropertyID::GridColumnStart:
+    case PropertyID::GridRowEnd:
+    case PropertyID::GridRowStart:
+    case PropertyID::GridTemplateAreas:
+    case PropertyID::GridTemplateColumns:
+    case PropertyID::GridTemplateRows:
+    case PropertyID::ListStyle:
+    case PropertyID::MaskPosition:
+    case PropertyID::MaskRepeat:
+    case PropertyID::MaskSize:
+    case PropertyID::MathDepth:
+    case PropertyID::OverflowClipMargin:
+    case PropertyID::OverflowClipMarginBlock:
+    case PropertyID::OverflowClipMarginBlockEnd:
+    case PropertyID::OverflowClipMarginBlockStart:
+    case PropertyID::OverflowClipMarginBottom:
+    case PropertyID::OverflowClipMarginInline:
+    case PropertyID::OverflowClipMarginInlineEnd:
+    case PropertyID::OverflowClipMarginInlineStart:
+    case PropertyID::OverflowClipMarginLeft:
+    case PropertyID::OverflowClipMarginRight:
+    case PropertyID::OverflowClipMarginTop:
+    case PropertyID::PaintOrder:
+    case PropertyID::PlaceContent:
+    case PropertyID::PlaceItems:
+    case PropertyID::PlaceSelf:
+    case PropertyID::PositionAnchor:
+    case PropertyID::PositionArea:
+    case PropertyID::PositionTryFallbacks:
+    case PropertyID::PositionTryOrder:
+    case PropertyID::PositionVisibility:
+    case PropertyID::Quotes:
+    case PropertyID::Rotate:
+    case PropertyID::Scale:
+    case PropertyID::ScrollTimeline:
+    case PropertyID::ScrollTimelineName:
+    case PropertyID::ScrollbarColor:
+    case PropertyID::ScrollbarGutter:
+    case PropertyID::ShapeOutside:
+    case PropertyID::StrokeDasharray:
+    case PropertyID::TextDecoration:
+    case PropertyID::TextDecorationLine:
+    case PropertyID::TextIndent:
+    case PropertyID::TextShadow:
+    case PropertyID::TextUnderlinePosition:
+    case PropertyID::TextWrap:
+    case PropertyID::TextWrapMode:
+    case PropertyID::TextWrapStyle:
+    case PropertyID::TimelineScope:
+    case PropertyID::TouchAction:
+    case PropertyID::TransformOrigin:
+    case PropertyID::TransitionBehavior:
+    case PropertyID::TransitionProperty:
+    case PropertyID::Translate:
+    case PropertyID::ViewTimeline:
+    case PropertyID::ViewTimelineName:
+    case PropertyID::ViewTransitionName:
+    case PropertyID::WhiteSpace:
+    case PropertyID::WhiteSpaceTrim:
+    case PropertyID::WillChange:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
 {
     switch (font_style) {
@@ -257,125 +376,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     };
     auto property_numeric_metadata = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<RustComponentValueParser::PropertyNumericMetadata> {
         return RustComponentValueParser::property_numeric_metadata(property_ids, value_type);
-    };
-    auto property_uses_rust_owned_whole_grammar = [](ReadonlySpan<PropertyID> property_ids) {
-        if (property_ids.size() != 1)
-            return false;
-        switch (property_ids[0]) {
-        case PropertyID::AnchorName:
-        case PropertyID::AnchorScope:
-        case PropertyID::AnimationName:
-        case PropertyID::AspectRatio:
-        case PropertyID::BackgroundPosition:
-        case PropertyID::BackgroundPositionX:
-        case PropertyID::BackgroundPositionY:
-        case PropertyID::BackgroundRepeat:
-        case PropertyID::BackgroundSize:
-        case PropertyID::Border:
-        case PropertyID::BorderBlock:
-        case PropertyID::BorderImage:
-        case PropertyID::BorderImageOutset:
-        case PropertyID::BorderImageRepeat:
-        case PropertyID::BorderImageSlice:
-        case PropertyID::BorderImageWidth:
-        case PropertyID::BorderInline:
-        case PropertyID::BorderBottomLeftRadius:
-        case PropertyID::BorderBottomRightRadius:
-        case PropertyID::BorderEndEndRadius:
-        case PropertyID::BorderEndStartRadius:
-        case PropertyID::BorderRadius:
-        case PropertyID::BorderStartEndRadius:
-        case PropertyID::BorderStartStartRadius:
-        case PropertyID::BorderTopLeftRadius:
-        case PropertyID::BorderTopRightRadius:
-        case PropertyID::BoxShadow:
-        case PropertyID::BackdropFilter:
-        case PropertyID::ColorScheme:
-        case PropertyID::Columns:
-        case PropertyID::Contain:
-        case PropertyID::ContainerType:
-        case PropertyID::Content:
-        case PropertyID::CounterIncrement:
-        case PropertyID::CounterReset:
-        case PropertyID::CounterSet:
-        case PropertyID::Cursor:
-        case PropertyID::Display:
-        case PropertyID::Filter:
-        case PropertyID::Flex:
-        case PropertyID::FlexFlow:
-        case PropertyID::FontFamily:
-        case PropertyID::FontFeatureSettings:
-        case PropertyID::FontLanguageOverride:
-        case PropertyID::FontVariant:
-        case PropertyID::FontVariationSettings:
-        case PropertyID::GridAutoColumns:
-        case PropertyID::GridAutoFlow:
-        case PropertyID::GridAutoRows:
-        case PropertyID::GridColumnEnd:
-        case PropertyID::GridColumnStart:
-        case PropertyID::GridRowEnd:
-        case PropertyID::GridRowStart:
-        case PropertyID::GridTemplateAreas:
-        case PropertyID::GridTemplateColumns:
-        case PropertyID::GridTemplateRows:
-        case PropertyID::ListStyle:
-        case PropertyID::MaskPosition:
-        case PropertyID::MaskRepeat:
-        case PropertyID::MaskSize:
-        case PropertyID::MathDepth:
-        case PropertyID::OverflowClipMargin:
-        case PropertyID::OverflowClipMarginBlock:
-        case PropertyID::OverflowClipMarginBlockEnd:
-        case PropertyID::OverflowClipMarginBlockStart:
-        case PropertyID::OverflowClipMarginBottom:
-        case PropertyID::OverflowClipMarginInline:
-        case PropertyID::OverflowClipMarginInlineEnd:
-        case PropertyID::OverflowClipMarginInlineStart:
-        case PropertyID::OverflowClipMarginLeft:
-        case PropertyID::OverflowClipMarginRight:
-        case PropertyID::OverflowClipMarginTop:
-        case PropertyID::PaintOrder:
-        case PropertyID::PlaceContent:
-        case PropertyID::PlaceItems:
-        case PropertyID::PlaceSelf:
-        case PropertyID::PositionAnchor:
-        case PropertyID::PositionArea:
-        case PropertyID::PositionTryFallbacks:
-        case PropertyID::PositionTryOrder:
-        case PropertyID::PositionVisibility:
-        case PropertyID::Quotes:
-        case PropertyID::Rotate:
-        case PropertyID::Scale:
-        case PropertyID::ScrollTimeline:
-        case PropertyID::ScrollTimelineName:
-        case PropertyID::ScrollbarColor:
-        case PropertyID::ScrollbarGutter:
-        case PropertyID::ShapeOutside:
-        case PropertyID::StrokeDasharray:
-        case PropertyID::TextDecoration:
-        case PropertyID::TextDecorationLine:
-        case PropertyID::TextIndent:
-        case PropertyID::TextShadow:
-        case PropertyID::TextUnderlinePosition:
-        case PropertyID::TextWrap:
-        case PropertyID::TextWrapMode:
-        case PropertyID::TextWrapStyle:
-        case PropertyID::TimelineScope:
-        case PropertyID::TouchAction:
-        case PropertyID::TransformOrigin:
-        case PropertyID::TransitionBehavior:
-        case PropertyID::TransitionProperty:
-        case PropertyID::Translate:
-        case PropertyID::ViewTimeline:
-        case PropertyID::ViewTimelineName:
-        case PropertyID::ViewTransitionName:
-        case PropertyID::WhiteSpace:
-        case PropertyID::WhiteSpaceTrim:
-        case PropertyID::WillChange:
-            return true;
-        default:
-            return false;
-        }
     };
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
@@ -3757,7 +3757,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
     }
 
-    if (property_uses_rust_owned_whole_grammar(property_ids))
+    if (property_ids.size() == 1 && property_uses_rust_owned_whole_grammar(property_ids[0]))
         return OptionalNone {};
 
     if (peek_token.is(Token::Type::Ident)) {
@@ -3996,6 +3996,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     if (!tokens.has_next_token())
         return ParseError::SyntaxError;
 
+    if (property_uses_rust_owned_whole_grammar(property_id))
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
+
     // Special-case property handling
     switch (property_id) {
     case PropertyID::All:
@@ -4003,141 +4006,23 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         //       values, only the CSS-wide keywords - this is handled above, and thus, if we have gotten to here, there
         //       is an invalid value which is a syntax error.
         return ParseError::SyntaxError;
-    case PropertyID::AnchorName:
-    case PropertyID::AnchorScope:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::AspectRatio:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Animation:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_animation_value(tokens); });
-    case PropertyID::BackdropFilter:
-    case PropertyID::Filter:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Background:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_background_value(tokens); });
-    case PropertyID::BackgroundPosition:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BackgroundPositionX:
-    case PropertyID::BackgroundPositionY:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BackgroundRepeat:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BackgroundSize:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Border:
-    case PropertyID::BorderBlock:
-    case PropertyID::BorderInline:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BorderImage:
-    case PropertyID::BorderImageOutset:
-    case PropertyID::BorderImageRepeat:
-    case PropertyID::BorderImageSlice:
-    case PropertyID::BorderImageWidth:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BorderTopLeftRadius:
-    case PropertyID::BorderTopRightRadius:
-    case PropertyID::BorderBottomRightRadius:
-    case PropertyID::BorderBottomLeftRadius:
-    case PropertyID::BorderEndEndRadius:
-    case PropertyID::BorderEndStartRadius:
-    case PropertyID::BorderStartEndRadius:
-    case PropertyID::BorderStartStartRadius:
-    case PropertyID::BorderRadius:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::BoxShadow:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::ColorScheme:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Columns:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Content:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::CounterIncrement:
-    case PropertyID::CounterReset:
-    case PropertyID::CounterSet:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Cursor:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Display:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::Flex:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::FlexFlow:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Font:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_font_value(tokens); });
-    case PropertyID::FontFamily:
-    case PropertyID::FontFeatureSettings:
-    case PropertyID::FontLanguageOverride:
-    case PropertyID::FontVariationSettings:
-    case PropertyID::FontVariant:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridArea:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_area_shorthand_value(tokens); });
-    case PropertyID::GridAutoFlow:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridColumn:
     case PropertyID::GridRow:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_grid_track_placement_shorthand_value(property_id, tokens); });
-    case PropertyID::GridColumnEnd:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridColumnStart:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridRowEnd:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridRowStart:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Grid:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_shorthand_value(tokens); });
     case PropertyID::GridTemplate:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_size_list_shorthand_value(PropertyID::GridTemplate, tokens); });
-    case PropertyID::GridTemplateAreas:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridTemplateColumns:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridTemplateRows:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridAutoColumns:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::GridAutoRows:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::ListStyle:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Mask:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_mask_value(tokens); });
-    case PropertyID::MaskPosition:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::MaskRepeat:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::MaskSize:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::OverflowClipMarginBlockEnd:
-    case PropertyID::OverflowClipMarginBlockStart:
-    case PropertyID::OverflowClipMarginBottom:
-    case PropertyID::OverflowClipMarginInlineEnd:
-    case PropertyID::OverflowClipMarginInlineStart:
-    case PropertyID::OverflowClipMarginLeft:
-    case PropertyID::OverflowClipMarginRight:
-    case PropertyID::OverflowClipMarginTop:
-    case PropertyID::OverflowClipMargin:
-    case PropertyID::OverflowClipMarginBlock:
-    case PropertyID::OverflowClipMarginInline:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::PlaceContent:
-    case PropertyID::PlaceItems:
-    case PropertyID::PlaceSelf:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::PositionAnchor:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::PositionArea:
-    case PropertyID::PositionTryFallbacks:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::ScrollbarColor:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::ShapeOutside:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
-    case PropertyID::TextShadow:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Transition:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_transition_value(tokens); });
     default:
