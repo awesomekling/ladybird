@@ -1229,6 +1229,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
                 style_value->border_image_slice_sources.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
+            } else if (kind == FFI::CssStyleValueKind::BorderImage) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::BorderImage);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                switch (color_red) {
+                case 0:
+                    style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 1:
+                    style_value->border_image_shorthand_slice_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 2:
+                    style_value->border_image_shorthand_width_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 3:
+                    style_value->border_image_shorthand_outset_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 4:
+                    style_value->border_image_shorthand_repeat_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::BorderImageRepeat) {
                 if (!style_value.has_value()) {
                     style_value = move(value);
