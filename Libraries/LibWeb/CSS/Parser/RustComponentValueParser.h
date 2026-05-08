@@ -154,6 +154,12 @@ public:
         Source,
     };
 
+    enum class RustImageKind : u8 {
+        Url,
+        Gradient,
+        ImageSet,
+    };
+
     enum class RustListStyleTypeKind : u8 {
         None,
         String,
@@ -308,6 +314,7 @@ public:
     };
 
     struct RustCursorImage {
+        RustImageKind image_kind { RustImageKind::Url };
         String image_source;
         Optional<RustNestedPrimitiveValue> x;
         Optional<RustNestedPrimitiveValue> y;
@@ -490,6 +497,7 @@ public:
         Optional<RustStyleColor> text_decoration_color;
         Optional<RustListStylePosition> list_style_position;
         Optional<RustListStyleImageKind> list_style_image_kind;
+        Optional<RustImageKind> list_style_image_source_kind;
         Optional<String> list_style_image_source;
         Optional<RustListStyleTypeKind> list_style_type_kind;
         Optional<String> list_style_type_string;
@@ -505,6 +513,7 @@ public:
         Optional<LineStyle> border_style;
         Optional<RustStyleColor> border_color;
         Optional<RustBorderImageSourceKind> border_image_source_kind;
+        Optional<RustImageKind> border_image_source_source_kind;
         Optional<String> border_image_source_source;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };
@@ -564,6 +573,7 @@ public:
         Optional<Keyword> content_keyword;
         Vector<RustContentEvent> content_events;
         bool shape_outside_is_none { false };
+        Optional<RustImageKind> shape_outside_image_source_kind;
         Optional<String> shape_outside_image_source;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Vector<String> shape_outside_basic_shape_argument_groups;

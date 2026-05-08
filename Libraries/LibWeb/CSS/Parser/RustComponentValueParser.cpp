@@ -1311,8 +1311,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->list_style_position = static_cast<RustListStylePosition>(color_green);
                 else if (color_red == 1) {
                     style_value->list_style_image_kind = static_cast<RustListStyleImageKind>(color_green);
-                    if (*style_value->list_style_image_kind == RustListStyleImageKind::Source)
+                    if (*style_value->list_style_image_kind == RustListStyleImageKind::Source) {
+                        style_value->list_style_image_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
+                    }
                 } else {
                     auto type_kind = static_cast<RustListStyleTypeKind>(color_green);
                     style_value->list_style_type_kind = type_kind;
@@ -1424,8 +1426,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 switch (color_red) {
                 case 0:
                     style_value->border_image_source_kind = static_cast<RustBorderImageSourceKind>(color_green);
-                    if (*style_value->border_image_source_kind == RustBorderImageSourceKind::Source)
+                    if (*style_value->border_image_source_kind == RustBorderImageSourceKind::Source) {
+                        style_value->border_image_source_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
+                    }
                     break;
                 case 1:
                     style_value->border_image_shorthand_has_slice = true;
@@ -1577,6 +1581,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_is_none = true;
                     break;
                 case RustShapeOutsideEventKind::Image:
+                    style_value->shape_outside_image_source_kind = static_cast<RustImageKind>(color_green);
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
                     break;
                 case RustShapeOutsideEventKind::BasicShape:
@@ -1783,6 +1788,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 VERIFY(color_red == Image);
                 RustCursorImage image {
+                    .image_kind = static_cast<RustImageKind>(color_green),
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
                 };
                 style_value->cursor_images.append(move(image));

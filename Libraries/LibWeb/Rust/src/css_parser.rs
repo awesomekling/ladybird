@@ -2226,10 +2226,12 @@ pub(crate) struct RustOwnedImage {
     source: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum RustOwnedImageKind {
     Url,
-    Gradient { function_name: String },
+    Gradient,
+    ImageSet,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2280,7 +2282,7 @@ pub(crate) enum RustOwnedListStylePosition {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedListStyleImage {
     None,
-    Source(String),
+    Image(RustOwnedImage),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2536,7 +2538,7 @@ pub(crate) struct RustOwnedCursor {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCursorImage {
-    image_source: String,
+    image: RustOwnedImage,
     x: Option<RustOwnedNestedPrimitiveValue>,
     y: Option<RustOwnedNestedPrimitiveValue>,
 }
@@ -2568,7 +2570,7 @@ pub(crate) enum RustOwnedContentAltTextItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedShapeOutside {
     None,
-    Image(String),
+    Image(RustOwnedImage),
     Shape {
         basic_shape: Option<RustOwnedBasicShape>,
         shape_box: Option<RustOwnedShapeBox>,
@@ -2888,7 +2890,7 @@ pub(crate) struct RustOwnedBorderImage {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBorderImageSource {
     None,
-    Source(String),
+    Image(RustOwnedImage),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5890,9 +5892,15 @@ fn consume_border_image_source(parser: &mut ComponentValueParser, source: &str) 
         return Some(RustOwnedBorderImageSource::None);
     }
 
-    Some(RustOwnedBorderImageSource::Source(serialize_consumed_component_values(
-        parser, start, source,
-    )?))
+    let source = serialize_consumed_component_values(parser, start, source)?;
+    match rust_owned_image_style_value_kind(source.as_bytes(), &source)? {
+        RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(image)),
+        RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
+            kind: RustOwnedImageKind::ImageSet,
+            source,
+        })),
+        _ => None,
+    }
 }
 
 fn component_value_parse_as_border_image_outset(component_value: &ComponentValue) -> bool {
@@ -7365,13 +7373,11 @@ fn rust_owned_image_style_value_kind(
         }));
     }
 
-    if let ComponentValue::Function(function) = component_value
+    if let ComponentValue::Function(_) = component_value
         && component_value_parse_as_image_gradient(component_value)
     {
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
-            kind: RustOwnedImageKind::Gradient {
-                function_name: function.name.clone(),
-            },
+            kind: RustOwnedImageKind::Gradient,
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -7380,6 +7386,22 @@ fn rust_owned_image_style_value_kind(
     }
 
     None
+}
+
+fn rust_owned_image_from_component_value(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedImage> {
+    let source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    match rust_owned_image_style_value_kind(source.as_bytes(), &source)? {
+        RustOwnedStyleValueKind::Image(image) => Some(image),
+        RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedImage {
+            kind: RustOwnedImageKind::ImageSet,
+            source,
+        }),
+        _ => None,
+    }
 }
 
 fn rust_owned_image_set_style_value_kind(
@@ -8068,9 +8090,9 @@ where
             const SOURCE: u8 = 0;
 
             if let Some(source) = &value.source {
-                let (kind, source) = match source {
-                    RustOwnedBorderImageSource::None => (0, ""),
-                    RustOwnedBorderImageSource::Source(source) => (1, source.as_str()),
+                let (kind, image_kind, source) = match source {
+                    RustOwnedBorderImageSource::None => (0, 0, ""),
+                    RustOwnedBorderImageSource::Image(image) => (1, image.kind as u8, image.source.as_str()),
                 };
                 callback(
                     CssStyleValueKind::BorderImage,
@@ -8082,7 +8104,7 @@ where
                     0.0,
                     SOURCE,
                     kind,
-                    0,
+                    image_kind,
                     0,
                     source.as_bytes(),
                     "",
@@ -10388,10 +10410,10 @@ where
             false,
             0.0,
             CURSOR_CALLBACK_IMAGE,
+            image.image.kind as u8,
             0,
             0,
-            0,
-            image.image_source.as_bytes(),
+            image.image.source.as_bytes(),
             "",
         );
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
@@ -10437,7 +10459,7 @@ where
 {
     let (kind, source) = match value {
         RustOwnedListStyleImage::None => (LIST_STYLE_IMAGE_CALLBACK_NONE, ""),
-        RustOwnedListStyleImage::Source(source) => (LIST_STYLE_IMAGE_CALLBACK_SOURCE, source.as_str()),
+        RustOwnedListStyleImage::Image(image) => (LIST_STYLE_IMAGE_CALLBACK_SOURCE, image.source.as_str()),
     };
     callback(
         CssStyleValueKind::ListStyle,
@@ -10449,7 +10471,10 @@ where
         0.0,
         1,
         kind,
-        0,
+        match value {
+            RustOwnedListStyleImage::None => 0,
+            RustOwnedListStyleImage::Image(image) => image.kind as u8,
+        },
         0,
         source.as_bytes(),
         "",
@@ -10792,10 +10817,16 @@ where
 {
     match value {
         RustOwnedShapeOutside::None => {
-            callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_NONE, "");
+            callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_NONE, 0, "");
         }
-        RustOwnedShapeOutside::Image(source) => {
-            callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_IMAGE, source);
+        RustOwnedShapeOutside::Image(image) => {
+            callback_shape_outside_event(
+                callback,
+                property_id,
+                SHAPE_OUTSIDE_CALLBACK_IMAGE,
+                image.kind as u8,
+                &image.source,
+            );
         }
         RustOwnedShapeOutside::Shape { basic_shape, shape_box } => {
             if let Some(basic_shape) = basic_shape {
@@ -10822,7 +10853,7 @@ where
     }
 }
 
-fn callback_shape_outside_event<C>(callback: &mut C, property_id: u16, kind: u8, source: &str)
+fn callback_shape_outside_event<C>(callback: &mut C, property_id: u16, kind: u8, image_kind: u8, source: &str)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
@@ -10835,7 +10866,7 @@ where
         false,
         0.0,
         kind,
-        0,
+        image_kind,
         0,
         0,
         source.as_bytes(),
@@ -20310,8 +20341,15 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
         _ => {}
     }
 
-    if rust_owned_image_style_value_kind(filtered_input, filtered_input_string).is_some() {
-        return Some(RustOwnedShapeOutside::Image(filtered_input_to_string(filtered_input)));
+    if let Some(value) = rust_owned_image_style_value_kind(filtered_input, filtered_input_string) {
+        return match value {
+            RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(image)),
+            RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
+                kind: RustOwnedImageKind::ImageSet,
+                source: filtered_input_to_string(filtered_input),
+            })),
+            _ => None,
+        };
     }
 
     let mut basic_shape = None;
@@ -20721,9 +20759,7 @@ fn rust_owned_list_style_image_from_component_value(
     source: &str,
 ) -> Option<RustOwnedListStyleImage> {
     if component_value_parse_as_list_style_image(component_value) {
-        return Some(RustOwnedListStyleImage::Source(
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?,
-        ));
+        return rust_owned_image_from_component_value(component_value, source).map(RustOwnedListStyleImage::Image);
     }
     None
 }
@@ -21387,18 +21423,17 @@ fn parse_cursor_image(component_values: &[ComponentValue], source: &str) -> Opti
     let component_values = remove_whitespace_component_values(component_values);
     let (image, coordinates) = component_values.split_first()?;
 
-    let image_source = serialize_component_values_for_reparsing(std::slice::from_ref(image), source)?;
-    rust_owned_image_style_value_kind(image_source.as_bytes(), &image_source)?;
+    let image = rust_owned_image_from_component_value(image, source)?;
 
     match coordinates {
         [] => Some(RustOwnedCursorImage {
-            image_source,
+            image,
             x: None,
             y: None,
         }),
         [x, y] if component_value_parse_as_number_prefix(x) && component_value_parse_as_number_prefix(y) => {
             Some(RustOwnedCursorImage {
-                image_source,
+                image,
                 x: Some(component_value_parse_as_nested_number(x, source)?),
                 y: Some(component_value_parse_as_nested_number(y, source)?),
             })
@@ -32996,7 +33031,10 @@ mod tests {
                 property_id: PropertyId::ListStyle,
                 value: RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
                     position: Some(RustOwnedListStylePosition::Inside),
-                    image: Some(RustOwnedListStyleImage::Source("url(marker.png)".to_string())),
+                    image: Some(RustOwnedListStyleImage::Image(RustOwnedImage {
+                        kind: RustOwnedImageKind::Url,
+                        source: "url(marker.png)".to_string(),
+                    })),
                     list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
                         "square".to_string()
                     ))),
@@ -33333,9 +33371,7 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundImage,
                 value: RustOwnedStyleValueKind::Image(RustOwnedImage {
-                    kind: RustOwnedImageKind::Gradient {
-                        function_name: "linear-gradient".to_string(),
-                    },
+                    kind: RustOwnedImageKind::Gradient,
                     source: "linear-gradient(black, white)".to_string(),
                 }),
             })
@@ -33583,7 +33619,10 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImage,
                 value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
-                    source: Some(RustOwnedBorderImageSource::Source("url(border.png)".to_string())),
+                    source: Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
+                        kind: RustOwnedImageKind::Url,
+                        source: "url(border.png)".to_string(),
+                    })),
                     slice: Some(RustOwnedBorderImageSlice {
                         values: vec![
                             RustOwnedNestedPrimitiveValue::Number(10.0),
@@ -33669,7 +33708,10 @@ mod tests {
                 property_id: PropertyId::Cursor,
                 value: RustOwnedStyleValueKind::Cursor(RustOwnedCursor {
                     images: vec![RustOwnedCursorImage {
-                        image_source: "url(cursor.png)".to_string(),
+                        image: RustOwnedImage {
+                            kind: RustOwnedImageKind::Url,
+                            source: "url(cursor.png)".to_string(),
+                        },
                         x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),
                         y: Some(RustOwnedNestedPrimitiveValue::Number(2.0)),
                     }],
