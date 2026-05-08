@@ -268,6 +268,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::AnimationName:
         case PropertyID::AspectRatio:
         case PropertyID::BackgroundPosition:
+        case PropertyID::BackgroundPositionX:
+        case PropertyID::BackgroundPositionY:
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
         case PropertyID::BorderBottomLeftRadius:
@@ -2701,7 +2703,46 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::Position:
                 if (!rust_style_value->position_sources.is_empty() && rust_style_value->value_type.has_value()) {
-                    if (*rust_style_value->value_type == ValueType::BackgroundPosition) {
+                    if (first_is_one_of(rust_style_value->property_id, PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY)) {
+                        StyleValueVector values;
+                        values.ensure_capacity(rust_style_value->position_sources.size());
+                        for (auto const& source : rust_style_value->position_sources) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            Optional<PositionEdge> relative_edge {};
+                            RefPtr<StyleValue const> value;
+
+                            if (auto keyword_value = parse_keyword_value(value_tokens)) {
+                                auto keyword = keyword_value->to_keyword();
+                                if (keyword == Keyword::Center) {
+                                    value = EdgeStyleValue::create(PositionEdge::Center, {});
+                                } else if (auto edge = keyword_to_position_edge(keyword); edge.has_value()) {
+                                    relative_edge = edge;
+                                    if (auto length_percentage = parse_length_percentage_value(value_tokens, infinite_range, infinite_range))
+                                        value = EdgeStyleValue::create(relative_edge, length_percentage.release_nonnull());
+                                    else
+                                        value = EdgeStyleValue::create(relative_edge, {});
+                                } else {
+                                    break;
+                                }
+                            } else if (auto length_percentage = parse_length_percentage_value(value_tokens, infinite_range, infinite_range)) {
+                                value = EdgeStyleValue::create(relative_edge, length_percentage.release_nonnull());
+                            } else {
+                                break;
+                            }
+
+                            value_tokens.discard_whitespace();
+                            if (value_tokens.has_next_token())
+                                break;
+                            values.append(value.release_nonnull());
+                        }
+
+                        if (values.size() == rust_style_value->position_sources.size()) {
+                            discard_rust_owned_property_value_tokens();
+                            generated_transaction.commit();
+                            return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
+                        }
+                    } else if (*rust_style_value->value_type == ValueType::BackgroundPosition) {
                         StyleValueVector background_position_x_values;
                         StyleValueVector background_position_y_values;
                         background_position_x_values.ensure_capacity(rust_style_value->position_sources.size());
@@ -3764,9 +3805,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BackgroundPositionX:
     case PropertyID::BackgroundPositionY:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) { return parse_single_background_position_x_or_y_value(tokens, property_id); });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BackgroundRepeat:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BackgroundSize:

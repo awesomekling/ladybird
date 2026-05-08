@@ -3121,7 +3121,15 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         // generated value-type path so they materialize as a single
         // `PositionStyleValue`, while direct longhand parsing below keeps
         // owning the full comma-separated layer list in Rust.
-        if property_ids.len() > 1 && matches!(property_id, PropertyId::BackgroundPosition | PropertyId::MaskPosition) {
+        if property_ids.len() > 1
+            && matches!(
+                property_id,
+                PropertyId::BackgroundPosition
+                    | PropertyId::BackgroundPositionX
+                    | PropertyId::BackgroundPositionY
+                    | PropertyId::MaskPosition
+            )
+        {
             continue;
         }
         if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
@@ -3266,6 +3274,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AspectRatio
             | PropertyId::BackgroundRepeat
             | PropertyId::BackgroundPosition
+            | PropertyId::BackgroundPositionX
+            | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
@@ -3385,6 +3395,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::BackgroundPosition => {
             rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
+        }
+        PropertyId::BackgroundPositionX | PropertyId::BackgroundPositionY => {
+            rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
@@ -4962,6 +4975,34 @@ fn rust_owned_position_list_style_value_kind(
 
     Some(RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
         value_type,
+        sources,
+    }))
+}
+
+fn rust_owned_background_position_longhand_list_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let is_horizontal = property_id == PropertyId::BackgroundPositionX;
+    let sources = parse_comma_separated_component_values(component_values, |component_values| {
+        let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
+        if parse_background_position_longhand_value(value_source.as_bytes(), is_horizontal)
+            == CssPositionValueKind::Invalid
+        {
+            return None;
+        }
+        Some(value_source)
+    })?;
+
+    if sources.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+        value_type: PropertyValueType::BackgroundPosition,
         sources,
     }))
 }
@@ -29330,6 +29371,26 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundPositionX], "left 10px, center"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundPositionX,
+                value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+                    value_type: PropertyValueType::BackgroundPosition,
+                    sources: vec!["left 10px".to_string(), "center".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BackgroundPositionY], "top 20px, 50%"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundPositionY,
+                value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+                    value_type: PropertyValueType::BackgroundPosition,
+                    sources: vec!["top 20px".to_string(), "50%".to_string()],
+                }),
+            })
+        );
+        assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::MaskPosition], "left 10px top 20px, center"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MaskPosition,
@@ -30366,14 +30427,14 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::BackgroundPositionX], "50%"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::Primitive,
+                kind: CssStyleValueKind::Position,
                 property_id: PropertyId::BackgroundPositionX,
-                primitive_kind: CssPrimitiveValueKind::Percentage,
-                numeric_value: Some(50.0),
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: String::new(),
-                value_type: "Percentage".to_string(),
+                value: "50%".to_string(),
+                value_type: "BackgroundPosition".to_string(),
             })
         );
         assert_eq!(
