@@ -100,8 +100,6 @@ struct DescriptorMetadata {
     bool allow_arbitrary_substitution_functions { false };
 };
 
-DescriptorMetadata get_descriptor_metadata(AtRuleID, DescriptorID);
-
 }
 """)
 
@@ -314,63 +312,6 @@ RefPtr<StyleValue const> descriptor_initial_value(AtRuleID at_rule_id, Descripto
                 out.write(f"""
         case DescriptorID::{descriptor_titlecase}:
             return nullptr;
-""")
-
-        out.write("""
-        default:
-            VERIFY_NOT_REACHED();
-        }
-""")
-
-    out.write("""
-    }
-    VERIFY_NOT_REACHED();
-}
-
-DescriptorMetadata get_descriptor_metadata(AtRuleID at_rule_id, DescriptorID descriptor_id)
-{
-    switch (at_rule_id) {
-""")
-
-    for at_rule_name, at_rule in at_rules_data.items():
-        out.write(f"""
-    case AtRuleID::{title_casify(at_rule_name)}:
-        switch (descriptor_id) {{
-""")
-
-        descriptors = at_rule["descriptors"]
-        for descriptor_name, descriptor in descriptors.items():
-            if is_legacy_alias(descriptor):
-                continue
-            descriptor_titlecase = title_casify(descriptor_name)
-            out.write(f"""
-        case DescriptorID::{descriptor_titlecase}: {{
-            DescriptorMetadata metadata;
-""")
-            generate_syntax_list(out, descriptor["syntax"])
-            allow_arbitrary = "true" if descriptor.get("allow-arbitrary-substitution-functions", False) else "false"
-            out.write(f"""
-            metadata.allow_arbitrary_substitution_functions = {allow_arbitrary};
-
-            return metadata;
-        }}
-""")
-
-        if "custom-descriptors" in at_rule:
-            custom_descriptors = at_rule["custom-descriptors"]
-            out.write("""
-        case DescriptorID::Custom: {
-            DescriptorMetadata metadata;
-""")
-            generate_syntax_list(out, custom_descriptors["syntax"])
-            allow_arbitrary = (
-                "true" if custom_descriptors.get("allow-arbitrary-substitution-functions", False) else "false"
-            )
-            out.write(f"""
-            metadata.allow_arbitrary_substitution_functions = {allow_arbitrary};
-
-            return metadata;
-        }}
 """)
 
         out.write("""

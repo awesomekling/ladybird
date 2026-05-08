@@ -15,6 +15,7 @@
 #include <AK/Vector.h>
 #include <LibGfx/Font/UnicodeRange.h>
 #include <LibWeb/CSS/BooleanExpression.h>
+#include <LibWeb/CSS/DescriptorID.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/NumericRange.h>
@@ -877,6 +878,8 @@ public:
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);
     static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
     static bool property_accepts_keyword(PropertyID, Keyword);
+    static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
+    static DescriptorMetadata descriptor_metadata(AtRuleID, DescriptorID);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);

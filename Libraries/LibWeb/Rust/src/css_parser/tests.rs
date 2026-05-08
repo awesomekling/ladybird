@@ -10,18 +10,18 @@ use super::{
     CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValue,
     CssColorSchemeValueKind, CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
     CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDisplayBox, CssDisplayInside, CssDisplayInternal,
-    CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind,
-    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
-    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-    CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis, CssGridAutoFlowDense,
-    CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind,
-    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
-    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword, CssPaintOrderValue,
-    CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
-    CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
-    CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
-    CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDescriptorValueType, CssDisplayBox, CssDisplayInside,
+    CssDisplayInternal, CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind, CssEasingValueKind,
+    CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
+    CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis,
+    CssGridAutoFlowDense, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind,
+    CssImageSetValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPaintOrderKeyword,
+    CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind,
+    CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
+    CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue,
+    CssRatioValueKind, CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
     CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
     CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
@@ -126,6 +126,10 @@ use super::{
     parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
 };
 use crate::css_tokenizer::{self, TokenType};
+use crate::generated_descriptors::{
+    AtRuleId, DescriptorId, DescriptorSyntax, at_rule_supports_descriptor,
+    descriptor_allows_arbitrary_substitution_functions, for_each_descriptor_syntax,
+};
 use crate::generated_media_features::{
     MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
     media_feature_identifier_is_falsey,
@@ -1707,6 +1711,59 @@ fn generated_property_metadata_knows_ranges_and_aliases() {
         Some("auto")
     );
     assert_eq!(property_custom_ident_blacklist(PropertyId::AnimationName), &["none"]);
+}
+
+#[test]
+fn generated_descriptor_metadata_knows_supported_descriptors() {
+    assert!(at_rule_supports_descriptor(
+        AtRuleId::CounterStyle,
+        DescriptorId::AdditiveSymbols
+    ));
+    assert!(at_rule_supports_descriptor(AtRuleId::Function, DescriptorId::Custom));
+    assert!(!at_rule_supports_descriptor(
+        AtRuleId::CounterStyle,
+        DescriptorId::FontFamily
+    ));
+    assert!(!at_rule_supports_descriptor(AtRuleId::FontFace, DescriptorId::Custom));
+}
+
+#[test]
+fn generated_descriptor_metadata_knows_asf_support() {
+    assert!(descriptor_allows_arbitrary_substitution_functions(
+        AtRuleId::Function,
+        DescriptorId::Result
+    ));
+    assert!(descriptor_allows_arbitrary_substitution_functions(
+        AtRuleId::Function,
+        DescriptorId::Custom
+    ));
+    assert!(!descriptor_allows_arbitrary_substitution_functions(
+        AtRuleId::Property,
+        DescriptorId::InitialValue
+    ));
+}
+
+#[test]
+fn generated_descriptor_metadata_knows_syntax_options() {
+    let mut syntax = Vec::new();
+    assert!(for_each_descriptor_syntax(
+        AtRuleId::FontFace,
+        DescriptorId::FontWeight,
+        |item| syntax.push(item)
+    ));
+    assert!(matches!(syntax[0], DescriptorSyntax::Keyword("auto")));
+    assert!(matches!(
+        syntax[1],
+        DescriptorSyntax::ValueType(CssDescriptorValueType::FontWeightAbsolutePair)
+    ));
+
+    syntax.clear();
+    assert!(for_each_descriptor_syntax(
+        AtRuleId::Page,
+        DescriptorId::Margin,
+        |item| syntax.push(item)
+    ));
+    assert!(matches!(syntax[0], DescriptorSyntax::Property(PropertyId::Margin)));
 }
 
 #[test]

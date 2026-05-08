@@ -58,7 +58,7 @@ RefPtr<StyleValue const> Parser::materialize_nonnegative_integer_symbol_pair(Rea
 
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens)
 {
-    if (!at_rule_supports_descriptor(at_rule_id, descriptor_name_and_id.id())) {
+    if (!RustComponentValueParser::at_rule_supports_descriptor(at_rule_id, descriptor_name_and_id.id())) {
         ErrorReporter::the().report(UnknownPropertyError {
             .rule_name = to_string(at_rule_id),
             .property_name = descriptor_name_and_id.name(),
@@ -84,7 +84,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
             return ParseError::SyntaxError;
     }
 
-    auto metadata = get_descriptor_metadata(at_rule_id, descriptor_name_and_id.id());
+    auto metadata = RustComponentValueParser::descriptor_metadata(at_rule_id, descriptor_name_and_id.id());
 
     if (substitution_functions_presence.has_any()) {
         // https://drafts.csswg.org/css-values-5/#resolve-property

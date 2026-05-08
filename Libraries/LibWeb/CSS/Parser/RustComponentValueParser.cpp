@@ -793,6 +793,88 @@ bool RustComponentValueParser::property_accepts_keyword(PropertyID property_id, 
     return parse_property_keyword_value({ &property_id, 1 }, string_from_keyword(keyword)).has_value();
 }
 
+static DescriptorMetadata::ValueType descriptor_value_type_from_ffi(FFI::CssDescriptorValueType value_type)
+{
+    switch (value_type) {
+    case FFI::CssDescriptorValueType::CounterStyleSystem:
+        return DescriptorMetadata::ValueType::CounterStyleSystem;
+    case FFI::CssDescriptorValueType::CounterStyleAdditiveSymbols:
+        return DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols;
+    case FFI::CssDescriptorValueType::CounterStyleName:
+        return DescriptorMetadata::ValueType::CounterStyleName;
+    case FFI::CssDescriptorValueType::CounterStyleNegative:
+        return DescriptorMetadata::ValueType::CounterStyleNegative;
+    case FFI::CssDescriptorValueType::CounterStylePad:
+        return DescriptorMetadata::ValueType::CounterStylePad;
+    case FFI::CssDescriptorValueType::CounterStyleRange:
+        return DescriptorMetadata::ValueType::CounterStyleRange;
+    case FFI::CssDescriptorValueType::CropOrCross:
+        return DescriptorMetadata::ValueType::CropOrCross;
+    case FFI::CssDescriptorValueType::FamilyName:
+        return DescriptorMetadata::ValueType::FamilyName;
+    case FFI::CssDescriptorValueType::FontSrcList:
+        return DescriptorMetadata::ValueType::FontSrcList;
+    case FFI::CssDescriptorValueType::FontWeightAbsolutePair:
+        return DescriptorMetadata::ValueType::FontWeightAbsolutePair;
+    case FFI::CssDescriptorValueType::Length:
+        return DescriptorMetadata::ValueType::Length;
+    case FFI::CssDescriptorValueType::OptionalDeclarationValue:
+        return DescriptorMetadata::ValueType::OptionalDeclarationValue;
+    case FFI::CssDescriptorValueType::PageSize:
+        return DescriptorMetadata::ValueType::PageSize;
+    case FFI::CssDescriptorValueType::PositivePercentage:
+        return DescriptorMetadata::ValueType::PositivePercentage;
+    case FFI::CssDescriptorValueType::String:
+        return DescriptorMetadata::ValueType::String;
+    case FFI::CssDescriptorValueType::Symbol:
+        return DescriptorMetadata::ValueType::Symbol;
+    case FFI::CssDescriptorValueType::Symbols:
+        return DescriptorMetadata::ValueType::Symbols;
+    case FFI::CssDescriptorValueType::UnicodeRangeTokens:
+        return DescriptorMetadata::ValueType::UnicodeRangeTokens;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+bool RustComponentValueParser::at_rule_supports_descriptor(AtRuleID at_rule_id, DescriptorID descriptor_id)
+{
+    return FFI::rust_css_at_rule_supports_descriptor(
+        static_cast<u8>(to_underlying(at_rule_id)),
+        static_cast<u8>(to_underlying(descriptor_id)));
+}
+
+DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rule_id, DescriptorID descriptor_id)
+{
+    DescriptorMetadata metadata;
+    metadata.allow_arbitrary_substitution_functions = FFI::rust_css_descriptor_allows_arbitrary_substitution_functions(
+        static_cast<u8>(to_underlying(at_rule_id)),
+        static_cast<u8>(to_underlying(descriptor_id)));
+
+    auto parsed = FFI::rust_css_for_each_descriptor_syntax(
+        static_cast<u8>(to_underlying(at_rule_id)),
+        static_cast<u8>(to_underlying(descriptor_id)),
+        &metadata,
+        [](void* raw_metadata, FFI::CssDescriptorSyntaxKind kind, u16 property_id, FFI::CssDescriptorValueType value_type, u8 const* value_ptr, size_t value_len) {
+            auto& metadata = *static_cast<DescriptorMetadata*>(raw_metadata);
+            switch (kind) {
+            case FFI::CssDescriptorSyntaxKind::Keyword: {
+                auto keyword = keyword_from_string({ value_ptr, value_len });
+                VERIFY(keyword.has_value());
+                metadata.syntax.empend(keyword.release_value());
+                break;
+            }
+            case FFI::CssDescriptorSyntaxKind::Property:
+                metadata.syntax.empend(static_cast<PropertyID>(property_id));
+                break;
+            case FFI::CssDescriptorSyntaxKind::ValueType:
+                metadata.syntax.empend(descriptor_value_type_from_ffi(value_type));
+                break;
+            }
+        });
+    VERIFY(parsed);
+    return metadata;
+}
+
 Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;

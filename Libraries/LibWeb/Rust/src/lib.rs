@@ -9,6 +9,9 @@ mod rust_allocator;
 
 mod css_parser;
 mod css_tokenizer;
+mod generated_descriptors {
+    include!(concat!(env!("OUT_DIR"), "/generated_descriptors.rs"));
+}
 mod generated_media_features {
     include!(concat!(env!("OUT_DIR"), "/generated_media_features.rs"));
 }
@@ -42,32 +45,33 @@ pub use css_parser::{
     CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssComponentValue,
     CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
     CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssEasingValueKind, CssFitContentValueKind,
-    CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech,
-    CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind,
-    CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind,
-    CssMediaFeature, CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind,
-    CssMediaFeatureValue, CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
-    CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-    CssPageSelector, CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
-    CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind,
-    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
-    CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
-    CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
-    CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-    CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace,
-    CssSelectorNamespaceType, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode,
-    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
-    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
-    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
-    CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-    CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssDescriptorSyntaxKind, CssDescriptorValueType,
+    CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
+    CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
+    CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind,
+    CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
+    CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature, CssMediaFeatureComparison,
+    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
+    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector,
+    CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
+    CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
+    CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
+    CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
+    CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
+    CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+    CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
+    CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+    CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
+    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -429,6 +433,44 @@ pub unsafe extern "C" fn rust_css_parse_property_keyword_value(
 
             css_parser::parse_property_keyword_value(property_ids, keyword, |property_id, keyword| {
                 callback(ctx, property_id, keyword.as_ptr(), keyword.len());
+            })
+        })
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_css_at_rule_supports_descriptor(at_rule_id: u8, descriptor_id: u8) -> bool {
+    abort_on_panic(|| css_parser::descriptor_supports(at_rule_id, descriptor_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_css_descriptor_allows_arbitrary_substitution_functions(
+    at_rule_id: u8,
+    descriptor_id: u8,
+) -> bool {
+    abort_on_panic(|| css_parser::descriptor_allows_arbitrary_substitution_functions(at_rule_id, descriptor_id))
+}
+
+/// # Safety
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_for_each_descriptor_syntax(
+    at_rule_id: u8,
+    descriptor_id: u8,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssDescriptorSyntaxKind,
+        property_id: u16,
+        value_type: CssDescriptorValueType,
+        value: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            css_parser::for_each_descriptor_syntax(at_rule_id, descriptor_id, |kind, property_id, value_type, value| {
+                callback(ctx, kind, property_id, value_type, value.as_ptr(), value.len());
             })
         })
     }

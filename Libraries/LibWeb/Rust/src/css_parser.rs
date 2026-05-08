@@ -9,6 +9,11 @@
 #![allow(dead_code)]
 
 use crate::css_tokenizer::{CssNumberType, CssToken, NumericValue, Token, TokenType};
+use crate::generated_descriptors::{
+    DescriptorSyntax, at_rule_id_from_u8, at_rule_supports_descriptor as generated_at_rule_supports_descriptor,
+    descriptor_allows_arbitrary_substitution_functions as generated_descriptor_allows_arbitrary_substitution_functions,
+    descriptor_id_from_u8, for_each_descriptor_syntax as generated_for_each_descriptor_syntax,
+};
 use crate::generated_media_features::{
     MediaFeatureId, MediaFeatureValueType, media_feature_accepts_identifier, media_feature_accepts_type,
     media_feature_id_from_string, media_feature_type_is_range,
@@ -118,6 +123,37 @@ pub enum CssSyntaxNodeKind {
     AlternativesEnd,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDescriptorValueType {
+    CounterStyleSystem,
+    CounterStyleAdditiveSymbols,
+    CounterStyleName,
+    CounterStyleNegative,
+    CounterStylePad,
+    CounterStyleRange,
+    CropOrCross,
+    FamilyName,
+    FontSrcList,
+    FontWeightAbsolutePair,
+    Length,
+    OptionalDeclarationValue,
+    PageSize,
+    PositivePercentage,
+    String,
+    Symbol,
+    Symbols,
+    UnicodeRangeTokens,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssDescriptorSyntaxKind {
+    Keyword,
+    Property,
+    ValueType,
+}
+
 #[repr(C)]
 pub struct CssSyntaxNode {
     pub kind: CssSyntaxNodeKind,
@@ -196,6 +232,54 @@ where
     }
 
     false
+}
+
+pub(crate) fn descriptor_supports(at_rule_id: u8, descriptor_id: u8) -> bool {
+    let Some(at_rule_id) = at_rule_id_from_u8(at_rule_id) else {
+        return false;
+    };
+    let Some(descriptor_id) = descriptor_id_from_u8(descriptor_id) else {
+        return false;
+    };
+    generated_at_rule_supports_descriptor(at_rule_id, descriptor_id)
+}
+
+pub(crate) fn descriptor_allows_arbitrary_substitution_functions(at_rule_id: u8, descriptor_id: u8) -> bool {
+    let Some(at_rule_id) = at_rule_id_from_u8(at_rule_id) else {
+        return false;
+    };
+    let Some(descriptor_id) = descriptor_id_from_u8(descriptor_id) else {
+        return false;
+    };
+    generated_descriptor_allows_arbitrary_substitution_functions(at_rule_id, descriptor_id)
+}
+
+pub(crate) fn for_each_descriptor_syntax<F>(at_rule_id: u8, descriptor_id: u8, mut callback: F) -> bool
+where
+    F: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
+{
+    let Some(at_rule_id) = at_rule_id_from_u8(at_rule_id) else {
+        return false;
+    };
+    let Some(descriptor_id) = descriptor_id_from_u8(descriptor_id) else {
+        return false;
+    };
+
+    generated_for_each_descriptor_syntax(at_rule_id, descriptor_id, |syntax| match syntax {
+        DescriptorSyntax::Keyword(keyword) => callback(
+            CssDescriptorSyntaxKind::Keyword,
+            0,
+            CssDescriptorValueType::CounterStyleSystem,
+            keyword,
+        ),
+        DescriptorSyntax::Property(property_id) => callback(
+            CssDescriptorSyntaxKind::Property,
+            property_id as u16,
+            CssDescriptorValueType::CounterStyleSystem,
+            "",
+        ),
+        DescriptorSyntax::ValueType(value_type) => callback(CssDescriptorSyntaxKind::ValueType, 0, value_type, ""),
+    })
 }
 
 pub(crate) fn property_accepting_type<C>(property_ids: &[u16], value_type: &[u8], mut callback: C) -> bool
