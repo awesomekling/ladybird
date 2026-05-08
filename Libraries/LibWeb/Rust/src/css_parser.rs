@@ -1988,8 +1988,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
     Border {
-        width_source: Option<String>,
-        style_source: Option<String>,
+        width: Option<RustOwnedBorderWidth>,
+        style: Option<RustOwnedLineStyle>,
         color_source: Option<String>,
     },
     BorderImage(RustOwnedBorderImage),
@@ -2391,6 +2391,35 @@ pub(crate) struct RustOwnedBackgroundSizeList {
 pub(crate) struct RustOwnedBorderRadius {
     horizontal_radii: Vec<RustOwnedNestedPrimitiveValue>,
     vertical_radii: Vec<RustOwnedNestedPrimitiveValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedBorderWidth {
+    Length(RustOwnedNestedPrimitiveValue),
+    LineWidth(RustOwnedLineWidth),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedLineWidth {
+    Thin,
+    Medium,
+    Thick,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedLineStyle {
+    None,
+    Hidden,
+    Dotted,
+    Dashed,
+    Solid,
+    Double,
+    Groove,
+    Ridge,
+    Inset,
+    Outset,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5640,16 +5669,16 @@ fn rust_owned_border_shorthand_style_value_kind(
 ) -> Option<RustOwnedStyleValueKind> {
     // https://drafts.csswg.org/css-backgrounds-3/#propdef-border
     // <line-width> || <line-style> || <color>
-    let (width_property, style_property, color_property) = border_shorthand_component_properties(property_id)?;
-    let component_property_ids = [width_property as u16, color_property as u16, style_property as u16];
+    let (_, _, color_property) = border_shorthand_component_properties(property_id)?;
+    let component_property_ids = [color_property as u16];
 
     let source = filtered_input_to_string(filtered_input);
     let (mut input_parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = input_parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
 
-    let mut width_source = None;
-    let mut style_source = None;
+    let mut width = None;
+    let mut style = None;
     let mut color_source = None;
 
     while parser.has_next_component_value() {
@@ -5658,32 +5687,96 @@ fn rust_owned_border_shorthand_style_value_kind(
         parser.index += 1;
 
         let component_source = serialize_consumed_component_values(&parser, start, &source)?;
-        let RustOwnedStyleValueParseResult::Parsed(component_style_value) =
-            parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes())
-        else {
-            return None;
-        };
-
-        if component_style_value.property_id == width_property && width_source.is_none() {
-            width_source = Some(component_source);
-        } else if component_style_value.property_id == style_property && style_source.is_none() {
-            style_source = Some(component_source);
-        } else if component_style_value.property_id == color_property && color_source.is_none() {
+        let component_value = &parser.component_values[start];
+        if width.is_none()
+            && let Some(value) = rust_owned_border_width_from_component_value(component_value, &source)
+        {
+            width = Some(value);
+        } else if style.is_none()
+            && let Some(value) = rust_owned_line_style_from_component_value(component_value)
+        {
+            style = Some(value);
+        } else if color_source.is_none()
+            && let RustOwnedStyleValueParseResult::Parsed(_) =
+                parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes())
+        {
             color_source = Some(component_source);
         } else {
             return None;
         }
     }
 
-    if width_source.is_none() && style_source.is_none() && color_source.is_none() {
+    if width.is_none() && style.is_none() && color_source.is_none() {
         return None;
     }
 
     Some(RustOwnedStyleValueKind::Border {
-        width_source,
-        style_source,
+        width,
+        style,
         color_source,
     })
+}
+
+fn rust_owned_border_width_from_component_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedBorderWidth> {
+    if let Some(line_width) = rust_owned_line_width_from_component_value(component_value) {
+        return Some(RustOwnedBorderWidth::LineWidth(line_width));
+    }
+
+    Some(RustOwnedBorderWidth::Length(
+        component_value_parse_as_nested_non_negative_length(component_value, source)?,
+    ))
+}
+
+fn rust_owned_line_width_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedLineWidth> {
+    let ident = component_value_ident(component_value)?;
+    if ident.eq_ignore_ascii_case("thin") {
+        return Some(RustOwnedLineWidth::Thin);
+    }
+    if ident.eq_ignore_ascii_case("medium") {
+        return Some(RustOwnedLineWidth::Medium);
+    }
+    if ident.eq_ignore_ascii_case("thick") {
+        return Some(RustOwnedLineWidth::Thick);
+    }
+    None
+}
+
+fn rust_owned_line_style_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedLineStyle> {
+    let ident = component_value_ident(component_value)?;
+    if ident.eq_ignore_ascii_case("none") {
+        return Some(RustOwnedLineStyle::None);
+    }
+    if ident.eq_ignore_ascii_case("hidden") {
+        return Some(RustOwnedLineStyle::Hidden);
+    }
+    if ident.eq_ignore_ascii_case("dotted") {
+        return Some(RustOwnedLineStyle::Dotted);
+    }
+    if ident.eq_ignore_ascii_case("dashed") {
+        return Some(RustOwnedLineStyle::Dashed);
+    }
+    if ident.eq_ignore_ascii_case("solid") {
+        return Some(RustOwnedLineStyle::Solid);
+    }
+    if ident.eq_ignore_ascii_case("double") {
+        return Some(RustOwnedLineStyle::Double);
+    }
+    if ident.eq_ignore_ascii_case("groove") {
+        return Some(RustOwnedLineStyle::Groove);
+    }
+    if ident.eq_ignore_ascii_case("ridge") {
+        return Some(RustOwnedLineStyle::Ridge);
+    }
+    if ident.eq_ignore_ascii_case("inset") {
+        return Some(RustOwnedLineStyle::Inset);
+    }
+    if ident.eq_ignore_ascii_case("outset") {
+        return Some(RustOwnedLineStyle::Outset);
+    }
+    None
 }
 
 fn component_value_parse_as_border_image_source(component_value: &ComponentValue) -> bool {
@@ -7914,36 +8007,50 @@ where
             }
         }
         RustOwnedStyleValueKind::Border {
-            width_source,
-            style_source,
+            width,
+            style,
             color_source,
         } => {
             const WIDTH: u8 = 0;
             const STYLE: u8 = 1;
             const COLOR: u8 = 2;
 
-            for (kind, source) in [
-                (WIDTH, width_source.as_ref()),
-                (STYLE, style_source.as_ref()),
-                (COLOR, color_source.as_ref()),
-            ] {
-                if let Some(source) = source {
-                    callback(
-                        CssStyleValueKind::Border,
-                        property_id,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        kind,
-                        0,
-                        0,
-                        0,
-                        source.as_bytes(),
-                        "",
-                    );
-                }
+            if let Some(width) = width {
+                callback_border_width_style_value(callback, CssStyleValueKind::Border, property_id, width);
+            }
+            if let Some(style) = style {
+                callback(
+                    CssStyleValueKind::Border,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    STYLE,
+                    *style as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
+            if let Some(source) = color_source {
+                callback(
+                    CssStyleValueKind::Border,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    COLOR,
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
+                );
             }
         }
         RustOwnedStyleValueKind::BorderImageRepeat { values } => {
@@ -9482,6 +9589,34 @@ fn callback_border_image_slice_style_value<C>(
 {
     for slice_value in &value.values {
         callback_nested_primitive(callback, kind, property_id, 1, value.fill.into(), slice_value);
+    }
+}
+
+fn callback_border_width_style_value<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    value: &RustOwnedBorderWidth,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedBorderWidth::Length(value) => callback_nested_primitive(callback, kind, property_id, 0, 1, value),
+        RustOwnedBorderWidth::LineWidth(value) => callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            *value as u8,
+            0,
+            0,
+            &[],
+            "",
+        ),
     }
 }
 
@@ -30210,9 +30345,9 @@ mod tests {
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat,
-        RustOwnedBorderImageSlice, RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedColorScheme,
-        RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedBorderImageSlice, RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth,
+        RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
         RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
         RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
@@ -30220,34 +30355,35 @@ mod tests {
         RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle,
         RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
         RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedListStylePosition, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
-        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
-        RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
-        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
-        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
-        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLineWidth,
+        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStylePosition, RustOwnedMathDepth,
+        RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
+        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextDecorationThickness, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
+        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
+        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -32473,8 +32609,11 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Border,
                 value: RustOwnedStyleValueKind::Border {
-                    width_source: Some("1px".to_string()),
-                    style_source: Some("solid".to_string()),
+                    width: Some(RustOwnedBorderWidth::Length(RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    },)),
+                    style: Some(RustOwnedLineStyle::Solid),
                     color_source: Some("red".to_string()),
                 },
             })
@@ -32484,8 +32623,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderBlock,
                 value: RustOwnedStyleValueKind::Border {
-                    width_source: Some("thick".to_string()),
-                    style_source: Some("dashed".to_string()),
+                    width: Some(RustOwnedBorderWidth::LineWidth(RustOwnedLineWidth::Thick)),
+                    style: Some(RustOwnedLineStyle::Dashed),
                     color_source: Some("currentcolor".to_string()),
                 },
             })

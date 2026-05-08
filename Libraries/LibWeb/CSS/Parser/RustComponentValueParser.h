@@ -432,8 +432,9 @@ public:
         Optional<RustNestedPrimitiveValue> aspect_ratio_denominator;
         Vector<RustNestedPrimitiveValue> border_radius_horizontal_radii;
         Vector<RustNestedPrimitiveValue> border_radius_vertical_radii;
-        Optional<String> border_width_source;
-        Optional<String> border_style_source;
+        Optional<LineWidth> border_width_keyword;
+        Optional<RustNestedPrimitiveValue> border_width_length;
+        Optional<LineStyle> border_style;
         Optional<String> border_color_source;
         Optional<String> border_image_source_source;
         bool border_image_shorthand_has_slice { false };

@@ -1331,10 +1331,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 switch (color_red) {
                 case 0:
-                    style_value->border_width_source = string_from_ffi_bytes(value_ptr, value_len);
+                    if (color_blue != 0)
+                        style_value->border_width_length = nested_primitive_value_from_callback_payload();
+                    else
+                        style_value->border_width_keyword = static_cast<LineWidth>(color_green);
                     break;
                 case 1:
-                    style_value->border_style_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->border_style = static_cast<LineStyle>(color_green);
                     break;
                 case 2:
                     style_value->border_color_source = string_from_ffi_bytes(value_ptr, value_len);

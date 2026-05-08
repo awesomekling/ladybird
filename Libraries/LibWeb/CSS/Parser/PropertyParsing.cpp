@@ -2891,22 +2891,38 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                     return ShorthandStyleValue::create(property_id, longhands, longhand_values);
                 };
-                auto parse_single_value_shorthand = [&](PropertyID property_id, Optional<String> const& source) -> RefPtr<StyleValue const> {
-                    if (!source.has_value())
-                        return property_initial_value(property_id);
-
-                    auto value = parse_rust_source_as_property(property_id, *source);
-                    if (!value)
-                        return nullptr;
-
-                    return make_single_value_shorthand(property_id, longhands_for_shorthand(property_id), value.release_nonnull());
-                };
-
-                auto width = parse_single_value_shorthand(width_property, rust_style_value->border_width_source);
-                auto style = parse_single_value_shorthand(style_property, rust_style_value->border_style_source);
-                auto color = parse_single_value_shorthand(color_property, rust_style_value->border_color_source);
-                if (!width || !style || !color)
+                RefPtr<StyleValue const> width;
+                if (rust_style_value->border_width_keyword.has_value())
+                    width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), KeywordStyleValue::create(to_keyword(*rust_style_value->border_width_keyword)));
+                else if (rust_style_value->border_width_length.has_value()) {
+                    auto width_value = materialize_rust_nested_length(*rust_style_value->border_width_length, non_negative_range);
+                    if (!width_value)
+                        break;
+                    width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), width_value.release_nonnull());
+                } else {
+                    width = property_initial_value(width_property);
+                }
+                if (!width)
                     break;
+
+                RefPtr<StyleValue const> style = rust_style_value->border_style.has_value()
+                    ? make_single_value_shorthand(style_property, longhands_for_shorthand(style_property), KeywordStyleValue::create(to_keyword(*rust_style_value->border_style)))
+                    : property_initial_value(style_property);
+
+                RefPtr<StyleValue const> color;
+                if (rust_style_value->border_color_source.has_value()) {
+                    auto color_value = parse_rust_source_as_property(color_property, *rust_style_value->border_color_source);
+                    if (!color_value)
+                        break;
+                    color = make_single_value_shorthand(color_property, longhands_for_shorthand(color_property), color_value.release_nonnull());
+                } else {
+                    color = property_initial_value(color_property);
+                }
+                if (!color)
+                    break;
+                auto width_nonnull = width.release_nonnull();
+                auto style_nonnull = style.release_nonnull();
+                auto color_nonnull = color.release_nonnull();
 
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
@@ -2916,7 +2932,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         rust_style_value->property_id,
                         ShorthandStyleValue::create(rust_style_value->property_id,
                             { width_property, style_property, color_property },
-                            { width.release_nonnull(), style.release_nonnull(), color.release_nonnull() })
+                            { width_nonnull, style_nonnull, color_nonnull })
                     };
                 }
 
@@ -2924,7 +2940,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     rust_style_value->property_id,
                     ShorthandStyleValue::create(PropertyID::Border,
                         { width_property, style_property, color_property, PropertyID::BorderImage },
-                        { width.release_nonnull(), style.release_nonnull(), color.release_nonnull(), property_initial_value(PropertyID::BorderImage) })
+                        { width_nonnull, style_nonnull, color_nonnull, property_initial_value(PropertyID::BorderImage) })
                 };
             }
             case FFI::CssStyleValueKind::BorderImage: {
