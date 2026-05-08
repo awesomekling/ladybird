@@ -1241,7 +1241,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return Gfx::WindingRule::EvenOdd;
                 return {};
             };
-            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups, Optional<u8> fill_rule_value, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& polygon_coordinates, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
+            auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Vector<String> const& argument_groups, Optional<u8> fill_rule_value, Vector<RustComponentValueParser::RustBasicShapeRectangleComponent> const& rectangle_components, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_horizontal_radii, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_vertical_radii, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& polygon_coordinates, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
                 auto materialize_rust_fill_rule = [](Optional<u8> fill_rule_value) -> Optional<Gfx::WindingRule> {
                     if (!fill_rule_value.has_value() || *fill_rule_value == 0)
                         return Gfx::WindingRule::Nonzero;
@@ -1275,6 +1275,80 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
                     return nullptr;
                 };
+                auto materialize_rust_basic_shape_rectangle_component = [&](RustComponentValueParser::RustBasicShapeRectangleComponent const& component, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (component.is_auto)
+                        return KeywordStyleValue::create(Keyword::Auto);
+                    return materialize_rust_basic_shape_length_percentage(component.value, range);
+                };
+                auto materialize_rust_basic_shape_border_radius = [&]() -> RefPtr<StyleValue const> {
+                    if (rectangle_border_radius_horizontal_radii.is_empty())
+                        return BorderRadiusRectStyleValue::create_zero();
+
+                    auto materialize_radius_values = [&](Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& radii) -> Optional<StyleValueVector> {
+                        StyleValueVector values;
+                        values.ensure_capacity(radii.size());
+                        for (auto const& radius : radii) {
+                            auto value = materialize_rust_basic_shape_length_percentage(radius, non_negative_range);
+                            if (!value)
+                                return {};
+                            values.append(value.release_nonnull());
+                        }
+                        return values;
+                    };
+                    auto top_left = [](StyleValueVector& radii) { return radii[0]; };
+                    auto top_right = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                        case 3:
+                        case 2:
+                            return radii[1];
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+                    auto bottom_right = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                        case 3:
+                            return radii[2];
+                        case 2:
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+                    auto bottom_left = [](StyleValueVector& radii) {
+                        switch (radii.size()) {
+                        case 4:
+                            return radii[3];
+                        case 3:
+                        case 2:
+                            return radii[1];
+                        case 1:
+                            return radii[0];
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    };
+
+                    auto maybe_horizontal_radii = materialize_radius_values(rectangle_border_radius_horizontal_radii);
+                    auto maybe_vertical_radii = rectangle_border_radius_vertical_radii.is_empty()
+                        ? Optional<StyleValueVector> {}
+                        : materialize_radius_values(rectangle_border_radius_vertical_radii);
+                    if (!maybe_horizontal_radii.has_value() || (!rectangle_border_radius_vertical_radii.is_empty() && !maybe_vertical_radii.has_value()))
+                        return nullptr;
+
+                    auto& horizontal_radii = *maybe_horizontal_radii;
+                    auto& vertical_radii = maybe_vertical_radii.has_value() ? *maybe_vertical_radii : horizontal_radii;
+                    auto top_left_radius = BorderRadiusStyleValue::create(top_left(horizontal_radii), top_left(vertical_radii));
+                    auto top_right_radius = BorderRadiusStyleValue::create(top_right(horizontal_radii), top_right(vertical_radii));
+                    auto bottom_right_radius = BorderRadiusStyleValue::create(bottom_right(horizontal_radii), bottom_right(vertical_radii));
+                    auto bottom_left_radius = BorderRadiusStyleValue::create(bottom_left(horizontal_radii), bottom_left(vertical_radii));
+                    return BorderRadiusRectStyleValue::create(top_left_radius, top_right_radius, bottom_right_radius, bottom_left_radius);
+                };
                 auto parse_optional_round_border_radius = [&](TokenStream<ComponentValue>& arguments_tokens) -> RefPtr<StyleValue const> {
                     NonnullRefPtr<StyleValue const> border_radius = BorderRadiusRectStyleValue::create_zero();
                     arguments_tokens.discard_whitespace();
@@ -1294,6 +1368,45 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 switch (kind) {
                 case RustComponentValueParser::RustBasicShapeKind::Inset: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "inset"sv });
+                    if (!rectangle_components.is_empty()) {
+                        if (rectangle_components.size() > 4)
+                            return nullptr;
+
+                        auto top = materialize_rust_basic_shape_rectangle_component(rectangle_components[0], infinite_range);
+                        if (!top)
+                            return nullptr;
+
+                        RefPtr<StyleValue const> right;
+                        if (rectangle_components.size() > 1)
+                            right = materialize_rust_basic_shape_rectangle_component(rectangle_components[1], infinite_range);
+                        else
+                            right = top;
+                        if (!right)
+                            return nullptr;
+
+                        RefPtr<StyleValue const> bottom;
+                        if (rectangle_components.size() > 2)
+                            bottom = materialize_rust_basic_shape_rectangle_component(rectangle_components[2], infinite_range);
+                        else
+                            bottom = top;
+                        if (!bottom)
+                            return nullptr;
+
+                        RefPtr<StyleValue const> left;
+                        if (rectangle_components.size() > 3)
+                            left = materialize_rust_basic_shape_rectangle_component(rectangle_components[3], infinite_range);
+                        else
+                            left = right;
+                        if (!left)
+                            return nullptr;
+
+                        auto border_radius = materialize_rust_basic_shape_border_radius();
+                        if (!border_radius)
+                            return nullptr;
+
+                        return BasicShapeStyleValue::create(Inset { top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull(), border_radius.release_nonnull() });
+                    }
+
                     if (argument_groups.size() != 1)
                         return nullptr;
                     auto component_values = parse_rust_basic_shape_group(argument_groups[0]);
@@ -1328,6 +1441,20 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustBasicShapeKind::Xywh: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "xywh"sv });
+                    if (!rectangle_components.is_empty()) {
+                        if (rectangle_components.size() != 4)
+                            return nullptr;
+                        auto x = materialize_rust_basic_shape_rectangle_component(rectangle_components[0], infinite_range);
+                        auto y = materialize_rust_basic_shape_rectangle_component(rectangle_components[1], infinite_range);
+                        auto width = materialize_rust_basic_shape_rectangle_component(rectangle_components[2], non_negative_range);
+                        auto height = materialize_rust_basic_shape_rectangle_component(rectangle_components[3], non_negative_range);
+                        auto border_radius = materialize_rust_basic_shape_border_radius();
+                        if (!x || !y || !width || !height || !border_radius)
+                            return nullptr;
+
+                        return BasicShapeStyleValue::create(Xywh { x.release_nonnull(), y.release_nonnull(), width.release_nonnull(), height.release_nonnull(), border_radius.release_nonnull() });
+                    }
+
                     if (argument_groups.size() != 1)
                         return nullptr;
                     auto component_values = parse_rust_basic_shape_group(argument_groups[0]);
@@ -1362,6 +1489,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustBasicShapeKind::Rect: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
+                    if (!rectangle_components.is_empty()) {
+                        if (rectangle_components.size() != 4)
+                            return nullptr;
+
+                        auto top = materialize_rust_basic_shape_rectangle_component(rectangle_components[0], infinite_range);
+                        auto right = materialize_rust_basic_shape_rectangle_component(rectangle_components[1], infinite_range);
+                        auto bottom = materialize_rust_basic_shape_rectangle_component(rectangle_components[2], infinite_range);
+                        auto left = materialize_rust_basic_shape_rectangle_component(rectangle_components[3], infinite_range);
+                        auto border_radius = materialize_rust_basic_shape_border_radius();
+                        if (!top || !right || !bottom || !left || !border_radius)
+                            return nullptr;
+
+                        return BasicShapeStyleValue::create(Rect { top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull(), border_radius.release_nonnull() });
+                    }
+
                     if (argument_groups.size() != 1)
                         return nullptr;
                     auto component_values = parse_rust_basic_shape_group(argument_groups[0]);
@@ -1666,7 +1808,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 RefPtr<StyleValue const> basic_shape_value;
                 RefPtr<StyleValue const> shape_box_value;
                 if (rust_style_value->shape_outside_basic_shape_kind.has_value()) {
-                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups, rust_style_value->shape_outside_basic_shape_fill_rule, rust_style_value->shape_outside_basic_shape_polygon_coordinates, rust_style_value->shape_outside_basic_shape_path_data);
+                    basic_shape_value = materialize_rust_basic_shape(*rust_style_value->shape_outside_basic_shape_kind, rust_style_value->shape_outside_basic_shape_argument_groups, rust_style_value->shape_outside_basic_shape_fill_rule, rust_style_value->shape_outside_basic_shape_rectangle_components, rust_style_value->shape_outside_basic_shape_rectangle_border_radius_horizontal_radii, rust_style_value->shape_outside_basic_shape_rectangle_border_radius_vertical_radii, rust_style_value->shape_outside_basic_shape_polygon_coordinates, rust_style_value->shape_outside_basic_shape_path_data);
                     if (!basic_shape_value)
                         return nullptr;
                 }
@@ -2604,7 +2746,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BasicShape:
-                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_polygon_coordinates, rust_style_value->basic_shape_path_data)) {
+                if (auto value = materialize_rust_basic_shape(rust_style_value->basic_shape_kind, rust_style_value->basic_shape_argument_groups, rust_style_value->basic_shape_fill_rule, rust_style_value->basic_shape_rectangle_components, rust_style_value->basic_shape_rectangle_border_radius_horizontal_radii, rust_style_value->basic_shape_rectangle_border_radius_vertical_radii, rust_style_value->basic_shape_polygon_coordinates, rust_style_value->basic_shape_path_data)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, value };

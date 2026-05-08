@@ -1051,7 +1051,33 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     BasicShapeComponentHeader,
                     BasicShapeComponentPolygonPointX,
                     BasicShapeComponentPolygonPointY,
+                    BasicShapeComponentRectangleLengthPercentage,
+                    BasicShapeComponentRectangleAuto,
+                    BasicShapeComponentRectangleBorderRadiusHorizontal,
+                    BasicShapeComponentRectangleBorderRadiusVertical,
                 };
+                if (value.basic_shape_kind == RustBasicShapeKind::Inset || value.basic_shape_kind == RustBasicShapeKind::Xywh || value.basic_shape_kind == RustBasicShapeKind::Rect) {
+                    if (!style_value.has_value())
+                        style_value = move(value);
+                    else {
+                        VERIFY(style_value->kind == FFI::CssStyleValueKind::BasicShape);
+                        VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                    }
+
+                    style_value->basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
+                    if (color_blue == BasicShapeComponentRectangleLengthPercentage) {
+                        style_value->basic_shape_rectangle_components.append({ .value = nested_primitive_value_from_callback_payload() });
+                    } else if (color_blue == BasicShapeComponentRectangleAuto) {
+                        style_value->basic_shape_rectangle_components.append({ .is_auto = true });
+                    } else if (color_blue == BasicShapeComponentRectangleBorderRadiusHorizontal) {
+                        style_value->basic_shape_rectangle_border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
+                    } else if (color_blue == BasicShapeComponentRectangleBorderRadiusVertical) {
+                        style_value->basic_shape_rectangle_border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
+                    } else {
+                        VERIFY(color_blue == BasicShapeComponentHeader);
+                    }
+                    return;
+                }
                 if (value.basic_shape_kind == RustBasicShapeKind::Polygon) {
                     if (!style_value.has_value())
                         style_value = move(value);
@@ -1614,8 +1640,24 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         BasicShapeComponentHeader,
                         BasicShapeComponentPolygonPointX,
                         BasicShapeComponentPolygonPointY,
+                        BasicShapeComponentRectangleLengthPercentage,
+                        BasicShapeComponentRectangleAuto,
+                        BasicShapeComponentRectangleBorderRadiusHorizontal,
+                        BasicShapeComponentRectangleBorderRadiusVertical,
                     };
-                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Polygon) {
+                    if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Inset || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Xywh || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Rect) {
+                        if (color_blue == BasicShapeComponentRectangleLengthPercentage) {
+                            style_value->shape_outside_basic_shape_rectangle_components.append({ .value = nested_primitive_value_from_callback_payload() });
+                        } else if (color_blue == BasicShapeComponentRectangleAuto) {
+                            style_value->shape_outside_basic_shape_rectangle_components.append({ .is_auto = true });
+                        } else if (color_blue == BasicShapeComponentRectangleBorderRadiusHorizontal) {
+                            style_value->shape_outside_basic_shape_rectangle_border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
+                        } else if (color_blue == BasicShapeComponentRectangleBorderRadiusVertical) {
+                            style_value->shape_outside_basic_shape_rectangle_border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
+                        } else {
+                            VERIFY(color_blue == BasicShapeComponentHeader);
+                        }
+                    } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Polygon) {
                         style_value->shape_outside_basic_shape_fill_rule = color_alpha;
                         if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY)
                             style_value->shape_outside_basic_shape_polygon_coordinates.append(nested_primitive_value_from_callback_payload());

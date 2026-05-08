@@ -2239,6 +2239,8 @@ pub(crate) struct RustOwnedBasicShape {
     kind: RustOwnedBasicShapeKind,
     argument_groups: Vec<String>,
     fill_rule: RustOwnedBasicShapeFillRule,
+    rectangle_components: Vec<RustOwnedBasicShapeRectangleComponent>,
+    rectangle_border_radius: Option<RustOwnedBorderRadius>,
     polygon_points: Vec<RustOwnedBasicShapePolygonPoint>,
     path_data: Option<String>,
     source: String,
@@ -2266,6 +2268,12 @@ pub(crate) enum RustOwnedBasicShapeFillRule {
 pub(crate) struct RustOwnedBasicShapePolygonPoint {
     x: RustOwnedNestedPrimitiveValue,
     y: RustOwnedNestedPrimitiveValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedBasicShapeRectangleComponent {
+    LengthPercentage(RustOwnedNestedPrimitiveValue),
+    Auto,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4449,14 +4457,25 @@ fn rust_owned_basic_shape_style_value_kind(
     // https://drafts.csswg.org/css-shapes-1/#typedef-basic-shape
     // <basic-shape> = <inset()> | <circle()> | <ellipse()> | <polygon()> | <path()> | <rect()> | <xywh()>
     let mut fill_rule = RustOwnedBasicShapeFillRule::Nonzero;
+    let mut rectangle_components = vec![];
+    let mut rectangle_border_radius = None;
     let mut polygon_points = vec![];
     let mut path_data = None;
     let kind = if function.name.eq_ignore_ascii_case("inset") {
-        parse_inset_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Inset)
+        let rectangle = parse_owned_inset_basic_shape_function(function, filtered_input_string)?;
+        rectangle_components = rectangle.components;
+        rectangle_border_radius = rectangle.border_radius;
+        Some(RustOwnedBasicShapeKind::Inset)
     } else if function.name.eq_ignore_ascii_case("xywh") {
-        parse_xywh_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Xywh)
+        let rectangle = parse_owned_xywh_basic_shape_function(function, filtered_input_string)?;
+        rectangle_components = rectangle.components;
+        rectangle_border_radius = rectangle.border_radius;
+        Some(RustOwnedBasicShapeKind::Xywh)
     } else if function.name.eq_ignore_ascii_case("rect") {
-        parse_rect_basic_shape_function(function).then_some(RustOwnedBasicShapeKind::Rect)
+        let rectangle = parse_owned_rect_basic_shape_function(function, filtered_input_string)?;
+        rectangle_components = rectangle.components;
+        rectangle_border_radius = rectangle.border_radius;
+        Some(RustOwnedBasicShapeKind::Rect)
     } else if function.name.eq_ignore_ascii_case("circle") {
         parse_circle_or_ellipse_basic_shape_function(function, BasicShapeRadialFunction::Circle)
             .then_some(RustOwnedBasicShapeKind::Circle)
@@ -4489,6 +4508,8 @@ fn rust_owned_basic_shape_style_value_kind(
         kind,
         argument_groups,
         fill_rule,
+        rectangle_components,
+        rectangle_border_radius,
         polygon_points,
         path_data,
         source: filtered_input_string.to_string(),
@@ -9651,6 +9672,10 @@ const BASIC_SHAPE_CALLBACK_PATH: u8 = 6;
 const BASIC_SHAPE_COMPONENT_HEADER: u8 = 0;
 const BASIC_SHAPE_COMPONENT_POLYGON_POINT_X: u8 = 1;
 const BASIC_SHAPE_COMPONENT_POLYGON_POINT_Y: u8 = 2;
+const BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE: u8 = 3;
+const BASIC_SHAPE_COMPONENT_RECTANGLE_AUTO: u8 = 4;
+const BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_HORIZONTAL: u8 = 5;
+const BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_VERTICAL: u8 = 6;
 
 const FIT_CONTENT_CALLBACK_KEYWORD: u8 = 0;
 const FIT_CONTENT_CALLBACK_FUNCTION: u8 = 1;
@@ -9989,6 +10014,21 @@ where
 {
     let (kind, argument_groups) = basic_shape_callback_payload(value);
 
+    if matches!(
+        value.kind,
+        RustOwnedBasicShapeKind::Inset | RustOwnedBasicShapeKind::Xywh | RustOwnedBasicShapeKind::Rect
+    ) {
+        callback_basic_shape_header(
+            callback,
+            CssStyleValueKind::BasicShape,
+            property_id,
+            kind,
+            value.fill_rule,
+        );
+        callback_basic_shape_rectangle_components(callback, CssStyleValueKind::BasicShape, property_id, kind, value);
+        return;
+    }
+
     if value.kind == RustOwnedBasicShapeKind::Polygon {
         callback_basic_shape_header(
             callback,
@@ -10035,6 +10075,70 @@ where
         argument_groups.as_bytes(),
         "",
     );
+}
+
+fn callback_basic_shape_rectangle_components<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    value: &RustOwnedBasicShape,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    for component in &value.rectangle_components {
+        match component {
+            RustOwnedBasicShapeRectangleComponent::LengthPercentage(value) => callback_basic_shape_nested_primitive(
+                callback,
+                style_value_kind,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
+                value,
+            ),
+            RustOwnedBasicShapeRectangleComponent::Auto => callback(
+                style_value_kind,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                kind,
+                0,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_AUTO,
+                0,
+                &[],
+                "",
+            ),
+        }
+    }
+
+    if let Some(border_radius) = &value.rectangle_border_radius {
+        for radius in &border_radius.horizontal_radii {
+            callback_basic_shape_nested_primitive(
+                callback,
+                style_value_kind,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_HORIZONTAL,
+                radius,
+            );
+        }
+        for radius in &border_radius.vertical_radii {
+            callback_basic_shape_nested_primitive(
+                callback,
+                style_value_kind,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_VERTICAL,
+                radius,
+            );
+        }
+    }
 }
 
 fn callback_basic_shape_header<C>(
@@ -11050,6 +11154,15 @@ where
 {
     let (kind, argument_groups) = basic_shape_callback_payload(value);
 
+    if matches!(
+        value.kind,
+        RustOwnedBasicShapeKind::Inset | RustOwnedBasicShapeKind::Xywh | RustOwnedBasicShapeKind::Rect
+    ) {
+        callback_shape_outside_basic_shape_header(callback, property_id, kind, value.fill_rule);
+        callback_shape_outside_basic_shape_rectangle_components(callback, property_id, kind, value);
+        return;
+    }
+
     if value.kind == RustOwnedBasicShapeKind::Polygon {
         callback_shape_outside_basic_shape_header(callback, property_id, kind, value.fill_rule);
         for point in &value.polygon_points {
@@ -11113,6 +11226,68 @@ fn callback_shape_outside_basic_shape_header<C>(
         &[],
         "",
     );
+}
+
+fn callback_shape_outside_basic_shape_rectangle_components<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    value: &RustOwnedBasicShape,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    for component in &value.rectangle_components {
+        match component {
+            RustOwnedBasicShapeRectangleComponent::LengthPercentage(value) => {
+                callback_shape_outside_basic_shape_nested_primitive(
+                    callback,
+                    property_id,
+                    kind,
+                    RustOwnedBasicShapeFillRule::Nonzero,
+                    BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
+                    value,
+                );
+            }
+            RustOwnedBasicShapeRectangleComponent::Auto => callback(
+                CssStyleValueKind::ShapeOutside,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE,
+                kind,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_AUTO,
+                0,
+                &[],
+                "",
+            ),
+        }
+    }
+
+    if let Some(border_radius) = &value.rectangle_border_radius {
+        for radius in &border_radius.horizontal_radii {
+            callback_shape_outside_basic_shape_nested_primitive(
+                callback,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_HORIZONTAL,
+                radius,
+            );
+        }
+        for radius in &border_radius.vertical_radii {
+            callback_shape_outside_basic_shape_nested_primitive(
+                callback,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_BORDER_RADIUS_VERTICAL,
+                radius,
+            );
+        }
+    }
 }
 
 fn callback_shape_outside_basic_shape_nested_primitive<C>(
@@ -16647,6 +16822,91 @@ fn parse_rect_basic_shape_function(function: &Function) -> bool {
     consume_optional_round_border_radius_and_end(&mut parser)
 }
 
+struct ParsedRectangleBasicShapeFunction {
+    components: Vec<RustOwnedBasicShapeRectangleComponent>,
+    border_radius: Option<RustOwnedBorderRadius>,
+}
+
+fn parse_owned_inset_basic_shape_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<ParsedRectangleBasicShapeFunction> {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-inset
+    // inset() = inset( <length-percentage>{1,4} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut components = vec![];
+    while components.len() < 4 {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.next_component_value() else {
+            break;
+        };
+        let Some(value) = component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)
+        else {
+            break;
+        };
+        parser.index += 1;
+        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+    }
+
+    if components.is_empty() {
+        return None;
+    }
+
+    Some(ParsedRectangleBasicShapeFunction {
+        components,
+        border_radius: consume_optional_owned_round_border_radius_and_end(&mut parser, filtered_input_string)?,
+    })
+}
+
+fn parse_owned_xywh_basic_shape_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<ParsedRectangleBasicShapeFunction> {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-xywh
+    // xywh() = xywh( <length-percentage>{2} <length-percentage [0,∞]>{2} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut components = vec![];
+    for _ in 0..4 {
+        parser.discard_whitespace();
+        let component_value = parser.next_component_value()?;
+        let value = component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?;
+        parser.index += 1;
+        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+    }
+
+    Some(ParsedRectangleBasicShapeFunction {
+        components,
+        border_radius: consume_optional_owned_round_border_radius_and_end(&mut parser, filtered_input_string)?,
+    })
+}
+
+fn parse_owned_rect_basic_shape_function(
+    function: &Function,
+    filtered_input_string: &str,
+) -> Option<ParsedRectangleBasicShapeFunction> {
+    // https://drafts.csswg.org/css-shapes-1/#funcdef-basic-shape-rect
+    // rect() = rect( [ <length-percentage> | auto ]{4} [ round <'border-radius'> ]? )
+    let mut parser = ComponentValueParser::new(function.value.clone());
+    let mut components = vec![];
+    for _ in 0..4 {
+        parser.discard_whitespace();
+        if parser.consume_ident_matching("auto") {
+            components.push(RustOwnedBasicShapeRectangleComponent::Auto);
+            continue;
+        }
+
+        let component_value = parser.next_component_value()?;
+        let value = component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?;
+        parser.index += 1;
+        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+    }
+
+    Some(ParsedRectangleBasicShapeFunction {
+        components,
+        border_radius: consume_optional_owned_round_border_radius_and_end(&mut parser, filtered_input_string)?,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BasicShapeRadialFunction {
     Circle,
@@ -16813,6 +17073,55 @@ fn consume_optional_round_border_radius_and_end(parser: &mut ComponentValueParse
 
     parser.discard_whitespace();
     !parser.has_next_component_value()
+}
+
+fn consume_optional_owned_round_border_radius_and_end(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<Option<RustOwnedBorderRadius>> {
+    parser.discard_whitespace();
+    if !parser.consume_ident_matching("round") {
+        parser.discard_whitespace();
+        return (!parser.has_next_component_value()).then_some(None);
+    }
+
+    let component_values = remove_whitespace_component_values(&parser.component_values[parser.index..]);
+    parser.index = parser.component_values.len();
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    let slash_positions = component_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component_value)| component_value_is_delim(Some(component_value), '/').then_some(index))
+        .collect::<Vec<_>>();
+
+    if slash_positions.len() > 1 {
+        return None;
+    }
+
+    let (horizontal_radii, vertical_radii) = if let Some(slash_position) = slash_positions.first() {
+        (
+            &component_values[..*slash_position],
+            Some(&component_values[*slash_position + 1..]),
+        )
+    } else {
+        (component_values.as_slice(), None)
+    };
+
+    let horizontal_radii = rust_owned_border_radius_shorthand_side_values(horizontal_radii, filtered_input_string)?;
+    let vertical_radii = if let Some(vertical_radii) = vertical_radii {
+        rust_owned_border_radius_shorthand_side_values(vertical_radii, filtered_input_string)?
+    } else {
+        vec![]
+    };
+
+    Some(Some(RustOwnedBorderRadius {
+        horizontal_radii,
+        vertical_radii,
+    }))
 }
 
 fn consume_border_radius_rect_component_values(parser: &mut ComponentValueParser) -> bool {
@@ -31501,18 +31810,18 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorderImage,
-        RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-        RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
-        RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
+        RustOwnedBasicShapeRectangleComponent, RustOwnedBorderImage, RustOwnedBorderImageOutset,
+        RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource, RustOwnedBorderImageWidth,
+        RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumnInteger,
+        RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
+        RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
+        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
+        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -33407,6 +33716,8 @@ mod tests {
                         kind: RustOwnedBasicShapeKind::Circle,
                         argument_groups: vec!["10px".to_string()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                        rectangle_components: vec![],
+                        rectangle_border_radius: None,
                         polygon_points: vec![],
                         path_data: None,
                         source: "circle(10px)".to_string(),
@@ -33424,6 +33735,8 @@ mod tests {
                         kind: RustOwnedBasicShapeKind::Circle,
                         argument_groups: vec![String::new()],
                         fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                        rectangle_components: vec![],
+                        rectangle_border_radius: None,
                         polygon_points: vec![],
                         path_data: None,
                         source: "circle()".to_string(),
@@ -34150,6 +34463,13 @@ mod tests {
                     kind: RustOwnedBasicShapeKind::Inset,
                     argument_groups: vec!["10px".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
+                    rectangle_components: vec![RustOwnedBasicShapeRectangleComponent::LengthPercentage(
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 10.0,
+                            unit: "px".to_string(),
+                        },
+                    )],
+                    rectangle_border_radius: None,
                     polygon_points: vec![],
                     path_data: None,
                     source: "inset(10px)".to_string(),
@@ -34164,6 +34484,8 @@ mod tests {
                     kind: RustOwnedBasicShapeKind::Path,
                     argument_groups: vec!["evenodd".to_string(), "\"M 0 0 L 1 1\"".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
+                    rectangle_components: vec![],
+                    rectangle_border_radius: None,
                     polygon_points: vec![],
                     path_data: Some("M 0 0 L 1 1".to_string()),
                     source: "path(evenodd, \"M 0 0 L 1 1\")".to_string(),
@@ -34178,6 +34500,8 @@ mod tests {
                     kind: RustOwnedBasicShapeKind::Polygon,
                     argument_groups: vec!["evenodd".to_string(), "0 0".to_string(), "100% 0".to_string()],
                     fill_rule: RustOwnedBasicShapeFillRule::Evenodd,
+                    rectangle_components: vec![],
+                    rectangle_border_radius: None,
                     polygon_points: vec![
                         RustOwnedBasicShapePolygonPoint {
                             x: RustOwnedNestedPrimitiveValue::Length {
@@ -35338,11 +35662,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::BasicShape,
                 property_id: PropertyId::ClipPath,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(10.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "10px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );

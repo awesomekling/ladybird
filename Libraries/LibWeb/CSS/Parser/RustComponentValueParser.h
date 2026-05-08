@@ -215,6 +215,11 @@ public:
         RustNestedPrimitiveValue value;
     };
 
+    struct RustBasicShapeRectangleComponent {
+        bool is_auto { false };
+        RustNestedPrimitiveValue value;
+    };
+
     struct RustStyleColor {
         bool is_simple { false };
         FFI::CssParsedColorKind kind { FFI::CssParsedColorKind::Invalid };
@@ -542,6 +547,9 @@ public:
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Vector<String> basic_shape_argument_groups;
         Optional<u8> basic_shape_fill_rule;
+        Vector<RustBasicShapeRectangleComponent> basic_shape_rectangle_components;
+        Vector<RustNestedPrimitiveValue> basic_shape_rectangle_border_radius_horizontal_radii;
+        Vector<RustNestedPrimitiveValue> basic_shape_rectangle_border_radius_vertical_radii;
         Vector<RustNestedPrimitiveValue> basic_shape_polygon_coordinates;
         Optional<String> basic_shape_path_data;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
@@ -583,6 +591,9 @@ public:
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Vector<String> shape_outside_basic_shape_argument_groups;
         Optional<u8> shape_outside_basic_shape_fill_rule;
+        Vector<RustBasicShapeRectangleComponent> shape_outside_basic_shape_rectangle_components;
+        Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_rectangle_border_radius_horizontal_radii;
+        Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_rectangle_border_radius_vertical_radii;
         Vector<RustNestedPrimitiveValue> shape_outside_basic_shape_polygon_coordinates;
         Optional<String> shape_outside_basic_shape_path_data;
         Optional<ShapeBox> shape_outside_shape_box;
