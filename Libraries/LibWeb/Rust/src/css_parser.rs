@@ -2049,7 +2049,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     TransformLonghand(RustOwnedTransformLonghand),
     TransformOrigin(RustOwnedTransformOrigin),
     Transformation(RustOwnedTransformation),
-    TreeCountingFunction(RustOwnedSourceBackedStyleValue),
+    SourceBacked(RustOwnedSourceBackedValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
     ViewTimeline(RustOwnedViewTimeline),
@@ -2093,10 +2093,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     ViewTransitionName(RustOwnedViewTransitionName),
     WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
-    MathFunction {
-        value_type: PropertyValueType,
-        function: RustOwnedMathFunction,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2182,12 +2178,6 @@ pub(crate) struct RustOwnedPositionalValueListShorthandItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedMathFunction {
-    name: String,
-    source: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorFunction {
     anchor_name: Option<String>,
     anchor_side: String,
@@ -2202,9 +2192,16 @@ pub(crate) struct RustOwnedAnchorSizeFunction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedSourceBackedStyleValue {
+pub(crate) struct RustOwnedSourceBackedValue {
+    kind: RustOwnedSourceBackedValueKind,
     source: String,
     value_type: PropertyValueType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedSourceBackedValueKind {
+    MathFunction { name: String },
+    TreeCountingFunction,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4031,17 +4028,17 @@ fn parse_rust_owned_generated_longhand_value(
         _ => {}
     }
 
-    if let Some(function) = parse_rust_owned_math_function(component_values, filtered_input) {
+    if let Some(function) = parse_rust_owned_math_function(value_type, component_values, filtered_input) {
         return RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::MathFunction { value_type, function },
+            value: RustOwnedStyleValueKind::SourceBacked(function),
         };
     }
 
     if let Some(function) = parse_rust_owned_tree_counting_function(value_type, component_values, filtered_input) {
         return RustOwnedStyleValue {
             property_id,
-            value: RustOwnedStyleValueKind::TreeCountingFunction(function),
+            value: RustOwnedStyleValueKind::SourceBacked(function),
         };
     }
 
@@ -8152,9 +8149,10 @@ fn rust_owned_primitive_style_value_kind(
 }
 
 fn parse_rust_owned_math_function(
+    value_type: PropertyValueType,
     component_values: &[ComponentValue],
     filtered_input: &[u8],
-) -> Option<RustOwnedMathFunction> {
+) -> Option<RustOwnedSourceBackedValue> {
     // https://drafts.csswg.org/css-values-4/#math
     // A math function represents a numeric value.
     let [ComponentValue::Function(function)] = component_values else {
@@ -8168,9 +8166,12 @@ fn parse_rust_owned_math_function(
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
 
-    Some(RustOwnedMathFunction {
-        name: function.name.clone(),
+    Some(RustOwnedSourceBackedValue {
+        kind: RustOwnedSourceBackedValueKind::MathFunction {
+            name: function.name.clone(),
+        },
         source,
+        value_type,
     })
 }
 
@@ -8178,7 +8179,7 @@ fn parse_rust_owned_tree_counting_function(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
     filtered_input: &[u8],
-) -> Option<RustOwnedSourceBackedStyleValue> {
+) -> Option<RustOwnedSourceBackedValue> {
     // https://drafts.csswg.org/css-values-5/#tree-counting
     // <tree-counting-function> = <sibling-index()> | <sibling-count()>
     let [ComponentValue::Function(function)] = component_values else {
@@ -8194,7 +8195,11 @@ fn parse_rust_owned_tree_counting_function(
     let filtered_input = std::str::from_utf8(filtered_input)
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
-    Some(RustOwnedSourceBackedStyleValue { source, value_type })
+    Some(RustOwnedSourceBackedValue {
+        kind: RustOwnedSourceBackedValueKind::TreeCountingFunction,
+        source,
+        value_type,
+    })
 }
 
 fn filtered_input_to_string(filtered_input: &[u8]) -> String {
@@ -9326,14 +9331,8 @@ where
                 }
             }
         },
-        RustOwnedStyleValueKind::TreeCountingFunction(function) => {
-            callback_source_backed_value_type_kind_style_value(
-                callback,
-                CssStyleValueKind::TreeCountingFunction,
-                property_id,
-                &function.source,
-                function.value_type,
-            );
+        RustOwnedStyleValueKind::SourceBacked(value) => {
+            callback_rust_owned_source_backed_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::CounterStyle { value } => {
             callback_counter_style(callback, CssStyleValueKind::CounterStyle, property_id, value);
@@ -9579,15 +9578,6 @@ where
             &[],
             property_value_type_name(PropertyValueType::ViewFunction),
         ),
-        RustOwnedStyleValueKind::MathFunction { value_type, function } => {
-            callback_source_backed_value_type_kind_style_value(
-                callback,
-                CssStyleValueKind::MathFunction,
-                property_id,
-                &function.source,
-                *value_type,
-            );
-        }
     }
 }
 
@@ -9719,6 +9709,17 @@ where
             property_value_type_name(PropertyValueType::CounterStyle),
         ),
     }
+}
+
+fn callback_rust_owned_source_backed_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedSourceBackedValue)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let kind = match &value.kind {
+        RustOwnedSourceBackedValueKind::MathFunction { .. } => CssStyleValueKind::MathFunction,
+        RustOwnedSourceBackedValueKind::TreeCountingFunction => CssStyleValueKind::TreeCountingFunction,
+    };
+    callback_source_backed_value_type_kind_style_value(callback, kind, property_id, &value.source, value.value_type);
 }
 
 fn callback_style_value_type<C>(
@@ -33137,35 +33138,36 @@ mod tests {
         RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
-        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
-        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
-        RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
-        RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction,
-        TransformFunctionParameterType, auto_keyword, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_property_value_type,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, emit_rust_owned_style_value, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
+        RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
+        RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
+        RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue,
+        RustOwnedSourceBackedValueKind, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
+        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl,
+        RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, auto_keyword,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_property_value_type, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type,
+        emit_rust_owned_style_value, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -36042,46 +36044,47 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::MarginLeft], "calc(1px + 2px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MarginLeft,
-                value: RustOwnedStyleValueKind::MathFunction {
-                    value_type: PropertyValueType::Length,
-                    function: RustOwnedMathFunction {
+                value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
+                    kind: RustOwnedSourceBackedValueKind::MathFunction {
                         name: "calc".to_string(),
-                        source: "calc(1px + 2px)".to_string(),
                     },
-                },
+                    source: "calc(1px + 2px)".to_string(),
+                    value_type: PropertyValueType::Length,
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::Opacity], "clamp(0, 0.5, 1)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Opacity,
-                value: RustOwnedStyleValueKind::MathFunction {
-                    value_type: PropertyValueType::OpacityValue,
-                    function: RustOwnedMathFunction {
+                value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
+                    kind: RustOwnedSourceBackedValueKind::MathFunction {
                         name: "clamp".to_string(),
-                        source: "clamp(0, 0.5, 1)".to_string(),
                     },
-                },
+                    source: "clamp(0, 0.5, 1)".to_string(),
+                    value_type: PropertyValueType::OpacityValue,
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontWeight], "calc(600 + 100)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontWeight,
-                value: RustOwnedStyleValueKind::MathFunction {
-                    value_type: PropertyValueType::FontWeightAbsolute,
-                    function: RustOwnedMathFunction {
+                value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
+                    kind: RustOwnedSourceBackedValueKind::MathFunction {
                         name: "calc".to_string(),
-                        source: "calc(600 + 100)".to_string(),
                     },
-                },
+                    source: "calc(600 + 100)".to_string(),
+                    value_type: PropertyValueType::FontWeightAbsolute,
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::FontWeight], "sibling-count()"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontWeight,
-                value: RustOwnedStyleValueKind::TreeCountingFunction(RustOwnedSourceBackedStyleValue {
+                value: RustOwnedStyleValueKind::SourceBacked(RustOwnedSourceBackedValue {
+                    kind: RustOwnedSourceBackedValueKind::TreeCountingFunction,
                     source: "sibling-count()".to_string(),
                     value_type: PropertyValueType::FontWeightAbsolute,
                 }),
