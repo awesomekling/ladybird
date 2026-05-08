@@ -1857,6 +1857,7 @@ pub enum CssStyleValueKind {
     AnimationName,
     AnchorNameOrScope,
     BackgroundSize,
+    BorderImageSlice,
     ColorScheme,
     Contain,
     ContainerType,
@@ -1978,6 +1979,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     GuaranteedInvalid,
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
+    BorderImageSlice(RustOwnedBorderImageSlice),
     Integer {
         value: i32,
         value_type: PropertyValueType,
@@ -2320,6 +2322,12 @@ pub(crate) struct RustOwnedBackgroundSizeList {
 pub(crate) struct RustOwnedBorderRadius {
     horizontal_sources: Vec<String>,
     vertical_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderImageSlice {
+    sources: Vec<String>,
+    fill: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3277,6 +3285,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionX
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
+            | PropertyId::BorderImageSlice
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderEndEndRadius
@@ -3402,6 +3411,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
+        PropertyId::BorderImageSlice => rust_owned_border_image_slice_style_value_kind(filtered_input),
         PropertyId::BorderBottomLeftRadius
         | PropertyId::BorderBottomRightRadius
         | PropertyId::BorderEndEndRadius
@@ -5321,6 +5331,74 @@ fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     }))
 }
 
+fn rust_owned_border_image_slice_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let mut fill = false;
+    let mut sources = vec![];
+    let mut index = 0;
+
+    // https://drafts.csswg.org/css-backgrounds-3/#border-image-slice
+    // <'border-image-slice'> = [<number [0,∞]> | <percentage [0,∞]>]{1,4} && fill?
+    while index < component_values.len() && is_whitespace_component_value(&component_values[index]) {
+        index += 1;
+    }
+    if component_value_is_ident(component_values.get(index), "fill") {
+        fill = true;
+        index += 1;
+    }
+
+    while index < component_values.len() {
+        let component_value = &component_values[index];
+        if is_whitespace_component_value(component_value) {
+            index += 1;
+            continue;
+        }
+
+        if sources.len() == 4 || !component_value_parse_as_non_negative_number_percentage(component_value) {
+            break;
+        }
+
+        sources.push(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            &source,
+        )?);
+        index += 1;
+    }
+
+    while index < component_values.len() && is_whitespace_component_value(&component_values[index]) {
+        index += 1;
+    }
+    if component_value_is_ident(component_values.get(index), "fill") {
+        if fill {
+            return None;
+        }
+        fill = true;
+        index += 1;
+    }
+    while index < component_values.len() && is_whitespace_component_value(&component_values[index]) {
+        index += 1;
+    }
+    if index != component_values.len() {
+        return None;
+    }
+
+    let sources = match sources.as_slice() {
+        [top] => vec![top.clone(), top.clone(), top.clone(), top.clone()],
+        [top, right] => vec![top.clone(), right.clone(), top.clone(), right.clone()],
+        [top, right, bottom] => vec![top.clone(), right.clone(), bottom.clone(), right.clone()],
+        [top, right, bottom, left] => vec![top.clone(), right.clone(), bottom.clone(), left.clone()],
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::BorderImageSlice(RustOwnedBorderImageSlice {
+        sources,
+        fill,
+    }))
+}
+
 fn rust_owned_border_radius_shorthand_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -7146,6 +7224,25 @@ where
                     property_id,
                     1,
                     Some(source),
+                );
+            }
+        }
+        RustOwnedStyleValueKind::BorderImageSlice(value) => {
+            for source in &value.sources {
+                callback(
+                    CssStyleValueKind::BorderImageSlice,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.fill.into(),
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
                 );
             }
         }
@@ -26974,27 +27071,27 @@ mod tests {
         PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-        RustOwnedBasicShapeKind, RustOwnedBorderRadius, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCursor, RustOwnedCursorImage,
-        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-        RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
-        RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow,
-        RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
-        RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind,
-        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth,
-        RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
-        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
-        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
-        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedBasicShapeKind, RustOwnedBorderImageSlice, RustOwnedBorderRadius, RustOwnedColorScheme,
+        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
+        RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
+        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
         RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
         RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
         SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE,
@@ -29117,6 +29214,20 @@ mod tests {
                     vertical_sources: vec!["3px".to_string(), "4px".to_string()],
                 }),
             })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10% 20 30% fill"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderImageSlice,
+                value: RustOwnedStyleValueKind::BorderImageSlice(RustOwnedBorderImageSlice {
+                    sources: vec!["10%".to_string(), "20".to_string(), "30%".to_string(), "20".to_string(),],
+                    fill: true,
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10% fill 20"),
+            None
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BoxShadow], "inset 1px 2px 3px red"),

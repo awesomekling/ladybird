@@ -272,6 +272,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::BackgroundPositionY:
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
+        case PropertyID::BorderImageSlice:
         case PropertyID::BorderBottomLeftRadius:
         case PropertyID::BorderBottomRightRadius:
         case PropertyID::BorderEndEndRadius:
@@ -2204,6 +2205,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, BorderRadiusStyleValue::create(horizontal.release_nonnull(), vertical.release_nonnull()) };
                 }
+            case FFI::CssStyleValueKind::BorderImageSlice:
+                if (rust_style_value->border_image_slice_sources.size() == 4) {
+                    auto top = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[0]);
+                    auto right = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[1]);
+                    auto bottom = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[2]);
+                    auto left = parse_rust_source_as_non_negative_number_percentage(rust_style_value->border_image_slice_sources[3]);
+                    if (!top || !right || !bottom || !left)
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id,
+                        BorderImageSliceStyleValue::create(
+                            top.release_nonnull(),
+                            right.release_nonnull(),
+                            bottom.release_nonnull(),
+                            left.release_nonnull(),
+                            rust_style_value->border_image_slice_fill) };
+                }
+                break;
             case FFI::CssStyleValueKind::Columns:
                 if (rust_style_value->column_count_source.has_value() || rust_style_value->column_width_source.has_value() || rust_style_value->column_height_source.has_value()) {
                     auto column_count = rust_style_value->column_count_source.has_value()
@@ -3817,7 +3838,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BorderImage:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_image_value(tokens); });
     case PropertyID::BorderImageSlice:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_border_image_slice_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
     case PropertyID::BorderBottomRightRadius:
