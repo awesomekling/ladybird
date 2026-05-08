@@ -273,6 +273,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
         case PropertyID::BorderImageOutset:
+        case PropertyID::BorderImageRepeat:
         case PropertyID::BorderImageSlice:
         case PropertyID::BorderImageWidth:
         case PropertyID::BorderBottomLeftRadius:
@@ -2260,6 +2261,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
+            case FFI::CssStyleValueKind::BorderImageRepeat:
+                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_repeat_sources, [&](auto const& source) -> RefPtr<StyleValue const> {
+                        auto maybe_keyword = keyword_from_string(source);
+                        if (!maybe_keyword.has_value())
+                            return nullptr;
+                        return KeywordStyleValue::create(maybe_keyword.release_value());
+                    })) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                }
+                break;
             case FFI::CssStyleValueKind::BorderImageWidth:
                 if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_width_sources, parse_rust_source_as_border_image_width)) {
                     discard_rust_owned_property_value_tokens();
@@ -3002,7 +3015,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             repetition_from_rust(rust_style_value->repeat_x_values[i]),
                             repetition_from_rust(rust_style_value->repeat_y_values[i])));
                     }
-
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
                     return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
@@ -3880,6 +3892,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BorderImage:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_image_value(tokens); });
     case PropertyID::BorderImageOutset:
+    case PropertyID::BorderImageRepeat:
     case PropertyID::BorderImageSlice:
     case PropertyID::BorderImageWidth:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
@@ -4680,6 +4693,20 @@ RefPtr<StyleValue const> Parser::parse_border_image_value(TokenStream<ComponentV
                         }
                     }
                     return nullptr;
+                }
+
+                if (property_id == PropertyID::BorderImageRepeat) {
+                    auto transaction = inner_tokens.begin_transaction();
+                    auto keyword_value = parse_keyword_value(inner_tokens);
+                    if (!keyword_value)
+                        return nullptr;
+
+                    auto keyword = keyword_value->to_keyword();
+                    if (!keyword_to_border_image_repeat(keyword).has_value())
+                        return nullptr;
+
+                    transaction.commit();
+                    return KeywordStyleValue::create(keyword);
                 }
 
                 return parse_css_value_for_property(property_id, inner_tokens);

@@ -316,6 +316,7 @@ public:
         Vector<String> border_radius_horizontal_sources;
         Vector<String> border_radius_vertical_sources;
         Vector<String> border_image_outset_sources;
+        Vector<String> border_image_repeat_sources;
         Vector<String> border_image_slice_sources;
         bool border_image_slice_fill { false };
         Vector<String> border_image_width_sources;

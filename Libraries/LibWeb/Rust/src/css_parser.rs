@@ -1858,6 +1858,7 @@ pub enum CssStyleValueKind {
     AnchorNameOrScope,
     BackgroundSize,
     BorderImageOutset,
+    BorderImageRepeat,
     BorderImageSlice,
     BorderImageWidth,
     ColorScheme,
@@ -1982,6 +1983,9 @@ pub(crate) enum RustOwnedStyleValueKind {
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
     BorderImageOutset {
+        sources: Vec<String>,
+    },
+    BorderImageRepeat {
         sources: Vec<String>,
     },
     BorderImageSlice(RustOwnedBorderImageSlice),
@@ -3294,6 +3298,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
             | PropertyId::BorderImageOutset
+            | PropertyId::BorderImageRepeat
             | PropertyId::BorderImageSlice
             | PropertyId::BorderImageWidth
             | PropertyId::BorderBottomLeftRadius
@@ -3422,6 +3427,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),
+        PropertyId::BorderImageRepeat => rust_owned_border_image_repeat_style_value_kind(filtered_input),
         PropertyId::BorderImageSlice => rust_owned_border_image_slice_style_value_kind(filtered_input),
         PropertyId::BorderImageWidth => rust_owned_border_image_width_style_value_kind(filtered_input),
         PropertyId::BorderBottomLeftRadius
@@ -5400,6 +5406,42 @@ fn rust_owned_border_image_width_style_value_kind(filtered_input: &[u8]) -> Opti
     Some(RustOwnedStyleValueKind::BorderImageWidth { sources })
 }
 
+fn component_value_parse_as_border_image_repeat(component_value: &ComponentValue) -> bool {
+    component_value_is_ident(Some(component_value), "stretch")
+        || component_value_is_ident(Some(component_value), "repeat")
+        || component_value_is_ident(Some(component_value), "round")
+        || component_value_is_ident(Some(component_value), "space")
+}
+
+fn rust_owned_border_image_repeat_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let mut sources = vec![];
+
+    for component_value in component_values {
+        if is_whitespace_component_value(component_value) {
+            continue;
+        }
+
+        if sources.len() == 2 || !component_value_parse_as_border_image_repeat(component_value) {
+            return None;
+        }
+
+        sources.push(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            &source,
+        )?);
+    }
+
+    if sources.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::BorderImageRepeat { sources })
+}
+
 fn rust_owned_border_image_slice_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -7300,6 +7342,25 @@ where
             for source in sources {
                 callback(
                     CssStyleValueKind::BorderImageOutset,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::BorderImageRepeat { sources } => {
+            for source in sources {
+                callback(
+                    CssStyleValueKind::BorderImageRepeat,
                     property_id,
                     CssPrimitiveValueKind::Invalid,
                     false,
@@ -29360,6 +29421,23 @@ mod tests {
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BorderImageWidth], "-1px"),
+            None
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageRepeat], "stretch round"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderImageRepeat,
+                value: RustOwnedStyleValueKind::BorderImageRepeat {
+                    sources: vec!["stretch".to_string(), "round".to_string()],
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageRepeat], "repeat round space"),
+            None
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageRepeat], "no-repeat"),
             None
         );
         assert_eq!(
