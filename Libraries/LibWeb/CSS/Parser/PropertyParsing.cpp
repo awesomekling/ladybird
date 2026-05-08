@@ -3091,6 +3091,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
+            case FFI::CssStyleValueKind::CounterStyle:
+                if (rust_style_value->counter_style.has_value()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, materialize_rust_counter_style(rust_style_value->counter_style) };
+                }
+                break;
             case FFI::CssStyleValueKind::CounterDefinitions:
                 if (!rust_style_value->counter_definitions.is_empty()) {
                     VERIFY(rust_style_value->counter_definitions.size() == rust_style_value->counter_definition_values.size());

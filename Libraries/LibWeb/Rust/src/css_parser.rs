@@ -1841,6 +1841,7 @@ pub enum CssStyleValueKind {
     Color,
     Url,
     CounterStyleName,
+    CounterStyle,
     EasingFunction,
     FitContent,
     FontFamily,
@@ -1951,7 +1952,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     Counter(RustOwnedCounterFunction),
     CounterStyle {
         value: CounterStyle,
-        source: String,
     },
     CounterDefinitions(RustOwnedCounterDefinitions),
     BorderRadius(RustOwnedBorderRadius),
@@ -3975,10 +3975,7 @@ fn parse_rust_owned_generated_longhand_value(
             },
             CounterStyle::SymbolsFunction { .. } => RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::CounterStyle {
-                    value: counter_style,
-                    source: filtered_input_to_string(filtered_input),
-                },
+                value: RustOwnedStyleValueKind::CounterStyle { value: counter_style },
             },
         };
     }
@@ -9227,13 +9224,8 @@ where
         RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             let _ = function;
         }
-        RustOwnedStyleValueKind::CounterStyle { source, .. } => {
-            callback_source_backed_value_type_style_value(
-                callback,
-                property_id,
-                source,
-                PropertyValueType::CounterStyle,
-            );
+        RustOwnedStyleValueKind::CounterStyle { value } => {
+            callback_counter_style(callback, CssStyleValueKind::CounterStyle, property_id, value);
         }
         RustOwnedStyleValueKind::FontVariantAlternates { values } => {
             for value in values {
@@ -11301,6 +11293,69 @@ where
         source.as_bytes(),
         "",
     );
+}
+
+fn callback_counter_style<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    counter_style: &CounterStyle,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match counter_style {
+        CounterStyle::Name(name) => {
+            callback(
+                style_value_kind,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                COUNTER_CALLBACK_STYLE_NAME,
+                0,
+                0,
+                0,
+                name.as_bytes(),
+                "",
+            );
+        }
+        CounterStyle::SymbolsFunction { symbols_type, symbols } => {
+            callback(
+                style_value_kind,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                COUNTER_CALLBACK_STYLE_SYMBOLS,
+                *symbols_type as u8,
+                0,
+                0,
+                &[],
+                "",
+            );
+            for symbol in symbols {
+                callback(
+                    style_value_kind,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    COUNTER_CALLBACK_STYLE_SYMBOL,
+                    0,
+                    0,
+                    0,
+                    symbol.as_bytes(),
+                    "",
+                );
+            }
+        }
+    }
 }
 
 fn callback_flex_basis<C>(callback: &mut C, property_id: u16, value: &RustOwnedFlexBasis)
@@ -34292,7 +34347,6 @@ mod tests {
                         symbols_type: CssCounterStyleSymbolsType::Symbolic,
                         symbols: vec!["*".to_string(), "**".to_string()],
                     },
-                    source: "symbols(\"*\" \"**\")".to_string(),
                 },
             })
         );
@@ -36368,6 +36422,19 @@ mod tests {
                 color: None,
                 value: "disc".to_string(),
                 value_type: "CounterStyle".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::CounterStyle,
+                property_id: PropertyId::ListStyleType,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "**".to_string(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

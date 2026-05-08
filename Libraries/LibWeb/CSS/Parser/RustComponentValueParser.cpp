@@ -2107,11 +2107,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 };
             } else if (kind == FFI::CssStyleValueKind::ContainerType) {
                 value.container_type = static_cast<FFI::CssContainerTypeValueKind>(color_red);
-            } else if (kind == FFI::CssStyleValueKind::Counter) {
+            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Counter, FFI::CssStyleValueKind::CounterStyle)) {
                 if (!style_value.has_value()) {
                     style_value = move(value);
                 } else {
-                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Counter);
+                    VERIFY(style_value->kind == kind);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
