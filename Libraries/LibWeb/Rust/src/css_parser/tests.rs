@@ -1981,6 +1981,47 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::TextDecorationColor], "red blue"),
         None
     );
+    for (property_id, input, value, value_type) in [
+        (
+            PropertyId::FlexGrow,
+            "3",
+            RustOwnedNestedPrimitiveValue::Number(3.0),
+            PropertyValueType::Number,
+        ),
+        (
+            PropertyId::StrokeMiterlimit,
+            "4",
+            RustOwnedNestedPrimitiveValue::Number(4.0),
+            PropertyValueType::Number,
+        ),
+    ] {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], input),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested { value, value_type }),
+            })
+        );
+    }
+    for property_id in [
+        PropertyId::FillOpacity,
+        PropertyId::FloodOpacity,
+        PropertyId::Opacity,
+        PropertyId::ShapeImageThreshold,
+        PropertyId::StopOpacity,
+        PropertyId::StrokeOpacity,
+    ] {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], "25%"),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                    value: RustOwnedNestedPrimitiveValue::Percentage(25.0),
+                    value_type: PropertyValueType::OpacityValue,
+                }),
+            })
+        );
+    }
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Fill], "none"),
         Some(RustOwnedStyleValue {
@@ -4157,6 +4198,60 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(parse_style_value(&[PropertyId::TextDecorationColor], "red blue"), None);
+    for (property_id, input, primitive_kind, numeric_value, value, value_type) in [
+        (
+            PropertyId::FlexShrink,
+            "3",
+            CssPrimitiveValueKind::Number,
+            3.0,
+            "",
+            "Number",
+        ),
+        (
+            PropertyId::StrokeMiterlimit,
+            "4",
+            CssPrimitiveValueKind::Number,
+            4.0,
+            "",
+            "Number",
+        ),
+    ] {
+        assert_eq!(
+            parse_style_value(&[property_id], input),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id,
+                primitive_kind,
+                numeric_value: Some(numeric_value),
+                secondary_numeric_value: None,
+                color: None,
+                value: value.to_string(),
+                value_type: value_type.to_string(),
+            })
+        );
+    }
+    for property_id in [
+        PropertyId::FillOpacity,
+        PropertyId::FloodOpacity,
+        PropertyId::Opacity,
+        PropertyId::ShapeImageThreshold,
+        PropertyId::StopOpacity,
+        PropertyId::StrokeOpacity,
+    ] {
+        assert_eq!(
+            parse_style_value(&[property_id], "25%"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id,
+                primitive_kind: CssPrimitiveValueKind::Percentage,
+                numeric_value: Some(25.0),
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "OpacityValue".to_string(),
+            })
+        );
+    }
     assert_eq!(
         parse_style_value(&[PropertyId::Color], "currentColor"),
         Some(ParsedStyleValue {

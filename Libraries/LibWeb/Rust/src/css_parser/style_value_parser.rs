@@ -237,6 +237,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Cursor
             | PropertyId::Display
             | PropertyId::Fill
+            | PropertyId::FillOpacity
             | PropertyId::Filter
             | PropertyId::Flex
             | PropertyId::FlexFlow
@@ -246,6 +247,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
             | PropertyId::FloodColor
+            | PropertyId::FloodOpacity
+            | PropertyId::FlexGrow
+            | PropertyId::FlexShrink
             | PropertyId::GridAutoColumns
             | PropertyId::GridAutoFlow
             | PropertyId::GridAutoRows
@@ -277,6 +281,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowClipMarginLeft
             | PropertyId::OverflowClipMarginRight
             | PropertyId::OverflowClipMarginTop
+            | PropertyId::Opacity
             | PropertyId::OutlineColor
             | PropertyId::PaintOrder
             | PropertyId::PlaceContent
@@ -296,9 +301,13 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
             | PropertyId::ShapeOutside
+            | PropertyId::ShapeImageThreshold
             | PropertyId::StopColor
+            | PropertyId::StopOpacity
             | PropertyId::Stroke
             | PropertyId::StrokeDasharray
+            | PropertyId::StrokeMiterlimit
+            | PropertyId::StrokeOpacity
             | PropertyId::TextDecoration
             | PropertyId::TextDecorationColor
             | PropertyId::TextDecorationLine
@@ -380,10 +389,19 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::AccentColor
         | PropertyId::CaretColor
         | PropertyId::Fill
+        | PropertyId::FillOpacity
         | PropertyId::FloodColor
+        | PropertyId::FloodOpacity
+        | PropertyId::FlexGrow
+        | PropertyId::FlexShrink
+        | PropertyId::Opacity
         | PropertyId::OutlineColor
+        | PropertyId::ShapeImageThreshold
         | PropertyId::StopColor
+        | PropertyId::StopOpacity
         | PropertyId::Stroke
+        | PropertyId::StrokeMiterlimit
+        | PropertyId::StrokeOpacity
         | PropertyId::TextDecorationColor => {
             rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input)
         }
@@ -541,12 +559,31 @@ fn rust_owned_generated_property_specific_style_value_kind(
         if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
             continue;
         }
+        if !component_values_satisfy_property_numeric_range(property_id, *value_type, component_values) {
+            continue;
+        }
         return Some(
             parse_rust_owned_generated_longhand_value(property_id, *value_type, filtered_input, component_values).value,
         );
     }
 
     None
+}
+
+fn component_values_satisfy_property_numeric_range(
+    property_id: PropertyId,
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+) -> bool {
+    let Some(numeric_value) = style_value_numeric_value(value_type, component_values) else {
+        return true;
+    };
+    let Some(range) = property_accepted_range_by_value_type(property_id, value_type) else {
+        return true;
+    };
+
+    let (minimum, maximum) = numeric_range_to_f64(range, value_type);
+    minimum <= numeric_value && numeric_value <= maximum
 }
 
 pub(super) fn parse_rust_owned_generated_longhand_value(

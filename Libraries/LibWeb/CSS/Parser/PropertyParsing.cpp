@@ -131,6 +131,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Cursor:
     case PropertyID::Display:
     case PropertyID::Fill:
+    case PropertyID::FillOpacity:
     case PropertyID::Filter:
     case PropertyID::Flex:
     case PropertyID::FlexFlow:
@@ -140,6 +141,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FontVariant:
     case PropertyID::FontVariationSettings:
     case PropertyID::FloodColor:
+    case PropertyID::FloodOpacity:
+    case PropertyID::FlexGrow:
+    case PropertyID::FlexShrink:
     case PropertyID::GridAutoColumns:
     case PropertyID::GridAutoFlow:
     case PropertyID::GridAutoRows:
@@ -171,6 +175,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowClipMarginLeft:
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
+    case PropertyID::Opacity:
     case PropertyID::OutlineColor:
     case PropertyID::PaintOrder:
     case PropertyID::PlaceContent:
@@ -190,9 +195,13 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ScrollbarColor:
     case PropertyID::ScrollbarGutter:
     case PropertyID::ShapeOutside:
+    case PropertyID::ShapeImageThreshold:
     case PropertyID::StopColor:
+    case PropertyID::StopOpacity:
     case PropertyID::Stroke:
     case PropertyID::StrokeDasharray:
+    case PropertyID::StrokeMiterlimit:
+    case PropertyID::StrokeOpacity:
     case PropertyID::TextDecoration:
     case PropertyID::TextDecorationColor:
     case PropertyID::TextDecorationLine:
@@ -436,8 +445,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
 
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
-                if (!metadata.has_value())
-                    return nullptr;
+                if (!metadata.has_value()) {
+                    if (*rust_style_value->value_type != ValueType::OpacityValue)
+                        return nullptr;
+                    metadata = RustComponentValueParser::PropertyNumericMetadata {
+                        .property_id = rust_style_value->property_id,
+                        .range = infinite_range,
+                    };
+                }
 
                 switch (*rust_style_value->value_type) {
                 case ValueType::Integer:
@@ -489,8 +504,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
 
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
-                if (!metadata.has_value())
-                    return nullptr;
+                if (!metadata.has_value()) {
+                    if (*rust_style_value->value_type != ValueType::OpacityValue)
+                        return nullptr;
+                    metadata = RustComponentValueParser::PropertyNumericMetadata {
+                        .property_id = rust_style_value->property_id,
+                        .range = infinite_range,
+                    };
+                }
 
                 switch (*rust_style_value->value_type) {
                 case ValueType::Integer:
