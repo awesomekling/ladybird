@@ -2013,11 +2013,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     BorderImageWidth {
         values: Vec<RustOwnedNestedPrimitiveValue>,
     },
-    Keyword(String),
-    CustomIdent {
-        value: String,
-        value_type: PropertyValueType,
-    },
+    Identifier(RustOwnedIdentifierValue),
     ListStyle(RustOwnedListStyle),
     MathDepth(RustOwnedMathDepth),
     Paint(RustOwnedPaint),
@@ -2042,10 +2038,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     ScrollbarGutter(RustOwnedScrollbarGutter),
     ScrollTimeline(RustOwnedScrollTimeline),
     Shorthand(RustOwnedStyleValueList),
-    String {
-        value: String,
-        value_type: PropertyValueType,
-    },
     TimelineName(RustOwnedTimelineName),
     TimelineScope(RustOwnedTimelineScope),
     TextWrap(RustOwnedTextWrap),
@@ -2071,7 +2063,6 @@ pub(crate) enum RustOwnedStyleValueKind {
         name: Option<String>,
     },
     Url(RustOwnedUrl),
-    CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
     FitContent(RustOwnedNestedPrimitiveValue),
     FontFamily {
@@ -2134,6 +2125,16 @@ pub(crate) enum RustOwnedPrimitiveValue {
         value: String,
         value_type: PropertyValueType,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedIdentifierValue {
+    Keyword(String),
+    CustomIdent {
+        value: String,
+        value_type: PropertyValueType,
+    },
+    CounterStyleName(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3430,7 +3431,9 @@ fn parse_rust_owned_style_value_for_property_with_mode(
                 let resolved_keyword = resolve_legacy_value_alias(property_id, value).unwrap_or(value);
                 return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::Keyword(resolved_keyword.to_string()),
+                    value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                        resolved_keyword.to_string(),
+                    )),
                 });
             }
         }
@@ -3451,10 +3454,10 @@ fn parse_rust_owned_style_value_for_property_with_mode(
         if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::CustomIdent {
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CustomIdent {
                     value: name,
                     value_type: PropertyValueType::CustomIdent,
-                },
+                }),
             });
         }
     }
@@ -3516,10 +3519,10 @@ fn parse_rust_owned_style_value_for_property_with_mode(
             if let Some(name) = parser.parse_a_custom_ident(property_custom_ident_blacklist(property_id)) {
                 return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::CustomIdent {
+                    value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CustomIdent {
                         value: name,
                         value_type: PropertyValueType::CustomIdent,
-                    },
+                    }),
                 });
             }
         }
@@ -3897,7 +3900,9 @@ fn parse_rust_owned_generated_longhand_value(
         return match counter_style {
             CounterStyle::Name(counter_style_name) => RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::CounterStyleName(counter_style_name),
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::CounterStyleName(
+                    counter_style_name,
+                )),
             },
             CounterStyle::SymbolsFunction { .. } => RustOwnedStyleValue {
                 property_id,
@@ -5021,7 +5026,9 @@ fn rust_owned_counter_definitions_style_value_kind(
     ] = component_values.as_slice()
         && value.eq_ignore_ascii_case("none")
     {
-        return Some(RustOwnedStyleValueKind::Keyword("none".to_string()));
+        return Some(RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+            "none".to_string(),
+        )));
     }
 
     let mut parser = ComponentValueParser::new(component_values);
@@ -8133,7 +8140,13 @@ fn rust_owned_primitive_style_value_kind(
             has_denominator: value == "has-denominator",
             value_type,
         }),
-        CssPrimitiveValueKind::String => RustOwnedStyleValueKind::String { value, value_type },
+        CssPrimitiveValueKind::String => RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
+            primitive_kind,
+            numeric_value,
+            secondary_numeric_value,
+            value,
+            value_type,
+        }),
         _ => RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
             primitive_kind,
             numeric_value,
@@ -9294,15 +9307,9 @@ where
             );
         }
         RustOwnedStyleValueKind::Primitive(value) => callback_rust_owned_primitive_value(callback, property_id, value),
-        RustOwnedStyleValueKind::String { value, value_type } => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::String,
-            None,
-            None,
-            value.as_bytes(),
-            *value_type,
-        ),
+        RustOwnedStyleValueKind::Identifier(value) => {
+            callback_rust_owned_identifier_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::StrokeDasharray(value) => match value {
             RustOwnedStrokeDasharray::None => callback(
                 CssStyleValueKind::StrokeDasharray,
@@ -9428,36 +9435,6 @@ where
             let _ = value_list;
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
-        RustOwnedStyleValueKind::Keyword(value) => callback(
-            CssStyleValueKind::Keyword,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            TRANSFORM_LONGHAND_CALLBACK_NONE,
-            0,
-            0,
-            0,
-            value.as_bytes(),
-            "",
-        ),
-        RustOwnedStyleValueKind::CustomIdent { value, value_type } => callback(
-            CssStyleValueKind::CustomIdent,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            0,
-            0,
-            0,
-            0,
-            value.as_bytes(),
-            property_value_type_name(*value_type),
-        ),
         RustOwnedStyleValueKind::Color {
             red,
             green,
@@ -9489,21 +9466,6 @@ where
             );
         }
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
-        RustOwnedStyleValueKind::CounterStyleName(value) => callback(
-            CssStyleValueKind::CounterStyleName,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            0,
-            0,
-            0,
-            0,
-            value.as_bytes(),
-            property_value_type_name(PropertyValueType::CounterStyle),
-        ),
         RustOwnedStyleValueKind::EasingFunction(value) => {
             callback_easing_function_style_value(callback, property_id, value);
         }
@@ -9737,6 +9699,59 @@ where
             *secondary_numeric_value,
             value.as_bytes(),
             *value_type,
+        ),
+    }
+}
+
+fn callback_rust_owned_identifier_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedIdentifierValue)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedIdentifierValue::Keyword(value) => callback(
+            CssStyleValueKind::Keyword,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            TRANSFORM_LONGHAND_CALLBACK_NONE,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            "",
+        ),
+        RustOwnedIdentifierValue::CustomIdent { value, value_type } => callback(
+            CssStyleValueKind::CustomIdent,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(*value_type),
+        ),
+        RustOwnedIdentifierValue::CounterStyleName(value) => callback(
+            CssStyleValueKind::CounterStyleName,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            value.as_bytes(),
+            property_value_type_name(PropertyValueType::CounterStyle),
         ),
     }
 }
@@ -13406,7 +13421,8 @@ fn parsed_transition_shorthand_is_invalid(items: &[RustOwnedCoordinatingValueLis
             item.style_value.property_id == PropertyId::TransitionProperty
                 && matches!(
                     &item.style_value.value,
-                    RustOwnedStyleValueKind::Keyword(value) if value.eq_ignore_ascii_case("none")
+                    RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(value))
+                        if value.eq_ignore_ascii_case("none")
                 )
         })
 }
