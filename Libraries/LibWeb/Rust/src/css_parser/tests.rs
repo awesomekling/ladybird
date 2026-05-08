@@ -2653,6 +2653,57 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(parse_rust_owned_style_value(&[PropertyId::Top], "red"), None);
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::PaddingTop], "10%"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::PaddingTop,
+            value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                value: RustOwnedNestedPrimitiveValue::Percentage(10.0),
+                value_type: PropertyValueType::Percentage,
+            }),
+        })
+    );
+    assert_eq!(parse_rust_owned_style_value(&[PropertyId::PaddingTop], "-1px"), None);
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::MarginLeft], "auto"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::MarginLeft,
+            value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword("auto".to_string())),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BorderTopWidth], "thick"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BorderTopWidth,
+            value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword("thick".to_string())),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::RowGap], "12px"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::RowGap,
+            value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                value: RustOwnedNestedPrimitiveValue::Length {
+                    value: 12.0,
+                    unit: "px".to_string(),
+                },
+                value_type: PropertyValueType::Length,
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::FontWidth], "condensed"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::FontWidth,
+            value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Token {
+                primitive_kind: CssPrimitiveValueKind::Keyword,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                value: "condensed".to_string(),
+                value_type: PropertyValueType::FontWidthCss3,
+            }),
+        })
+    );
     for (property_id, source, keyword) in [
         (PropertyId::OverflowWrap, "break-word", "break-word"),
         (PropertyId::ScrollBehavior, "smooth", "smooth"),

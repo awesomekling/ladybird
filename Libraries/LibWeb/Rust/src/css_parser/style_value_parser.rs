@@ -209,6 +209,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnimationTimingFunction
             | PropertyId::Appearance
             | PropertyId::AspectRatio
+            | PropertyId::BlockSize
             | PropertyId::BackgroundRepeat
             | PropertyId::BackgroundPosition
             | PropertyId::BackgroundPositionX
@@ -226,16 +227,25 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderCollapse
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
+            | PropertyId::BorderBlockEndWidth
+            | PropertyId::BorderBlockStartWidth
+            | PropertyId::BorderBottomWidth
             | PropertyId::BorderEndEndRadius
             | PropertyId::BorderEndStartRadius
+            | PropertyId::BorderInlineEndWidth
+            | PropertyId::BorderInlineStartWidth
             | PropertyId::BorderLeftStyle
+            | PropertyId::BorderLeftWidth
             | PropertyId::BorderRadius
             | PropertyId::BorderRightStyle
+            | PropertyId::BorderRightWidth
             | PropertyId::BorderStartEndRadius
             | PropertyId::BorderStartStartRadius
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
             | PropertyId::BorderTopStyle
+            | PropertyId::BorderTopWidth
+            | PropertyId::Bottom
             | PropertyId::BoxShadow
             | PropertyId::BoxSizing
             | PropertyId::BackdropFilter
@@ -265,6 +275,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FillRule
             | PropertyId::Filter
             | PropertyId::Flex
+            | PropertyId::FlexBasis
             | PropertyId::FlexDirection
             | PropertyId::FlexFlow
             | PropertyId::FlexWrap
@@ -274,10 +285,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontLanguageOverride
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
+            | PropertyId::FontWidth
             | PropertyId::FloodColor
             | PropertyId::FloodOpacity
             | PropertyId::FlexGrow
             | PropertyId::FlexShrink
+            | PropertyId::ColumnGap
             | PropertyId::GridAutoColumns
             | PropertyId::GridAutoFlow
             | PropertyId::GridAutoRows
@@ -288,20 +301,38 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            | PropertyId::InlineSize
             | PropertyId::InsetBlockEnd
             | PropertyId::InsetBlockStart
             | PropertyId::InsetInlineEnd
             | PropertyId::InsetInlineStart
             | PropertyId::ImageRendering
             | PropertyId::Isolation
+            | PropertyId::LetterSpacing
             | PropertyId::ListStyle
             | PropertyId::ListStylePosition
+            | PropertyId::MarginBlockEnd
+            | PropertyId::MarginBlockStart
+            | PropertyId::MarginBottom
+            | PropertyId::MarginInlineEnd
+            | PropertyId::MarginInlineStart
+            | PropertyId::MarginLeft
+            | PropertyId::MarginRight
+            | PropertyId::MarginTop
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
             | PropertyId::MathDepth
             | PropertyId::MathShift
             | PropertyId::MathStyle
+            | PropertyId::MaxBlockSize
+            | PropertyId::MaxHeight
+            | PropertyId::MaxInlineSize
+            | PropertyId::MaxWidth
+            | PropertyId::MinBlockSize
+            | PropertyId::MinHeight
+            | PropertyId::MinInlineSize
+            | PropertyId::MinWidth
             | PropertyId::MixBlendMode
             | PropertyId::ObjectFit
             | PropertyId::OverflowWrap
@@ -321,9 +352,20 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Opacity
             | PropertyId::Order
             | PropertyId::OutlineColor
+            | PropertyId::OutlineOffset
             | PropertyId::OutlineStyle
+            | PropertyId::OutlineWidth
             | PropertyId::Orphans
+            | PropertyId::PaddingBlockEnd
+            | PropertyId::PaddingBlockStart
+            | PropertyId::PaddingBottom
+            | PropertyId::PaddingInlineEnd
+            | PropertyId::PaddingInlineStart
+            | PropertyId::PaddingLeft
+            | PropertyId::PaddingRight
+            | PropertyId::PaddingTop
             | PropertyId::PaintOrder
+            | PropertyId::Perspective
             | PropertyId::PointerEvents
             | PropertyId::Position
             | PropertyId::PlaceContent
@@ -336,7 +378,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::PositionVisibility
             | PropertyId::Quotes
             | PropertyId::Resize
+            | PropertyId::Right
             | PropertyId::Rotate
+            | PropertyId::RowGap
             | PropertyId::Scale
             | PropertyId::ScrollBehavior
             | PropertyId::ScrollTimeline
@@ -345,6 +389,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ScrollbarGutter
             | PropertyId::ScrollbarWidth
             | PropertyId::ShapeRendering
+            | PropertyId::ShapeMargin
             | PropertyId::ShapeOutside
             | PropertyId::ShapeImageThreshold
             | PropertyId::StopColor
@@ -363,16 +408,19 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TextDecorationLine
             | PropertyId::TextDecorationSkipInk
             | PropertyId::TextDecorationStyle
+            | PropertyId::TextDecorationThickness
             | PropertyId::TextIndent
             | PropertyId::TextJustify
             | PropertyId::TextRendering
             | PropertyId::TextShadow
             | PropertyId::TextTransform
+            | PropertyId::TextUnderlineOffset
             | PropertyId::TextUnderlinePosition
             | PropertyId::TextWrap
             | PropertyId::TextWrapMode
             | PropertyId::TextWrapStyle
             | PropertyId::TimelineScope
+            | PropertyId::Top
             | PropertyId::TouchAction
             | PropertyId::TransformBox
             | PropertyId::TransformOrigin
@@ -465,13 +513,56 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::FillOpacity
         | PropertyId::FloodColor
         | PropertyId::FloodOpacity
+        | PropertyId::BlockSize
+        | PropertyId::BorderBlockEndWidth
+        | PropertyId::BorderBlockStartWidth
+        | PropertyId::BorderBottomWidth
+        | PropertyId::BorderInlineEndWidth
+        | PropertyId::BorderInlineStartWidth
+        | PropertyId::BorderLeftWidth
+        | PropertyId::BorderRightWidth
+        | PropertyId::BorderTopWidth
+        | PropertyId::ColumnGap
+        | PropertyId::FlexBasis
         | PropertyId::FlexGrow
         | PropertyId::FlexShrink
+        | PropertyId::FontWidth
+        | PropertyId::InlineSize
+        | PropertyId::LetterSpacing
+        | PropertyId::MarginBlockEnd
+        | PropertyId::MarginBlockStart
+        | PropertyId::MarginBottom
+        | PropertyId::MarginInlineEnd
+        | PropertyId::MarginInlineStart
+        | PropertyId::MarginLeft
+        | PropertyId::MarginRight
+        | PropertyId::MarginTop
+        | PropertyId::MaxBlockSize
+        | PropertyId::MaxHeight
+        | PropertyId::MaxInlineSize
+        | PropertyId::MaxWidth
+        | PropertyId::MinBlockSize
+        | PropertyId::MinHeight
+        | PropertyId::MinInlineSize
+        | PropertyId::MinWidth
         | PropertyId::Opacity
         | PropertyId::ColumnCount
         | PropertyId::Order
         | PropertyId::OutlineColor
+        | PropertyId::OutlineOffset
+        | PropertyId::OutlineWidth
         | PropertyId::Orphans
+        | PropertyId::PaddingBlockEnd
+        | PropertyId::PaddingBlockStart
+        | PropertyId::PaddingBottom
+        | PropertyId::PaddingInlineEnd
+        | PropertyId::PaddingInlineStart
+        | PropertyId::PaddingLeft
+        | PropertyId::PaddingRight
+        | PropertyId::PaddingTop
+        | PropertyId::Perspective
+        | PropertyId::RowGap
+        | PropertyId::ShapeMargin
         | PropertyId::ShapeImageThreshold
         | PropertyId::StopColor
         | PropertyId::StopOpacity
@@ -479,6 +570,8 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::StrokeMiterlimit
         | PropertyId::StrokeOpacity
         | PropertyId::TextDecorationColor
+        | PropertyId::TextDecorationThickness
+        | PropertyId::TextUnderlineOffset
         | PropertyId::Widows
         | PropertyId::ZIndex => rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input),
         PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),

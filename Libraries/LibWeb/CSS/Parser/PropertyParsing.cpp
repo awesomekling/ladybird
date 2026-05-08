@@ -98,6 +98,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AnimationTimingFunction:
     case PropertyID::Appearance:
     case PropertyID::AspectRatio:
+    case PropertyID::BlockSize:
     case PropertyID::BackgroundPosition:
     case PropertyID::BackgroundPositionX:
     case PropertyID::BackgroundPositionY:
@@ -115,16 +116,25 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderCollapse:
     case PropertyID::BorderBottomLeftRadius:
     case PropertyID::BorderBottomRightRadius:
+    case PropertyID::BorderBlockEndWidth:
+    case PropertyID::BorderBlockStartWidth:
+    case PropertyID::BorderBottomWidth:
     case PropertyID::BorderEndEndRadius:
     case PropertyID::BorderEndStartRadius:
+    case PropertyID::BorderInlineEndWidth:
+    case PropertyID::BorderInlineStartWidth:
     case PropertyID::BorderLeftStyle:
+    case PropertyID::BorderLeftWidth:
     case PropertyID::BorderRadius:
     case PropertyID::BorderRightStyle:
+    case PropertyID::BorderRightWidth:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
     case PropertyID::BorderTopStyle:
+    case PropertyID::BorderTopWidth:
+    case PropertyID::Bottom:
     case PropertyID::BoxShadow:
     case PropertyID::BoxSizing:
     case PropertyID::BackdropFilter:
@@ -154,6 +164,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FillRule:
     case PropertyID::Filter:
     case PropertyID::Flex:
+    case PropertyID::FlexBasis:
     case PropertyID::FlexDirection:
     case PropertyID::FlexFlow:
     case PropertyID::FlexWrap:
@@ -163,10 +174,12 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FontLanguageOverride:
     case PropertyID::FontVariant:
     case PropertyID::FontVariationSettings:
+    case PropertyID::FontWidth:
     case PropertyID::FloodColor:
     case PropertyID::FloodOpacity:
     case PropertyID::FlexGrow:
     case PropertyID::FlexShrink:
+    case PropertyID::ColumnGap:
     case PropertyID::GridAutoColumns:
     case PropertyID::GridAutoFlow:
     case PropertyID::GridAutoRows:
@@ -177,20 +190,38 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::GridTemplateAreas:
     case PropertyID::GridTemplateColumns:
     case PropertyID::GridTemplateRows:
+    case PropertyID::InlineSize:
     case PropertyID::InsetBlockEnd:
     case PropertyID::InsetBlockStart:
     case PropertyID::InsetInlineEnd:
     case PropertyID::InsetInlineStart:
     case PropertyID::ImageRendering:
     case PropertyID::Isolation:
+    case PropertyID::LetterSpacing:
     case PropertyID::ListStyle:
     case PropertyID::ListStylePosition:
+    case PropertyID::MarginBlockEnd:
+    case PropertyID::MarginBlockStart:
+    case PropertyID::MarginBottom:
+    case PropertyID::MarginInlineEnd:
+    case PropertyID::MarginInlineStart:
+    case PropertyID::MarginLeft:
+    case PropertyID::MarginRight:
+    case PropertyID::MarginTop:
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
     case PropertyID::MathDepth:
     case PropertyID::MathShift:
     case PropertyID::MathStyle:
+    case PropertyID::MaxBlockSize:
+    case PropertyID::MaxHeight:
+    case PropertyID::MaxInlineSize:
+    case PropertyID::MaxWidth:
+    case PropertyID::MinBlockSize:
+    case PropertyID::MinHeight:
+    case PropertyID::MinInlineSize:
+    case PropertyID::MinWidth:
     case PropertyID::MixBlendMode:
     case PropertyID::ObjectFit:
     case PropertyID::OverflowWrap:
@@ -210,9 +241,20 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Opacity:
     case PropertyID::Order:
     case PropertyID::OutlineColor:
+    case PropertyID::OutlineOffset:
     case PropertyID::OutlineStyle:
+    case PropertyID::OutlineWidth:
     case PropertyID::Orphans:
+    case PropertyID::PaddingBlockEnd:
+    case PropertyID::PaddingBlockStart:
+    case PropertyID::PaddingBottom:
+    case PropertyID::PaddingInlineEnd:
+    case PropertyID::PaddingInlineStart:
+    case PropertyID::PaddingLeft:
+    case PropertyID::PaddingRight:
+    case PropertyID::PaddingTop:
     case PropertyID::PaintOrder:
+    case PropertyID::Perspective:
     case PropertyID::PointerEvents:
     case PropertyID::Position:
     case PropertyID::PlaceContent:
@@ -225,7 +267,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::PositionVisibility:
     case PropertyID::Quotes:
     case PropertyID::Resize:
+    case PropertyID::Right:
     case PropertyID::Rotate:
+    case PropertyID::RowGap:
     case PropertyID::Scale:
     case PropertyID::ScrollBehavior:
     case PropertyID::ScrollTimeline:
@@ -234,6 +278,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ScrollbarGutter:
     case PropertyID::ScrollbarWidth:
     case PropertyID::ShapeRendering:
+    case PropertyID::ShapeMargin:
     case PropertyID::ShapeOutside:
     case PropertyID::ShapeImageThreshold:
     case PropertyID::StopColor:
@@ -252,16 +297,19 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TextDecorationLine:
     case PropertyID::TextDecorationSkipInk:
     case PropertyID::TextDecorationStyle:
+    case PropertyID::TextDecorationThickness:
     case PropertyID::TextIndent:
     case PropertyID::TextJustify:
     case PropertyID::TextRendering:
     case PropertyID::TextShadow:
     case PropertyID::TextTransform:
+    case PropertyID::TextUnderlineOffset:
     case PropertyID::TextUnderlinePosition:
     case PropertyID::TextWrap:
     case PropertyID::TextWrapMode:
     case PropertyID::TextWrapStyle:
     case PropertyID::TimelineScope:
+    case PropertyID::Top:
     case PropertyID::TouchAction:
     case PropertyID::TransformBox:
     case PropertyID::TransformOrigin:
