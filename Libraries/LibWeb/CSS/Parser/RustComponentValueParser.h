@@ -537,7 +537,7 @@ public:
         Optional<String> shape_outside_image_source;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Vector<String> shape_outside_basic_shape_argument_groups;
-        Optional<String> shape_outside_shape_box_source;
+        Optional<ShapeBox> shape_outside_shape_box;
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};

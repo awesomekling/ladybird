@@ -1638,12 +1638,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!basic_shape_value)
                         return nullptr;
                 }
-                if (rust_style_value->shape_outside_shape_box_source.has_value()) {
-                    auto maybe_keyword = keyword_from_string(*rust_style_value->shape_outside_shape_box_source);
-                    if (!maybe_keyword.has_value() || !keyword_to_shape_box(*maybe_keyword).has_value())
-                        return nullptr;
-                    shape_box_value = KeywordStyleValue::create(*maybe_keyword);
-                }
+                if (rust_style_value->shape_outside_shape_box.has_value())
+                    shape_box_value = KeywordStyleValue::create(to_keyword(*rust_style_value->shape_outside_shape_box));
 
                 if (basic_shape_value && !shape_box_value)
                     return basic_shape_value;

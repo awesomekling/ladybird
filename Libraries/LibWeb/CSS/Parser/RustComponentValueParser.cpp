@@ -1587,7 +1587,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     }
                     break;
                 case RustShapeOutsideEventKind::ShapeBox:
-                    style_value->shape_outside_shape_box_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->shape_outside_shape_box = static_cast<ShapeBox>(color_green);
                     break;
                 }
                 return;

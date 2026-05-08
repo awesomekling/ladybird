@@ -2571,8 +2571,17 @@ pub(crate) enum RustOwnedShapeOutside {
     Image(String),
     Shape {
         basic_shape: Option<RustOwnedBasicShape>,
-        shape_box_source: Option<String>,
+        shape_box: Option<RustOwnedShapeBox>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedShapeBox {
+    Content,
+    Padding,
+    Border,
+    Margin,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10775,15 +10784,26 @@ where
         RustOwnedShapeOutside::Image(source) => {
             callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_IMAGE, source);
         }
-        RustOwnedShapeOutside::Shape {
-            basic_shape,
-            shape_box_source,
-        } => {
+        RustOwnedShapeOutside::Shape { basic_shape, shape_box } => {
             if let Some(basic_shape) = basic_shape {
                 callback_shape_outside_basic_shape_event(callback, property_id, basic_shape);
             }
-            if let Some(source) = shape_box_source {
-                callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX, source);
+            if let Some(shape_box) = shape_box {
+                callback(
+                    CssStyleValueKind::ShapeOutside,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX,
+                    *shape_box as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
             }
         }
     }
@@ -19813,7 +19833,7 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
     }
 
     let mut basic_shape = None;
-    let mut shape_box_source = None;
+    let mut shape_box = None;
     for component_value in &component_values {
         let component_values = std::slice::from_ref(component_value);
         if basic_shape.is_none()
@@ -19825,25 +19845,21 @@ fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Option<RustOwn
             continue;
         }
 
-        if shape_box_source.is_none()
-            && component_value_is_shape_box(component_value)
-            && let Some(source) = serialize_component_values_for_reparsing(component_values, filtered_input_string)
+        if shape_box.is_none()
+            && let Some(value) = rust_owned_shape_box_from_component_value(component_value)
         {
-            shape_box_source = Some(source.to_string());
+            shape_box = Some(value);
             continue;
         }
 
         return None;
     }
 
-    if basic_shape.is_none() && shape_box_source.is_none() {
+    if basic_shape.is_none() && shape_box.is_none() {
         return None;
     }
 
-    Some(RustOwnedShapeOutside::Shape {
-        basic_shape,
-        shape_box_source,
-    })
+    Some(RustOwnedShapeOutside::Shape { basic_shape, shape_box })
 }
 
 pub(crate) fn parse_text_decoration_value(filtered_input: &[u8]) -> bool {
@@ -20013,17 +20029,33 @@ fn parse_single_column_component_value(
 }
 
 fn component_value_is_shape_box(component_value: &ComponentValue) -> bool {
+    rust_owned_shape_box_from_component_value(component_value).is_some()
+}
+
+fn rust_owned_shape_box_from_component_value(component_value: &ComponentValue) -> Option<RustOwnedShapeBox> {
     let ComponentValue::PreservedToken(Token {
         token_type: TokenType::Ident { value },
         ..
     }) = component_value
     else {
-        return false;
+        return None;
     };
 
     // https://drafts.csswg.org/css-shapes-1/#typedef-shape-box
     // <shape-box> = <box> | margin-box
-    first_is_one_of(value, &["content-box", "padding-box", "border-box", "margin-box"])
+    if value.eq_ignore_ascii_case("content-box") {
+        return Some(RustOwnedShapeBox::Content);
+    }
+    if value.eq_ignore_ascii_case("padding-box") {
+        return Some(RustOwnedShapeBox::Padding);
+    }
+    if value.eq_ignore_ascii_case("border-box") {
+        return Some(RustOwnedShapeBox::Border);
+    }
+    if value.eq_ignore_ascii_case("margin-box") {
+        return Some(RustOwnedShapeBox::Margin);
+    }
+    None
 }
 
 const TEXT_DECORATION_LINE_NONE: u8 = 1 << 0;
@@ -30664,7 +30696,7 @@ mod tests {
         RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
         RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
         RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
         RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
@@ -32525,7 +32557,7 @@ mod tests {
                         argument_groups: vec!["10px".to_string()],
                         source: "circle(10px)".to_string(),
                     }),
-                    shape_box_source: Some("border-box".to_string()),
+                    shape_box: Some(RustOwnedShapeBox::Border),
                 }),
             })
         );
@@ -32539,7 +32571,7 @@ mod tests {
                         argument_groups: vec![String::new()],
                         source: "circle()".to_string(),
                     }),
-                    shape_box_source: None,
+                    shape_box: None,
                 }),
             })
         );
@@ -34630,7 +34662,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "border-box".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
