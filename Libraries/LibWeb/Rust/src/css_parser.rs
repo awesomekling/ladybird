@@ -1860,6 +1860,7 @@ pub enum CssStyleValueKind {
     Rect,
     AspectRatio,
     AnimationName,
+    Anchor,
     AnchorNameOrScope,
     BackgroundSize,
     Border,
@@ -8320,8 +8321,9 @@ where
             callback_image_style_value(callback, property_id, image);
         }
         RustOwnedStyleValueKind::Anchor(value) => {
-            callback_source_backed_value_type_style_value(
+            callback_source_backed_value_type_kind_style_value(
                 callback,
+                CssStyleValueKind::Anchor,
                 property_id,
                 &value.source,
                 PropertyValueType::Anchor,
@@ -37480,6 +37482,19 @@ mod tests {
                 color: None,
                 value: "calc(1px + 2px)".to_string(),
                 value_type: "Length".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Top], "anchor(--target bottom, calc(1px + 2%))"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Anchor,
+                property_id: PropertyId::Top,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "anchor(--target bottom, calc(1px + 2%))".to_string(),
+                value_type: "Anchor".to_string(),
             })
         );
         assert_eq!(
