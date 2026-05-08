@@ -139,6 +139,25 @@ public:
         Inner,
     };
 
+    enum class RustListStylePosition : u8 {
+        Inside,
+        Outside,
+    };
+
+    enum class RustTextDecorationStyle : u8 {
+        Solid,
+        Double,
+        Dotted,
+        Dashed,
+        Wavy,
+    };
+
+    enum class RustTextDecorationThicknessKind : u8 {
+        Auto,
+        FromFont,
+        LengthPercentage,
+    };
+
     struct RustNestedPrimitiveValue {
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
@@ -383,11 +402,12 @@ public:
         Optional<String> flex_basis_source;
         Optional<String> flex_direction_source;
         Optional<String> flex_wrap_source;
-        Optional<String> text_decoration_line_source;
-        Optional<String> text_decoration_thickness_source;
-        Optional<String> text_decoration_style_source;
+        Optional<u8> text_decoration_line_bits;
+        Optional<RustTextDecorationThicknessKind> text_decoration_thickness_kind;
+        Optional<RustNestedPrimitiveValue> text_decoration_thickness;
+        Optional<RustTextDecorationStyle> text_decoration_style;
         Optional<String> text_decoration_color_source;
-        Optional<String> list_style_position_source;
+        Optional<RustListStylePosition> list_style_position;
         Optional<String> list_style_image_source;
         Optional<String> list_style_type_source;
         Optional<RustNestedPrimitiveValue> math_depth_integer;

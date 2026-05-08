@@ -1262,14 +1262,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == 0)
-                    style_value->text_decoration_line_source = string_from_ffi_bytes(value_ptr, value_len);
-                else if (color_red == 1)
-                    style_value->text_decoration_thickness_source = string_from_ffi_bytes(value_ptr, value_len);
-                else if (color_red == 2)
-                    style_value->text_decoration_style_source = string_from_ffi_bytes(value_ptr, value_len);
-                else
+                if (color_red == 0) {
+                    style_value->text_decoration_line_bits = color_green;
+                } else if (color_red == 1) {
+                    style_value->text_decoration_thickness_kind = static_cast<RustTextDecorationThicknessKind>(color_green);
+                    if (*style_value->text_decoration_thickness_kind == RustTextDecorationThicknessKind::LengthPercentage)
+                        style_value->text_decoration_thickness = nested_primitive_value_from_callback_payload();
+                } else if (color_red == 2) {
+                    style_value->text_decoration_style = static_cast<RustTextDecorationStyle>(color_green);
+                } else {
                     style_value->text_decoration_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ListStyle) {
                 if (!style_value.has_value())
@@ -1280,7 +1283,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (color_red == 0)
-                    style_value->list_style_position_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->list_style_position = static_cast<RustListStylePosition>(color_green);
                 else if (color_red == 1)
                     style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
                 else

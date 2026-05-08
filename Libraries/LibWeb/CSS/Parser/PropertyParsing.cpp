@@ -1840,6 +1840,65 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_rust_text_decoration_line = [](u8 bits) -> RefPtr<StyleValue const> {
+                if (bits == (1 << 0))
+                    return KeywordStyleValue::create(Keyword::None);
+
+                StyleValueVector style_values;
+                auto append_line = [&](u8 bit, TextDecorationLine line) {
+                    if (bits & bit)
+                        style_values.append(KeywordStyleValue::create(to_keyword(line)));
+                };
+                append_line(1 << 1, TextDecorationLine::Underline);
+                append_line(1 << 2, TextDecorationLine::Overline);
+                append_line(1 << 3, TextDecorationLine::LineThrough);
+                append_line(1 << 4, TextDecorationLine::Blink);
+                append_line(1 << 5, TextDecorationLine::SpellingError);
+                append_line(1 << 6, TextDecorationLine::GrammarError);
+                if (style_values.is_empty())
+                    return nullptr;
+                return StyleValueList::create(move(style_values), StyleValueList::Separator::Space);
+            };
+            auto text_decoration_style_keyword_from_rust = [](RustComponentValueParser::RustTextDecorationStyle style) {
+                switch (style) {
+                case RustComponentValueParser::RustTextDecorationStyle::Solid:
+                    return Keyword::Solid;
+                case RustComponentValueParser::RustTextDecorationStyle::Double:
+                    return Keyword::Double;
+                case RustComponentValueParser::RustTextDecorationStyle::Dotted:
+                    return Keyword::Dotted;
+                case RustComponentValueParser::RustTextDecorationStyle::Dashed:
+                    return Keyword::Dashed;
+                case RustComponentValueParser::RustTextDecorationStyle::Wavy:
+                    return Keyword::Wavy;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto list_style_position_keyword_from_rust = [](RustComponentValueParser::RustListStylePosition position) {
+                switch (position) {
+                case RustComponentValueParser::RustListStylePosition::Inside:
+                    return Keyword::Inside;
+                case RustComponentValueParser::RustListStylePosition::Outside:
+                    return Keyword::Outside;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto materialize_rust_text_decoration_thickness = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->text_decoration_thickness_kind.has_value())
+                    return nullptr;
+
+                switch (*rust_style_value->text_decoration_thickness_kind) {
+                case RustComponentValueParser::RustTextDecorationThicknessKind::Auto:
+                    return KeywordStyleValue::create(Keyword::Auto);
+                case RustComponentValueParser::RustTextDecorationThicknessKind::FromFont:
+                    return KeywordStyleValue::create(Keyword::FromFont);
+                case RustComponentValueParser::RustTextDecorationThicknessKind::LengthPercentage:
+                    if (!rust_style_value->text_decoration_thickness.has_value())
+                        return nullptr;
+                    return materialize_rust_nested_length_percentage(*rust_style_value->text_decoration_thickness, infinite_range);
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->rect_sides.size() != 4)
                     return nullptr;
@@ -3161,9 +3220,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::ListStyle:
-                if (rust_style_value->list_style_position_source.has_value() || rust_style_value->list_style_image_source.has_value() || rust_style_value->list_style_type_source.has_value()) {
-                    auto list_position = rust_style_value->list_style_position_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ListStylePosition, *rust_style_value->list_style_position_source)
+                if (rust_style_value->list_style_position.has_value() || rust_style_value->list_style_image_source.has_value() || rust_style_value->list_style_type_source.has_value()) {
+                    RefPtr<StyleValue const> list_position = rust_style_value->list_style_position.has_value()
+                        ? KeywordStyleValue::create(list_style_position_keyword_from_rust(*rust_style_value->list_style_position))
                         : property_initial_value(PropertyID::ListStylePosition);
                     auto list_image = rust_style_value->list_style_image_source.has_value()
                         ? parse_rust_source_as_property(PropertyID::ListStyleImage, *rust_style_value->list_style_image_source)
@@ -3772,15 +3831,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecoration:
-                if (rust_style_value->text_decoration_line_source.has_value() || rust_style_value->text_decoration_thickness_source.has_value() || rust_style_value->text_decoration_style_source.has_value() || rust_style_value->text_decoration_color_source.has_value()) {
-                    auto decoration_line = rust_style_value->text_decoration_line_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::TextDecorationLine, *rust_style_value->text_decoration_line_source)
+                if (rust_style_value->text_decoration_line_bits.has_value() || rust_style_value->text_decoration_thickness_kind.has_value() || rust_style_value->text_decoration_style.has_value() || rust_style_value->text_decoration_color_source.has_value()) {
+                    auto decoration_line = rust_style_value->text_decoration_line_bits.has_value()
+                        ? materialize_rust_text_decoration_line(*rust_style_value->text_decoration_line_bits)
                         : property_initial_value(PropertyID::TextDecorationLine);
-                    auto decoration_thickness = rust_style_value->text_decoration_thickness_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::TextDecorationThickness, *rust_style_value->text_decoration_thickness_source)
+                    auto decoration_thickness = rust_style_value->text_decoration_thickness_kind.has_value()
+                        ? materialize_rust_text_decoration_thickness()
                         : property_initial_value(PropertyID::TextDecorationThickness);
-                    auto decoration_style = rust_style_value->text_decoration_style_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::TextDecorationStyle, *rust_style_value->text_decoration_style_source)
+                    RefPtr<StyleValue const> decoration_style = rust_style_value->text_decoration_style.has_value()
+                        ? KeywordStyleValue::create(text_decoration_style_keyword_from_rust(*rust_style_value->text_decoration_style))
                         : property_initial_value(PropertyID::TextDecorationStyle);
                     auto decoration_color = rust_style_value->text_decoration_color_source.has_value()
                         ? parse_rust_source_as_property(PropertyID::TextDecorationColor, *rust_style_value->text_decoration_color_source)
@@ -3796,28 +3855,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecorationLine:
-                if (rust_style_value->color_red == (1 << 0)) {
+                if (auto value = materialize_rust_text_decoration_line(rust_style_value->color_red)) {
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
-                }
-                if (rust_style_value->color_red != 0) {
-                    StyleValueVector style_values;
-                    auto append_line = [&](u8 bit, TextDecorationLine line) {
-                        if (rust_style_value->color_red & bit)
-                            style_values.append(KeywordStyleValue::create(to_keyword(line)));
-                    };
-                    append_line(1 << 1, TextDecorationLine::Underline);
-                    append_line(1 << 2, TextDecorationLine::Overline);
-                    append_line(1 << 3, TextDecorationLine::LineThrough);
-                    append_line(1 << 4, TextDecorationLine::Blink);
-                    append_line(1 << 5, TextDecorationLine::SpellingError);
-                    append_line(1 << 6, TextDecorationLine::GrammarError);
-                    if (!style_values.is_empty()) {
-                        discard_rust_owned_property_value_tokens();
-                        generated_transaction.commit();
-                        return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(style_values), StyleValueList::Separator::Space) };
-                    }
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::ScrollTimeline: {
