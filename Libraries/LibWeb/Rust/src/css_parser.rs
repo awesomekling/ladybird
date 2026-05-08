@@ -1931,6 +1931,7 @@ pub enum CssStyleValueKind {
     WhiteSpace,
     WhiteSpaceTrim,
     WillChange,
+    MathFunction,
     ValueType,
 }
 
@@ -1948,7 +1949,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     AnimationName(RustOwnedAnimationName),
     AspectRatio(RustOwnedAspectRatio),
     BackgroundSize(RustOwnedBackgroundSizeList),
-    Calculated(RustOwnedMathFunction),
     ColorScheme(RustOwnedColorScheme),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
@@ -9501,15 +9501,6 @@ where
             value.unit.as_bytes(),
             value.value_type,
         ),
-        RustOwnedStyleValueKind::Calculated(function) => {
-            let _ = function;
-            callback_style_value_type(
-                callback,
-                CssStyleValueKind::ValueType,
-                property_id,
-                PropertyValueType::Number,
-            );
-        }
         RustOwnedStyleValueKind::Function(function) | RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             let _ = function;
         }
@@ -9850,7 +9841,13 @@ where
             property_value_type_name(PropertyValueType::ViewFunction),
         ),
         RustOwnedStyleValueKind::MathFunction { value_type, function } => {
-            callback_source_backed_value_type_style_value(callback, property_id, &function.source, *value_type);
+            callback_source_backed_value_type_kind_style_value(
+                callback,
+                CssStyleValueKind::MathFunction,
+                property_id,
+                &function.source,
+                *value_type,
+            );
         }
         RustOwnedStyleValueKind::UnresolvedValueType { value_type, source } => {
             callback_source_backed_value_type_style_value(callback, property_id, source, *value_type);
@@ -10714,8 +10711,26 @@ fn callback_source_backed_value_type_style_value<C>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    callback(
+    callback_source_backed_value_type_kind_style_value(
+        callback,
         CssStyleValueKind::ValueType,
+        property_id,
+        source,
+        value_type,
+    );
+}
+
+fn callback_source_backed_value_type_kind_style_value<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    source: &str,
+    value_type: PropertyValueType,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
         property_id,
         CssPrimitiveValueKind::Invalid,
         false,
@@ -37457,7 +37472,7 @@ mod tests {
         assert_eq!(
             parse_style_value(&[PropertyId::MarginLeft], "calc(1px + 2px)"),
             Some(ParsedStyleValue {
-                kind: CssStyleValueKind::ValueType,
+                kind: CssStyleValueKind::MathFunction,
                 property_id: PropertyId::MarginLeft,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
                 numeric_value: None,

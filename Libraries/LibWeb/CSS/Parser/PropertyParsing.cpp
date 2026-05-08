@@ -4936,6 +4936,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 }
                 break;
+            case FFI::CssStyleValueKind::MathFunction:
             case FFI::CssStyleValueKind::Primitive:
             case FFI::CssStyleValueKind::ValueType:
                 if (rust_style_value->value_type.has_value()) {
