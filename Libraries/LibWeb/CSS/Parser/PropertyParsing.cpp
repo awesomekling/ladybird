@@ -5216,20 +5216,7 @@ RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentVal
         PropertyID::TransitionBehavior
     };
 
-    auto parsed_value = parse_coordinating_value_list_shorthand(tokens, PropertyID::Transition, longhand_ids);
-
-    if (!parsed_value)
-        return nullptr;
-
-    // https://drafts.csswg.org/css-transitions-1/#transition-shorthand-property
-    // If there is more than one <single-transition> in the shorthand, and any of the transitions has none as the
-    // <single-transition-property>, then the declaration is invalid.
-    auto const& transition_properties = parsed_value->as_shorthand().longhand(PropertyID::TransitionProperty)->as_value_list().values();
-
-    if (transition_properties.size() > 1 && transition_properties.contains([](auto const& transition_property) { return transition_property->to_keyword() == Keyword::None; }))
-        return nullptr;
-
-    return parsed_value;
+    return parse_coordinating_value_list_shorthand(tokens, PropertyID::Transition, longhand_ids);
 }
 
 RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)

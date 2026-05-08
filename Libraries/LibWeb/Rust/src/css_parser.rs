@@ -10367,7 +10367,57 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
         return None;
     }
 
+    if parsed_coordinating_value_list_shorthand_is_invalid(property_ids, &items) {
+        return None;
+    }
+
     Some(items)
+}
+
+fn parsed_coordinating_value_list_shorthand_is_invalid(
+    property_ids: &[u16],
+    items: &[RustOwnedCoordinatingValueListShorthandItem],
+) -> bool {
+    if is_transition_shorthand_property_list(property_ids) {
+        return parsed_transition_shorthand_is_invalid(items);
+    }
+
+    false
+}
+
+fn is_transition_shorthand_property_list(property_ids: &[u16]) -> bool {
+    let property_ids = property_ids
+        .iter()
+        .filter_map(|property_id| property_id_from_u16(*property_id))
+        .collect::<Vec<_>>();
+
+    property_ids.len() == 5
+        && property_ids.contains(&PropertyId::TransitionProperty)
+        && property_ids.contains(&PropertyId::TransitionDuration)
+        && property_ids.contains(&PropertyId::TransitionTimingFunction)
+        && property_ids.contains(&PropertyId::TransitionDelay)
+        && property_ids.contains(&PropertyId::TransitionBehavior)
+}
+
+fn parsed_transition_shorthand_is_invalid(items: &[RustOwnedCoordinatingValueListShorthandItem]) -> bool {
+    let parsed_layer_count = items
+        .iter()
+        .map(|item| item.layer_index)
+        .max()
+        .map_or(0, |layer_index| layer_index + 1);
+
+    // https://drafts.csswg.org/css-transitions-1/#transition-shorthand-property
+    // If there is more than one <single-transition> in the shorthand, and any
+    // of the transitions has none as the <single-transition-property>, then the
+    // declaration is invalid.
+    parsed_layer_count > 1
+        && items.iter().any(|item| {
+            item.style_value.property_id == PropertyId::TransitionProperty
+                && matches!(
+                    &item.style_value.value,
+                    RustOwnedStyleValueKind::Keyword(value) if value.eq_ignore_ascii_case("none")
+                )
+        })
 }
 
 pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
@@ -31576,6 +31626,19 @@ mod tests {
                     PropertyId::TransitionBehavior,
                 ],
                 "opacity,"
+            ),
+            None
+        );
+        assert_eq!(
+            parse_coordinating_shorthand(
+                &[
+                    PropertyId::TransitionProperty,
+                    PropertyId::TransitionDuration,
+                    PropertyId::TransitionTimingFunction,
+                    PropertyId::TransitionDelay,
+                    PropertyId::TransitionBehavior,
+                ],
+                "none, opacity 1s"
             ),
             None
         );
