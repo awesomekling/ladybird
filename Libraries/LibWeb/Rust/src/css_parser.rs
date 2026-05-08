@@ -1845,6 +1845,7 @@ pub enum CssStyleValueKind {
     EasingFunction,
     FitContent,
     Image,
+    ColorFunction,
     FontFamily,
     FontFeatureSettings,
     FontLanguageOverride,
@@ -1953,6 +1954,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     AspectRatio(RustOwnedAspectRatio),
     BackgroundSize(RustOwnedBackgroundSizeList),
     ColorScheme(RustOwnedColorScheme),
+    ColorFunction(RustOwnedSourceBackedStyleValue),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
     CornerShape(RustOwnedCornerShape),
@@ -2220,6 +2222,12 @@ pub(crate) struct RustOwnedAnchorFunction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorSizeFunction {
+    source: String,
+    value_type: PropertyValueType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedSourceBackedStyleValue {
     source: String,
     value_type: PropertyValueType,
 }
@@ -3967,6 +3975,22 @@ fn parse_rust_owned_generated_longhand_value(
                 },
             },
         };
+    }
+
+    if value_type == PropertyValueType::Color
+        && let [ComponentValue::Function(function)] = component_values
+    {
+        // https://drafts.csswg.org/css-color-4/#typedef-color
+        // <color> = <absolute-color-base> | currentcolor | <system-color> | <contrast-color()> | <device-cmyk()>
+        if component_value_parse_as_color_function(function)
+            && let Some(source) =
+                serialize_component_values_for_reparsing(component_values, &filtered_input_to_string(filtered_input))
+        {
+            return RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::ColorFunction(RustOwnedSourceBackedStyleValue { source, value_type }),
+            };
+        }
     }
 
     if value_type == PropertyValueType::DashedIdent {
@@ -9736,6 +9760,15 @@ where
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
+        RustOwnedStyleValueKind::ColorFunction(value) => {
+            callback_source_backed_value_type_kind_style_value(
+                callback,
+                CssStyleValueKind::ColorFunction,
+                property_id,
+                &value.source,
+                value.value_type,
+            );
+        }
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::CounterStyleName(value) => callback(
             CssStyleValueKind::CounterStyleName,
@@ -33226,17 +33259,17 @@ mod tests {
         RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle,
         RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
         RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
-        RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline,
-        RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
-        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
+        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+        RustOwnedTextDecorationLine, RustOwnedTextDecorationThickness, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
+        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload,
+        RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
         TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
@@ -35062,6 +35095,16 @@ mod tests {
                     alpha: 255,
                     name: Some("red".to_string()),
                 },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Color], "color-mix(in oklab, red 40%, blue)"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Color,
+                value: RustOwnedStyleValueKind::ColorFunction(RustOwnedSourceBackedStyleValue {
+                    source: "color-mix(in oklab, red 40%, blue)".to_string(),
+                    value_type: PropertyValueType::Color,
+                }),
             })
         );
         assert_eq!(
@@ -37185,6 +37228,19 @@ mod tests {
                 secondary_numeric_value: None,
                 color: None,
                 value: "currentColor".to_string(),
+                value_type: "Color".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_style_value(&[PropertyId::Color], "color-mix(in oklab, red 40%, blue)"),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::ColorFunction,
+                property_id: PropertyId::Color,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: "color-mix(in oklab, red 40%, blue)".to_string(),
                 value_type: "Color".to_string(),
             })
         );
