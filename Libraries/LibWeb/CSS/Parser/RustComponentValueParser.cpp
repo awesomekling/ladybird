@@ -1747,6 +1747,41 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 };
             } else if (kind == FFI::CssStyleValueKind::ContainerType) {
                 value.container_type = static_cast<FFI::CssContainerTypeValueKind>(color_red);
+            } else if (kind == FFI::CssStyleValueKind::Counter) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Counter);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                switch (static_cast<RustCounterEventKind>(color_red)) {
+                case RustCounterEventKind::Function:
+                    style_value->counter_function = static_cast<RustCounterFunctionKind>(color_green);
+                    style_value->counter_name = fly_string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case RustCounterEventKind::JoinString:
+                    style_value->counter_join_string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case RustCounterEventKind::StyleName:
+                    style_value->counter_style = CounterStyle {
+                        .kind = FFI::CssCounterStyleKind::Name,
+                        .symbols_type = FFI::CssCounterStyleSymbolsType::Symbolic,
+                        .name = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    };
+                    break;
+                case RustCounterEventKind::StyleSymbols:
+                    style_value->counter_style = CounterStyle {
+                        .kind = FFI::CssCounterStyleKind::SymbolsFunction,
+                        .symbols_type = static_cast<FFI::CssCounterStyleSymbolsType>(color_green),
+                    };
+                    break;
+                case RustCounterEventKind::StyleSymbol:
+                    VERIFY(style_value->counter_style.has_value());
+                    style_value->counter_style->symbols.append(fly_string_from_ffi_bytes(value_ptr, value_len));
+                    break;
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::CounterDefinitions) {
                 if (!style_value.has_value()) {
                     style_value = move(value);

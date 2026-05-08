@@ -1549,13 +1549,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }();
                 return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
             };
-            auto materialize_rust_counter = [&](RustComponentValueParser::RustContentEvent const& event) -> RefPtr<StyleValue const> {
-                auto counter_style = materialize_rust_counter_style(event.counter_style);
-                switch (event.counter_function) {
+            auto materialize_rust_counter = [&](RustComponentValueParser::RustCounterFunctionKind function, FlyString const& name, FlyString const& join_string, Optional<RustComponentValueParser::CounterStyle> const& counter_style) -> RefPtr<StyleValue const> {
+                auto counter_style_value = materialize_rust_counter_style(counter_style);
+                switch (function) {
                 case RustComponentValueParser::RustCounterFunctionKind::Counter:
-                    return CounterStyleValue::create_counter(event.counter_name, counter_style);
+                    return CounterStyleValue::create_counter(name, counter_style_value);
                 case RustComponentValueParser::RustCounterFunctionKind::Counters:
-                    return CounterStyleValue::create_counters(event.counter_name, event.counter_join_string, counter_style);
+                    return CounterStyleValue::create_counters(name, join_string, counter_style_value);
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -1641,7 +1641,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         content_values.append(value.release_nonnull());
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemCounter:
-                        value = materialize_rust_counter(event);
+                        value = materialize_rust_counter(event.counter_function, event.counter_name, event.counter_join_string, event.counter_style);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
@@ -1650,7 +1650,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         alt_text_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::AltTextCounter:
-                        value = materialize_rust_counter(event);
+                        value = materialize_rust_counter(event.counter_function, event.counter_name, event.counter_join_string, event.counter_style);
                         if (!value)
                             return nullptr;
                         alt_text_values.append(value.release_nonnull());
@@ -2400,6 +2400,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             }
+            case FFI::CssStyleValueKind::Counter:
+                if (rust_style_value->counter_function.has_value()) {
+                    auto value = materialize_rust_counter(*rust_style_value->counter_function, rust_style_value->counter_name, rust_style_value->counter_join_string, rust_style_value->counter_style);
+                    if (!value)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                }
+                break;
             case FFI::CssStyleValueKind::CounterDefinitions:
                 if (!rust_style_value->counter_definitions.is_empty()) {
                     VERIFY(rust_style_value->counter_definitions.size() == rust_style_value->counter_definition_value_sources.size());

@@ -1866,6 +1866,7 @@ pub enum CssStyleValueKind {
     ColorScheme,
     Contain,
     ContainerType,
+    Counter,
     CounterDefinitions,
     BorderRadius,
     Columns,
@@ -2211,7 +2212,6 @@ pub(crate) struct RustOwnedCounterFunction {
     counter_name: String,
     join_string: Option<String>,
     counter_style: Option<CounterStyle>,
-    source: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4124,7 +4124,6 @@ fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option
         return Some(RustOwnedStyleValueKind::Counter(rust_owned_counter_function_value(
             function,
             filtered_input_string,
-            filtered_input_to_string(filtered_input),
         )?));
     }
 
@@ -4133,7 +4132,6 @@ fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option
         return Some(RustOwnedStyleValueKind::Counter(rust_owned_counters_function_value(
             function,
             filtered_input_string,
-            filtered_input_to_string(filtered_input),
         )?));
     }
 
@@ -4143,7 +4141,6 @@ fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option
 fn rust_owned_counter_function_value(
     function: &Function,
     filtered_input_string: &str,
-    source: String,
 ) -> Option<RustOwnedCounterFunction> {
     let groups = split_component_values_on_comma(&function.value);
     if groups.is_empty() || groups.len() > 2 {
@@ -4165,14 +4162,12 @@ fn rust_owned_counter_function_value(
         counter_name,
         join_string: None,
         counter_style,
-        source,
     })
 }
 
 fn rust_owned_counters_function_value(
     function: &Function,
     filtered_input_string: &str,
-    source: String,
 ) -> Option<RustOwnedCounterFunction> {
     let groups = split_component_values_on_comma(&function.value);
     if groups.len() < 2 || groups.len() > 3 {
@@ -4195,7 +4190,6 @@ fn rust_owned_counters_function_value(
         counter_name,
         join_string: Some(join_string),
         counter_style,
-        source,
     })
 }
 
@@ -7554,12 +7548,7 @@ where
             );
         }
         RustOwnedStyleValueKind::Counter(value) => {
-            callback_source_backed_value_type_style_value(
-                callback,
-                property_id,
-                &value.source,
-                PropertyValueType::Counter,
-            );
+            callback_counter_function_style_value(callback, CssStyleValueKind::Counter, property_id, value);
         }
         RustOwnedStyleValueKind::ImageSet(_) => {
             callback_style_value_type(
@@ -9762,6 +9751,11 @@ const CONTENT_CALLBACK_COUNTER_JOIN_STRING: u8 = 8;
 const CONTENT_CALLBACK_COUNTER_STYLE_NAME: u8 = 9;
 const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOLS: u8 = 10;
 const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOL: u8 = 11;
+const COUNTER_CALLBACK_FUNCTION: u8 = 0;
+const COUNTER_CALLBACK_JOIN_STRING: u8 = 1;
+const COUNTER_CALLBACK_STYLE_NAME: u8 = 2;
+const COUNTER_CALLBACK_STYLE_SYMBOLS: u8 = 3;
+const COUNTER_CALLBACK_STYLE_SYMBOL: u8 = 4;
 const COUNTER_FUNCTION_COUNTER: u8 = 0;
 const COUNTER_FUNCTION_COUNTERS: u8 = 1;
 const FILTER_VALUE_LIST_CALLBACK_NONE: u8 = 0;
@@ -9967,6 +9961,108 @@ where
                 );
                 for symbol in symbols {
                     callback_content_event(callback, property_id, CONTENT_CALLBACK_COUNTER_STYLE_SYMBOL, symbol);
+                }
+            }
+        }
+    }
+}
+
+fn callback_counter_function_style_value<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    counter: &RustOwnedCounterFunction,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        style_value_kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        COUNTER_CALLBACK_FUNCTION,
+        match counter.function {
+            RustOwnedCounterFunctionKind::Counter => COUNTER_FUNCTION_COUNTER,
+            RustOwnedCounterFunctionKind::Counters => COUNTER_FUNCTION_COUNTERS,
+        },
+        0,
+        0,
+        counter.counter_name.as_bytes(),
+        "",
+    );
+
+    if let Some(join_string) = counter.join_string.as_ref() {
+        callback(
+            style_value_kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            COUNTER_CALLBACK_JOIN_STRING,
+            0,
+            0,
+            0,
+            join_string.as_bytes(),
+            "",
+        );
+    }
+
+    if let Some(counter_style) = counter.counter_style.as_ref() {
+        match counter_style {
+            CounterStyle::Name(name) => {
+                callback(
+                    style_value_kind,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    COUNTER_CALLBACK_STYLE_NAME,
+                    0,
+                    0,
+                    0,
+                    name.as_bytes(),
+                    "",
+                );
+            }
+            CounterStyle::SymbolsFunction { symbols_type, symbols } => {
+                callback(
+                    style_value_kind,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    COUNTER_CALLBACK_STYLE_SYMBOLS,
+                    *symbols_type as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+                for symbol in symbols {
+                    callback(
+                        style_value_kind,
+                        property_id,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        COUNTER_CALLBACK_STYLE_SYMBOL,
+                        0,
+                        0,
+                        0,
+                        symbol.as_bytes(),
+                        "",
+                    );
                 }
             }
         }
@@ -19464,14 +19560,12 @@ fn component_value_parse_as_content_counter(
         return None;
     };
 
-    let source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
     if function.name.eq_ignore_ascii_case("counter") {
-        return rust_owned_counter_function_value(function, filtered_input_string, source);
+        return rust_owned_counter_function_value(function, filtered_input_string);
     }
 
     if function.name.eq_ignore_ascii_case("counters") {
-        return rust_owned_counters_function_value(function, filtered_input_string, source);
+        return rust_owned_counters_function_value(function, filtered_input_string);
     }
 
     None
@@ -31120,7 +31214,6 @@ mod tests {
                         counter_name: "section".to_string(),
                         join_string: None,
                         counter_style: Some(CounterStyle::Name("upper-roman".to_string())),
-                        source: "counter(section, upper-roman)".to_string(),
                     })],
                     alt_text: vec![],
                 }),
@@ -31365,7 +31458,6 @@ mod tests {
                             symbols_type: CssCounterStyleSymbolsType::Symbolic,
                             symbols: vec!["*".to_string(), "**".to_string()],
                         }),
-                        source: "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
                     })],
                     alt_text: vec![],
                 }),

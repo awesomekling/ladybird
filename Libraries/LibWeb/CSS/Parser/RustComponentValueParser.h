@@ -272,6 +272,14 @@ public:
         Counters,
     };
 
+    enum class RustCounterEventKind : u8 {
+        Function,
+        JoinString,
+        StyleName,
+        StyleSymbols,
+        StyleSymbol,
+    };
+
     struct CounterStyle {
         FFI::CssCounterStyleKind kind;
         FFI::CssCounterStyleSymbolsType symbols_type;
@@ -381,6 +389,10 @@ public:
         Vector<String> border_image_width_sources;
         FFI::CssContainValue contain {};
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
+        Optional<RustCounterFunctionKind> counter_function;
+        FlyString counter_name;
+        FlyString counter_join_string;
+        Optional<CounterStyle> counter_style;
         Vector<CounterDefinition> counter_definitions;
         Vector<String> counter_definition_value_sources;
         Vector<String> background_size_sources;
