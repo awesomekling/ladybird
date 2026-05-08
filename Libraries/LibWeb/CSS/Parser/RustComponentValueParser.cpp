@@ -1229,6 +1229,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
                 style_value->border_image_slice_sources.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
+            } else if (kind == FFI::CssStyleValueKind::BorderImageOutset || kind == FFI::CssStyleValueKind::BorderImageWidth) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == kind);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                if (kind == FFI::CssStyleValueKind::BorderImageOutset)
+                    style_value->border_image_outset_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                else
+                    style_value->border_image_width_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (kind == FFI::CssStyleValueKind::TransformOrigin) {
                 if (!style_value.has_value())
                     style_value = move(value);

@@ -272,7 +272,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::BackgroundPositionY:
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
+        case PropertyID::BorderImageOutset:
         case PropertyID::BorderImageSlice:
+        case PropertyID::BorderImageWidth:
         case PropertyID::BorderBottomLeftRadius:
         case PropertyID::BorderBottomRightRadius:
         case PropertyID::BorderEndEndRadius:
@@ -1366,6 +1368,32 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_border_image_outset = [&](String const& source) -> RefPtr<StyleValue const> {
+                if (auto value = parse_rust_source_as_non_negative_number(source))
+                    return value;
+                return parse_rust_source_as_non_negative_length(source);
+            };
+            auto parse_rust_source_as_border_image_width = [&](String const& source) -> RefPtr<StyleValue const> {
+                if (source.equals_ignoring_ascii_case("auto"sv))
+                    return KeywordStyleValue::create(Keyword::Auto);
+                if (auto value = parse_rust_source_as_non_negative_number(source))
+                    return value;
+                return parse_rust_source_as_non_negative_length_percentage(source);
+            };
+            auto materialize_rust_style_value_list = [&](Vector<String> const& sources, auto parse_source) -> RefPtr<StyleValue const> {
+                if (sources.is_empty())
+                    return nullptr;
+                StyleValueVector values;
+                for (auto const& source : sources) {
+                    auto value = parse_source(source);
+                    if (!value)
+                        return nullptr;
+                    values.append(value.release_nonnull());
+                }
+                if (values.size() == 1)
+                    return values[0];
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+            };
             auto parse_rust_source_as_angle = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -2223,6 +2251,20 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             bottom.release_nonnull(),
                             left.release_nonnull(),
                             rust_style_value->border_image_slice_fill) };
+                }
+                break;
+            case FFI::CssStyleValueKind::BorderImageOutset:
+                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_outset_sources, parse_rust_source_as_border_image_outset)) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                }
+                break;
+            case FFI::CssStyleValueKind::BorderImageWidth:
+                if (auto value = materialize_rust_style_value_list(rust_style_value->border_image_width_sources, parse_rust_source_as_border_image_width)) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
             case FFI::CssStyleValueKind::Columns:
@@ -3837,7 +3879,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_border_value(property_id, tokens); });
     case PropertyID::BorderImage:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_image_value(tokens); });
+    case PropertyID::BorderImageOutset:
     case PropertyID::BorderImageSlice:
+    case PropertyID::BorderImageWidth:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
@@ -4592,9 +4636,54 @@ RefPtr<StyleValue const> Parser::parse_border_image_value(TokenStream<ComponentV
         auto remaining_values = property_maximum_value_count(property_id);
         StyleValueVector values;
         while (inner_tokens.has_next_token() && remaining_values > 0) {
+            inner_tokens.discard_whitespace();
             if (delimiter.has_value() && inner_tokens.next_token().is_delim(*delimiter))
                 break;
-            auto value = parse_css_value_for_property(property_id, inner_tokens);
+            auto value = [&]() -> RefPtr<StyleValue const> {
+                if (property_id == PropertyID::BorderImageWidth) {
+                    if (inner_tokens.next_token().is_ident("auto"sv)) {
+                        auto transaction = inner_tokens.begin_transaction();
+                        inner_tokens.discard_a_token();
+                        transaction.commit();
+                        return KeywordStyleValue::create(Keyword::Auto);
+                    }
+                    {
+                        auto transaction = inner_tokens.begin_transaction();
+                        if (auto number = parse_number_value(inner_tokens, non_negative_range)) {
+                            transaction.commit();
+                            return number.release_nonnull();
+                        }
+                    }
+                    {
+                        auto transaction = inner_tokens.begin_transaction();
+                        if (auto length_percentage = parse_length_percentage_value(inner_tokens, non_negative_range, non_negative_range)) {
+                            transaction.commit();
+                            return length_percentage.release_nonnull();
+                        }
+                    }
+                    return nullptr;
+                }
+
+                if (property_id == PropertyID::BorderImageOutset) {
+                    {
+                        auto transaction = inner_tokens.begin_transaction();
+                        if (auto number = parse_number_value(inner_tokens, non_negative_range)) {
+                            transaction.commit();
+                            return number.release_nonnull();
+                        }
+                    }
+                    {
+                        auto transaction = inner_tokens.begin_transaction();
+                        if (auto length = parse_length_value(inner_tokens, non_negative_range)) {
+                            transaction.commit();
+                            return length.release_nonnull();
+                        }
+                    }
+                    return nullptr;
+                }
+
+                return parse_css_value_for_property(property_id, inner_tokens);
+            }();
             if (!value)
                 break;
             values.append(*value);

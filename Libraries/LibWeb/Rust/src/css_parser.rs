@@ -1857,7 +1857,9 @@ pub enum CssStyleValueKind {
     AnimationName,
     AnchorNameOrScope,
     BackgroundSize,
+    BorderImageOutset,
     BorderImageSlice,
+    BorderImageWidth,
     ColorScheme,
     Contain,
     ContainerType,
@@ -1979,7 +1981,13 @@ pub(crate) enum RustOwnedStyleValueKind {
     GuaranteedInvalid,
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
+    BorderImageOutset {
+        sources: Vec<String>,
+    },
     BorderImageSlice(RustOwnedBorderImageSlice),
+    BorderImageWidth {
+        sources: Vec<String>,
+    },
     Integer {
         value: i32,
         value_type: PropertyValueType,
@@ -3285,7 +3293,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionX
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
+            | PropertyId::BorderImageOutset
             | PropertyId::BorderImageSlice
+            | PropertyId::BorderImageWidth
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderEndEndRadius
@@ -3411,7 +3421,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
+        PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),
         PropertyId::BorderImageSlice => rust_owned_border_image_slice_style_value_kind(filtered_input),
+        PropertyId::BorderImageWidth => rust_owned_border_image_width_style_value_kind(filtered_input),
         PropertyId::BorderBottomLeftRadius
         | PropertyId::BorderBottomRightRadius
         | PropertyId::BorderEndEndRadius
@@ -5331,6 +5343,63 @@ fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     }))
 }
 
+fn rust_owned_one_to_four_sources<F>(filtered_input: &[u8], predicate: F) -> Option<Vec<String>>
+where
+    F: Fn(&ComponentValue) -> bool,
+{
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let mut sources = vec![];
+
+    for component_value in component_values {
+        if is_whitespace_component_value(component_value) {
+            continue;
+        }
+
+        if sources.len() == 4 || !predicate(component_value) {
+            return None;
+        }
+
+        sources.push(serialize_component_values_for_reparsing(
+            std::slice::from_ref(component_value),
+            &source,
+        )?);
+    }
+
+    if sources.is_empty() {
+        return None;
+    }
+
+    Some(sources)
+}
+
+fn component_value_parse_as_border_image_outset(component_value: &ComponentValue) -> bool {
+    component_value_parse_as_non_negative_number(component_value)
+        || component_value_parse_as_non_negative_length(component_value)
+}
+
+fn rust_owned_border_image_outset_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-backgrounds-3/#border-image-outset
+    // <'border-image-outset'> = [ <length [0,∞]> | <number [0,∞]> ]{1,4}
+    let sources = rust_owned_one_to_four_sources(filtered_input, component_value_parse_as_border_image_outset)?;
+    Some(RustOwnedStyleValueKind::BorderImageOutset { sources })
+}
+
+fn component_value_parse_as_border_image_width(component_value: &ComponentValue) -> bool {
+    component_value_is_ident(Some(component_value), "auto")
+        || component_value_parse_as_non_negative_length_percentage(component_value)
+        || component_value_parse_as_non_negative_number(component_value)
+}
+
+fn rust_owned_border_image_width_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-backgrounds-3/#border-image-width
+    // <'border-image-width'> = [ <length-percentage [0,∞]> | <number [0,∞]> | auto ]{1,4}
+    let sources = rust_owned_one_to_four_sources(filtered_input, component_value_parse_as_border_image_width)?;
+    Some(RustOwnedStyleValueKind::BorderImageWidth { sources })
+}
+
 fn rust_owned_border_image_slice_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -7227,6 +7296,25 @@ where
                 );
             }
         }
+        RustOwnedStyleValueKind::BorderImageOutset { sources } => {
+            for source in sources {
+                callback(
+                    CssStyleValueKind::BorderImageOutset,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::BorderImageSlice(value) => {
             for source in &value.sources {
                 callback(
@@ -7238,6 +7326,25 @@ where
                     false,
                     0.0,
                     value.fill.into(),
+                    0,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::BorderImageWidth { sources } => {
+            for source in sources {
+                callback(
+                    CssStyleValueKind::BorderImageWidth,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
                     0,
                     0,
                     0,
@@ -29227,6 +29334,32 @@ mod tests {
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10% fill 20"),
+            None
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageOutset], "1px 2 3px 4"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderImageOutset,
+                value: RustOwnedStyleValueKind::BorderImageOutset {
+                    sources: vec!["1px".to_string(), "2".to_string(), "3px".to_string(), "4".to_string(),],
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageOutset], "1%"),
+            None
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageWidth], "1px 2% 3 auto"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderImageWidth,
+                value: RustOwnedStyleValueKind::BorderImageWidth {
+                    sources: vec!["1px".to_string(), "2%".to_string(), "3".to_string(), "auto".to_string(),],
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderImageWidth], "-1px"),
             None
         );
         assert_eq!(
