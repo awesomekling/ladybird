@@ -2013,7 +2013,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     },
     BorderImageSlice(RustOwnedBorderImageSlice),
     BorderImageWidth {
-        values: Vec<RustOwnedBorderImageWidth>,
+        values: Vec<RustOwnedNestedPrimitiveValue>,
     },
     Integer {
         value: i32,
@@ -2271,7 +2271,7 @@ pub(crate) enum RustOwnedImageKind {
 pub(crate) struct RustOwnedBasicShape {
     kind: RustOwnedBasicShapeKind,
     fill_rule: RustOwnedBasicShapeFillRule,
-    rectangle_components: Vec<RustOwnedBasicShapeRectangleComponent>,
+    rectangle_components: Vec<RustOwnedNestedPrimitiveValue>,
     rectangle_border_radius: Option<RustOwnedBorderRadius>,
     radial_shape_radius: Vec<RustOwnedBasicShapeRadiusComponent>,
     radial_shape_position: Option<RustOwnedResolvedPosition>,
@@ -2301,12 +2301,6 @@ pub(crate) enum RustOwnedBasicShapeFillRule {
 pub(crate) struct RustOwnedBasicShapePolygonPoint {
     x: RustOwnedNestedPrimitiveValue,
     y: RustOwnedNestedPrimitiveValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedBasicShapeRectangleComponent {
-    LengthPercentage(RustOwnedNestedPrimitiveValue),
-    Auto,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2534,12 +2528,6 @@ pub(crate) struct RustOwnedBorderImageSlice {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageOutset {
     value: RustOwnedNestedPrimitiveValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedBorderImageWidth {
-    Auto,
-    Value(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2958,7 +2946,7 @@ pub(crate) struct RustOwnedScrollbarGutter {
 pub(crate) struct RustOwnedBorderImage {
     source: Option<RustOwnedBorderImageSource>,
     slice: Option<RustOwnedBorderImageSlice>,
-    width: Option<Vec<RustOwnedBorderImageWidth>>,
+    width: Option<Vec<RustOwnedNestedPrimitiveValue>>,
     outset: Option<Vec<RustOwnedBorderImageOutset>>,
     repeat: Option<Vec<RustOwnedBorderImageRepeat>>,
 }
@@ -6268,7 +6256,7 @@ fn component_value_parse_as_border_image_width(component_value: &ComponentValue)
 fn consume_border_image_width_values(
     parser: &mut ComponentValueParser,
     source: &str,
-) -> Option<Vec<RustOwnedBorderImageWidth>> {
+) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
     parser.discard_whitespace();
     let mut values = Vec::new();
 
@@ -6332,7 +6320,7 @@ fn rust_owned_border_image_width_style_value_kind(filtered_input: &[u8]) -> Opti
     Some(RustOwnedStyleValueKind::BorderImageWidth { values })
 }
 
-fn rust_owned_one_to_four_border_image_widths(filtered_input: &[u8]) -> Option<Vec<RustOwnedBorderImageWidth>> {
+fn rust_owned_one_to_four_border_image_widths(filtered_input: &[u8]) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
     let source = filtered_input_to_string(filtered_input);
     rust_owned_one_to_four_values(filtered_input, |component_value| {
         if !component_value_parse_as_border_image_width(component_value) {
@@ -6345,14 +6333,12 @@ fn rust_owned_one_to_four_border_image_widths(filtered_input: &[u8]) -> Option<V
 fn rust_owned_border_image_width_from_component_value(
     component_value: &ComponentValue,
     source: &str,
-) -> Option<RustOwnedBorderImageWidth> {
+) -> Option<RustOwnedNestedPrimitiveValue> {
     if component_value_is_ident(Some(component_value), "auto") {
-        return Some(RustOwnedBorderImageWidth::Auto);
+        return Some(auto_keyword());
     }
 
-    Some(RustOwnedBorderImageWidth::Value(
-        component_value_parse_as_nested_non_negative_number_length_percentage(component_value, source)?,
-    ))
+    component_value_parse_as_nested_non_negative_number_length_percentage(component_value, source)
 }
 
 fn component_value_parse_as_border_image_repeat(component_value: &ComponentValue) -> bool {
@@ -10203,13 +10189,13 @@ fn callback_border_image_width_style_value<C>(
     callback: &mut C,
     kind: CssStyleValueKind,
     property_id: u16,
-    values: &[RustOwnedBorderImageWidth],
+    values: &[RustOwnedNestedPrimitiveValue],
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     for value in values {
         match value {
-            RustOwnedBorderImageWidth::Auto => callback(
+            RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => callback(
                 kind,
                 property_id,
                 CssPrimitiveValueKind::Invalid,
@@ -10224,7 +10210,7 @@ fn callback_border_image_width_style_value<C>(
                 &[],
                 "",
             ),
-            RustOwnedBorderImageWidth::Value(value) => {
+            _ => {
                 callback_nested_primitive(callback, kind, property_id, 2, 0, value);
             }
         }
@@ -10547,16 +10533,7 @@ fn callback_basic_shape_rectangle_components<C>(
 {
     for component in &value.rectangle_components {
         match component {
-            RustOwnedBasicShapeRectangleComponent::LengthPercentage(value) => callback_basic_shape_nested_primitive(
-                callback,
-                style_value_kind,
-                property_id,
-                kind,
-                RustOwnedBasicShapeFillRule::Nonzero,
-                BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
-                value,
-            ),
-            RustOwnedBasicShapeRectangleComponent::Auto => callback(
+            RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => callback(
                 style_value_kind,
                 property_id,
                 CssPrimitiveValueKind::Invalid,
@@ -10570,6 +10547,15 @@ fn callback_basic_shape_rectangle_components<C>(
                 0,
                 &[],
                 "",
+            ),
+            _ => callback_basic_shape_nested_primitive(
+                callback,
+                style_value_kind,
+                property_id,
+                kind,
+                RustOwnedBasicShapeFillRule::Nonzero,
+                BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
+                component,
             ),
         }
     }
@@ -12062,17 +12048,7 @@ fn callback_shape_outside_basic_shape_rectangle_components<C>(
 {
     for component in &value.rectangle_components {
         match component {
-            RustOwnedBasicShapeRectangleComponent::LengthPercentage(value) => {
-                callback_shape_outside_basic_shape_nested_primitive(
-                    callback,
-                    property_id,
-                    kind,
-                    RustOwnedBasicShapeFillRule::Nonzero,
-                    BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
-                    value,
-                );
-            }
-            RustOwnedBasicShapeRectangleComponent::Auto => callback(
+            RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => callback(
                 CssStyleValueKind::ShapeOutside,
                 property_id,
                 CssPrimitiveValueKind::Invalid,
@@ -12087,6 +12063,16 @@ fn callback_shape_outside_basic_shape_rectangle_components<C>(
                 &[],
                 "",
             ),
+            _ => {
+                callback_shape_outside_basic_shape_nested_primitive(
+                    callback,
+                    property_id,
+                    kind,
+                    RustOwnedBasicShapeFillRule::Nonzero,
+                    BASIC_SHAPE_COMPONENT_RECTANGLE_LENGTH_PERCENTAGE,
+                    component,
+                );
+            }
         }
     }
 
@@ -17984,7 +17970,7 @@ fn parse_rect_basic_shape_function(function: &Function) -> bool {
 }
 
 struct ParsedRectangleBasicShapeFunction {
-    components: Vec<RustOwnedBasicShapeRectangleComponent>,
+    components: Vec<RustOwnedNestedPrimitiveValue>,
     border_radius: Option<RustOwnedBorderRadius>,
 }
 
@@ -18006,7 +17992,7 @@ fn parse_owned_inset_basic_shape_function(
             break;
         };
         parser.index += 1;
-        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+        components.push(value);
     }
 
     if components.is_empty() {
@@ -18032,7 +18018,7 @@ fn parse_owned_xywh_basic_shape_function(
         let component_value = parser.next_component_value()?;
         let value = component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?;
         parser.index += 1;
-        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+        components.push(value);
     }
 
     Some(ParsedRectangleBasicShapeFunction {
@@ -18052,14 +18038,14 @@ fn parse_owned_rect_basic_shape_function(
     for _ in 0..4 {
         parser.discard_whitespace();
         if parser.consume_ident_matching("auto") {
-            components.push(RustOwnedBasicShapeRectangleComponent::Auto);
+            components.push(auto_keyword());
             continue;
         }
 
         let component_value = parser.next_component_value()?;
         let value = component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?;
         parser.index += 1;
-        components.push(RustOwnedBasicShapeRectangleComponent::LengthPercentage(value));
+        components.push(value);
     }
 
     Some(ParsedRectangleBasicShapeFunction {
@@ -33153,27 +33139,27 @@ mod tests {
         RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
         RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
-        RustOwnedBasicShapeRadiusComponent, RustOwnedBasicShapeRectangleComponent, RustOwnedBorderImage,
-        RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-        RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
-        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
-        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
-        RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind,
-        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop,
-        RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
-        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
-        RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor,
-        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedBasicShapeRadiusComponent, RustOwnedBorderImage, RustOwnedBorderImageOutset,
+        RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource, RustOwnedBorderRadius,
+        RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCornerShape, RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
+        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
+        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
+        RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
         RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
         RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
         RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
@@ -35692,13 +35678,13 @@ mod tests {
                 property_id: PropertyId::BorderImageWidth,
                 value: RustOwnedStyleValueKind::BorderImageWidth {
                     values: vec![
-                        RustOwnedBorderImageWidth::Value(RustOwnedNestedPrimitiveValue::Length {
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
                             unit: "px".to_string(),
-                        }),
-                        RustOwnedBorderImageWidth::Value(RustOwnedNestedPrimitiveValue::Percentage(2.0)),
-                        RustOwnedBorderImageWidth::Value(RustOwnedNestedPrimitiveValue::Number(3.0)),
-                        RustOwnedBorderImageWidth::Auto,
+                        },
+                        RustOwnedNestedPrimitiveValue::Percentage(2.0),
+                        RustOwnedNestedPrimitiveValue::Number(3.0),
+                        auto_keyword(),
                     ],
                 },
             })
@@ -35746,9 +35732,7 @@ mod tests {
                         ],
                         fill: true,
                     }),
-                    width: Some(vec![RustOwnedBorderImageWidth::Value(
-                        RustOwnedNestedPrimitiveValue::Number(2.0),
-                    )]),
+                    width: Some(vec![RustOwnedNestedPrimitiveValue::Number(2.0)]),
                     outset: Some(vec![RustOwnedBorderImageOutset {
                         value: RustOwnedNestedPrimitiveValue::Number(3.0),
                     }]),
@@ -35928,12 +35912,10 @@ mod tests {
                 value: RustOwnedStyleValueKind::BasicShape(Box::new(RustOwnedBasicShape {
                     kind: RustOwnedBasicShapeKind::Inset,
                     fill_rule: RustOwnedBasicShapeFillRule::Nonzero,
-                    rectangle_components: vec![RustOwnedBasicShapeRectangleComponent::LengthPercentage(
-                        RustOwnedNestedPrimitiveValue::Length {
-                            value: 10.0,
-                            unit: "px".to_string(),
-                        },
-                    )],
+                    rectangle_components: vec![RustOwnedNestedPrimitiveValue::Length {
+                        value: 10.0,
+                        unit: "px".to_string(),
+                    }],
                     rectangle_border_radius: None,
                     radial_shape_radius: vec![],
                     radial_shape_position: None,
