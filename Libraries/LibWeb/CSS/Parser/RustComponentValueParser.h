@@ -850,9 +850,19 @@ public:
         String source;
     };
 
+    struct CounterStyleSystemDescriptor {
+        FFI::CssCounterStyleSystemKind kind;
+        String source;
+    };
+
     struct CounterStylePadDescriptor {
         FFI::CssNonnegativeIntegerSymbolPairOrder order;
         String source;
+    };
+
+    struct PageSizeDescriptor {
+        FFI::CssPageSizeDescriptorKind kind;
+        Vector<String> sources;
     };
 
     struct SyntaxComponent {
@@ -927,9 +937,14 @@ public:
     static Optional<Vector<String>> parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
     static Optional<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>> parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding);
+    static Optional<CounterStyleSystemDescriptor> parse_counter_style_system_descriptor_source(StringView input, StringView encoding);
     static Optional<CounterStylePadDescriptor> parse_counter_style_pad_descriptor_source(StringView input, StringView encoding);
     static Optional<String> parse_counter_style_symbol_descriptor_source(StringView input, StringView encoding);
     static Optional<Vector<String>> parse_font_src_list_descriptor_sources(StringView input, StringView encoding);
+    static Optional<String> parse_length_descriptor_source(StringView input, StringView encoding);
+    static Optional<String> parse_positive_percentage_descriptor_source(StringView input, StringView encoding);
+    static Optional<PageSizeDescriptor> parse_page_size_descriptor_sources(StringView input, StringView encoding);
+    static Optional<String> parse_string_descriptor_source(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);

@@ -190,36 +190,26 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_system = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto system = RustComponentValueParser::parse_counter_style_system(serialized_system.bytes_as_string_view(), "utf-8"sv);
+                    auto system = RustComponentValueParser::parse_counter_style_system_descriptor_source(serialized_system.bytes_as_string_view(), "utf-8"sv);
                     if (!system.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> system_tokens { component_values };
-
-                    auto keyword_value = parse_keyword_value(system_tokens);
-                    if (!keyword_value)
-                        return nullptr;
-
-                    switch (*system) {
+                    switch (system->kind) {
                     case FFI::CssCounterStyleSystemKind::Cyclic:
+                        return CounterStyleSystemStyleValue::create(CounterStyleSystem::Cyclic);
                     case FFI::CssCounterStyleSystemKind::Numeric:
+                        return CounterStyleSystemStyleValue::create(CounterStyleSystem::Numeric);
                     case FFI::CssCounterStyleSystemKind::Alphabetic:
+                        return CounterStyleSystemStyleValue::create(CounterStyleSystem::Alphabetic);
                     case FFI::CssCounterStyleSystemKind::Symbolic:
-                    case FFI::CssCounterStyleSystemKind::Additive: {
-                        auto counter_style_system = keyword_to_counter_style_system(keyword_value->to_keyword());
-                        if (!counter_style_system.has_value())
-                            return nullptr;
-                        return CounterStyleSystemStyleValue::create(counter_style_system.release_value());
-                    }
+                        return CounterStyleSystemStyleValue::create(CounterStyleSystem::Symbolic);
+                    case FFI::CssCounterStyleSystemKind::Additive:
+                        return CounterStyleSystemStyleValue::create(CounterStyleSystem::Additive);
                     case FFI::CssCounterStyleSystemKind::Fixed:
-                        if (keyword_value->to_keyword() != Keyword::Fixed)
-                            return nullptr;
                         return CounterStyleSystemStyleValue::create_fixed(nullptr);
                     case FFI::CssCounterStyleSystemKind::FixedWithInteger: {
-                        if (keyword_value->to_keyword() != Keyword::Fixed)
-                            return nullptr;
-                        system_tokens.discard_whitespace();
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system->source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> system_tokens { component_values };
                         auto integer_value = parse_integer_value(system_tokens, infinite_integer_range);
                         if (!integer_value)
                             return nullptr;
@@ -228,18 +218,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                             return nullptr;
                         return CounterStyleSystemStyleValue::create_fixed(integer_value);
                     }
-                    case FFI::CssCounterStyleSystemKind::Extends: {
-                        if (keyword_value->to_keyword() != Keyword::Extends)
-                            return nullptr;
-                        system_tokens.discard_whitespace();
-                        auto counter_style_name = parse_counter_style_name(system_tokens);
-                        if (!counter_style_name.has_value())
-                            return nullptr;
-                        system_tokens.discard_whitespace();
-                        if (system_tokens.has_next_token())
-                            return nullptr;
-                        return CounterStyleSystemStyleValue::create_extends(counter_style_name.release_value());
-                    }
+                    case FFI::CssCounterStyleSystemKind::Extends:
+                        return CounterStyleSystemStyleValue::create_extends(FlyString::from_utf8_without_validation(system->source.bytes()));
                     }
                     VERIFY_NOT_REACHED();
                 }
@@ -518,10 +498,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_length = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_length_descriptor(serialized_length.bytes_as_string_view(), "utf-8"sv))
+                    auto length_source = RustComponentValueParser::parse_length_descriptor_source(serialized_length.bytes_as_string_view(), "utf-8"sv);
+                    if (!length_source.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_source->bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> length_tokens { component_values };
 
                     auto length = parse_length_value(length_tokens, infinite_range);
@@ -573,22 +554,34 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_page_size = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_page_size_descriptor(serialized_page_size.bytes_as_string_view(), "utf-8"sv))
+                    auto page_size_descriptor = RustComponentValueParser::parse_page_size_descriptor_sources(serialized_page_size.bytes_as_string_view(), "utf-8"sv);
+                    if (!page_size_descriptor.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> page_size_tokens { component_values };
-
                     // auto
-                    if (auto value = parse_all_as_single_keyword_value(page_size_tokens, Keyword::Auto))
-                        return value.release_nonnull();
+                    if (page_size_descriptor->kind == FFI::CssPageSizeDescriptorKind::Auto)
+                        return KeywordStyleValue::create(Keyword::Auto);
 
                     // <length [0,∞]>{1,2}
-                    if (auto first_length = parse_length_value(page_size_tokens, non_negative_range)) {
-                        page_size_tokens.discard_whitespace();
+                    if (page_size_descriptor->kind == FFI::CssPageSizeDescriptorKind::Lengths) {
+                        VERIFY(page_size_descriptor->sources.size() == 1 || page_size_descriptor->sources.size() == 2);
 
-                        if (auto second_length = parse_length_value(page_size_tokens, non_negative_range))
+                        auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->sources[0].bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> first_tokens { first_component_values };
+                        auto first_length = parse_length_value(first_tokens, non_negative_range);
+                        first_tokens.discard_whitespace();
+                        if (!first_length || first_tokens.has_next_token())
+                            return nullptr;
+
+                        if (page_size_descriptor->sources.size() == 2) {
+                            auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->sources[1].bytes_as_string_view(), "utf-8"sv);
+                            TokenStream<ComponentValue> second_tokens { second_component_values };
+                            auto second_length = parse_length_value(second_tokens, non_negative_range);
+                            second_tokens.discard_whitespace();
+                            if (!second_length || second_tokens.has_next_token())
+                                return nullptr;
                             return StyleValueList::create(StyleValueVector { first_length.release_nonnull(), second_length.release_nonnull() }, StyleValueList::Separator::Space);
+                        }
 
                         return first_length.release_nonnull();
                     }
@@ -596,29 +589,28 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // [ <page-size> || [ portrait | landscape ] ]
                     RefPtr<StyleValue const> page_size;
                     RefPtr<StyleValue const> orientation;
-                    if (auto first_keyword = parse_keyword_value(page_size_tokens)) {
-                        if (first_is_one_of(first_keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
-                            orientation = first_keyword.release_nonnull();
-                        } else if (keyword_to_page_size(first_keyword->to_keyword()).has_value()) {
-                            page_size = first_keyword.release_nonnull();
+                    for (auto const& source : page_size_descriptor->sources) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> keyword_tokens { component_values };
+                        auto keyword = parse_keyword_value(keyword_tokens);
+                        keyword_tokens.discard_whitespace();
+                        if (!keyword || keyword_tokens.has_next_token())
+                            return nullptr;
+
+                        if (first_is_one_of(keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
+                            if (orientation)
+                                return nullptr;
+                            orientation = keyword.release_nonnull();
+                        } else if (keyword_to_page_size(keyword->to_keyword()).has_value()) {
+                            if (page_size)
+                                return nullptr;
+                            page_size = keyword.release_nonnull();
                         } else {
                             return nullptr;
                         }
-                    } else {
-                        return nullptr;
                     }
 
-                    page_size_tokens.discard_whitespace();
-
-                    if (auto second_keyword = parse_keyword_value(page_size_tokens)) {
-                        if (orientation.is_null() && first_is_one_of(second_keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
-                            orientation = second_keyword.release_nonnull();
-                        } else if (page_size.is_null() && keyword_to_page_size(second_keyword->to_keyword()).has_value()) {
-                            page_size = second_keyword.release_nonnull();
-                        } else {
-                            return nullptr;
-                        }
-
+                    if (page_size && orientation) {
                         // Portrait is considered the default orientation, so don't include it.
                         if (orientation->to_keyword() == Keyword::Portrait)
                             return page_size.release_nonnull();
@@ -636,10 +628,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_percentage = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_positive_percentage_descriptor(serialized_percentage.bytes_as_string_view(), "utf-8"sv))
+                    auto percentage_source = RustComponentValueParser::parse_positive_percentage_descriptor_source(serialized_percentage.bytes_as_string_view(), "utf-8"sv);
+                    if (!percentage_source.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_source->bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> percentage_tokens { component_values };
 
                     if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
@@ -669,10 +662,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_string = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_string_descriptor(serialized_string.bytes_as_string_view(), "utf-8"sv))
+                    auto string_source = RustComponentValueParser::parse_string_descriptor_source(serialized_string.bytes_as_string_view(), "utf-8"sv);
+                    if (!string_source.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_source->bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> string_tokens { component_values };
 
                     auto string = parse_string_value(string_tokens);

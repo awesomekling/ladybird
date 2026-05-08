@@ -849,6 +849,14 @@ pub enum CssCounterStyleRangeKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPageSizeDescriptorKind {
+    Auto,
+    Lengths,
+    PageSizeAndOrientation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssCropOrCrossKind {
     Crop,
     Cross,

@@ -24,6 +24,27 @@ pub(crate) struct RustOwnedCounterStylePadDescriptor {
     pub(crate) source: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedCounterStyleSystemDescriptor {
+    Cyclic,
+    Numeric,
+    Alphabetic,
+    Symbolic,
+    Additive,
+    Fixed { first_symbol: Option<String> },
+    Extends { name: String },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPageSizeDescriptor {
+    Auto,
+    Lengths(Vec<String>),
+    PageSizeAndOrientation {
+        page_size: Option<String>,
+        orientation: Option<String>,
+    },
+}
+
 pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -156,6 +177,53 @@ pub(crate) fn parse_rust_owned_counter_style_additive_symbols_descriptor(
     (!tuples.is_empty() && !parser.has_next_component_value()).then_some(tuples)
 }
 
+pub(crate) fn parse_rust_owned_counter_style_system_descriptor(
+    filtered_input: &[u8],
+) -> Option<RustOwnedCounterStyleSystemDescriptor> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-system
+    // cyclic | numeric | alphabetic | symbolic | additive | [fixed <integer>?] | [ extends <counter-style-name> ]
+    parser.discard_whitespace();
+
+    let descriptor = if parser.consume_ident_matching("cyclic") {
+        RustOwnedCounterStyleSystemDescriptor::Cyclic
+    } else if parser.consume_ident_matching("numeric") {
+        RustOwnedCounterStyleSystemDescriptor::Numeric
+    } else if parser.consume_ident_matching("alphabetic") {
+        RustOwnedCounterStyleSystemDescriptor::Alphabetic
+    } else if parser.consume_ident_matching("symbolic") {
+        RustOwnedCounterStyleSystemDescriptor::Symbolic
+    } else if parser.consume_ident_matching("additive") {
+        RustOwnedCounterStyleSystemDescriptor::Additive
+    } else if parser.consume_ident_matching("fixed") {
+        parser.discard_whitespace();
+        let integer_start = parser.index;
+        let first_symbol = if parser.consume_integer_syntax() {
+            Some(serialize_component_values_for_reparsing(
+                &parser.component_values[integer_start..parser.index],
+                &filtered_input,
+            )?)
+        } else {
+            None
+        };
+        RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol }
+    } else if parser.consume_ident_matching("extends") {
+        parser.discard_whitespace();
+        let name = parser.parse_a_counter_style_name()?;
+        RustOwnedCounterStyleSystemDescriptor::Extends { name }
+    } else {
+        return None;
+    };
+
+    parser.discard_whitespace();
+    (!parser.has_next_component_value()).then_some(descriptor)
+}
+
 pub(crate) fn parse_rust_owned_counter_style_pad_descriptor(
     filtered_input: &[u8],
 ) -> Option<RustOwnedCounterStylePadDescriptor> {
@@ -238,6 +306,108 @@ pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_inp
 
     parser.discard_whitespace();
     (!weights.is_empty() && !parser.has_next_component_value()).then_some(weights)
+}
+
+pub(crate) fn parse_rust_owned_length_descriptor(filtered_input: &[u8]) -> Option<String> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-values-4/#lengths
+    // <length>
+    matches!(component_values, [component_value] if component_value_parse_as_length_descriptor(component_value))
+        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
+}
+
+pub(crate) fn parse_rust_owned_positive_percentage_descriptor(filtered_input: &[u8]) -> Option<String> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-values-4/#percentages
+    // <percentage [0,∞]>
+    matches!(component_values, [component_value] if component_value_parse_as_positive_percentage_descriptor(component_value))
+        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
+}
+
+pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Option<RustOwnedPageSizeDescriptor> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-page-3/#page-size-prop
+    // <length [0,∞]>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("auto") {
+        parser.discard_whitespace();
+        return (!parser.has_next_component_value()).then_some(RustOwnedPageSizeDescriptor::Auto);
+    }
+
+    let saved_index = parser.index;
+    let mut lengths = Vec::new();
+    for _ in 0..2 {
+        parser.discard_whitespace();
+        let start = parser.index;
+        if !parser.consume_nonnegative_length_descriptor_syntax() {
+            break;
+        }
+        lengths.push(serialize_component_values_for_reparsing(
+            &parser.component_values[start..parser.index],
+            &filtered_input,
+        )?);
+    }
+    parser.discard_whitespace();
+    if !lengths.is_empty() {
+        return (!parser.has_next_component_value()).then_some(RustOwnedPageSizeDescriptor::Lengths(lengths));
+    }
+    parser.index = saved_index;
+
+    let mut page_size = None;
+    let mut orientation = None;
+
+    for _ in 0..2 {
+        parser.discard_whitespace();
+        let start = parser.index;
+        let Some(ident) = parser.consume_an_ident() else {
+            break;
+        };
+        let source =
+            serialize_component_values_for_reparsing(&parser.component_values[start..parser.index], &filtered_input)?;
+
+        if is_page_size_keyword(&ident) {
+            if page_size.is_some() {
+                return None;
+            }
+            page_size = Some(source);
+        } else if ident.eq_ignore_ascii_case("portrait") || ident.eq_ignore_ascii_case("landscape") {
+            if orientation.is_some() {
+                return None;
+            }
+            orientation = Some(source);
+        } else {
+            return None;
+        }
+    }
+
+    parser.discard_whitespace();
+    (!parser.has_next_component_value() && (page_size.is_some() || orientation.is_some()))
+        .then_some(RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation })
+}
+
+pub(crate) fn parse_rust_owned_string_descriptor(filtered_input: &[u8]) -> Option<String> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+    let component_values = strip_whitespace(&component_values);
+
+    // https://drafts.csswg.org/css-values-4/#strings
+    // <string>
+    component_values_parse_as_string(component_values)
+        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
 }
 
 pub(crate) fn parse_a_counter_style_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool

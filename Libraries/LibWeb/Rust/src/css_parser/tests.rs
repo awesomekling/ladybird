@@ -46,16 +46,17 @@ use super::{
     RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
     RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
-    RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
-    RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
-    RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
-    RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
-    RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-    RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop,
-    RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
-    RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
-    RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPaint, RustOwnedPaintOrder,
+    RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay,
+    RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue,
+    RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
+    RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontFamilyList, RustOwnedFontLanguageOverride,
+    RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+    RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+    RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+    RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
+    RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
+    RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
+    RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder,
     RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
     RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
@@ -109,12 +110,14 @@ use super::{
     parse_rust_owned_counter_style_additive_symbols_descriptor, parse_rust_owned_counter_style_negative_descriptor,
     parse_rust_owned_counter_style_pad_descriptor, parse_rust_owned_counter_style_range_descriptor,
     parse_rust_owned_counter_style_symbol_descriptor, parse_rust_owned_counter_style_symbols_descriptor,
-    parse_rust_owned_filter_value_list_value, parse_rust_owned_font_src_list_descriptor,
-    parse_rust_owned_font_weight_absolute_pair_descriptor, parse_rust_owned_generated_longhand_value,
-    parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
-    parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
-    parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
-    parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
+    parse_rust_owned_counter_style_system_descriptor, parse_rust_owned_filter_value_list_value,
+    parse_rust_owned_font_src_list_descriptor, parse_rust_owned_font_weight_absolute_pair_descriptor,
+    parse_rust_owned_generated_longhand_value, parse_rust_owned_length_descriptor,
+    parse_rust_owned_page_size_descriptor, parse_rust_owned_positional_value_list_shorthand,
+    parse_rust_owned_positive_percentage_descriptor, parse_rust_owned_string_descriptor,
+    parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
+    parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
+    parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
     parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
     parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
     parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
@@ -6684,6 +6687,30 @@ fn rejects_invalid_counter_style_system_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_counter_style_system_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_system_descriptor("cyclic".as_bytes()),
+        Some(RustOwnedCounterStyleSystemDescriptor::Cyclic)
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_system_descriptor("fixed".as_bytes()),
+        Some(RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol: None })
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_system_descriptor("fixed calc(1)".as_bytes()),
+        Some(RustOwnedCounterStyleSystemDescriptor::Fixed {
+            first_symbol: Some("calc(1)".to_string()),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_system_descriptor("extends custom".as_bytes()),
+        Some(RustOwnedCounterStyleSystemDescriptor::Extends {
+            name: "custom".to_string(),
+        })
+    );
+}
+
+#[test]
 fn parses_counter_style_symbols_descriptors() {
     assert_eq!(parse_counter_style_symbols_descriptor("\"*\""), Some(1));
     assert_eq!(parse_counter_style_symbols_descriptor("\"*\" \"**\""), Some(2));
@@ -6751,6 +6778,15 @@ fn rejects_invalid_string_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_string_descriptors() {
+    assert_eq!(
+        parse_rust_owned_string_descriptor("\"hello\"".as_bytes()),
+        Some("\"hello\"".to_string())
+    );
+    assert_eq!(parse_rust_owned_string_descriptor("ident".as_bytes()), None);
+}
+
+#[test]
 fn parses_length_descriptors() {
     assert!(parse_length_descriptor_value("1px"));
     assert!(parse_length_descriptor_value("0"));
@@ -6767,6 +6803,15 @@ fn rejects_invalid_length_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_length_descriptors() {
+    assert_eq!(
+        parse_rust_owned_length_descriptor("calc(1px + 2px)".as_bytes()),
+        Some("calc(1px + 2px)".to_string())
+    );
+    assert_eq!(parse_rust_owned_length_descriptor("1px 2px".as_bytes()), None);
+}
+
+#[test]
 fn parses_positive_percentage_descriptors() {
     assert!(parse_positive_percentage_descriptor_value("0%"));
     assert!(parse_positive_percentage_descriptor_value("100%"));
@@ -6780,6 +6825,15 @@ fn rejects_invalid_positive_percentage_descriptors() {
     assert!(!parse_positive_percentage_descriptor_value("1px"));
     assert!(!parse_positive_percentage_descriptor_value("1% 2%"));
     assert!(!parse_positive_percentage_descriptor_value("foo(1%)"));
+}
+
+#[test]
+fn parses_rust_owned_positive_percentage_descriptors() {
+    assert_eq!(
+        parse_rust_owned_positive_percentage_descriptor("calc(50% + 25%)".as_bytes()),
+        Some("calc(50% + 25%)".to_string())
+    );
+    assert_eq!(parse_rust_owned_positive_percentage_descriptor("-1%".as_bytes()), None);
 }
 
 #[test]
@@ -6806,6 +6860,29 @@ fn rejects_invalid_page_size_descriptors() {
     assert!(!parse_page_size_descriptor_value("a4 letter"));
     assert!(!parse_page_size_descriptor_value("landscape portrait"));
     assert!(!parse_page_size_descriptor_value("orange"));
+}
+
+#[test]
+fn parses_rust_owned_page_size_descriptors() {
+    assert_eq!(
+        parse_rust_owned_page_size_descriptor("auto".as_bytes()),
+        Some(RustOwnedPageSizeDescriptor::Auto)
+    );
+    assert_eq!(
+        parse_rust_owned_page_size_descriptor("8.5in 11in".as_bytes()),
+        Some(RustOwnedPageSizeDescriptor::Lengths(vec![
+            "8.5in".to_string(),
+            "11in".to_string(),
+        ]))
+    );
+    assert_eq!(
+        parse_rust_owned_page_size_descriptor("letter landscape".as_bytes()),
+        Some(RustOwnedPageSizeDescriptor::PageSizeAndOrientation {
+            page_size: Some("letter".to_string()),
+            orientation: Some("landscape".to_string()),
+        })
+    );
+    assert_eq!(parse_rust_owned_page_size_descriptor("auto landscape".as_bytes()), None);
 }
 
 #[test]
