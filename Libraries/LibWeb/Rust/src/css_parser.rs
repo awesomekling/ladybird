@@ -8974,7 +8974,7 @@ where
             property_value_type_name(PropertyValueType::CounterStyle),
         ),
         RustOwnedStyleValueKind::EasingFunction(value) => {
-            callback_source_backed_style_value(callback, CssStyleValueKind::EasingFunction, property_id, &value.source);
+            callback_easing_function_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::FitContent(value) => {
             callback_source_backed_style_value(callback, CssStyleValueKind::FitContent, property_id, &value.source);
@@ -9259,6 +9259,61 @@ where
         0,
         0,
         source.as_bytes(),
+        "",
+    );
+}
+
+const EASING_FUNCTION_CALLBACK_KEYWORD: u8 = 0;
+const EASING_FUNCTION_CALLBACK_LINEAR: u8 = 1;
+const EASING_FUNCTION_CALLBACK_CUBIC_BEZIER: u8 = 2;
+const EASING_FUNCTION_CALLBACK_STEPS: u8 = 3;
+
+fn callback_easing_function_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedEasingFunction)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, sources) = match &value.value {
+        RustOwnedEasingFunctionValue::Keyword(keyword) => (EASING_FUNCTION_CALLBACK_KEYWORD, keyword.clone()),
+        RustOwnedEasingFunctionValue::Linear(stops) => {
+            let mut sources = String::new();
+            for stop in stops {
+                if !sources.is_empty() {
+                    sources.push('\0');
+                }
+                sources.push_str(&stop.output);
+                sources.push('\0');
+                if let Some(first_stop_length) = &stop.first_stop_length {
+                    sources.push_str(first_stop_length);
+                }
+                sources.push('\0');
+                if let Some(second_stop_length) = &stop.second_stop_length {
+                    sources.push_str(second_stop_length);
+                }
+            }
+            (EASING_FUNCTION_CALLBACK_LINEAR, sources)
+        }
+        RustOwnedEasingFunctionValue::CubicBezier { x1, y1, x2, y2 } => {
+            (EASING_FUNCTION_CALLBACK_CUBIC_BEZIER, format!("{x1}\0{y1}\0{x2}\0{y2}"))
+        }
+        RustOwnedEasingFunctionValue::Steps { intervals, position } => (
+            EASING_FUNCTION_CALLBACK_STEPS,
+            format!("{}\0{}", intervals, position.as_deref().unwrap_or("")),
+        ),
+    };
+
+    callback(
+        CssStyleValueKind::EasingFunction,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        0,
+        0,
+        sources.as_bytes(),
         "",
     );
 }

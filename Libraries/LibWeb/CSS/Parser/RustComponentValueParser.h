@@ -333,6 +333,8 @@ public:
         Vector<CounterDefinition> counter_definitions;
         Vector<String> counter_definition_value_sources;
         Vector<String> background_size_sources;
+        u8 easing_function_kind { 0 };
+        Vector<String> easing_function_sources;
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };
