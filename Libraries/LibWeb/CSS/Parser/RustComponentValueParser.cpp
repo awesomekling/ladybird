@@ -4523,6 +4523,98 @@ Optional<size_t> RustComponentValueParser::parse_counter_style_additive_symbols(
     return count;
 }
 
+Optional<Vector<String>> RustComponentValueParser::parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding)
+{
+    Vector<String> symbols;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_negative_descriptor_sources(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &symbols,
+        [](void* raw_symbols, u8 const* symbol_ptr, size_t symbol_len) {
+            auto& symbols = *static_cast<Vector<String>*>(raw_symbols);
+            symbols.append(string_from_ffi_bytes(symbol_ptr, symbol_len));
+        });
+
+    if (!parsed)
+        return {};
+
+    return symbols;
+}
+
+Optional<Vector<String>> RustComponentValueParser::parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding)
+{
+    Vector<String> symbols;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_symbols_descriptor_sources(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &symbols,
+        [](void* raw_symbols, u8 const* symbol_ptr, size_t symbol_len) {
+            auto& symbols = *static_cast<Vector<String>*>(raw_symbols);
+            symbols.append(string_from_ffi_bytes(symbol_ptr, symbol_len));
+        });
+
+    if (!parsed)
+        return {};
+
+    return symbols;
+}
+
+Optional<RustComponentValueParser::CounterStyleRangeDescriptor> RustComponentValueParser::parse_counter_style_range_descriptor_sources(StringView input, StringView encoding)
+{
+    Optional<CounterStyleRangeDescriptor> range;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_range_descriptor_sources(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &range,
+        [](void* raw_range, FFI::CssCounterStyleRangeKind kind) {
+            auto& range = *static_cast<Optional<CounterStyleRangeDescriptor>*>(raw_range);
+            range = CounterStyleRangeDescriptor { .kind = kind };
+        },
+        [](void* raw_range, u8 const* range_ptr, size_t range_len) {
+            auto& range = *static_cast<Optional<CounterStyleRangeDescriptor>*>(raw_range);
+            VERIFY(range.has_value());
+            range->ranges.append(string_from_ffi_bytes(range_ptr, range_len));
+        });
+
+    if (!parsed || !range.has_value())
+        return {};
+
+    return range;
+}
+
+Optional<Vector<RustComponentValueParser::CounterStyleAdditiveSymbolsDescriptorTuple>> RustComponentValueParser::parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding)
+{
+    Vector<CounterStyleAdditiveSymbolsDescriptorTuple> tuples;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter_style_additive_symbols_descriptor_sources(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &tuples,
+        [](void* raw_tuples, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* tuple_ptr, size_t tuple_len) {
+            auto& tuples = *static_cast<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>*>(raw_tuples);
+            tuples.append(CounterStyleAdditiveSymbolsDescriptorTuple {
+                .order = order,
+                .source = string_from_ffi_bytes(tuple_ptr, tuple_len),
+            });
+        });
+
+    if (!parsed)
+        return {};
+
+    return tuples;
+}
+
 bool RustComponentValueParser::parse_string_descriptor(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

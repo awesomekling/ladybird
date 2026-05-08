@@ -136,41 +136,19 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_additive_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto additive_tuple_count = RustComponentValueParser::parse_counter_style_additive_symbols(serialized_additive_symbols.bytes_as_string_view(), "utf-8"sv);
-                    if (!additive_tuple_count.has_value())
+                    auto additive_tuple_sources = RustComponentValueParser::parse_counter_style_additive_symbols_descriptor_sources(serialized_additive_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!additive_tuple_sources.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> additive_symbol_tokens { component_values };
-
                     StyleValueVector additive_tuples;
-                    for (size_t i = 0; i < *additive_tuple_count; ++i) {
-                        additive_symbol_tokens.discard_whitespace();
-                        auto additive_tuple_start = additive_symbol_tokens.current_index();
-                        while (additive_symbol_tokens.has_next_token() && !additive_symbol_tokens.next_token().is(Token::Type::Comma))
-                            additive_symbol_tokens.discard_a_token();
-
-                        auto serialized_tuple = serialize_component_values_for_reparsing(additive_symbol_tokens.tokens_since(additive_tuple_start));
-                        auto order = RustComponentValueParser::parse_a_nonnegative_integer_symbol_pair(serialized_tuple.bytes_as_string_view(), "utf-8"sv);
-                        if (!order.has_value())
-                            return nullptr;
-
-                        auto additive_tuple = materialize_nonnegative_integer_symbol_pair(additive_symbol_tokens.tokens_since(additive_tuple_start), *order);
+                    for (auto const& tuple : *additive_tuple_sources) {
+                        auto tuple_component_values = RustComponentValueParser::parse_a_list_of_component_values(tuple.source.bytes_as_string_view(), "utf-8"sv);
+                        auto additive_tuple = materialize_nonnegative_integer_symbol_pair(tuple_component_values, tuple.order);
                         if (!additive_tuple)
                             return nullptr;
 
                         additive_tuples.append(additive_tuple.release_nonnull());
-
-                        additive_symbol_tokens.discard_whitespace();
-                        if (i + 1 < *additive_tuple_count) {
-                            if (!additive_symbol_tokens.has_next_token() || !additive_symbol_tokens.consume_a_token().is(Token::Type::Comma))
-                                return nullptr;
-                        }
                     }
-
-                    additive_symbol_tokens.discard_whitespace();
-                    if (additive_symbol_tokens.has_next_token())
-                        return nullptr;
 
                     auto additive_tuple_list = StyleValueList::create(move(additive_tuples), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);
 
@@ -298,31 +276,24 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_negative = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto count = RustComponentValueParser::parse_counter_style_negative(serialized_negative.bytes_as_string_view(), "utf-8"sv);
-                    if (!count.has_value())
+                    auto symbol_sources = RustComponentValueParser::parse_counter_style_negative_descriptor_sources(serialized_negative.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_sources.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> negative_tokens { component_values };
+                    StyleValueVector symbols;
+                    for (auto const& source : *symbol_sources) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> symbol_tokens { component_values };
+                        auto symbol = parse_symbol_value(symbol_tokens);
+                        symbol_tokens.discard_whitespace();
+                        if (!symbol || symbol_tokens.has_next_token())
+                            return nullptr;
+                        symbols.append(symbol.release_nonnull());
+                    }
 
-                    auto first_symbol = parse_symbol_value(negative_tokens);
-
-                    if (!first_symbol)
-                        return nullptr;
-
-                    if (*count == FFI::CssCounterStyleNegativeSymbolCount::One)
-                        return StyleValueList::create({ first_symbol.release_nonnull() }, StyleValueList::Separator::Space);
-
-                    negative_tokens.discard_whitespace();
-                    auto second_symbol = parse_symbol_value(negative_tokens);
-                    if (!second_symbol)
-                        return nullptr;
-
-                    negative_tokens.discard_whitespace();
-                    if (negative_tokens.has_next_token())
-                        return nullptr;
-
-                    return StyleValueList::create({ first_symbol.release_nonnull(), second_symbol.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
+                    if (symbols.size() == 1)
+                        return StyleValueList::create(move(symbols), StyleValueList::Separator::Space);
+                    return StyleValueList::create(move(symbols), StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
                 }
                 case DescriptorMetadata::ValueType::CounterStylePad: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-pad
@@ -346,17 +317,14 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_range = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto range = RustComponentValueParser::parse_counter_style_range(serialized_range.bytes_as_string_view(), "utf-8"sv);
+                    auto range = RustComponentValueParser::parse_counter_style_range_descriptor_sources(serialized_range.bytes_as_string_view(), "utf-8"sv);
                     if (!range.has_value())
                         return nullptr;
 
                     if (range->kind == FFI::CssCounterStyleRangeKind::Auto)
                         return KeywordStyleValue::create(Keyword::Auto);
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> range_tokens { component_values };
-
-                    auto const parse_value = [&]() -> RefPtr<StyleValue const> {
+                    auto const parse_value = [&](TokenStream<ComponentValue>& range_tokens) -> RefPtr<StyleValue const> {
                         if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
                             return keyword_value;
 
@@ -381,11 +349,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     };
 
                     StyleValueVector range_entries;
-                    for (size_t i = 0; i < range->count; ++i) {
+                    for (auto const& source : range->ranges) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> range_tokens { component_values };
                         range_tokens.discard_whitespace();
-                        auto first_value = parse_value();
+                        auto first_value = parse_value(range_tokens);
                         range_tokens.discard_whitespace();
-                        auto second_value = parse_value();
+                        auto second_value = parse_value(range_tokens);
 
                         if (!first_value || !second_value)
                             return nullptr;
@@ -401,15 +371,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         range_entries.append(StyleValueList::create({ first_value.release_nonnull(), second_value.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No));
 
                         range_tokens.discard_whitespace();
-                        if (i + 1 < range->count) {
-                            if (!range_tokens.has_next_token() || !range_tokens.consume_a_token().is(Token::Type::Comma))
-                                return nullptr;
-                        }
+                        if (range_tokens.has_next_token())
+                            return nullptr;
                     }
-
-                    range_tokens.discard_whitespace();
-                    if (range_tokens.has_next_token())
-                        return nullptr;
 
                     return StyleValueList::create(move(range_entries), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);
                 }
@@ -753,25 +717,21 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_count = RustComponentValueParser::parse_counter_style_symbols(serialized_symbols.bytes_as_string_view(), "utf-8"sv);
-                    if (!symbol_count.has_value())
+                    auto symbol_sources = RustComponentValueParser::parse_counter_style_symbols_descriptor_sources(serialized_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_sources.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> symbol_tokens { component_values };
-
                     StyleValueVector symbols;
-                    for (size_t i = 0; i < *symbol_count; ++i) {
+                    for (auto const& source : *symbol_sources) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> symbol_tokens { component_values };
                         symbol_tokens.discard_whitespace();
                         auto symbol = parse_symbol_value(symbol_tokens);
-                        if (!symbol)
+                        symbol_tokens.discard_whitespace();
+                        if (!symbol || symbol_tokens.has_next_token())
                             return nullptr;
                         symbols.append(symbol.release_nonnull());
                     }
-
-                    symbol_tokens.discard_whitespace();
-                    if (symbol_tokens.has_next_token())
-                        return nullptr;
 
                     return StyleValueList::create(move(symbols), StyleValueList::Separator::Space, StyleValueList::Collapsible::No);
                 }

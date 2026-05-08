@@ -840,6 +840,16 @@ public:
         size_t count { 0 };
     };
 
+    struct CounterStyleRangeDescriptor {
+        FFI::CssCounterStyleRangeKind kind;
+        Vector<String> ranges;
+    };
+
+    struct CounterStyleAdditiveSymbolsDescriptorTuple {
+        FFI::CssNonnegativeIntegerSymbolPairOrder order;
+        String source;
+    };
+
     struct SyntaxComponent {
         OwnPtr<SyntaxNode> syntax;
         size_t consumed_byte_length { 0 };
@@ -908,6 +918,10 @@ public:
     static Optional<size_t> parse_counter_style_symbols(StringView input, StringView encoding);
     static Optional<CounterStyleRangeSyntax> parse_counter_style_range(StringView input, StringView encoding);
     static Optional<size_t> parse_counter_style_additive_symbols(StringView input, StringView encoding);
+    static Optional<Vector<String>> parse_counter_style_negative_descriptor_sources(StringView input, StringView encoding);
+    static Optional<Vector<String>> parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding);
+    static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
+    static Optional<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>> parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
