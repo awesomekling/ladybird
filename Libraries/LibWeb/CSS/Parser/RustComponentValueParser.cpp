@@ -2280,7 +2280,23 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->repeat_y_values.append(color_green);
                 return;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarColor) {
-                value.scrollbar_color_kind = color_red;
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::ScrollbarColor);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                if (component_kind == 1) {
+                    style_value->scrollbar_color_kind = 1;
+                } else if (component_kind == 2) {
+                    style_value->scrollbar_color_kind = 2;
+                    style_value->scrollbar_thumb_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                } else if (component_kind == 3) {
+                    style_value->scrollbar_color_kind = 2;
+                    style_value->scrollbar_track_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
                 value.scrollbar_gutter = static_cast<FFI::CssScrollbarGutterValueKind>(color_red);
             } else if (kind == FFI::CssStyleValueKind::ScrollTimeline) {

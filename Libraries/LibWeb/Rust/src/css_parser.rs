@@ -2927,8 +2927,11 @@ pub(crate) struct RustOwnedRepeatStyle {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedScrollbarColor {
-    Auto { source: String },
-    Colors { source: String },
+    Auto,
+    Colors {
+        thumb_color: RustOwnedColor,
+        track_color: RustOwnedColor,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -6701,9 +6704,7 @@ fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<
     ] = component_values
         && value.eq_ignore_ascii_case("auto")
     {
-        return Some(RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto {
-            source,
-        }));
+        return Some(RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto));
     }
 
     let colors: Vec<_> = component_values
@@ -6714,16 +6715,14 @@ fn rust_owned_scrollbar_color_style_value_kind(filtered_input: &[u8]) -> Option<
         return None;
     };
 
-    let thumb_color_source = serialize_component_values_for_reparsing(std::slice::from_ref(*thumb_color), &source)?;
-    let track_color_source = serialize_component_values_for_reparsing(std::slice::from_ref(*track_color), &source)?;
-    if parse_color_value(thumb_color_source.as_bytes(), false) != CssColorValueKind::Valid
-        || parse_color_value(track_color_source.as_bytes(), false) != CssColorValueKind::Valid
-    {
-        return None;
-    }
+    let thumb_color = rust_owned_color_from_component_value(thumb_color, &source)?;
+    let track_color = rust_owned_color_from_component_value(track_color, &source)?;
 
     Some(RustOwnedStyleValueKind::ScrollbarColor(
-        RustOwnedScrollbarColor::Colors { source },
+        RustOwnedScrollbarColor::Colors {
+            thumb_color,
+            track_color,
+        },
     ))
 }
 
@@ -8727,24 +8726,30 @@ where
                 length,
             );
         }
-        RustOwnedStyleValueKind::ScrollbarColor(value) => callback(
-            CssStyleValueKind::ScrollbarColor,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            match value {
-                RustOwnedScrollbarColor::Auto { .. } => 1,
-                RustOwnedScrollbarColor::Colors { .. } => 2,
-            },
-            0,
-            0,
-            0,
-            &[],
-            "",
-        ),
+        RustOwnedStyleValueKind::ScrollbarColor(value) => match value {
+            RustOwnedScrollbarColor::Auto => callback(
+                CssStyleValueKind::ScrollbarColor,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                1,
+                0,
+                0,
+                0,
+                &[],
+                "",
+            ),
+            RustOwnedScrollbarColor::Colors {
+                thumb_color,
+                track_color,
+            } => {
+                callback_rust_owned_color(callback, CssStyleValueKind::ScrollbarColor, property_id, 2, thumb_color);
+                callback_rust_owned_color(callback, CssStyleValueKind::ScrollbarColor, property_id, 3, track_color);
+            }
+        },
         RustOwnedStyleValueKind::ScrollbarGutter(value) => callback(
             CssStyleValueKind::ScrollbarGutter,
             property_id,
@@ -35687,9 +35692,7 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::ScrollbarColor], "auto"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ScrollbarColor,
-                value: RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto {
-                    source: "auto".to_string(),
-                }),
+                value: RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Auto),
             })
         );
         assert_eq!(
@@ -35697,7 +35700,22 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::ScrollbarColor,
                 value: RustOwnedStyleValueKind::ScrollbarColor(RustOwnedScrollbarColor::Colors {
-                    source: "red CanvasText".to_string(),
+                    thumb_color: RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("red".to_string()),
+                    },
+                    track_color: RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Keyword,
+                        red: 0,
+                        green: 0,
+                        blue: 0,
+                        alpha: 0,
+                        name: Some("CanvasText".to_string()),
+                    },
                 }),
             })
         );

@@ -651,6 +651,8 @@ public:
         Vector<u8> repeat_x_values;
         Vector<u8> repeat_y_values;
         u8 scrollbar_color_kind { 0 };
+        Optional<RustStyleColor> scrollbar_thumb_color;
+        Optional<RustStyleColor> scrollbar_track_color;
         FFI::CssScrollbarGutterValueKind scrollbar_gutter { FFI::CssScrollbarGutterValueKind::Invalid };
         FFI::CssTextWrapValue text_wrap {};
         FFI::CssTextWrapModeValue text_wrap_mode { FFI::CssTextWrapModeValue::Invalid };

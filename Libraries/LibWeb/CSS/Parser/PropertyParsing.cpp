@@ -4267,12 +4267,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::Auto) };
                 }
                 if (rust_style_value->scrollbar_color_kind == 2) {
-                    auto thumb_color = parse_color_value(tokens);
-                    if (!thumb_color)
+                    if (!rust_style_value->scrollbar_thumb_color.has_value() || !rust_style_value->scrollbar_track_color.has_value())
                         break;
-                    tokens.discard_whitespace();
-                    auto track_color = parse_color_value(tokens);
-                    if (!track_color)
+                    auto thumb_color = materialize_rust_style_color(*rust_style_value->scrollbar_thumb_color, parse_rust_source_as_color);
+                    auto track_color = materialize_rust_style_color(*rust_style_value->scrollbar_track_color, parse_rust_source_as_color);
+                    if (!thumb_color || !track_color)
                         break;
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
