@@ -8,8 +8,8 @@ use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedStyleValue {
-    pub(super) property_id: PropertyId,
-    pub(super) value: RustOwnedStyleValueKind,
+    pub(crate) property_id: PropertyId,
+    pub(crate) value: RustOwnedStyleValueKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -156,68 +156,68 @@ pub(crate) enum RustOwnedFontVariantLonghand {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorder {
-    pub(super) width: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) style: Option<RustOwnedLineStyle>,
-    pub(super) color: Option<RustOwnedColor>,
+    pub(crate) width: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) style: Option<RustOwnedLineStyle>,
+    pub(crate) color: Option<RustOwnedColor>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontLanguageOverride {
-    pub(super) kind: CssFontLanguageOverrideKind,
-    pub(super) value: Option<String>,
+    pub(crate) kind: CssFontLanguageOverrideKind,
+    pub(crate) value: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollFunction {
-    pub(super) scroller: CssScrollFunctionScrollerKind,
-    pub(super) axis: CssScrollFunctionAxisKind,
+    pub(crate) scroller: CssScrollFunctionScrollerKind,
+    pub(crate) axis: CssScrollFunctionAxisKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedViewTimelineInset {
-    pub(super) values: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) values: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedViewFunction {
-    pub(super) axis: CssScrollFunctionAxisKind,
-    pub(super) inset: CssViewFunctionInsetKind,
-    pub(super) inset_position: CssViewFunctionInsetPosition,
+    pub(crate) axis: CssScrollFunctionAxisKind,
+    pub(crate) inset: CssViewFunctionInsetKind,
+    pub(crate) inset_position: CssViewFunctionInsetPosition,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCornerShape {
-    pub(super) value: RustOwnedNestedPrimitiveValue,
+    pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageOutsetList {
-    pub(super) values: Vec<RustOwnedBorderImageOutset>,
+    pub(crate) values: Vec<RustOwnedBorderImageOutset>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageRepeatList {
-    pub(super) values: Vec<RustOwnedBorderImageRepeat>,
+    pub(crate) values: Vec<RustOwnedBorderImageRepeat>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageWidthList {
-    pub(super) values: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) values: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedOverflowClipMargin {
-    pub(super) length: RustOwnedNestedPrimitiveValue,
+    pub(crate) length: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFitContent {
-    pub(super) value: RustOwnedNestedPrimitiveValue,
+    pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontFamilyList {
-    pub(super) values: Vec<FontFamilyValue>,
+    pub(crate) values: Vec<FontFamilyValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,68 +228,68 @@ pub(crate) enum RustOwnedStyleValueParseResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
-    pub(super) layer_index: usize,
-    pub(super) style_value: RustOwnedStyleValue,
-    pub(super) source: String,
+    pub(crate) layer_index: usize,
+    pub(crate) style_value: RustOwnedStyleValue,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedLayerShorthandItem {
-    pub(super) layer_index: usize,
-    pub(super) property_id: PropertyId,
-    pub(super) source: String,
+    pub(crate) layer_index: usize,
+    pub(crate) property_id: PropertyId,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontShorthandItem {
-    pub(super) property_id: PropertyId,
-    pub(super) source: String,
+    pub(crate) property_id: PropertyId,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridPlacementShorthandItem {
-    pub(super) property_id: PropertyId,
-    pub(super) source: String,
+    pub(crate) property_id: PropertyId,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridTemplateShorthandItem {
-    pub(super) property_id: PropertyId,
-    pub(super) source: String,
+    pub(crate) property_id: PropertyId,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum GridTemplateRowTrackSourceItem {
+pub(crate) enum GridTemplateRowTrackSourceItem {
     LineNames(Vec<String>),
     Track(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
-    pub(super) index: usize,
-    pub(super) style_value: RustOwnedStyleValue,
-    pub(super) source: String,
+    pub(crate) index: usize,
+    pub(crate) style_value: RustOwnedStyleValue,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorFunction {
-    pub(super) anchor_name: Option<String>,
-    pub(super) anchor_side: String,
-    pub(super) fallback: Option<String>,
-    pub(super) source: String,
+    pub(crate) anchor_name: Option<String>,
+    pub(crate) anchor_side: String,
+    pub(crate) fallback: Option<String>,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorSizeFunction {
-    pub(super) source: String,
-    pub(super) value_type: PropertyValueType,
+    pub(crate) source: String,
+    pub(crate) value_type: PropertyValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedSourceBackedValue {
-    pub(super) kind: RustOwnedSourceBackedValueKind,
-    pub(super) source: String,
-    pub(super) value_type: PropertyValueType,
+    pub(crate) kind: RustOwnedSourceBackedValueKind,
+    pub(crate) source: String,
+    pub(crate) value_type: PropertyValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -300,10 +300,10 @@ pub(crate) enum RustOwnedSourceBackedValueKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCounterFunction {
-    pub(super) function: RustOwnedCounterFunctionKind,
-    pub(super) counter_name: String,
-    pub(super) join_string: Option<String>,
-    pub(super) counter_style: Option<CounterStyle>,
+    pub(crate) function: RustOwnedCounterFunctionKind,
+    pub(crate) counter_name: String,
+    pub(crate) join_string: Option<String>,
+    pub(crate) counter_style: Option<CounterStyle>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,21 +314,21 @@ pub(crate) enum RustOwnedCounterFunctionKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImage {
-    pub(super) kind: RustOwnedImageKind,
-    pub(super) source: String,
-    pub(super) url: Option<RustOwnedUrlPayload>,
+    pub(crate) kind: RustOwnedImageKind,
+    pub(crate) source: String,
+    pub(crate) url: Option<RustOwnedUrlPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedUrl {
-    pub(super) source: String,
-    pub(super) url: Option<RustOwnedUrlPayload>,
+    pub(crate) source: String,
+    pub(crate) url: Option<RustOwnedUrlPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedUrlPayload {
-    pub(super) function_type: CssUrlFunctionType,
-    pub(super) url: String,
+    pub(crate) function_type: CssUrlFunctionType,
+    pub(crate) url: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -341,14 +341,14 @@ pub(crate) enum RustOwnedImageKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBasicShape {
-    pub(super) kind: RustOwnedBasicShapeKind,
-    pub(super) fill_rule: RustOwnedBasicShapeFillRule,
-    pub(super) rectangle_components: Vec<RustOwnedNestedPrimitiveValue>,
-    pub(super) rectangle_border_radius: Option<RustOwnedBorderRadius>,
-    pub(super) radial_shape_radius: Vec<RustOwnedNestedPrimitiveValue>,
-    pub(super) radial_shape_position: Option<RustOwnedResolvedPosition>,
-    pub(super) polygon_points: Vec<RustOwnedBasicShapePolygonPoint>,
-    pub(super) path_data: Option<String>,
+    pub(crate) kind: RustOwnedBasicShapeKind,
+    pub(crate) fill_rule: RustOwnedBasicShapeFillRule,
+    pub(crate) rectangle_components: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) rectangle_border_radius: Option<RustOwnedBorderRadius>,
+    pub(crate) radial_shape_radius: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) radial_shape_position: Option<RustOwnedResolvedPosition>,
+    pub(crate) polygon_points: Vec<RustOwnedBasicShapePolygonPoint>,
+    pub(crate) path_data: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,8 +371,8 @@ pub(crate) enum RustOwnedBasicShapeFillRule {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBasicShapePolygonPoint {
-    pub(super) x: RustOwnedNestedPrimitiveValue,
-    pub(super) y: RustOwnedNestedPrimitiveValue,
+    pub(crate) x: RustOwnedNestedPrimitiveValue,
+    pub(crate) y: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -385,22 +385,22 @@ pub(crate) enum RustOwnedBasicShapeRadialExtent {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImageSet {
-    pub(super) options: Vec<RustOwnedImageSetOption>,
+    pub(crate) options: Vec<RustOwnedImageSetOption>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImageSetOption {
-    pub(super) image_is_string: bool,
-    pub(super) image_source: String,
-    pub(super) resolution: Option<String>,
-    pub(super) mime_type: Option<String>,
+    pub(crate) image_is_string: bool,
+    pub(crate) image_source: String,
+    pub(crate) resolution: Option<String>,
+    pub(crate) mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedListStyle {
-    pub(super) position: Option<RustOwnedListStylePosition>,
-    pub(super) image: Option<RustOwnedListStyleImage>,
-    pub(super) list_style_type: Option<RustOwnedListStyleType>,
+    pub(crate) position: Option<RustOwnedListStylePosition>,
+    pub(crate) image: Option<RustOwnedListStyleImage>,
+    pub(crate) list_style_type: Option<RustOwnedListStyleType>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -432,7 +432,7 @@ pub(crate) enum RustOwnedMathDepth {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedEasingFunction {
-    pub(super) value: RustOwnedEasingFunctionValue,
+    pub(crate) value: RustOwnedEasingFunctionValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -453,9 +453,9 @@ pub(crate) enum RustOwnedEasingFunctionValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedLinearEasingStop {
-    pub(super) output: RustOwnedNestedPrimitiveValue,
-    pub(super) first_stop_length: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) second_stop_length: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) output: RustOwnedNestedPrimitiveValue,
+    pub(crate) first_stop_length: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) second_stop_length: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -470,26 +470,26 @@ pub(crate) enum RustOwnedStepPosition {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRect {
-    pub(super) sides: Vec<RustOwnedNestedPrimitiveValue>,
-    pub(super) requires_commas: bool,
+    pub(crate) sides: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) requires_commas: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontStyle {
-    pub(super) value: FontStyle,
-    pub(super) angle: Option<String>,
+    pub(crate) value: FontStyle,
+    pub(crate) angle: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedOpenTypeSettings {
-    pub(super) kind: CssOpenTypeSettingsKind,
-    pub(super) tag_values: Vec<OpenTypeTaggedValue>,
+    pub(crate) kind: CssOpenTypeSettingsKind,
+    pub(crate) tag_values: Vec<OpenTypeTaggedValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedOpenTypeSettingsStyleValue {
-    pub(super) kind: RustOwnedOpenTypeSettingsStyleValueKind,
-    pub(super) value: RustOwnedOpenTypeSettings,
+    pub(crate) kind: RustOwnedOpenTypeSettingsStyleValueKind,
+    pub(crate) value: RustOwnedOpenTypeSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,38 +500,38 @@ pub(crate) enum RustOwnedOpenTypeSettingsStyleValueKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorNameOrScope {
-    pub(super) kind: CssAnchorNameOrScopeValueKind,
-    pub(super) names: Vec<String>,
+    pub(crate) kind: CssAnchorNameOrScopeValueKind,
+    pub(crate) names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnimationNameItem {
-    pub(super) kind: CssAnimationNameItemKind,
-    pub(super) value: String,
+    pub(crate) kind: CssAnimationNameItemKind,
+    pub(crate) value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnimationName {
-    pub(super) kind: CssAnimationNameValueKind,
-    pub(super) names: Vec<RustOwnedAnimationNameItem>,
+    pub(crate) kind: CssAnimationNameValueKind,
+    pub(crate) names: Vec<RustOwnedAnimationNameItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAspectRatio {
-    pub(super) has_auto: bool,
-    pub(super) numerator: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) denominator: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) has_auto: bool,
+    pub(crate) numerator: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) denominator: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBackgroundSizeList {
-    pub(super) values: Vec<RustOwnedBackgroundSize>,
+    pub(crate) values: Vec<RustOwnedBackgroundSize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderRadius {
-    pub(super) horizontal_radii: Vec<RustOwnedNestedPrimitiveValue>,
-    pub(super) vertical_radii: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) horizontal_radii: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) vertical_radii: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -547,9 +547,9 @@ pub(crate) enum RustOwnedColor {
     Source(String),
 }
 
-pub(super) const LINE_WIDTH_THIN: u8 = 0;
-pub(super) const LINE_WIDTH_MEDIUM: u8 = 1;
-pub(super) const LINE_WIDTH_THICK: u8 = 2;
+pub(crate) const LINE_WIDTH_THIN: u8 = 0;
+pub(crate) const LINE_WIDTH_MEDIUM: u8 = 1;
+pub(crate) const LINE_WIDTH_THICK: u8 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedPaint {
@@ -578,13 +578,13 @@ pub(crate) enum RustOwnedLineStyle {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageSlice {
-    pub(super) values: Vec<RustOwnedNestedPrimitiveValue>,
-    pub(super) fill: bool,
+    pub(crate) values: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) fill: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImageOutset {
-    pub(super) value: RustOwnedNestedPrimitiveValue,
+    pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -599,36 +599,36 @@ pub(crate) enum RustOwnedBackgroundSize {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedColorScheme {
-    pub(super) value: CssColorSchemeValue,
-    pub(super) schemes: Vec<String>,
+    pub(crate) value: CssColorSchemeValue,
+    pub(crate) schemes: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCounterDefinition {
-    pub(super) name: String,
-    pub(super) is_reversed: bool,
-    pub(super) value: RustOwnedNestedPrimitiveValue,
+    pub(crate) name: String,
+    pub(crate) is_reversed: bool,
+    pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCounterDefinitions {
-    pub(super) definitions: Vec<RustOwnedCounterDefinition>,
+    pub(crate) definitions: Vec<RustOwnedCounterDefinition>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedDisplay {
-    pub(super) kind: CssDisplayValueKind,
-    pub(super) box_: CssDisplayBox,
-    pub(super) internal: CssDisplayInternal,
-    pub(super) outside: CssDisplayOutside,
-    pub(super) inside: CssDisplayInside,
-    pub(super) list_item: CssDisplayListItem,
+    pub(crate) kind: CssDisplayValueKind,
+    pub(crate) box_: CssDisplayBox,
+    pub(crate) internal: CssDisplayInternal,
+    pub(crate) outside: CssDisplayOutside,
+    pub(crate) inside: CssDisplayInside,
+    pub(crate) list_item: CssDisplayListItem,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridAutoFlow {
-    pub(super) axis: CssGridAutoFlowAxis,
-    pub(super) dense: CssGridAutoFlowDense,
+    pub(crate) axis: CssGridAutoFlowAxis,
+    pub(crate) dense: CssGridAutoFlowDense,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -646,15 +646,15 @@ pub(crate) enum RustOwnedGridTrackPlacement {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCursor {
-    pub(super) images: Vec<RustOwnedCursorImage>,
-    pub(super) predefined: String,
+    pub(crate) images: Vec<RustOwnedCursorImage>,
+    pub(crate) predefined: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCursorImage {
-    pub(super) image: RustOwnedImage,
-    pub(super) x: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) y: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) image: RustOwnedImage,
+    pub(crate) x: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) y: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -790,8 +790,8 @@ pub(crate) enum RustOwnedGridTrackSize {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridRepeat {
-    pub(super) repeat_type: RustOwnedGridRepeatType,
-    pub(super) track_list: Vec<RustOwnedGridTrackSizeListItem>,
+    pub(crate) repeat_type: RustOwnedGridRepeatType,
+    pub(crate) track_list: Vec<RustOwnedGridTrackSizeListItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -803,30 +803,30 @@ pub(crate) enum RustOwnedGridRepeatType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedContain {
-    pub(super) value: CssContainValue,
+    pub(crate) value: CssContainValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedContainerType {
-    pub(super) value: CssContainerTypeValueKind,
+    pub(crate) value: CssContainerTypeValueKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedColumns {
-    pub(super) column_count: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) column_width: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) column_height: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) column_count: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) column_width: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) column_height: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPaintOrder {
-    pub(super) value: CssPaintOrderValue,
+    pub(crate) value: CssPaintOrderValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFlexFlow {
-    pub(super) flex_direction: Option<RustOwnedFlexDirection>,
-    pub(super) flex_wrap: Option<RustOwnedFlexWrap>,
+    pub(crate) flex_direction: Option<RustOwnedFlexDirection>,
+    pub(crate) flex_wrap: Option<RustOwnedFlexWrap>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -862,25 +862,25 @@ pub(crate) enum RustOwnedFlexBasis {
     FitContentFunction(RustOwnedNestedPrimitiveValue),
 }
 
-pub(super) const FLEX_BASIS_KIND_AUTO: u8 = 0;
-pub(super) const FLEX_BASIS_KIND_CONTENT: u8 = 1;
-pub(super) const FLEX_BASIS_KIND_FIT_CONTENT: u8 = 2;
-pub(super) const FLEX_BASIS_KIND_MIN_CONTENT: u8 = 3;
-pub(super) const FLEX_BASIS_KIND_MAX_CONTENT: u8 = 4;
-pub(super) const FLEX_BASIS_KIND_FIT_CONTENT_FUNCTION: u8 = 5;
-pub(super) const FLEX_BASIS_KIND_LENGTH_PERCENTAGE: u8 = 6;
-pub(super) const FLEX_BASIS_KIND_SOURCE: u8 = 7;
+pub(crate) const FLEX_BASIS_KIND_AUTO: u8 = 0;
+pub(crate) const FLEX_BASIS_KIND_CONTENT: u8 = 1;
+pub(crate) const FLEX_BASIS_KIND_FIT_CONTENT: u8 = 2;
+pub(crate) const FLEX_BASIS_KIND_MIN_CONTENT: u8 = 3;
+pub(crate) const FLEX_BASIS_KIND_MAX_CONTENT: u8 = 4;
+pub(crate) const FLEX_BASIS_KIND_FIT_CONTENT_FUNCTION: u8 = 5;
+pub(crate) const FLEX_BASIS_KIND_LENGTH_PERCENTAGE: u8 = 6;
+pub(crate) const FLEX_BASIS_KIND_SOURCE: u8 = 7;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPlaceShorthand {
-    pub(super) align_keywords: Vec<String>,
-    pub(super) justify_keywords: Vec<String>,
+    pub(crate) align_keywords: Vec<String>,
+    pub(crate) justify_keywords: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionAnchor {
-    pub(super) kind: CssPositionAnchorValueKind,
-    pub(super) name: Option<String>,
+    pub(crate) kind: CssPositionAnchorValueKind,
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -912,24 +912,24 @@ pub(crate) enum RustOwnedPositionTryFallback {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionTryOrder {
-    pub(super) value: CssPositionTryOrderValue,
+    pub(crate) value: CssPositionTryOrderValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionVisibility {
-    pub(super) value: CssPositionVisibilityValue,
+    pub(crate) value: CssPositionVisibilityValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPosition {
-    pub(super) value_type: PropertyValueType,
-    pub(super) value: RustOwnedResolvedPosition,
+    pub(crate) value_type: PropertyValueType,
+    pub(crate) value: RustOwnedResolvedPosition,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionList {
-    pub(super) value_type: PropertyValueType,
-    pub(super) values: Vec<RustOwnedPositionListItem>,
+    pub(crate) value_type: PropertyValueType,
+    pub(crate) values: Vec<RustOwnedPositionListItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -940,31 +940,31 @@ pub(crate) enum RustOwnedPositionListItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedResolvedPosition {
-    pub(super) x: RustOwnedPositionComponent,
-    pub(super) y: RustOwnedPositionComponent,
+    pub(crate) x: RustOwnedPositionComponent,
+    pub(crate) y: RustOwnedPositionComponent,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionComponent {
-    pub(super) edge: Option<PositionEdge>,
-    pub(super) offset: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) edge: Option<PositionEdge>,
+    pub(crate) offset: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedQuotes {
-    pub(super) kind: CssQuotesValueKind,
-    pub(super) strings: Vec<String>,
+    pub(crate) kind: CssQuotesValueKind,
+    pub(crate) strings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRepeatStyleList {
-    pub(super) values: Vec<RustOwnedRepeatStyle>,
+    pub(crate) values: Vec<RustOwnedRepeatStyle>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedRepeatStyle {
-    pub(super) repeat_x: CssRepeatStyleRepetition,
-    pub(super) repeat_y: CssRepeatStyleRepetition,
+    pub(crate) repeat_x: CssRepeatStyleRepetition,
+    pub(crate) repeat_y: CssRepeatStyleRepetition,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -978,16 +978,16 @@ pub(crate) enum RustOwnedScrollbarColor {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollbarGutter {
-    pub(super) value: CssScrollbarGutterValueKind,
+    pub(crate) value: CssScrollbarGutterValueKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderImage {
-    pub(super) source: Option<RustOwnedBorderImageSource>,
-    pub(super) slice: Option<RustOwnedBorderImageSlice>,
-    pub(super) width: Option<Vec<RustOwnedNestedPrimitiveValue>>,
-    pub(super) outset: Option<Vec<RustOwnedBorderImageOutset>>,
-    pub(super) repeat: Option<Vec<RustOwnedBorderImageRepeat>>,
+    pub(crate) source: Option<RustOwnedBorderImageSource>,
+    pub(crate) slice: Option<RustOwnedBorderImageSlice>,
+    pub(crate) width: Option<Vec<RustOwnedNestedPrimitiveValue>>,
+    pub(crate) outset: Option<Vec<RustOwnedBorderImageOutset>>,
+    pub(crate) repeat: Option<Vec<RustOwnedBorderImageRepeat>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1013,12 +1013,12 @@ pub(crate) enum RustOwnedShadow {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedSingleShadow {
-    pub(super) color: Option<RustOwnedColor>,
-    pub(super) offset_x: RustOwnedNestedPrimitiveValue,
-    pub(super) offset_y: RustOwnedNestedPrimitiveValue,
-    pub(super) blur_radius: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) spread_distance: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) placement: RustOwnedShadowPlacement,
+    pub(crate) color: Option<RustOwnedColor>,
+    pub(crate) offset_x: RustOwnedNestedPrimitiveValue,
+    pub(crate) offset_y: RustOwnedNestedPrimitiveValue,
+    pub(crate) blur_radius: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) spread_distance: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) placement: RustOwnedShadowPlacement,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1035,20 +1035,20 @@ pub(crate) enum RustOwnedStrokeDasharray {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextUnderlinePosition {
-    pub(super) value: CssTextUnderlinePositionValue,
+    pub(crate) value: CssTextUnderlinePositionValue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RustOwnedTextDecorationLine {
-    pub(super) bits: u8,
+    pub(crate) bits: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextDecoration {
-    pub(super) line: Option<RustOwnedTextDecorationLine>,
-    pub(super) thickness: Option<RustOwnedNestedPrimitiveValue>,
-    pub(super) style: Option<RustOwnedTextDecorationStyle>,
-    pub(super) color: Option<RustOwnedColor>,
+    pub(crate) line: Option<RustOwnedTextDecorationLine>,
+    pub(crate) thickness: Option<RustOwnedNestedPrimitiveValue>,
+    pub(crate) style: Option<RustOwnedTextDecorationStyle>,
+    pub(crate) color: Option<RustOwnedColor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1085,129 +1085,129 @@ pub(crate) enum RustOwnedTransformLonghandFunction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformOrigin {
-    pub(super) x: RustOwnedNestedPrimitiveValue,
-    pub(super) y: RustOwnedNestedPrimitiveValue,
-    pub(super) z: RustOwnedNestedPrimitiveValue,
+    pub(crate) x: RustOwnedNestedPrimitiveValue,
+    pub(crate) y: RustOwnedNestedPrimitiveValue,
+    pub(crate) z: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformation {
-    pub(super) function: TransformFunction,
-    pub(super) arguments: Vec<RustOwnedTransformationArgument>,
+    pub(crate) function: TransformFunction,
+    pub(crate) arguments: Vec<RustOwnedTransformationArgument>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransformationArgument {
-    pub(super) parameter_type: TransformFunctionParameterType,
-    pub(super) value: RustOwnedNestedPrimitiveValue,
+    pub(crate) parameter_type: TransformFunctionParameterType,
+    pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineNameItem {
-    pub(super) kind: CssTimelineNameItemKind,
-    pub(super) name: String,
+    pub(crate) kind: CssTimelineNameItemKind,
+    pub(crate) name: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineName {
-    pub(super) kind: CssTimelineNameValueKind,
-    pub(super) names: Vec<RustOwnedTimelineNameItem>,
+    pub(crate) kind: CssTimelineNameValueKind,
+    pub(crate) names: Vec<RustOwnedTimelineNameItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedScrollTimeline {
-    pub(super) names: Vec<RustOwnedTimelineNameItem>,
-    pub(super) axes: Vec<CssScrollFunctionAxisKind>,
+    pub(crate) names: Vec<RustOwnedTimelineNameItem>,
+    pub(crate) axes: Vec<CssScrollFunctionAxisKind>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedViewTimeline {
-    pub(super) names: Vec<RustOwnedTimelineNameItem>,
-    pub(super) axes: Vec<CssScrollFunctionAxisKind>,
-    pub(super) insets: Vec<Vec<RustOwnedNestedPrimitiveValue>>,
+    pub(crate) names: Vec<RustOwnedTimelineNameItem>,
+    pub(crate) axes: Vec<CssScrollFunctionAxisKind>,
+    pub(crate) insets: Vec<Vec<RustOwnedNestedPrimitiveValue>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTimelineScope {
-    pub(super) kind: CssTimelineScopeValueKind,
-    pub(super) names: Vec<String>,
+    pub(crate) kind: CssTimelineScopeValueKind,
+    pub(crate) names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrap {
-    pub(super) value: CssTextWrapValue,
+    pub(crate) value: CssTextWrapValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrapMode {
-    pub(super) value: CssTextWrapModeValue,
+    pub(crate) value: CssTextWrapModeValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextWrapStyle {
-    pub(super) value: CssTextWrapStyleValue,
+    pub(crate) value: CssTextWrapStyleValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextIndent {
-    pub(super) length_percentage: RustOwnedNestedPrimitiveValue,
-    pub(super) has_hanging: bool,
-    pub(super) has_each_line: bool,
+    pub(crate) length_percentage: RustOwnedNestedPrimitiveValue,
+    pub(crate) has_hanging: bool,
+    pub(crate) has_each_line: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTouchAction {
-    pub(super) value: CssTouchActionValue,
+    pub(crate) value: CssTouchActionValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransitionBehavior {
-    pub(super) kind: CssTransitionBehaviorValueKind,
-    pub(super) behaviors: Vec<CssTransitionBehaviorItemKind>,
+    pub(crate) kind: CssTransitionBehaviorValueKind,
+    pub(crate) behaviors: Vec<CssTransitionBehaviorItemKind>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTransitionProperty {
-    pub(super) kind: CssTransitionPropertyValueKind,
-    pub(super) properties: Vec<String>,
+    pub(crate) kind: CssTransitionPropertyValueKind,
+    pub(crate) properties: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedViewTransitionName {
-    pub(super) kind: CssViewTransitionNameValueKind,
-    pub(super) name: Option<String>,
+    pub(crate) kind: CssViewTransitionNameValueKind,
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWhiteSpaceTrim {
-    pub(super) value: CssWhiteSpaceTrimValue,
+    pub(crate) value: CssWhiteSpaceTrimValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWhiteSpace {
-    pub(super) white_space_collapse: String,
-    pub(super) text_wrap_mode: CssTextWrapModeValue,
-    pub(super) white_space_trim: CssWhiteSpaceTrimValue,
+    pub(crate) white_space_collapse: String,
+    pub(crate) text_wrap_mode: CssTextWrapModeValue,
+    pub(crate) white_space_trim: CssWhiteSpaceTrimValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWillChangeFeature {
-    pub(super) kind: CssWillChangeFeatureKind,
-    pub(super) value: String,
+    pub(crate) kind: CssWillChangeFeatureKind,
+    pub(crate) value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedWillChange {
-    pub(super) kind: CssWillChangeValueKind,
-    pub(super) features: Vec<RustOwnedWillChangeFeature>,
+    pub(crate) kind: CssWillChangeValueKind,
+    pub(crate) features: Vec<RustOwnedWillChangeFeature>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedStyleValueList {
-    pub(super) values: Vec<RustOwnedStyleValueKind>,
-    pub(super) separator: RustOwnedStyleValueListSeparator,
-    pub(super) value_type: Option<PropertyValueType>,
-    pub(super) source: Option<String>,
+    pub(crate) values: Vec<RustOwnedStyleValueKind>,
+    pub(crate) separator: RustOwnedStyleValueListSeparator,
+    pub(crate) value_type: Option<PropertyValueType>,
+    pub(crate) source: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
