@@ -180,8 +180,19 @@ public:
         RustNestedPrimitiveValue value;
     };
 
+    struct RustStyleColor {
+        bool is_simple { false };
+        FFI::CssParsedColorKind kind { FFI::CssParsedColorKind::Invalid };
+        u8 red { 0 };
+        u8 green { 0 };
+        u8 blue { 0 };
+        u8 alpha { 0 };
+        Optional<String> name;
+        Optional<String> source;
+    };
+
     struct RustShadow {
-        Optional<String> color_source;
+        Optional<RustStyleColor> color;
         RustNestedPrimitiveValue offset_x;
         RustNestedPrimitiveValue offset_y;
         Optional<RustNestedPrimitiveValue> blur_radius;
@@ -374,7 +385,7 @@ public:
         RustNestedPrimitiveValue secondary_value;
         String source;
         Optional<RustNestedPrimitiveValue> drop_shadow_radius;
-        Optional<String> drop_shadow_color_source;
+        Optional<RustStyleColor> drop_shadow_color;
     };
 
     struct RustLinearEasingStop {
@@ -422,7 +433,7 @@ public:
         Optional<RustTextDecorationThicknessKind> text_decoration_thickness_kind;
         Optional<RustNestedPrimitiveValue> text_decoration_thickness;
         Optional<RustTextDecorationStyle> text_decoration_style;
-        Optional<String> text_decoration_color_source;
+        Optional<RustStyleColor> text_decoration_color;
         Optional<RustListStylePosition> list_style_position;
         Optional<String> list_style_image_source;
         Optional<String> list_style_type_source;
@@ -435,7 +446,7 @@ public:
         Optional<LineWidth> border_width_keyword;
         Optional<RustNestedPrimitiveValue> border_width_length;
         Optional<LineStyle> border_style;
-        Optional<String> border_color_source;
+        Optional<RustStyleColor> border_color;
         Optional<String> border_image_source_source;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };

@@ -1695,6 +1695,33 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto materialize_rust_style_color = [&](RustComponentValueParser::RustStyleColor const& color, auto parse_source) -> RefPtr<StyleValue const> {
+                if (!color.is_simple) {
+                    if (!color.source.has_value())
+                        return nullptr;
+                    return parse_source(*color.source);
+                }
+
+                switch (color.kind) {
+                case FFI::CssParsedColorKind::Invalid:
+                    return nullptr;
+                case FFI::CssParsedColorKind::Rgba: {
+                    Optional<FlyString> name;
+                    if (color.name.has_value())
+                        name = FlyString::from_utf8_without_validation(color.name->bytes());
+                    return ColorStyleValue::create_from_color({ color.red, color.green, color.blue, color.alpha }, ColorSyntax::Legacy, move(name));
+                }
+                case FFI::CssParsedColorKind::Keyword: {
+                    if (!color.name.has_value())
+                        return nullptr;
+                    auto keyword = keyword_from_string(*color.name);
+                    if (!keyword.has_value())
+                        return nullptr;
+                    return KeywordStyleValue::create(*keyword);
+                }
+                }
+                VERIFY_NOT_REACHED();
+            };
             auto parse_rust_source_as_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -2910,8 +2937,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     : property_initial_value(style_property);
 
                 RefPtr<StyleValue const> color;
-                if (rust_style_value->border_color_source.has_value()) {
-                    auto color_value = parse_rust_source_as_property(color_property, *rust_style_value->border_color_source);
+                if (rust_style_value->border_color.has_value()) {
+                    auto color_value = materialize_rust_style_color(*rust_style_value->border_color, [&](String const& source) {
+                        return parse_rust_source_as_property(color_property, source);
+                    });
                     if (!color_value)
                         break;
                     color = make_single_value_shorthand(color_property, longhands_for_shorthand(color_property), color_value.release_nonnull());
@@ -3165,8 +3194,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             }
 
                             RefPtr<StyleValue const> color;
-                            if (event.drop_shadow_color_source.has_value()) {
-                                color = parse_rust_source_as_color(*event.drop_shadow_color_source);
+                            if (event.drop_shadow_color.has_value()) {
+                                color = materialize_rust_style_color(*event.drop_shadow_color, parse_rust_source_as_color);
                                 if (!color)
                                     break;
                             }
@@ -3834,8 +3863,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     shadows.ensure_capacity(rust_style_value->shadows.size());
                     for (auto const& shadow : rust_style_value->shadows) {
                         RefPtr<StyleValue const> color;
-                        if (shadow.color_source.has_value()) {
-                            color = parse_rust_source_as_color(*shadow.color_source);
+                        if (shadow.color.has_value()) {
+                            color = materialize_rust_style_color(*shadow.color, parse_rust_source_as_color);
                             if (!color)
                                 break;
                         }
@@ -3879,7 +3908,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextDecoration:
-                if (rust_style_value->text_decoration_line_bits.has_value() || rust_style_value->text_decoration_thickness_kind.has_value() || rust_style_value->text_decoration_style.has_value() || rust_style_value->text_decoration_color_source.has_value()) {
+                if (rust_style_value->text_decoration_line_bits.has_value() || rust_style_value->text_decoration_thickness_kind.has_value() || rust_style_value->text_decoration_style.has_value() || rust_style_value->text_decoration_color.has_value()) {
                     auto decoration_line = rust_style_value->text_decoration_line_bits.has_value()
                         ? materialize_rust_text_decoration_line(*rust_style_value->text_decoration_line_bits)
                         : property_initial_value(PropertyID::TextDecorationLine);
@@ -3889,8 +3918,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     RefPtr<StyleValue const> decoration_style = rust_style_value->text_decoration_style.has_value()
                         ? KeywordStyleValue::create(text_decoration_style_keyword_from_rust(*rust_style_value->text_decoration_style))
                         : property_initial_value(PropertyID::TextDecorationStyle);
-                    auto decoration_color = rust_style_value->text_decoration_color_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::TextDecorationColor, *rust_style_value->text_decoration_color_source)
+                    auto decoration_color = rust_style_value->text_decoration_color.has_value()
+                        ? materialize_rust_style_color(*rust_style_value->text_decoration_color, [&](String const& source) {
+                              return parse_rust_source_as_property(PropertyID::TextDecorationColor, source);
+                          })
                         : property_initial_value(PropertyID::TextDecorationColor);
                     if (!decoration_line || !decoration_thickness || !decoration_style || !decoration_color)
                         break;

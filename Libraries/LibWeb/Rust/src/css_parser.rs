@@ -1990,7 +1990,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Border {
         width: Option<RustOwnedBorderWidth>,
         style: Option<RustOwnedLineStyle>,
-        color_source: Option<String>,
+        color: Option<RustOwnedColor>,
     },
     BorderImage(RustOwnedBorderImage),
     BorderImageOutset {
@@ -2394,6 +2394,19 @@ pub(crate) struct RustOwnedBorderRadius {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedColor {
+    Simple {
+        kind: CssParsedColorKind,
+        red: u8,
+        green: u8,
+        blue: u8,
+        alpha: u8,
+        name: Option<String>,
+    },
+    Source(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBorderWidth {
     Length(RustOwnedNestedPrimitiveValue),
     LineWidth(RustOwnedLineWidth),
@@ -2562,7 +2575,7 @@ pub(crate) enum RustOwnedFilterValue {
         radius: Option<RustOwnedNestedPrimitiveValue>,
     },
     DropShadow {
-        color_source: Option<String>,
+        color: Option<RustOwnedColor>,
         offset_x: RustOwnedNestedPrimitiveValue,
         offset_y: RustOwnedNestedPrimitiveValue,
         radius: Option<RustOwnedNestedPrimitiveValue>,
@@ -2830,7 +2843,7 @@ pub(crate) enum RustOwnedShadow {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedSingleShadow {
-    color_source: Option<String>,
+    color: Option<RustOwnedColor>,
     offset_x: RustOwnedNestedPrimitiveValue,
     offset_y: RustOwnedNestedPrimitiveValue,
     blur_radius: Option<RustOwnedNestedPrimitiveValue>,
@@ -2865,7 +2878,7 @@ pub(crate) struct RustOwnedTextDecoration {
     line: Option<RustOwnedTextDecorationLine>,
     thickness: Option<RustOwnedTextDecorationThickness>,
     style: Option<RustOwnedTextDecorationStyle>,
-    color_source: Option<String>,
+    color: Option<RustOwnedColor>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5679,7 +5692,7 @@ fn rust_owned_border_shorthand_style_value_kind(
 
     let mut width = None;
     let mut style = None;
-    let mut color_source = None;
+    let mut color = None;
 
     while parser.has_next_component_value() {
         parser.discard_whitespace();
@@ -5696,25 +5709,58 @@ fn rust_owned_border_shorthand_style_value_kind(
             && let Some(value) = rust_owned_line_style_from_component_value(component_value)
         {
             style = Some(value);
-        } else if color_source.is_none()
-            && let RustOwnedStyleValueParseResult::Parsed(_) =
-                parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes())
+        } else if color.is_none()
+            && let Some(value) = rust_owned_color_from_component_value(component_value, &source)
+            && matches!(
+                parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes()),
+                RustOwnedStyleValueParseResult::Parsed(_)
+            )
         {
-            color_source = Some(component_source);
+            color = Some(value);
         } else {
             return None;
         }
     }
 
-    if width.is_none() && style.is_none() && color_source.is_none() {
+    if width.is_none() && style.is_none() && color.is_none() {
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::Border {
-        width,
-        style,
-        color_source,
-    })
+    Some(RustOwnedStyleValueKind::Border { width, style, color })
+}
+
+fn rust_owned_color_from_component_value(component_value: &ComponentValue, source: &str) -> Option<RustOwnedColor> {
+    if let Some(color) = simple_color_from_component_value(component_value, false) {
+        return Some(match color {
+            ParsedSimpleColor::Rgba {
+                red,
+                green,
+                blue,
+                alpha,
+                name,
+            } => RustOwnedColor::Simple {
+                kind: CssParsedColorKind::Rgba,
+                red,
+                green,
+                blue,
+                alpha,
+                name: name.map(str::to_string),
+            },
+            ParsedSimpleColor::Keyword { name } => RustOwnedColor::Simple {
+                kind: CssParsedColorKind::Keyword,
+                red: 0,
+                green: 0,
+                blue: 0,
+                alpha: 0,
+                name: Some(name.to_string()),
+            },
+        });
+    }
+
+    component_value_parse_as_color_value(component_value)
+        .then(|| serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source))
+        .flatten()
+        .map(RustOwnedColor::Source)
 }
 
 fn rust_owned_border_width_from_component_value(
@@ -6404,7 +6450,7 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
     let mut line_component_values = Vec::new();
     let mut thickness = None;
     let mut style = None;
-    let mut color_source = None;
+    let mut color = None;
     let mut saw_non_line_after_line = false;
 
     for component_value in &component_values {
@@ -6425,11 +6471,10 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
             continue;
         }
 
-        if color_source.is_none() && component_value_parse_as_color_value(component_value) {
-            color_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+        if color.is_none()
+            && let Some(value) = rust_owned_color_from_component_value(component_value, filtered_input_string)
+        {
+            color = Some(value);
             continue;
         }
 
@@ -6458,7 +6503,7 @@ fn rust_owned_text_decoration_style_value_kind(filtered_input: &[u8]) -> Option<
         line,
         thickness,
         style,
-        color_source,
+        color,
     }))
 }
 
@@ -8006,11 +8051,7 @@ where
                 callback_border_image_repeat_style_value(callback, CssStyleValueKind::BorderImage, property_id, repeat);
             }
         }
-        RustOwnedStyleValueKind::Border {
-            width,
-            style,
-            color_source,
-        } => {
+        RustOwnedStyleValueKind::Border { width, style, color } => {
             const WIDTH: u8 = 0;
             const STYLE: u8 = 1;
             const COLOR: u8 = 2;
@@ -8035,22 +8076,8 @@ where
                     "",
                 );
             }
-            if let Some(source) = color_source {
-                callback(
-                    CssStyleValueKind::Border,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    COLOR,
-                    0,
-                    0,
-                    0,
-                    source.as_bytes(),
-                    "",
-                );
+            if let Some(color) = color {
+                callback_rust_owned_color(callback, CssStyleValueKind::Border, property_id, COLOR, color);
             }
         }
         RustOwnedStyleValueKind::BorderImageRepeat { values } => {
@@ -8564,13 +8591,9 @@ where
                     "",
                 );
             }
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::TextDecoration,
-                property_id,
-                3,
-                value.color_source.as_ref(),
-            );
+            if let Some(color) = &value.color {
+                callback_rust_owned_color(callback, CssStyleValueKind::TextDecoration, property_id, 3, color);
+            }
         }
         RustOwnedStyleValueKind::TextDecorationLine(value) => callback(
             CssStyleValueKind::TextDecorationLine,
@@ -9620,6 +9643,56 @@ fn callback_border_width_style_value<C>(
     }
 }
 
+fn callback_rust_owned_color<C>(
+    callback: &mut C,
+    kind: CssStyleValueKind,
+    property_id: u16,
+    component_kind: u8,
+    color: &RustOwnedColor,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match color {
+        RustOwnedColor::Simple {
+            kind: color_kind,
+            red,
+            green,
+            blue,
+            alpha,
+            name,
+        } => callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            true,
+            f64::from(component_kind),
+            true,
+            *color_kind as u8 as f64,
+            *red,
+            *green,
+            *blue,
+            *alpha,
+            name.as_deref().unwrap_or("").as_bytes(),
+            "",
+        ),
+        RustOwnedColor::Source(source) => callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            component_kind,
+            0,
+            0,
+            0,
+            source.as_bytes(),
+            "",
+        ),
+    }
+}
+
 fn callback_border_image_width_style_value<C>(
     callback: &mut C,
     kind: CssStyleValueKind,
@@ -10612,7 +10685,7 @@ where
                         radius.as_ref(),
                     ),
                     RustOwnedFilterValue::DropShadow {
-                        color_source,
+                        color,
                         offset_x,
                         offset_y,
                         radius,
@@ -10635,13 +10708,13 @@ where
                                 radius,
                             );
                         }
-                        if let Some(color_source) = color_source {
-                            callback_filter_source(
+                        if let Some(color) = color {
+                            callback_rust_owned_color(
                                 callback,
+                                CssStyleValueKind::FilterValueList,
                                 property_id,
                                 FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_COLOR,
-                                0,
-                                color_source,
+                                color,
                             );
                         }
                     }
@@ -11287,8 +11360,14 @@ where
                     RustOwnedShadowPlacement::Inner => SHADOW_PLACEMENT_INNER,
                 };
                 callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_BEGIN_SHADOW, placement, "");
-                if let Some(color_source) = &shadow.color_source {
-                    callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_COLOR, 0, color_source);
+                if let Some(color) = &shadow.color {
+                    callback_rust_owned_color(
+                        callback,
+                        CssStyleValueKind::Shadow,
+                        property_id,
+                        SHADOW_CALLBACK_COLOR,
+                        color,
+                    );
                 }
                 callback_nested_primitive(
                     callback,
@@ -20039,32 +20118,32 @@ fn component_values_parse_as_drop_shadow_function(
     }
 
     let mut parser = ComponentValueParser::new(component_values.to_vec());
-    let color_source_before_lengths = consume_filter_drop_shadow_color(&mut parser, source);
+    let color_before_lengths = consume_filter_drop_shadow_color(&mut parser, source);
     let offset_x = consume_filter_drop_shadow_length(&mut parser, source)?;
     let offset_y = consume_filter_drop_shadow_length(&mut parser, source)?;
 
     let radius = consume_filter_drop_shadow_length(&mut parser, source);
-    let color_source = if color_source_before_lengths.is_some() {
-        color_source_before_lengths
+    let color = if color_before_lengths.is_some() {
+        color_before_lengths
     } else {
         consume_filter_drop_shadow_color(&mut parser, source)
     };
 
     (!parser.has_next_component_value()).then_some(RustOwnedFilterValue::DropShadow {
-        color_source,
+        color,
         offset_x,
         offset_y,
         radius,
     })
 }
 
-fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser, source: &str) -> Option<String> {
+fn consume_filter_drop_shadow_color(parser: &mut ComponentValueParser, source: &str) -> Option<RustOwnedColor> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value().cloned()?;
 
-    if component_value_parse_as_color_value(&component_value) {
+    if let Some(color) = rust_owned_color_from_component_value(&component_value, source) {
         parser.index += 1;
-        return serialize_component_values_for_reparsing(std::slice::from_ref(&component_value), source);
+        return Some(color);
     }
 
     None
@@ -20599,7 +20678,7 @@ fn parse_single_shadow_value(
     let mut parser = ComponentValueParser::new(component_values);
     parser.discard_whitespace();
 
-    let mut color_source = None;
+    let mut color = None;
     let mut offset_x = None;
     let mut offset_y = None;
     let mut blur_radius = None;
@@ -20609,11 +20688,10 @@ fn parse_single_shadow_value(
 
     while parser.has_next_component_value() {
         let component_value = parser.next_component_value().unwrap();
-        if color_source.is_none() && component_value_parse_as_color_value(component_value) {
-            color_source = Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?);
+        if color.is_none()
+            && let Some(value) = rust_owned_color_from_component_value(component_value, filtered_input_string)
+        {
+            color = Some(value);
             parser.index += 1;
             continue;
         }
@@ -20659,7 +20737,7 @@ fn parse_single_shadow_value(
     }
 
     Some(RustOwnedSingleShadow {
-        color_source,
+        color,
         offset_x: offset_x?,
         offset_y: offset_y?,
         blur_radius,
@@ -30346,44 +30424,44 @@ mod tests {
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat,
         RustOwnedBorderImageSlice, RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth,
-        RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain,
-        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
-        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLineWidth,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStylePosition, RustOwnedMathDepth,
-        RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
-        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
-        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextDecorationThickness, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformOriginComponentValue, RustOwnedTransformation, RustOwnedTransformationArgument,
-        RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace,
-        RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType,
-        SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
-        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
-        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
-        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
-        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
-        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
-        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
-        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
-        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedColor, RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns,
+        RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
+        RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage,
+        RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+        RustOwnedFitContentValue, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedListStylePosition, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue,
+        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
+        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
+        RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
+        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
+        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -32614,7 +32692,14 @@ mod tests {
                         unit: "px".to_string(),
                     },)),
                     style: Some(RustOwnedLineStyle::Solid),
-                    color_source: Some("red".to_string()),
+                    color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("red".to_string()),
+                    }),
                 },
             })
         );
@@ -32625,7 +32710,14 @@ mod tests {
                 value: RustOwnedStyleValueKind::Border {
                     width: Some(RustOwnedBorderWidth::LineWidth(RustOwnedLineWidth::Thick)),
                     style: Some(RustOwnedLineStyle::Dashed),
-                    color_source: Some("currentcolor".to_string()),
+                    color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Keyword,
+                        red: 0,
+                        green: 0,
+                        blue: 0,
+                        alpha: 0,
+                        name: Some("currentcolor".to_string()),
+                    }),
                 },
             })
         );
@@ -32782,7 +32874,14 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BoxShadow,
                 value: RustOwnedStyleValueKind::Shadow(RustOwnedShadow::Shadows(vec![RustOwnedSingleShadow {
-                    color_source: Some("red".to_string()),
+                    color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("red".to_string()),
+                    }),
                     offset_x: RustOwnedNestedPrimitiveValue::Length {
                         value: 1.0,
                         unit: "px".to_string(),
@@ -33539,7 +33638,14 @@ mod tests {
                     }),
                     thickness: Some(RustOwnedTextDecorationThickness::FromFont),
                     style: None,
-                    color_source: Some("green".to_string()),
+                    color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 0,
+                        green: 128,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("green".to_string()),
+                    }),
                 }),
             })
         );
@@ -33559,7 +33665,14 @@ mod tests {
                     }),
                     thickness: None,
                     style: None,
-                    color_source: Some("red".to_string()),
+                    color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("red".to_string()),
+                    }),
                 }),
             })
         );
@@ -33578,7 +33691,7 @@ mod tests {
                     }),
                     thickness: None,
                     style: None,
-                    color_source: Some("rgb(255, 0, 0)".to_string()),
+                    color: Some(RustOwnedColor::Source("rgb(255, 0, 0)".to_string())),
                 }),
             })
         );
@@ -34299,8 +34412,8 @@ mod tests {
                 kind: CssStyleValueKind::TextDecoration,
                 property_id: PropertyId::TextDecoration,
                 primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
-                secondary_numeric_value: None,
+                numeric_value: Some(3.0),
+                secondary_numeric_value: Some(CssParsedColorKind::Rgba as u8 as f64),
                 color: None,
                 value: "red".to_string(),
                 value_type: String::new(),
@@ -38132,7 +38245,7 @@ mod tests {
 
         let [
             RustOwnedFilterValue::DropShadow {
-                color_source,
+                color,
                 offset_x,
                 offset_y,
                 radius,
@@ -38142,7 +38255,17 @@ mod tests {
             panic!("Expected drop-shadow filter");
         };
 
-        assert_eq!(color_source.as_deref(), Some("red"));
+        assert_eq!(
+            color,
+            &Some(RustOwnedColor::Simple {
+                kind: CssParsedColorKind::Rgba,
+                red: 255,
+                green: 0,
+                blue: 0,
+                alpha: 255,
+                name: Some("red".to_string()),
+            })
+        );
         assert_eq!(
             offset_x,
             &RustOwnedNestedPrimitiveValue::Length {

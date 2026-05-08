@@ -34,6 +34,26 @@ static String string_from_ffi_bytes(u8 const* bytes, size_t length)
     return String::from_utf8_without_validation({ bytes, length });
 }
 
+static RustComponentValueParser::RustStyleColor style_color_from_callback_payload(bool is_simple, double kind, u8 red, u8 green, u8 blue, u8 alpha, u8 const* value_ptr, size_t value_len)
+{
+    if (!is_simple) {
+        return {
+            .source = string_from_ffi_bytes(value_ptr, value_len),
+        };
+    }
+
+    auto name = string_from_ffi_bytes(value_ptr, value_len);
+    return {
+        .is_simple = true,
+        .kind = static_cast<FFI::CssParsedColorKind>(static_cast<u8>(kind)),
+        .red = red,
+        .green = green,
+        .blue = blue,
+        .alpha = alpha,
+        .name = name.is_empty() ? Optional<String> {} : Optional<String> { move(name) },
+    };
+}
+
 static String decode_and_filter_code_points(StringView input, StringView encoding)
 {
     // https://www.w3.org/TR/css-syntax-3/#css-filter-code-points
@@ -1262,16 +1282,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == 0) {
+                auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                if (component_kind == 0) {
                     style_value->text_decoration_line_bits = color_green;
-                } else if (color_red == 1) {
+                } else if (component_kind == 1) {
                     style_value->text_decoration_thickness_kind = static_cast<RustTextDecorationThicknessKind>(color_green);
                     if (*style_value->text_decoration_thickness_kind == RustTextDecorationThicknessKind::LengthPercentage)
                         style_value->text_decoration_thickness = nested_primitive_value_from_callback_payload();
-                } else if (color_red == 2) {
+                } else if (component_kind == 2) {
                     style_value->text_decoration_style = static_cast<RustTextDecorationStyle>(color_green);
                 } else {
-                    style_value->text_decoration_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->text_decoration_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ListStyle) {
@@ -1329,7 +1350,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                switch (color_red) {
+                auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                switch (component_kind) {
                 case 0:
                     if (color_blue != 0)
                         style_value->border_width_length = nested_primitive_value_from_callback_payload();
@@ -1340,7 +1362,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->border_style = static_cast<LineStyle>(color_green);
                     break;
                 case 2:
-                    style_value->border_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->border_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
                     break;
                 default:
                     VERIFY_NOT_REACHED();
@@ -1479,12 +1501,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == None) {
+                auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                if (component_kind == None) {
                     style_value->shadow_is_none = true;
                     return;
                 }
 
-                if (color_red == BeginShadow) {
+                if (component_kind == BeginShadow) {
                     style_value->shadows.append(RustShadow {
                         .placement = color_green == Inner ? RustShadowPlacement::Inner : RustShadowPlacement::Outer,
                     });
@@ -1493,15 +1516,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 VERIFY(!style_value->shadows.is_empty());
                 auto& shadow = style_value->shadows.last();
-                if (color_red == Color)
-                    shadow.color_source = string_from_ffi_bytes(value_ptr, value_len);
-                else if (color_red == OffsetX)
+                if (component_kind == Color)
+                    shadow.color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                else if (component_kind == OffsetX)
                     shadow.offset_x = nested_primitive_value_from_callback_payload();
-                else if (color_red == OffsetY)
+                else if (component_kind == OffsetY)
                     shadow.offset_y = nested_primitive_value_from_callback_payload();
-                else if (color_red == BlurRadius)
+                else if (component_kind == BlurRadius)
                     shadow.blur_radius = nested_primitive_value_from_callback_payload();
-                else if (color_red == SpreadDistance)
+                else if (component_kind == SpreadDistance)
                     shadow.spread_distance = nested_primitive_value_from_callback_payload();
                 return;
             } else if (kind == FFI::CssStyleValueKind::ShapeOutside) {
@@ -1659,12 +1682,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == None) {
+                auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                if (component_kind == None) {
                     style_value->filter_value_list_is_none = true;
                     return;
                 }
 
-                auto filter_event_kind = static_cast<RustFilterValueListEventKind>(color_red);
+                auto filter_event_kind = static_cast<RustFilterValueListEventKind>(component_kind);
                 if (filter_event_kind == RustFilterValueListEventKind::DropShadowRadius) {
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
@@ -1674,7 +1698,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (filter_event_kind == RustFilterValueListEventKind::DropShadowColor) {
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
-                    style_value->filter_value_list_events.last().drop_shadow_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->filter_value_list_events.last().drop_shadow_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
                     return;
                 }
 
