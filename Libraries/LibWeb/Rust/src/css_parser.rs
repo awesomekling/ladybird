@@ -1936,7 +1936,6 @@ pub enum CssStyleValueKind {
     WillChange,
     MathFunction,
     TreeCountingFunction,
-    ValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4284,12 +4283,7 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
             if let Some(value) = rust_owned_transform_list_style_value_kind(source.as_bytes(), &source) {
                 value
             } else {
-                RustOwnedStyleValueKind::ValueList(RustOwnedStyleValueList {
-                    values: Vec::new(),
-                    separator: RustOwnedStyleValueListSeparator::Space,
-                    value_type: Some(value_type),
-                    source: Some(source),
-                })
+                unreachable!("valid <transform-list> should have a Rust-owned representation")
             }
         }
         PropertyValueType::FontVariantAlternates => {
@@ -9715,13 +9709,7 @@ where
                 }
                 return;
             }
-            if let Some(value_type) = value_list.value_type {
-                if let Some(source) = value_list.source.as_ref() {
-                    callback_source_backed_value_type_style_value(callback, property_id, source, value_type);
-                } else {
-                    callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value_type);
-                }
-            }
+            let _ = value_list;
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
         RustOwnedStyleValueKind::Keyword(value) => callback(
@@ -10827,23 +10815,6 @@ where
             ),
         }
     }
-}
-
-fn callback_source_backed_value_type_style_value<C>(
-    callback: &mut C,
-    property_id: u16,
-    source: &str,
-    value_type: PropertyValueType,
-) where
-    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
-{
-    callback_source_backed_value_type_kind_style_value(
-        callback,
-        CssStyleValueKind::ValueType,
-        property_id,
-        source,
-        value_type,
-    );
 }
 
 fn callback_source_backed_value_type_kind_style_value<C>(

@@ -1865,15 +1865,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto parse_rust_source_as_value_type = [&](StringView source, ValueType value_type) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_value(value_type, value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto materialize_rust_counter_style = [&](Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style) -> NonnullRefPtr<StyleValue const> {
                 if (!maybe_counter_style.has_value())
                     return CounterStyleStyleValue::create("decimal"_fly_string);
@@ -4942,7 +4933,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::MathFunction:
             case FFI::CssStyleValueKind::Primitive:
             case FFI::CssStyleValueKind::TreeCountingFunction:
-            case FFI::CssStyleValueKind::ValueType:
                 if (rust_style_value->value_type.has_value()) {
                     auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);
 
@@ -4975,10 +4965,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         maybe_parsed_value = materialize_rust_numeric_value();
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
-                    } else if (rust_style_value->kind == FFI::CssStyleValueKind::ValueType && rust_style_value->string.has_value()) {
-                        maybe_parsed_value = parse_rust_source_as_value_type(rust_style_value->string->bytes_as_string_view(), *rust_style_value->value_type);
-                        if (maybe_parsed_value)
-                            discard_rust_owned_property_value_tokens();
                     } else {
                         maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
                     }
