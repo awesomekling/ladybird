@@ -865,6 +865,29 @@ pub enum CssCropOrCrossKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssDescriptorResultKind {
+    CounterStyleAdditiveSymbols,
+    CounterStyleSystemCyclic,
+    CounterStyleSystemNumeric,
+    CounterStyleSystemAlphabetic,
+    CounterStyleSystemSymbolic,
+    CounterStyleSystemAdditive,
+    CounterStyleSystemFixed,
+    CounterStyleSystemFixedWithInteger,
+    CounterStyleSystemExtends,
+    CounterStylePad,
+    CounterStyleRangeAuto,
+    CounterStyleRangeList,
+    Crop,
+    Cross,
+    CropAndCross,
+    PageSizeAuto,
+    PageSizeLengths,
+    PageSizeAndOrientation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssContainerTypeValueKind {
     Invalid,
     Normal,

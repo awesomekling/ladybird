@@ -45,33 +45,33 @@ pub use css_parser::{
     CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssComponentValue,
     CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
     CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssDescriptorSyntaxKind, CssDescriptorValueType,
-    CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
-    CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind,
-    CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind,
-    CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
-    CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature, CssMediaFeatureComparison,
-    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
-    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector,
-    CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
-    CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
-    CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-    CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
-    CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
-    CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
-    CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
-    CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
-    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
-    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
-    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
-    CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
-    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
-    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
-    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
-    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind,
+    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssDescriptorResultKind, CssDescriptorSyntaxKind,
+    CssDescriptorValueType, CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+    CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind,
+    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature,
+    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
+    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
+    CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
+    CssPageSelector, CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
+    CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind,
+    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
+    CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
+    CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
+    CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
+    CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace,
+    CssSelectorNamespaceType, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode,
+    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
+    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
+    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
+    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
+    CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
+    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
+    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
+    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+    CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -496,6 +496,39 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_sources(
             css_parser::parse_descriptor_sources(value_type, input, |source| {
                 callback(ctx, source.as_ptr(), source.len());
             })
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_descriptor_result(
+    value_type: CssDescriptorValueType,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    kind_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssDescriptorResultKind),
+    source_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        order: CssNonnegativeIntegerSymbolPairOrder,
+        source: *const u8,
+        source_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_descriptor_result(
+                value_type,
+                input,
+                |kind| kind_callback(ctx, kind),
+                |order, source| source_callback(ctx, order, source.as_ptr(), source.len()),
+            )
         })
     }
 }
@@ -2864,244 +2897,6 @@ pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
             };
 
             css_parser::parse_optional_declaration_value_descriptor(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_range_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    range_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssCounterStyleRangeKind),
-    range_source_callback: unsafe extern "C" fn(ctx: *mut c_void, range_ptr: *const u8, range_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(range) = css_parser::parse_rust_owned_counter_style_range_descriptor(input) else {
-                return false;
-            };
-
-            match range {
-                css_parser::RustOwnedCounterStyleRangeDescriptor::Auto => {
-                    range_callback(ctx, CssCounterStyleRangeKind::Auto);
-                }
-                css_parser::RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
-                    range_callback(ctx, CssCounterStyleRangeKind::List);
-                    for range in ranges {
-                        range_source_callback(ctx, range.as_ptr(), range.len());
-                    }
-                }
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_additive_symbols_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    tuple_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        order: CssNonnegativeIntegerSymbolPairOrder,
-        tuple_ptr: *const u8,
-        tuple_len: usize,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(tuples) = css_parser::parse_rust_owned_counter_style_additive_symbols_descriptor(input) else {
-                return false;
-            };
-
-            for tuple in tuples {
-                tuple_callback(ctx, tuple.order, tuple.source.as_ptr(), tuple.source.len());
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_system_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    system_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        kind: CssCounterStyleSystemKind,
-        source_ptr: *const u8,
-        source_len: usize,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(system) = css_parser::parse_rust_owned_counter_style_system_descriptor(input) else {
-                return false;
-            };
-
-            match system {
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Cyclic => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Cyclic, std::ptr::null(), 0);
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Numeric => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Numeric, std::ptr::null(), 0);
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Alphabetic => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Alphabetic, std::ptr::null(), 0);
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Symbolic => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Symbolic, std::ptr::null(), 0);
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Additive => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Additive, std::ptr::null(), 0);
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol } => {
-                    if let Some(first_symbol) = first_symbol {
-                        system_callback(
-                            ctx,
-                            CssCounterStyleSystemKind::FixedWithInteger,
-                            first_symbol.as_ptr(),
-                            first_symbol.len(),
-                        );
-                    } else {
-                        system_callback(ctx, CssCounterStyleSystemKind::Fixed, std::ptr::null(), 0);
-                    }
-                }
-                css_parser::RustOwnedCounterStyleSystemDescriptor::Extends { name } => {
-                    system_callback(ctx, CssCounterStyleSystemKind::Extends, name.as_ptr(), name.len());
-                }
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_counter_style_pad_descriptor_source(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    pad_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        order: CssNonnegativeIntegerSymbolPairOrder,
-        source_ptr: *const u8,
-        source_len: usize,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(pad) = css_parser::parse_rust_owned_counter_style_pad_descriptor(input) else {
-                return false;
-            };
-
-            pad_callback(ctx, pad.order, pad.source.as_ptr(), pad.source.len());
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_page_size_descriptor_sources(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    page_size_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssPageSizeDescriptorKind),
-    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            let Some(page_size) = css_parser::parse_rust_owned_page_size_descriptor(input) else {
-                return false;
-            };
-
-            match page_size {
-                css_parser::RustOwnedPageSizeDescriptor::Auto => {
-                    page_size_callback(ctx, CssPageSizeDescriptorKind::Auto);
-                }
-                css_parser::RustOwnedPageSizeDescriptor::Lengths(lengths) => {
-                    page_size_callback(ctx, CssPageSizeDescriptorKind::Lengths);
-                    for length in lengths {
-                        source_callback(ctx, length.as_ptr(), length.len());
-                    }
-                }
-                css_parser::RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {
-                    page_size_callback(ctx, CssPageSizeDescriptorKind::PageSizeAndOrientation);
-                    if let Some(page_size) = page_size {
-                        source_callback(ctx, page_size.as_ptr(), page_size.len());
-                    }
-                    if let Some(orientation) = orientation {
-                        source_callback(ctx, orientation.as_ptr(), orientation.len());
-                    }
-                }
-            }
-            true
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_crop_or_cross(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    kind_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: CssCropOrCrossKind),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_crop_or_cross(input, |kind| {
-                kind_callback(ctx, kind);
-            })
         })
     }
 }

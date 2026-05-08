@@ -320,6 +320,134 @@ where
     true
 }
 
+pub(crate) fn parse_descriptor_result<K, S>(
+    value_type: CssDescriptorValueType,
+    filtered_input: &[u8],
+    mut kind_callback: K,
+    mut source_callback: S,
+) -> bool
+where
+    K: FnMut(CssDescriptorResultKind),
+    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str),
+{
+    let default_order = CssNonnegativeIntegerSymbolPairOrder::IntegerFirst;
+
+    match value_type {
+        CssDescriptorValueType::CounterStyleAdditiveSymbols => {
+            let Some(tuples) = parse_rust_owned_counter_style_additive_symbols_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::CounterStyleAdditiveSymbols);
+            for tuple in &tuples {
+                source_callback(tuple.order, &tuple.source);
+            }
+        }
+        CssDescriptorValueType::CounterStyleSystem => {
+            let Some(system) = parse_rust_owned_counter_style_system_descriptor(filtered_input) else {
+                return false;
+            };
+
+            match system {
+                RustOwnedCounterStyleSystemDescriptor::Cyclic => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemCyclic);
+                }
+                RustOwnedCounterStyleSystemDescriptor::Numeric => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemNumeric);
+                }
+                RustOwnedCounterStyleSystemDescriptor::Alphabetic => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemAlphabetic);
+                }
+                RustOwnedCounterStyleSystemDescriptor::Symbolic => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemSymbolic);
+                }
+                RustOwnedCounterStyleSystemDescriptor::Additive => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemAdditive);
+                }
+                RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol } => {
+                    if let Some(first_symbol) = first_symbol {
+                        kind_callback(CssDescriptorResultKind::CounterStyleSystemFixedWithInteger);
+                        source_callback(default_order, &first_symbol);
+                    } else {
+                        kind_callback(CssDescriptorResultKind::CounterStyleSystemFixed);
+                    }
+                }
+                RustOwnedCounterStyleSystemDescriptor::Extends { name } => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleSystemExtends);
+                    source_callback(default_order, &name);
+                }
+            }
+        }
+        CssDescriptorValueType::CounterStylePad => {
+            let Some(pad) = parse_rust_owned_counter_style_pad_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::CounterStylePad);
+            source_callback(pad.order, &pad.source);
+        }
+        CssDescriptorValueType::CounterStyleRange => {
+            let Some(range) = parse_rust_owned_counter_style_range_descriptor(filtered_input) else {
+                return false;
+            };
+
+            match range {
+                RustOwnedCounterStyleRangeDescriptor::Auto => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleRangeAuto);
+                }
+                RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
+                    kind_callback(CssDescriptorResultKind::CounterStyleRangeList);
+                    for range in &ranges {
+                        source_callback(default_order, range);
+                    }
+                }
+            }
+        }
+        CssDescriptorValueType::CropOrCross => {
+            let mut kind = None;
+            if !parse_crop_or_cross(filtered_input, |parsed_kind| kind = Some(parsed_kind)) {
+                return false;
+            }
+
+            match kind {
+                Some(CssCropOrCrossKind::Crop) => kind_callback(CssDescriptorResultKind::Crop),
+                Some(CssCropOrCrossKind::Cross) => kind_callback(CssDescriptorResultKind::Cross),
+                Some(CssCropOrCrossKind::CropAndCross) => kind_callback(CssDescriptorResultKind::CropAndCross),
+                None => return false,
+            }
+        }
+        CssDescriptorValueType::PageSize => {
+            let Some(page_size) = parse_rust_owned_page_size_descriptor(filtered_input) else {
+                return false;
+            };
+
+            match page_size {
+                RustOwnedPageSizeDescriptor::Auto => {
+                    kind_callback(CssDescriptorResultKind::PageSizeAuto);
+                }
+                RustOwnedPageSizeDescriptor::Lengths(lengths) => {
+                    kind_callback(CssDescriptorResultKind::PageSizeLengths);
+                    for length in &lengths {
+                        source_callback(default_order, length);
+                    }
+                }
+                RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {
+                    kind_callback(CssDescriptorResultKind::PageSizeAndOrientation);
+                    if let Some(page_size) = page_size {
+                        source_callback(default_order, &page_size);
+                    }
+                    if let Some(orientation) = orientation {
+                        source_callback(default_order, &orientation);
+                    }
+                }
+            }
+        }
+        _ => return false,
+    }
+
+    true
+}
+
 pub(crate) fn property_accepting_type<C>(property_ids: &[u16], value_type: &[u8], mut callback: C) -> bool
 where
     C: FnMut(u16),

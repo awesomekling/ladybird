@@ -841,29 +841,14 @@ public:
         size_t count { 0 };
     };
 
-    struct CounterStyleRangeDescriptor {
-        FFI::CssCounterStyleRangeKind kind;
-        Vector<String> ranges;
-    };
-
-    struct CounterStyleAdditiveSymbolsDescriptorTuple {
+    struct DescriptorResultItem {
         FFI::CssNonnegativeIntegerSymbolPairOrder order;
         String source;
     };
 
-    struct CounterStyleSystemDescriptor {
-        FFI::CssCounterStyleSystemKind kind;
-        String source;
-    };
-
-    struct CounterStylePadDescriptor {
-        FFI::CssNonnegativeIntegerSymbolPairOrder order;
-        String source;
-    };
-
-    struct PageSizeDescriptor {
-        FFI::CssPageSizeDescriptorKind kind;
-        Vector<String> sources;
+    struct DescriptorResult {
+        FFI::CssDescriptorResultKind kind;
+        Vector<DescriptorResultItem> items;
     };
 
     struct SyntaxComponent {
@@ -931,12 +916,7 @@ public:
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding);
-    static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
-    static Optional<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>> parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding);
-    static Optional<CounterStyleSystemDescriptor> parse_counter_style_system_descriptor_source(StringView input, StringView encoding);
-    static Optional<CounterStylePadDescriptor> parse_counter_style_pad_descriptor_source(StringView input, StringView encoding);
-    static Optional<PageSizeDescriptor> parse_page_size_descriptor_sources(StringView input, StringView encoding);
-    static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
+    static Optional<DescriptorResult> parse_descriptor_result(DescriptorMetadata::ValueType, StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);

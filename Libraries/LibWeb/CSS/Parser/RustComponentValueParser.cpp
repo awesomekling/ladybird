@@ -940,6 +940,36 @@ Optional<Vector<String>> RustComponentValueParser::parse_descriptor_sources(Desc
     return sources;
 }
 
+Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
+{
+    Optional<DescriptorResult> result;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_descriptor_result(
+        descriptor_value_type_to_ffi(value_type),
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &result,
+        [](void* raw_result, FFI::CssDescriptorResultKind kind) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            result = DescriptorResult { .kind = kind };
+        },
+        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            result->items.append(DescriptorResultItem {
+                .order = order,
+                .source = string_from_ffi_bytes(source_ptr, source_len),
+            });
+        });
+
+    if (!parsed || !result.has_value())
+        return {};
+
+    return result;
+}
+
 Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)
 {
     Vector<u16, 4> ffi_property_ids;
@@ -4557,157 +4587,12 @@ Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> RustComponentValueParser::pa
     return order;
 }
 
-Optional<RustComponentValueParser::CounterStyleRangeDescriptor> RustComponentValueParser::parse_counter_style_range_descriptor_sources(StringView input, StringView encoding)
-{
-    Optional<CounterStyleRangeDescriptor> range;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_range_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &range,
-        [](void* raw_range, FFI::CssCounterStyleRangeKind kind) {
-            auto& range = *static_cast<Optional<CounterStyleRangeDescriptor>*>(raw_range);
-            range = CounterStyleRangeDescriptor { .kind = kind };
-        },
-        [](void* raw_range, u8 const* range_ptr, size_t range_len) {
-            auto& range = *static_cast<Optional<CounterStyleRangeDescriptor>*>(raw_range);
-            VERIFY(range.has_value());
-            range->ranges.append(string_from_ffi_bytes(range_ptr, range_len));
-        });
-
-    if (!parsed || !range.has_value())
-        return {};
-
-    return range;
-}
-
-Optional<Vector<RustComponentValueParser::CounterStyleAdditiveSymbolsDescriptorTuple>> RustComponentValueParser::parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding)
-{
-    Vector<CounterStyleAdditiveSymbolsDescriptorTuple> tuples;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_additive_symbols_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &tuples,
-        [](void* raw_tuples, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* tuple_ptr, size_t tuple_len) {
-            auto& tuples = *static_cast<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>*>(raw_tuples);
-            tuples.append(CounterStyleAdditiveSymbolsDescriptorTuple {
-                .order = order,
-                .source = string_from_ffi_bytes(tuple_ptr, tuple_len),
-            });
-        });
-
-    if (!parsed)
-        return {};
-
-    return tuples;
-}
-
-Optional<RustComponentValueParser::CounterStyleSystemDescriptor> RustComponentValueParser::parse_counter_style_system_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<CounterStyleSystemDescriptor> system;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_system_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &system,
-        [](void* raw_system, FFI::CssCounterStyleSystemKind kind, u8 const* source_ptr, size_t source_len) {
-            auto& system = *static_cast<Optional<CounterStyleSystemDescriptor>*>(raw_system);
-            system = CounterStyleSystemDescriptor {
-                .kind = kind,
-                .source = source_len > 0 ? string_from_ffi_bytes(source_ptr, source_len) : String {},
-            };
-        });
-
-    if (!parsed || !system.has_value())
-        return {};
-
-    return system;
-}
-
-Optional<RustComponentValueParser::CounterStylePadDescriptor> RustComponentValueParser::parse_counter_style_pad_descriptor_source(StringView input, StringView encoding)
-{
-    Optional<CounterStylePadDescriptor> pad;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_pad_descriptor_source(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &pad,
-        [](void* raw_pad, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len) {
-            auto& pad = *static_cast<Optional<CounterStylePadDescriptor>*>(raw_pad);
-            pad = CounterStylePadDescriptor {
-                .order = order,
-                .source = string_from_ffi_bytes(source_ptr, source_len),
-            };
-        });
-
-    if (!parsed || !pad.has_value())
-        return {};
-
-    return pad;
-}
-
-Optional<RustComponentValueParser::PageSizeDescriptor> RustComponentValueParser::parse_page_size_descriptor_sources(StringView input, StringView encoding)
-{
-    Optional<PageSizeDescriptor> page_size;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_page_size_descriptor_sources(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &page_size,
-        [](void* raw_page_size, FFI::CssPageSizeDescriptorKind kind) {
-            auto& page_size = *static_cast<Optional<PageSizeDescriptor>*>(raw_page_size);
-            page_size = PageSizeDescriptor { .kind = kind };
-        },
-        [](void* raw_page_size, u8 const* source_ptr, size_t source_len) {
-            auto& page_size = *static_cast<Optional<PageSizeDescriptor>*>(raw_page_size);
-            VERIFY(page_size.has_value());
-            page_size->sources.append(string_from_ffi_bytes(source_ptr, source_len));
-        });
-
-    if (!parsed || !page_size.has_value())
-        return {};
-
-    return page_size;
-}
-
 bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
 
     return FFI::rust_css_parse_optional_declaration_value_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
-Optional<FFI::CssCropOrCrossKind> RustComponentValueParser::parse_crop_or_cross(StringView input, StringView encoding)
-{
-    Optional<FFI::CssCropOrCrossKind> kind;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_crop_or_cross(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &kind,
-        [](void* raw_kind, FFI::CssCropOrCrossKind parsed_kind) {
-            auto& kind = *static_cast<Optional<FFI::CssCropOrCrossKind>*>(raw_kind);
-            kind = parsed_kind;
-        });
-
-    if (!parsed || !kind.has_value())
-        return {};
-
-    return kind;
 }
 
 RustComponentValueParser::TimelineScope RustComponentValueParser::parse_timeline_scope(StringView input, StringView encoding)

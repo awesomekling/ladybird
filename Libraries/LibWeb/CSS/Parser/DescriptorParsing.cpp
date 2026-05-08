@@ -136,12 +136,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_additive_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto additive_tuple_sources = RustComponentValueParser::parse_counter_style_additive_symbols_descriptor_sources(serialized_additive_symbols.bytes_as_string_view(), "utf-8"sv);
-                    if (!additive_tuple_sources.has_value())
+                    auto additive_symbols = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols, serialized_additive_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!additive_symbols.has_value() || additive_symbols->kind != FFI::CssDescriptorResultKind::CounterStyleAdditiveSymbols)
                         return nullptr;
 
                     StyleValueVector additive_tuples;
-                    for (auto const& tuple : *additive_tuple_sources) {
+                    for (auto const& tuple : additive_symbols->items) {
                         auto tuple_component_values = RustComponentValueParser::parse_a_list_of_component_values(tuple.source.bytes_as_string_view(), "utf-8"sv);
                         auto additive_tuple = materialize_nonnegative_integer_symbol_pair(tuple_component_values, tuple.order);
                         if (!additive_tuple)
@@ -190,25 +190,27 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_system = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto system = RustComponentValueParser::parse_counter_style_system_descriptor_source(serialized_system.bytes_as_string_view(), "utf-8"sv);
+                    auto system = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleSystem, serialized_system.bytes_as_string_view(), "utf-8"sv);
                     if (!system.has_value())
                         return nullptr;
 
                     switch (system->kind) {
-                    case FFI::CssCounterStyleSystemKind::Cyclic:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemCyclic:
                         return CounterStyleSystemStyleValue::create(CounterStyleSystem::Cyclic);
-                    case FFI::CssCounterStyleSystemKind::Numeric:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemNumeric:
                         return CounterStyleSystemStyleValue::create(CounterStyleSystem::Numeric);
-                    case FFI::CssCounterStyleSystemKind::Alphabetic:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemAlphabetic:
                         return CounterStyleSystemStyleValue::create(CounterStyleSystem::Alphabetic);
-                    case FFI::CssCounterStyleSystemKind::Symbolic:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemSymbolic:
                         return CounterStyleSystemStyleValue::create(CounterStyleSystem::Symbolic);
-                    case FFI::CssCounterStyleSystemKind::Additive:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemAdditive:
                         return CounterStyleSystemStyleValue::create(CounterStyleSystem::Additive);
-                    case FFI::CssCounterStyleSystemKind::Fixed:
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemFixed:
                         return CounterStyleSystemStyleValue::create_fixed(nullptr);
-                    case FFI::CssCounterStyleSystemKind::FixedWithInteger: {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system->source.bytes_as_string_view(), "utf-8"sv);
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemFixedWithInteger: {
+                        if (system->items.size() != 1)
+                            return nullptr;
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system->items.first().source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> system_tokens { component_values };
                         auto integer_value = parse_integer_value(system_tokens, infinite_integer_range);
                         if (!integer_value)
@@ -218,10 +220,14 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                             return nullptr;
                         return CounterStyleSystemStyleValue::create_fixed(integer_value);
                     }
-                    case FFI::CssCounterStyleSystemKind::Extends:
-                        return CounterStyleSystemStyleValue::create_extends(FlyString::from_utf8_without_validation(system->source.bytes()));
+                    case FFI::CssDescriptorResultKind::CounterStyleSystemExtends:
+                        if (system->items.size() != 1)
+                            return nullptr;
+                        return CounterStyleSystemStyleValue::create_extends(FlyString::from_utf8_without_validation(system->items.first().source.bytes()));
+                    default:
+                        break;
                     }
-                    VERIFY_NOT_REACHED();
+                    return nullptr;
                 }
                 case DescriptorMetadata::ValueType::CounterStyleName: {
                     // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
@@ -283,12 +289,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto pad = RustComponentValueParser::parse_counter_style_pad_descriptor_source(serialized_pair.bytes_as_string_view(), "utf-8"sv);
-                    if (!pad.has_value())
+                    auto pad = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStylePad, serialized_pair.bytes_as_string_view(), "utf-8"sv);
+                    if (!pad.has_value() || pad->kind != FFI::CssDescriptorResultKind::CounterStylePad || pad->items.size() != 1)
                         return nullptr;
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(pad->source.bytes_as_string_view(), "utf-8"sv);
-                    return materialize_nonnegative_integer_symbol_pair(component_values, pad->order);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(pad->items.first().source.bytes_as_string_view(), "utf-8"sv);
+                    return materialize_nonnegative_integer_symbol_pair(component_values, pad->items.first().order);
                 }
                 case DescriptorMetadata::ValueType::CounterStyleRange: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
@@ -298,12 +304,14 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_range = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto range = RustComponentValueParser::parse_counter_style_range_descriptor_sources(serialized_range.bytes_as_string_view(), "utf-8"sv);
+                    auto range = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleRange, serialized_range.bytes_as_string_view(), "utf-8"sv);
                     if (!range.has_value())
                         return nullptr;
 
-                    if (range->kind == FFI::CssCounterStyleRangeKind::Auto)
+                    if (range->kind == FFI::CssDescriptorResultKind::CounterStyleRangeAuto)
                         return KeywordStyleValue::create(Keyword::Auto);
+                    if (range->kind != FFI::CssDescriptorResultKind::CounterStyleRangeList)
+                        return nullptr;
 
                     auto const parse_value = [&](TokenStream<ComponentValue>& range_tokens) -> RefPtr<StyleValue const> {
                         if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
@@ -330,7 +338,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     };
 
                     StyleValueVector range_entries;
-                    for (auto const& source : range->ranges) {
+                    for (auto const& item : range->items) {
+                        auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> range_tokens { component_values };
                         range_tokens.discard_whitespace();
@@ -366,22 +375,24 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_crop_or_cross = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto crop_or_cross = RustComponentValueParser::parse_crop_or_cross(serialized_crop_or_cross.bytes_as_string_view(), "utf-8"sv);
+                    auto crop_or_cross = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CropOrCross, serialized_crop_or_cross.bytes_as_string_view(), "utf-8"sv);
                     if (!crop_or_cross.has_value())
                         return nullptr;
 
-                    switch (*crop_or_cross) {
-                    case FFI::CssCropOrCrossKind::Crop:
+                    switch (crop_or_cross->kind) {
+                    case FFI::CssDescriptorResultKind::Crop:
                         return KeywordStyleValue::create(Keyword::Crop);
-                    case FFI::CssCropOrCrossKind::Cross:
+                    case FFI::CssDescriptorResultKind::Cross:
                         return KeywordStyleValue::create(Keyword::Cross);
-                    case FFI::CssCropOrCrossKind::CropAndCross:
+                    case FFI::CssDescriptorResultKind::CropAndCross:
                         return StyleValueList::create(StyleValueVector {
                                                           KeywordStyleValue::create(Keyword::Crop),
                                                           KeywordStyleValue::create(Keyword::Cross) },
                             StyleValueList::Separator::Space);
+                    default:
+                        break;
                     }
-                    VERIFY_NOT_REACHED();
+                    return nullptr;
                 }
                 case DescriptorMetadata::ValueType::FamilyName: {
                     // https://drafts.csswg.org/css-fonts-4/#family-name-syntax
@@ -555,27 +566,27 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_page_size = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto page_size_descriptor = RustComponentValueParser::parse_page_size_descriptor_sources(serialized_page_size.bytes_as_string_view(), "utf-8"sv);
+                    auto page_size_descriptor = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::PageSize, serialized_page_size.bytes_as_string_view(), "utf-8"sv);
                     if (!page_size_descriptor.has_value())
                         return nullptr;
 
                     // auto
-                    if (page_size_descriptor->kind == FFI::CssPageSizeDescriptorKind::Auto)
+                    if (page_size_descriptor->kind == FFI::CssDescriptorResultKind::PageSizeAuto)
                         return KeywordStyleValue::create(Keyword::Auto);
 
                     // <length [0,∞]>{1,2}
-                    if (page_size_descriptor->kind == FFI::CssPageSizeDescriptorKind::Lengths) {
-                        VERIFY(page_size_descriptor->sources.size() == 1 || page_size_descriptor->sources.size() == 2);
+                    if (page_size_descriptor->kind == FFI::CssDescriptorResultKind::PageSizeLengths) {
+                        VERIFY(page_size_descriptor->items.size() == 1 || page_size_descriptor->items.size() == 2);
 
-                        auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->sources[0].bytes_as_string_view(), "utf-8"sv);
+                        auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->items[0].source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> first_tokens { first_component_values };
                         auto first_length = parse_length_value(first_tokens, non_negative_range);
                         first_tokens.discard_whitespace();
                         if (!first_length || first_tokens.has_next_token())
                             return nullptr;
 
-                        if (page_size_descriptor->sources.size() == 2) {
-                            auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->sources[1].bytes_as_string_view(), "utf-8"sv);
+                        if (page_size_descriptor->items.size() == 2) {
+                            auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->items[1].source.bytes_as_string_view(), "utf-8"sv);
                             TokenStream<ComponentValue> second_tokens { second_component_values };
                             auto second_length = parse_length_value(second_tokens, non_negative_range);
                             second_tokens.discard_whitespace();
@@ -586,11 +597,14 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                         return first_length.release_nonnull();
                     }
+                    if (page_size_descriptor->kind != FFI::CssDescriptorResultKind::PageSizeAndOrientation)
+                        return nullptr;
 
                     // [ <page-size> || [ portrait | landscape ] ]
                     RefPtr<StyleValue const> page_size;
                     RefPtr<StyleValue const> orientation;
-                    for (auto const& source : page_size_descriptor->sources) {
+                    for (auto const& item : page_size_descriptor->items) {
+                        auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> keyword_tokens { component_values };
                         auto keyword = parse_keyword_value(keyword_tokens);
