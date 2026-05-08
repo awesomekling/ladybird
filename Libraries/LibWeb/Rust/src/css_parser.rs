@@ -2743,8 +2743,8 @@ const FLEX_BASIS_KIND_SOURCE: u8 = RustOwnedFlexBasisKeyword::MaxContent as u8 +
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPlaceShorthand {
-    align_source: String,
-    justify_source: String,
+    align_keywords: Vec<String>,
+    justify_keywords: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5156,7 +5156,7 @@ fn rust_owned_place_shorthand_style_value_kind(
     parse_justify_value: fn(&[ComponentValue]) -> bool,
     style_value_kind: impl FnOnce(RustOwnedPlaceShorthand) -> RustOwnedStyleValueKind,
 ) -> Option<RustOwnedStyleValueKind> {
-    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
     let non_whitespace_component_values = remove_whitespace_component_values(component_values);
@@ -5166,10 +5166,10 @@ fn rust_owned_place_shorthand_style_value_kind(
     }
 
     if parse_align_value(&non_whitespace_component_values) && parse_justify_value(&non_whitespace_component_values) {
-        let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+        let keywords = component_values_to_ident_keywords(&non_whitespace_component_values)?;
         return Some(style_value_kind(RustOwnedPlaceShorthand {
-            align_source: source.clone(),
-            justify_source: source,
+            align_keywords: keywords.clone(),
+            justify_keywords: keywords,
         }));
     }
 
@@ -5187,16 +5187,28 @@ fn rust_owned_place_shorthand_style_value_kind(
         let justify_values = remove_whitespace_component_values(justify_component_values);
         if parse_align_value(&align_values) && parse_justify_value(&justify_values) {
             return Some(style_value_kind(RustOwnedPlaceShorthand {
-                align_source: serialize_component_values_for_reparsing(align_component_values, filtered_input_string)?,
-                justify_source: serialize_component_values_for_reparsing(
-                    justify_component_values,
-                    filtered_input_string,
-                )?,
+                align_keywords: component_values_to_ident_keywords(&align_values)?,
+                justify_keywords: component_values_to_ident_keywords(&justify_values)?,
             }));
         }
     }
 
     None
+}
+
+fn component_values_to_ident_keywords(component_values: &[ComponentValue]) -> Option<Vec<String>> {
+    let mut keywords = Vec::with_capacity(component_values.len());
+    for component_value in component_values {
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = component_value
+        else {
+            return None;
+        };
+        keywords.push(value.to_ascii_lowercase());
+    }
+    Some(keywords)
 }
 
 fn rust_owned_position_anchor_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -11570,36 +11582,40 @@ fn callback_place_shorthand_style_value<C>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    callback(
-        kind,
-        property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
-        false,
-        0.0,
-        0,
-        0,
-        0,
-        0,
-        value.align_source.as_bytes(),
-        "",
-    );
-    callback(
-        kind,
-        property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
-        false,
-        0.0,
-        1,
-        0,
-        0,
-        0,
-        value.justify_source.as_bytes(),
-        "",
-    );
+    for keyword in &value.align_keywords {
+        callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            keyword.as_bytes(),
+            "",
+        );
+    }
+    for keyword in &value.justify_keywords {
+        callback(
+            kind,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            1,
+            0,
+            0,
+            0,
+            keyword.as_bytes(),
+            "",
+        );
+    }
 }
 
 fn null_separated_string_list_bytes(strings: &[String]) -> Vec<u8> {
@@ -32439,8 +32455,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceContent,
                 value: RustOwnedStyleValueKind::PlaceContent(RustOwnedPlaceShorthand {
-                    align_source: "space-between".to_string(),
-                    justify_source: "center".to_string(),
+                    align_keywords: vec!["space-between".to_string()],
+                    justify_keywords: vec!["center".to_string()],
                 }),
             })
         );
@@ -32449,8 +32465,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceItems,
                 value: RustOwnedStyleValueKind::PlaceItems(RustOwnedPlaceShorthand {
-                    align_source: "normal".to_string(),
-                    justify_source: "start".to_string(),
+                    align_keywords: vec!["normal".to_string()],
+                    justify_keywords: vec!["start".to_string()],
                 }),
             })
         );
@@ -32459,8 +32475,8 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::PlaceSelf,
                 value: RustOwnedStyleValueKind::PlaceSelf(RustOwnedPlaceShorthand {
-                    align_source: "safe end".to_string(),
-                    justify_source: "unsafe right".to_string(),
+                    align_keywords: vec!["safe".to_string(), "end".to_string()],
+                    justify_keywords: vec!["unsafe".to_string(), "right".to_string()],
                 }),
             })
         );
@@ -34626,7 +34642,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "unsafe right".to_string(),
+                value: "right".to_string(),
                 value_type: String::new(),
             })
         );

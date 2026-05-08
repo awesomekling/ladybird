@@ -424,8 +424,8 @@ public:
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
         bool stroke_dasharray_none { false };
         Vector<RustNestedPrimitiveValue> stroke_dasharray_values;
-        String place_align_source;
-        String place_justify_source;
+        Vector<String> place_align_keywords;
+        Vector<String> place_justify_keywords;
         Optional<RustNestedPrimitiveValue> overflow_clip_margin;
         Optional<RustNestedPrimitiveValue> column_count;
         bool column_count_is_auto { false };

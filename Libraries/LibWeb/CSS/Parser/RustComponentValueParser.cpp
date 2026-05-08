@@ -1212,9 +1212,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (color_red == 0)
-                    style_value->place_align_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->place_align_keywords.append(string_from_ffi_bytes(value_ptr, value_len));
                 else
-                    style_value->place_justify_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->place_justify_keywords.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
             } else if (kind == FFI::CssStyleValueKind::OverflowClipMargin) {
                 value.overflow_clip_margin = nested_primitive_value_from_callback_payload();

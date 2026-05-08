@@ -1937,6 +1937,34 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
+            auto materialize_rust_keyword_list = [](Vector<String> const& keywords) -> RefPtr<StyleValue const> {
+                if (keywords.is_empty())
+                    return nullptr;
+
+                auto keyword_from_rust = [](String const& keyword_source) -> Optional<Keyword> {
+                    auto keyword = keyword_from_string(keyword_source);
+                    if (!keyword.has_value())
+                        return {};
+                    return keyword;
+                };
+
+                if (keywords.size() == 1) {
+                    auto keyword = keyword_from_rust(keywords.first());
+                    if (!keyword.has_value())
+                        return nullptr;
+                    return KeywordStyleValue::create(*keyword);
+                }
+
+                StyleValueVector values;
+                values.ensure_capacity(keywords.size());
+                for (auto const& keyword_source : keywords) {
+                    auto keyword = keyword_from_rust(keyword_source);
+                    if (!keyword.has_value())
+                        return nullptr;
+                    values.append(KeywordStyleValue::create(*keyword));
+                }
+                return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+            };
             auto materialize_rust_text_decoration_thickness = [&]() -> RefPtr<StyleValue const> {
                 if (!rust_style_value->text_decoration_thickness_kind.has_value())
                     return nullptr;
@@ -3515,18 +3543,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::PlaceContent:
-                if (!rust_style_value->place_align_source.is_empty() && !rust_style_value->place_justify_source.is_empty()) {
-                    auto align_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_align_source, "utf-8"sv);
-                    TokenStream align_tokens { align_component_values };
-                    auto align_content = parse_css_value_for_property(PropertyID::AlignContent, align_tokens);
-                    align_tokens.discard_whitespace();
-                    if (!align_content || align_tokens.has_next_token())
-                        break;
-                    auto justify_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_justify_source, "utf-8"sv);
-                    TokenStream justify_tokens { justify_component_values };
-                    auto justify_content = parse_css_value_for_property(PropertyID::JustifyContent, justify_tokens);
-                    justify_tokens.discard_whitespace();
-                    if (!justify_content || justify_tokens.has_next_token())
+                if (!rust_style_value->place_align_keywords.is_empty() && !rust_style_value->place_justify_keywords.is_empty()) {
+                    auto align_content = materialize_rust_keyword_list(rust_style_value->place_align_keywords);
+                    auto justify_content = materialize_rust_keyword_list(rust_style_value->place_justify_keywords);
+                    if (!align_content || !justify_content)
                         break;
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
@@ -3537,18 +3557,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::PlaceItems:
-                if (!rust_style_value->place_align_source.is_empty() && !rust_style_value->place_justify_source.is_empty()) {
-                    auto align_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_align_source, "utf-8"sv);
-                    TokenStream align_tokens { align_component_values };
-                    auto align_items = parse_css_value_for_property(PropertyID::AlignItems, align_tokens);
-                    align_tokens.discard_whitespace();
-                    if (!align_items || align_tokens.has_next_token())
-                        break;
-                    auto justify_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_justify_source, "utf-8"sv);
-                    TokenStream justify_tokens { justify_component_values };
-                    auto justify_items = parse_css_value_for_property(PropertyID::JustifyItems, justify_tokens);
-                    justify_tokens.discard_whitespace();
-                    if (!justify_items || justify_tokens.has_next_token())
+                if (!rust_style_value->place_align_keywords.is_empty() && !rust_style_value->place_justify_keywords.is_empty()) {
+                    auto align_items = materialize_rust_keyword_list(rust_style_value->place_align_keywords);
+                    auto justify_items = materialize_rust_keyword_list(rust_style_value->place_justify_keywords);
+                    if (!align_items || !justify_items)
                         break;
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
@@ -3559,18 +3571,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::PlaceSelf:
-                if (!rust_style_value->place_align_source.is_empty() && !rust_style_value->place_justify_source.is_empty()) {
-                    auto align_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_align_source, "utf-8"sv);
-                    TokenStream align_tokens { align_component_values };
-                    auto align_self = parse_css_value_for_property(PropertyID::AlignSelf, align_tokens);
-                    align_tokens.discard_whitespace();
-                    if (!align_self || align_tokens.has_next_token())
-                        break;
-                    auto justify_component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->place_justify_source, "utf-8"sv);
-                    TokenStream justify_tokens { justify_component_values };
-                    auto justify_self = parse_css_value_for_property(PropertyID::JustifySelf, justify_tokens);
-                    justify_tokens.discard_whitespace();
-                    if (!justify_self || justify_tokens.has_next_token())
+                if (!rust_style_value->place_align_keywords.is_empty() && !rust_style_value->place_justify_keywords.is_empty()) {
+                    auto align_self = materialize_rust_keyword_list(rust_style_value->place_align_keywords);
+                    auto justify_self = materialize_rust_keyword_list(rust_style_value->place_justify_keywords);
+                    if (!align_self || !justify_self)
                         break;
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
