@@ -1198,25 +1198,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 }
             };
-            auto materialize_rust_fit_content = [&]() -> RefPtr<StyleValue const> {
-                switch (rust_style_value->fit_content_kind) {
-                case RustComponentValueParser::RustFitContentKind::Keyword:
-                    return KeywordStyleValue::create(Keyword::FitContent);
-                case RustComponentValueParser::RustFitContentKind::Function: {
-                    if (!rust_style_value->fit_content_argument_source.has_value())
-                        return nullptr;
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*rust_style_value->fit_content_argument_source, "utf-8"sv);
-                    TokenStream argument_tokens { component_values };
-                    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
-                    auto length_percentage_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range);
-                    argument_tokens.discard_whitespace();
-                    if (!length_percentage_value || argument_tokens.has_next_token())
-                        return nullptr;
-                    return FunctionStyleValue::create("fit-content"_fly_string, length_percentage_value.release_nonnull());
-                }
-                }
-                VERIFY_NOT_REACHED();
-            };
             auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1842,6 +1823,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return KeywordStyleValue::create(Keyword::Auto);
                 }
                 return materialize_rust_nested_length_percentage(value, non_negative_range);
+            };
+            auto materialize_rust_fit_content = [&]() -> RefPtr<StyleValue const> {
+                switch (rust_style_value->fit_content_kind) {
+                case RustComponentValueParser::RustFitContentKind::Keyword:
+                    return KeywordStyleValue::create(Keyword::FitContent);
+                case RustComponentValueParser::RustFitContentKind::Function: {
+                    if (!rust_style_value->fit_content_argument.has_value())
+                        return nullptr;
+                    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
+                    auto argument = materialize_rust_nested_length_percentage(*rust_style_value->fit_content_argument, infinite_range);
+                    if (!argument)
+                        return nullptr;
+                    return FunctionStyleValue::create("fit-content"_fly_string, argument.release_nonnull());
+                }
+                }
+                VERIFY_NOT_REACHED();
             };
             auto materialize_rust_rect = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->rect_sides.size() != 4)

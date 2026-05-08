@@ -425,7 +425,7 @@ public:
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };
         Vector<String> basic_shape_argument_groups;
         RustFitContentKind fit_content_kind { RustFitContentKind::Keyword };
-        Optional<String> fit_content_argument_source;
+        Optional<RustNestedPrimitiveValue> fit_content_argument;
         Vector<RustNestedPrimitiveValue> rect_sides;
         bool rect_requires_commas { false };
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };

@@ -2318,13 +2318,12 @@ pub(crate) enum RustOwnedStepPosition {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFitContent {
     value: RustOwnedFitContentValue,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedFitContentValue {
     Keyword,
-    Function { argument: String },
+    Function { argument: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7265,7 +7264,6 @@ fn rust_owned_fit_content_style_value_kind(
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
-    let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
 
     let value = match component_values {
         [
@@ -7284,19 +7282,13 @@ fn rust_owned_fit_content_style_value_kind(
                 return None;
             }
             RustOwnedFitContentValue::Function {
-                argument: serialize_component_values_for_reparsing(
-                    std::slice::from_ref(component_value),
-                    filtered_input_string,
-                )?,
+                argument: component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?,
             }
         }
         _ => return None,
     };
 
-    Some(RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
-        value,
-        source,
-    }))
+    Some(RustOwnedStyleValueKind::FitContent(RustOwnedFitContent { value }))
 }
 
 fn rust_owned_rect_style_value_kind(
@@ -9290,26 +9282,31 @@ fn callback_fit_content_style_value<C>(callback: &mut C, property_id: u16, value
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let (kind, argument) = match &value.value {
-        RustOwnedFitContentValue::Keyword => (FIT_CONTENT_CALLBACK_KEYWORD, ""),
-        RustOwnedFitContentValue::Function { argument } => (FIT_CONTENT_CALLBACK_FUNCTION, argument.as_str()),
-    };
-
-    callback(
-        CssStyleValueKind::FitContent,
-        property_id,
-        CssPrimitiveValueKind::Invalid,
-        false,
-        0.0,
-        false,
-        0.0,
-        kind,
-        0,
-        0,
-        0,
-        argument.as_bytes(),
-        "",
-    );
+    match &value.value {
+        RustOwnedFitContentValue::Keyword => callback(
+            CssStyleValueKind::FitContent,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            FIT_CONTENT_CALLBACK_KEYWORD,
+            0,
+            0,
+            0,
+            b"",
+            "",
+        ),
+        RustOwnedFitContentValue::Function { argument } => callback_nested_primitive(
+            callback,
+            CssStyleValueKind::FitContent,
+            property_id,
+            FIT_CONTENT_CALLBACK_FUNCTION,
+            0,
+            argument,
+        ),
+    }
 }
 
 fn callback_basic_shape_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedBasicShape)
@@ -32278,9 +32275,11 @@ mod tests {
                 property_id: PropertyId::Width,
                 value: RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
                     value: RustOwnedFitContentValue::Function {
-                        argument: "10px".to_string(),
+                        argument: RustOwnedNestedPrimitiveValue::Length {
+                            value: 10.0,
+                            unit: "px".to_string(),
+                        },
                     },
-                    source: "fit-content(10px)".to_string(),
                 }),
             })
         );
@@ -33296,11 +33295,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::FitContent,
                 property_id: PropertyId::Width,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(10.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "10px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );

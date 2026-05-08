@@ -1035,8 +1035,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
             } else if (kind == FFI::CssStyleValueKind::FitContent) {
                 value.fit_content_kind = static_cast<RustFitContentKind>(color_red);
-                if (value_len > 0)
-                    value.fit_content_argument_source = String::from_utf8_without_validation({ value_ptr, value_len });
+                if (value.fit_content_kind == RustFitContentKind::Function)
+                    value.fit_content_argument = nested_primitive_value_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::Rect) {
                 if (!style_value.has_value())
                     style_value = move(value);
