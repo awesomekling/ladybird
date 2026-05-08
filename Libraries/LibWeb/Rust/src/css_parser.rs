@@ -3747,10 +3747,7 @@ fn parse_rust_owned_generated_longhand_value(
 
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type,
-                    source: filtered_input_to_string(filtered_input),
-                },
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
             };
         }
         PropertyValueType::FitContent => {
@@ -3762,10 +3759,7 @@ fn parse_rust_owned_generated_longhand_value(
 
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type,
-                    source: filtered_input_to_string(filtered_input),
-                },
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
             };
         }
         PropertyValueType::BasicShape => {
@@ -3777,10 +3771,7 @@ fn parse_rust_owned_generated_longhand_value(
 
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type,
-                    source: filtered_input_to_string(filtered_input),
-                },
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
             };
         }
         PropertyValueType::Rect => {
@@ -3792,10 +3783,7 @@ fn parse_rust_owned_generated_longhand_value(
 
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::UnresolvedValueType {
-                    value_type,
-                    source: filtered_input_to_string(filtered_input),
-                },
+                value: RustOwnedStyleValueKind::GuaranteedInvalid,
             };
         }
         PropertyValueType::ScrollFunction => {
