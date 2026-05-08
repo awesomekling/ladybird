@@ -2742,6 +2742,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (offset < value_len)
                         ++offset;
                 }
+            } else if (kind == FFI::CssStyleValueKind::GeneratedValueList) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::GeneratedValueList);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                if (!value_type.has_value())
+                    return;
+                style_value->generated_value_list_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                style_value->generated_value_list_value_types.append(value_type.release_value());
+                return;
             } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Anchor, FFI::CssStyleValueKind::AnchorSize, FFI::CssStyleValueKind::ColorFunction, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction, FFI::CssStyleValueKind::TreeCountingFunction)) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())

@@ -1077,6 +1077,25 @@ where
                 "",
             );
         }
+        RustOwnedStyleValueKind::GeneratedValueList(value) => {
+            for item in &value.items {
+                callback(
+                    CssStyleValueKind::GeneratedValueList,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    item.source.as_bytes(),
+                    property_value_type_name(item.value_type),
+                );
+            }
+        }
         RustOwnedStyleValueKind::Primitive(value) => callback_rust_owned_primitive_value(callback, property_id, value),
         RustOwnedStyleValueKind::Identifier(value) => {
             callback_rust_owned_identifier_value(callback, property_id, value);

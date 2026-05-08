@@ -47,27 +47,27 @@ use super::{
     RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
     RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay,
-    RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue,
-    RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-    RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontFamilyList, RustOwnedFontLanguageOverride,
-    RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+    RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+    RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
+    RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
     RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
     RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
-    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle,
-    RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
-    RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
-    RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint,
-    RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage,
+    RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
+    RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
+    RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder,
+    RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
     RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
     RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
     RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollFunction, RustOwnedScrollTimeline,
     RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox,
     RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue,
-    RustOwnedSourceBackedValueKind, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-    RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-    RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition,
-    RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
+    RustOwnedSourceBackedValueKind, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+    RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+    RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
+    RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
     RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
     RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
     RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace,
@@ -3015,19 +3015,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::TransitionTimingFunction,
-            value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
-                value: RustOwnedEasingFunctionValue::Linear(vec![
-                    RustOwnedLinearEasingStop {
-                        output: RustOwnedNestedPrimitiveValue::Number(0.0),
-                        first_stop_length: None,
-                        second_stop_length: None,
-                    },
-                    RustOwnedLinearEasingStop {
-                        output: RustOwnedNestedPrimitiveValue::Number(1.0),
-                        first_stop_length: None,
-                        second_stop_length: None,
-                    },
-                ]),
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "linear(0, 1)".to_string(),
+                    value_type: PropertyValueType::EasingFunction,
+                }],
             }),
         })
     );
@@ -3035,13 +3027,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "cubic-bezier(0, 0, 1, 1)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::TransitionTimingFunction,
-            value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
-                value: RustOwnedEasingFunctionValue::CubicBezier {
-                    x1: RustOwnedNestedPrimitiveValue::Number(0.0),
-                    y1: RustOwnedNestedPrimitiveValue::Number(0.0),
-                    x2: RustOwnedNestedPrimitiveValue::Number(1.0),
-                    y2: RustOwnedNestedPrimitiveValue::Number(1.0),
-                },
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "cubic-bezier(0, 0, 1, 1)".to_string(),
+                    value_type: PropertyValueType::EasingFunction,
+                }],
             }),
         })
     );
@@ -3049,11 +3039,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "steps(2, jump-none)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::TransitionTimingFunction,
-            value: RustOwnedStyleValueKind::EasingFunction(RustOwnedEasingFunction {
-                value: RustOwnedEasingFunctionValue::Steps {
-                    intervals: RustOwnedNestedPrimitiveValue::Integer(2),
-                    position: Some(RustOwnedStepPosition::JumpNone),
-                },
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "steps(2, jump-none)".to_string(),
+                    value_type: PropertyValueType::EasingFunction,
+                }],
             }),
         })
     );
@@ -3718,6 +3708,46 @@ fn parses_style_values_with_rust_owned_ast() {
                 ],
             }),
         })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationDelay], "1s, -200ms"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationDelay,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "1s".to_string(),
+                        value_type: PropertyValueType::Time,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "-200ms".to_string(),
+                        value_type: PropertyValueType::Time,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::TransitionTimingFunction], "ease, ease-in"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::TransitionTimingFunction,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "ease".to_string(),
+                        value_type: PropertyValueType::EasingFunction,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "ease-in".to_string(),
+                        value_type: PropertyValueType::EasingFunction,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::TransitionDuration], "-1s"),
+        None
     );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::ScrollTimelineName], "none, --track"),
@@ -4530,14 +4560,14 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::EasingFunction,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::TransitionTimingFunction,
-            primitive_kind: CssPrimitiveValueKind::Number,
-            numeric_value: Some(1.0),
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: String::new(),
-            value_type: String::new(),
+            value: "linear(0, 1)".to_string(),
+            value_type: "EasingFunction".to_string(),
         })
     );
     assert_eq!(

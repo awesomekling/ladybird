@@ -186,9 +186,14 @@ fn property_parses_as_coordinating_shorthand_item(property_id: PropertyId) -> bo
     matches!(
         property_id,
         PropertyId::AnimationName
+            | PropertyId::AnimationDelay
+            | PropertyId::AnimationTimingFunction
             | PropertyId::ScrollTimelineName
             | PropertyId::TransitionBehavior
+            | PropertyId::TransitionDelay
+            | PropertyId::TransitionDuration
             | PropertyId::TransitionProperty
+            | PropertyId::TransitionTimingFunction
             | PropertyId::ViewTimelineName
     )
 }
@@ -200,6 +205,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
+            | PropertyId::AnimationDelay
+            | PropertyId::AnimationTimingFunction
             | PropertyId::Appearance
             | PropertyId::AspectRatio
             | PropertyId::BackgroundRepeat
@@ -371,7 +378,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TransformOrigin
             | PropertyId::TransformStyle
             | PropertyId::TransitionBehavior
+            | PropertyId::TransitionDelay
+            | PropertyId::TransitionDuration
             | PropertyId::TransitionProperty
+            | PropertyId::TransitionTimingFunction
             | PropertyId::Translate
             | PropertyId::UnicodeBidi
             | PropertyId::UserSelect
@@ -418,6 +428,13 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
+        PropertyId::AnimationDelay
+        | PropertyId::AnimationTimingFunction
+        | PropertyId::TransitionDelay
+        | PropertyId::TransitionDuration
+        | PropertyId::TransitionTimingFunction => {
+            rust_owned_generated_value_list_style_value_kind(property_id, filtered_input)
+        }
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
         PropertyId::Border | PropertyId::BorderBlock | PropertyId::BorderInline => {
             rust_owned_border_shorthand_style_value_kind(property_id, filtered_input)
@@ -627,6 +644,66 @@ fn rust_owned_generated_property_specific_style_value_kind(
     }
 
     None
+}
+
+fn rust_owned_generated_value_list_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let groups = split_component_values_on_comma(&component_values);
+    if groups.is_empty() {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    for group in groups {
+        let component_values = strip_whitespace(group);
+        if component_values.is_empty() {
+            return None;
+        }
+        let source = serialize_component_values_for_reparsing(component_values, filtered_input_string)?;
+
+        let mut matching_value_type = if let [
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }),
+        ] = component_values
+            && property_accepts_keyword(property_id, value)
+            && property_accepts_value_type(property_id, PropertyValueType::EasingFunction)
+        {
+            Some(PropertyValueType::EasingFunction)
+        } else {
+            None
+        };
+        for value_type in generated_property_value_type_order() {
+            if matching_value_type.is_some() {
+                break;
+            }
+            if !property_accepts_value_type(property_id, *value_type) {
+                continue;
+            }
+            if !component_values_parse_as_property_value_type(*value_type, source.as_bytes()) {
+                continue;
+            }
+            if !component_values_satisfy_property_numeric_range(property_id, *value_type, component_values) {
+                continue;
+            }
+            matching_value_type = Some(*value_type);
+            break;
+        }
+
+        items.push(RustOwnedGeneratedValueListItem {
+            source,
+            value_type: matching_value_type?,
+        });
+    }
+
+    Some(RustOwnedStyleValueKind::GeneratedValueList(
+        RustOwnedGeneratedValueList { items },
+    ))
 }
 
 fn component_values_satisfy_property_numeric_range(

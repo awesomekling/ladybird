@@ -113,6 +113,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ViewTransitionName(RustOwnedViewTransitionName),
     WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
+    GeneratedValueList(RustOwnedGeneratedValueList),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1208,6 +1209,17 @@ pub(crate) struct RustOwnedStyleValueList {
     pub(crate) separator: RustOwnedStyleValueListSeparator,
     pub(crate) value_type: Option<PropertyValueType>,
     pub(crate) source: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGeneratedValueList {
+    pub(crate) items: Vec<RustOwnedGeneratedValueListItem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGeneratedValueListItem {
+    pub(crate) source: String,
+    pub(crate) value_type: PropertyValueType,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

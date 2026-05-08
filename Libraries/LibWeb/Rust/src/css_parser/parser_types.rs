@@ -1936,4 +1936,5 @@ pub enum CssStyleValueKind {
     WillChange,
     MathFunction,
     TreeCountingFunction,
+    GeneratedValueList,
 }

@@ -93,7 +93,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AccentColor:
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
+    case PropertyID::AnimationDelay:
     case PropertyID::AnimationName:
+    case PropertyID::AnimationTimingFunction:
     case PropertyID::Appearance:
     case PropertyID::AspectRatio:
     case PropertyID::BackgroundPosition:
@@ -265,7 +267,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TransformOrigin:
     case PropertyID::TransformStyle:
     case PropertyID::TransitionBehavior:
+    case PropertyID::TransitionDelay:
+    case PropertyID::TransitionDuration:
     case PropertyID::TransitionProperty:
+    case PropertyID::TransitionTimingFunction:
     case PropertyID::Translate:
     case PropertyID::UnicodeBidi:
     case PropertyID::UserSelect:
@@ -334,10 +339,15 @@ RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenSt
 {
     auto unwrap_single_coordinating_value_list_item = [](PropertyID property_id, RefPtr<StyleValue const>& parsed_value) {
         if (first_is_one_of(property_id,
+                PropertyID::AnimationDelay,
+                PropertyID::AnimationTimingFunction,
                 PropertyID::AnimationName,
                 PropertyID::ScrollTimelineName,
                 PropertyID::TransitionBehavior,
+                PropertyID::TransitionDelay,
+                PropertyID::TransitionDuration,
                 PropertyID::TransitionProperty,
+                PropertyID::TransitionTimingFunction,
                 PropertyID::ViewTimelineName)
             && parsed_value->is_value_list()
             && parsed_value->as_value_list().size() == 1) {
@@ -4844,6 +4854,40 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 }
                 break;
+            case FFI::CssStyleValueKind::GeneratedValueList: {
+                VERIFY(rust_style_value->generated_value_list_sources.size() == rust_style_value->generated_value_list_value_types.size());
+                auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);
+
+                StyleValueVector values;
+                values.ensure_capacity(rust_style_value->generated_value_list_sources.size());
+                for (size_t i = 0; i < rust_style_value->generated_value_list_sources.size(); ++i) {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->generated_value_list_sources[i].bytes_as_string_view(), "utf-8"sv);
+                    component_values.remove_all_matching([](auto const& component_value) { return component_value.is(Token::Type::Whitespace); });
+                    if (component_values.size() == 1 && component_values.first().is(Token::Type::Ident)) {
+                        auto keyword = RustComponentValueParser::parse_property_keyword_value({ &rust_style_value->property_id, 1 }, component_values.first().token().ident());
+                        if (keyword.has_value()) {
+                            values.unchecked_append(KeywordStyleValue::create(keyword->keyword));
+                            continue;
+                        }
+                    }
+
+                    TokenStream value_tokens { component_values };
+                    auto value = parse_value(rust_style_value->generated_value_list_value_types[i], value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!value)
+                        break;
+                    if (value_tokens.has_next_token())
+                        break;
+                    values.unchecked_append(value.release_nonnull());
+                }
+
+                if (values.size() == rust_style_value->generated_value_list_sources.size()) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
+                }
+                break;
+            }
             case FFI::CssStyleValueKind::Anchor:
             case FFI::CssStyleValueKind::AnchorSize:
             case FFI::CssStyleValueKind::ColorFunction:
