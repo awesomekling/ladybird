@@ -4390,20 +4390,14 @@ RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentVal
                     break;
                 }
                 case PropertyID::BackgroundRepeat: {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    background_repeat = parse_single_repeat_style_value(item.property_id, value_tokens);
-                    value_tokens.discard_whitespace();
-                    if (!background_repeat || value_tokens.has_next_token())
+                    background_repeat = parse_single_layer_value(item.property_id, item.value);
+                    if (!background_repeat)
                         failed_to_materialize_rust_background = true;
                     break;
                 }
                 case PropertyID::BackgroundSize: {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    background_size = parse_single_background_size_value(item.property_id, value_tokens);
-                    value_tokens.discard_whitespace();
-                    if (!background_size || value_tokens.has_next_token())
+                    background_size = parse_single_layer_value(item.property_id, item.value);
+                    if (!background_size)
                         failed_to_materialize_rust_background = true;
                     break;
                 }
@@ -4485,57 +4479,6 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
     }
 
     return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, value));
-}
-
-RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID, TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-
-    auto parse_background_size_component = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (auto keyword_value = parse_keyword_value(tokens)) {
-            if (first_is_one_of(keyword_value->to_keyword(), Keyword::Auto, Keyword::Cover, Keyword::Contain)) {
-                transaction.commit();
-                return keyword_value.release_nonnull();
-            }
-        }
-
-        if (auto value = parse_length_percentage_value(tokens, non_negative_range, non_negative_range)) {
-            transaction.commit();
-            return value.release_nonnull();
-        }
-
-        return nullptr;
-    };
-
-    auto validate_parsed_background_size = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
-        if (!value)
-            return nullptr;
-
-        auto serialized_background_size = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        if (RustComponentValueParser::parse_background_size(serialized_background_size.bytes_as_string_view(), "utf-8"sv) == FFI::CssBackgroundSizeValueKind::Invalid)
-            return nullptr;
-
-        transaction.commit();
-        return value;
-    };
-
-    auto maybe_x_value = parse_background_size_component(tokens);
-    if (!maybe_x_value)
-        return nullptr;
-
-    if (maybe_x_value->to_keyword() == Keyword::Cover || maybe_x_value->to_keyword() == Keyword::Contain) {
-        return validate_parsed_background_size(maybe_x_value);
-    }
-
-    auto maybe_y_value = parse_background_size_component(tokens);
-    if (!maybe_y_value) {
-        return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), KeywordStyleValue::create(Keyword::Auto)));
-    }
-
-    return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), maybe_y_value.release_nonnull()));
 }
 
 // https://drafts.csswg.org/css-fonts-4/#font-prop
@@ -4841,20 +4784,14 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
                     break;
                 }
                 case PropertyID::MaskSize: {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    mask_size = parse_single_background_size_value(item.property_id, value_tokens);
-                    value_tokens.discard_whitespace();
-                    if (!mask_size || value_tokens.has_next_token())
+                    mask_size = parse_single_layer_value(item.property_id, item.value);
+                    if (!mask_size)
                         failed_to_materialize_rust_mask = true;
                     break;
                 }
                 case PropertyID::MaskRepeat: {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    mask_repeat = parse_single_repeat_style_value(item.property_id, value_tokens);
-                    value_tokens.discard_whitespace();
-                    if (!mask_repeat || value_tokens.has_next_token())
+                    mask_repeat = parse_single_layer_value(item.property_id, item.value);
+                    if (!mask_repeat)
                         failed_to_materialize_rust_mask = true;
                     break;
                 }
@@ -4939,112 +4876,6 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
     }
 
     return nullptr;
-}
-
-RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-
-    auto repetition_from_rust = [](u8 repetition) {
-        switch (repetition) {
-        case 0:
-            return Repetition::NoRepeat;
-        case 1:
-            return Repetition::Repeat;
-        case 2:
-            return Repetition::Round;
-        case 3:
-            return Repetition::Space;
-        }
-
-        VERIFY_NOT_REACHED();
-    };
-
-    auto serialized_repeat_style = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property, 1 }, serialized_repeat_style.bytes_as_string_view());
-        rust_style_value.has_value()
-        && rust_style_value->kind == FFI::CssStyleValueKind::RepeatStyle
-        && rust_style_value->repeat_x_values.size() == 1
-        && rust_style_value->repeat_y_values.size() == 1) {
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-        transaction.commit();
-        return RepeatStyleStyleValue::create(
-            repetition_from_rust(rust_style_value->repeat_x_values[0]),
-            repetition_from_rust(rust_style_value->repeat_y_values[0]));
-    }
-
-    auto validate_parsed_repeat_style = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
-        if (!value)
-            return nullptr;
-
-        auto serialized_repeat_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        if (RustComponentValueParser::parse_repeat_style(serialized_repeat_style.bytes_as_string_view(), "utf-8"sv) == FFI::CssRepeatStyleValueKind::Invalid)
-            return nullptr;
-
-        transaction.commit();
-        return value;
-    };
-
-    auto is_directional_repeat = [](StyleValue const& value) -> bool {
-        auto keyword = value.to_keyword();
-        return keyword == Keyword::RepeatX || keyword == Keyword::RepeatY;
-    };
-
-    auto as_repeat = [](Keyword keyword) -> Optional<Repetition> {
-        switch (keyword) {
-        case Keyword::NoRepeat:
-            return Repetition::NoRepeat;
-        case Keyword::Repeat:
-            return Repetition::Repeat;
-        case Keyword::Round:
-            return Repetition::Round;
-        case Keyword::Space:
-            return Repetition::Space;
-        default:
-            return {};
-        }
-    };
-
-    auto maybe_x_value = parse_keyword_value(tokens);
-    if (!maybe_x_value)
-        return nullptr;
-    auto x_value = maybe_x_value.release_nonnull();
-
-    if (is_directional_repeat(*x_value)) {
-        auto keyword = x_value->to_keyword();
-        return validate_parsed_repeat_style(RepeatStyleStyleValue::create(
-            keyword == Keyword::RepeatX ? Repetition::Repeat : Repetition::NoRepeat,
-            keyword == Keyword::RepeatX ? Repetition::NoRepeat : Repetition::Repeat));
-    }
-
-    auto x_repeat = as_repeat(x_value->to_keyword());
-    if (!x_repeat.has_value())
-        return nullptr;
-
-    // See if we have a second value for Y
-    Optional<Repetition> y_repeat;
-    {
-        auto y_value_transaction = tokens.begin_transaction();
-        auto maybe_y_value = parse_keyword_value(tokens);
-        if (maybe_y_value) {
-            auto y_value = maybe_y_value.release_nonnull();
-            if (is_directional_repeat(*y_value))
-                return nullptr;
-
-            y_repeat = as_repeat(y_value->to_keyword());
-            if (y_repeat.has_value())
-                y_value_transaction.commit();
-        }
-    }
-
-    if (!y_repeat.has_value()) {
-        // We don't have a second value, so use x for both.
-        return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), x_repeat.value()));
-    }
-
-    return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value()));
 }
 
 // https://drafts.csswg.org/css-transitions-2/#transition-shorthand-property

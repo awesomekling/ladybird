@@ -390,7 +390,6 @@ private:
     RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_position_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>&, PropertyID);
-    RefPtr<StyleValue const> parse_single_background_size_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_family_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_style_value(TokenStream<ComponentValue>&);
@@ -400,7 +399,6 @@ private:
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_mask_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_single_repeat_style_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
