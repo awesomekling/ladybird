@@ -1251,9 +1251,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (color_red == 0)
-                    style_value->border_radius_horizontal_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                    style_value->border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
                 else
-                    style_value->border_radius_vertical_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                    style_value->border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
                 return;
             } else if (kind == FFI::CssStyleValueKind::Border) {
                 if (!style_value.has_value()) {

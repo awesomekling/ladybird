@@ -379,8 +379,8 @@ public:
         bool aspect_ratio_has_auto { false };
         Optional<String> aspect_ratio_numerator_source;
         Optional<String> aspect_ratio_denominator_source;
-        Vector<String> border_radius_horizontal_sources;
-        Vector<String> border_radius_vertical_sources;
+        Vector<RustNestedPrimitiveValue> border_radius_horizontal_radii;
+        Vector<RustNestedPrimitiveValue> border_radius_vertical_radii;
         Optional<String> border_width_source;
         Optional<String> border_style_source;
         Optional<String> border_color_source;

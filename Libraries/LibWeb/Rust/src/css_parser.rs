@@ -2373,8 +2373,8 @@ pub(crate) struct RustOwnedBackgroundSizeList {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBorderRadius {
-    horizontal_sources: Vec<String>,
-    vertical_sources: Vec<String>,
+    horizontal_radii: Vec<RustOwnedNestedPrimitiveValue>,
+    vertical_radii: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5432,15 +5432,14 @@ fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     if !component_value_parse_as_non_negative_length_percentage(horizontal) {
         return None;
     }
-    let horizontal_source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(horizontal), filtered_input_string)?;
+    let horizontal_radius = component_value_parse_as_nested_length_percentage(horizontal, filtered_input_string)?;
 
-    let vertical_sources = if let Some(vertical) = vertical {
+    let vertical_radii = if let Some(vertical) = vertical {
         if !component_value_parse_as_non_negative_length_percentage(vertical) {
             return None;
         }
-        vec![serialize_component_values_for_reparsing(
-            std::slice::from_ref(vertical),
+        vec![component_value_parse_as_nested_length_percentage(
+            vertical,
             filtered_input_string,
         )?]
     } else {
@@ -5448,8 +5447,8 @@ fn rust_owned_border_radius_style_value_kind(filtered_input: &[u8]) -> Option<Ru
     };
 
     Some(RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
-        horizontal_sources: vec![horizontal_source],
-        vertical_sources,
+        horizontal_radii: vec![horizontal_radius],
+        vertical_radii,
     }))
 }
 
@@ -5909,16 +5908,16 @@ fn rust_owned_border_radius_shorthand_style_value_kind(filtered_input: &[u8]) ->
 
     // https://drafts.csswg.org/css-backgrounds-3/#border-radius
     // <'border-radius'> = <length-percentage [0,∞]>{1,4} [ / <length-percentage [0,∞]>{1,4} ]?
-    let horizontal_sources = rust_owned_border_radius_shorthand_side_sources(horizontal_radii, filtered_input_string)?;
-    let vertical_sources = if let Some(vertical_radii) = vertical_radii {
-        rust_owned_border_radius_shorthand_side_sources(vertical_radii, filtered_input_string)?
+    let horizontal_radii = rust_owned_border_radius_shorthand_side_values(horizontal_radii, filtered_input_string)?;
+    let vertical_radii = if let Some(vertical_radii) = vertical_radii {
+        rust_owned_border_radius_shorthand_side_values(vertical_radii, filtered_input_string)?
     } else {
         vec![]
     };
 
     Some(RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
-        horizontal_sources,
-        vertical_sources,
+        horizontal_radii,
+        vertical_radii,
     }))
 }
 
@@ -7688,23 +7687,11 @@ where
             }
         }
         RustOwnedStyleValueKind::BorderRadius(value) => {
-            for source in &value.horizontal_sources {
-                callback_optional_longhand_source(
-                    callback,
-                    CssStyleValueKind::BorderRadius,
-                    property_id,
-                    0,
-                    Some(source),
-                );
+            for radius in &value.horizontal_radii {
+                callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 0, 0, radius);
             }
-            for source in &value.vertical_sources {
-                callback_optional_longhand_source(
-                    callback,
-                    CssStyleValueKind::BorderRadius,
-                    property_id,
-                    1,
-                    Some(source),
-                );
+            for radius in &value.vertical_radii {
+                callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 1, 0, radius);
             }
         }
         RustOwnedStyleValueKind::BorderImageOutset { sources } => {
@@ -19117,17 +19104,17 @@ fn parse_border_radius_shorthand_side(component_values: &[ComponentValue]) -> bo
             .all(component_value_parse_as_non_negative_length_percentage)
 }
 
-fn rust_owned_border_radius_shorthand_side_sources(
+fn rust_owned_border_radius_shorthand_side_values(
     component_values: &[ComponentValue],
     source: &str,
-) -> Option<Vec<String>> {
+) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
     if !parse_border_radius_shorthand_side(component_values) {
         return None;
     }
 
     component_values
         .iter()
-        .map(|component_value| serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source))
+        .map(|component_value| component_value_parse_as_nested_length_percentage(component_value, source))
         .collect()
 }
 
@@ -19545,6 +19532,19 @@ fn component_value_parse_as_nested_length(
                 .map(RustOwnedNestedPrimitiveValue::Source)
         }
         _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_length_percentage(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { number },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
+        _ => component_value_parse_as_nested_length(component_value, source),
     }
 }
 
@@ -31779,8 +31779,11 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderTopLeftRadius,
                 value: RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
-                    horizontal_sources: vec!["1px".to_string()],
-                    vertical_sources: vec!["2%".to_string()],
+                    horizontal_radii: vec![RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    }],
+                    vertical_radii: vec![RustOwnedNestedPrimitiveValue::Percentage(2.0)],
                 }),
             })
         );
@@ -31789,8 +31792,26 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderRadius,
                 value: RustOwnedStyleValueKind::BorderRadius(RustOwnedBorderRadius {
-                    horizontal_sources: vec!["1px".to_string(), "2px".to_string()],
-                    vertical_sources: vec!["3px".to_string(), "4px".to_string()],
+                    horizontal_radii: vec![
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 2.0,
+                            unit: "px".to_string(),
+                        },
+                    ],
+                    vertical_radii: vec![
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 3.0,
+                            unit: "px".to_string(),
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 4.0,
+                            unit: "px".to_string(),
+                        },
+                    ],
                 }),
             })
         );
@@ -33331,11 +33352,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::BorderRadius,
                 property_id: PropertyId::BorderRadius,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(2.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "2px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );

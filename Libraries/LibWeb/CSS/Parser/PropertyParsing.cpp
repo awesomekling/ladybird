@@ -1830,6 +1830,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return LengthStyleValue::create(length);
             };
+            auto materialize_rust_nested_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value()) {
+                    if (range.min >= 0)
+                        return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
+                    return parse_rust_source_as_length_percentage(value.source_or_unit);
+                }
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Length)
+                    return materialize_rust_nested_length(value, range);
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                    if (!range.contains(*value.numeric_value))
+                        return nullptr;
+                    return PercentageStyleValue::create(Percentage { *value.numeric_value });
+                }
+                return nullptr;
+            };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_angle(value.source_or_unit);
@@ -2630,14 +2645,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::BorderRadius:
-                if (rust_style_value->border_radius_horizontal_sources.is_empty())
+                if (rust_style_value->border_radius_horizontal_radii.is_empty())
                     break;
                 if (rust_style_value->property_id == PropertyID::BorderRadius) {
-                    auto parse_radius_values = [&](Vector<String> const& sources) -> Optional<StyleValueVector> {
+                    auto parse_radius_values = [&](Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& radii) -> Optional<StyleValueVector> {
                         StyleValueVector values;
-                        values.ensure_capacity(sources.size());
-                        for (auto const& source : sources) {
-                            auto value = parse_rust_source_as_non_negative_length_percentage(source);
+                        values.ensure_capacity(radii.size());
+                        for (auto const& radius : radii) {
+                            auto value = materialize_rust_nested_length_percentage(radius, non_negative_range);
                             if (!value)
                                 return {};
                             values.append(value.release_nonnull());
@@ -2683,11 +2698,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     };
 
-                    auto maybe_horizontal_radii = parse_radius_values(rust_style_value->border_radius_horizontal_sources);
-                    auto maybe_vertical_radii = rust_style_value->border_radius_vertical_sources.is_empty()
+                    auto maybe_horizontal_radii = parse_radius_values(rust_style_value->border_radius_horizontal_radii);
+                    auto maybe_vertical_radii = rust_style_value->border_radius_vertical_radii.is_empty()
                         ? Optional<StyleValueVector> {}
-                        : parse_radius_values(rust_style_value->border_radius_vertical_sources);
-                    if (!maybe_horizontal_radii.has_value() || (!rust_style_value->border_radius_vertical_sources.is_empty() && !maybe_vertical_radii.has_value()))
+                        : parse_radius_values(rust_style_value->border_radius_vertical_radii);
+                    if (!maybe_horizontal_radii.has_value() || (!rust_style_value->border_radius_vertical_radii.is_empty() && !maybe_vertical_radii.has_value()))
                         break;
 
                     auto& horizontal_radii = *maybe_horizontal_radii;
@@ -2704,10 +2719,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             { PropertyID::BorderTopLeftRadius, PropertyID::BorderTopRightRadius, PropertyID::BorderBottomRightRadius, PropertyID::BorderBottomLeftRadius },
                             { top_left_radius, top_right_radius, bottom_right_radius, bottom_left_radius }) };
                 } else {
-                    auto horizontal = parse_rust_source_as_non_negative_length_percentage(rust_style_value->border_radius_horizontal_sources[0]);
-                    auto vertical = rust_style_value->border_radius_vertical_sources.is_empty()
+                    auto horizontal = materialize_rust_nested_length_percentage(rust_style_value->border_radius_horizontal_radii[0], non_negative_range);
+                    auto vertical = rust_style_value->border_radius_vertical_radii.is_empty()
                         ? horizontal
-                        : parse_rust_source_as_non_negative_length_percentage(rust_style_value->border_radius_vertical_sources[0]);
+                        : materialize_rust_nested_length_percentage(rust_style_value->border_radius_vertical_radii[0], non_negative_range);
                     if (!horizontal || !vertical)
                         break;
 
