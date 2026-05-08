@@ -4613,6 +4613,14 @@ RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID, 
 RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& tokens)
 {
     // [ [ <'font-style'> || <font-variant-css2> || <'font-weight'> || <font-width-css3> ]? <'font-size'> [ / <'line-height'> ]? <'font-family'># ] | <system-family-name>
+    //
+    // FIXME: Handle <system-family-name>. (caption, icon, menu, message-box, small-caption, status-bar)
+    auto transaction = tokens.begin_transaction();
+    auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto rust_items = RustComponentValueParser::parse_font_shorthand(source.bytes_as_string_view());
+    if (!rust_items.has_value())
+        return nullptr;
+
     RefPtr<StyleValue const> font_style;
     RefPtr<StyleValue const> font_variant;
     RefPtr<StyleValue const> font_weight;
@@ -4621,120 +4629,68 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
     RefPtr<StyleValue const> line_height;
     RefPtr<StyleValue const> font_families;
 
-    // FIXME: Handle <system-family-name>. (caption, icon, menu, message-box, small-caption, status-bar)
+    auto parse_value = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+        TokenStream value_tokens { component_values };
+        auto value = parse_css_value_for_property(property_id, value_tokens);
+        value_tokens.discard_whitespace();
+        if (!value || value_tokens.has_next_token())
+            return {};
+        return value;
+    };
 
-    // Several sub-properties can be "normal", and appear in any order: style, variant, weight, stretch
-    // So, we have to handle that separately.
-    int normal_count = 0;
-
-    // font-variant and font-width aren't included because we have special parsing rules for them in font.
-    auto remaining_longhands = Vector { PropertyID::FontSize, PropertyID::FontStyle, PropertyID::FontWeight };
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is_ident("normal"sv)) {
-            normal_count++;
-            tokens.discard_a_token(); // normal
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        // <font-variant-css2> = normal | small-caps
-        if (!font_variant) {
-            auto font_variant_transaction = tokens.begin_transaction();
-            auto maybe_font_variant_css2 = parse_font_variant_css2_value(tokens);
-            if (maybe_font_variant_css2 && maybe_font_variant_css2->to_keyword() == Keyword::SmallCaps) {
-                font_variant_transaction.commit();
-                font_variant = ShorthandStyleValue::create(PropertyID::FontVariant,
-                    { PropertyID::FontVariantAlternates,
-                        PropertyID::FontVariantCaps,
-                        PropertyID::FontVariantEastAsian,
-                        PropertyID::FontVariantEmoji,
-                        PropertyID::FontVariantLigatures,
-                        PropertyID::FontVariantNumeric,
-                        PropertyID::FontVariantPosition },
-                    {
-                        property_initial_value(PropertyID::FontVariantAlternates),
-                        KeywordStyleValue::create(Keyword::SmallCaps),
-                        property_initial_value(PropertyID::FontVariantEastAsian),
-                        property_initial_value(PropertyID::FontVariantEmoji),
-                        property_initial_value(PropertyID::FontVariantLigatures),
-                        property_initial_value(PropertyID::FontVariantNumeric),
-                        property_initial_value(PropertyID::FontVariantPosition),
-                    });
-                tokens.discard_whitespace();
-                continue;
-            }
-        }
-
-        // <font-width-css3> = normal | ultra-condensed | extra-condensed | condensed | semi-condensed | semi-expanded | expanded | extra-expanded | ultra-expanded
-        if (!font_width) {
-            auto font_width_transaction = tokens.begin_transaction();
-            if (auto maybe_font_width_css3 = parse_font_width_css3_value(tokens); maybe_font_width_css3 && maybe_font_width_css3->to_keyword() != Keyword::Normal) {
-                font_width_transaction.commit();
-                font_width = maybe_font_width_css3.release_nonnull();
-                tokens.discard_whitespace();
-                continue;
-            }
-        }
-
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        if (!property_and_value.has_value())
+    for (auto const& item : rust_items.value()) {
+        auto value = parse_value(item.property_id, item.value);
+        if (!value)
             return nullptr;
-        auto& value = property_and_value->style_value;
-        remove_property(remaining_longhands, property_and_value->property);
 
-        switch (property_and_value->property) {
+        switch (item.property_id) {
         case PropertyID::FontSize: {
-            VERIFY(!font_size);
-            font_size = value.release_nonnull();
-
-            // Consume `/ line-height` if present
-            tokens.discard_whitespace();
-            if (tokens.next_token().is_delim('/')) {
-                tokens.discard_a_token(); // /
-                auto maybe_line_height = parse_css_value_for_property(PropertyID::LineHeight, tokens);
-                if (!maybe_line_height)
-                    return nullptr;
-                line_height = maybe_line_height.release_nonnull();
-                tokens.discard_whitespace();
-            }
-
-            // Consume font-families
-            auto maybe_font_families = parse_font_family_value(tokens);
-            // font-family comes last, so we must not have any tokens left over.
-            if (!maybe_font_families || tokens.has_next_token())
+            if (font_size)
                 return nullptr;
-            font_families = maybe_font_families.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
+            font_size = value.release_nonnull();
+            break;
+        }
+        case PropertyID::LineHeight: {
+            if (line_height)
+                return nullptr;
+            line_height = value.release_nonnull();
+            break;
+        }
+        case PropertyID::FontFamily: {
+            if (font_families)
+                return nullptr;
+            font_families = value.release_nonnull();
+            break;
         }
         case PropertyID::FontStyle: {
-            VERIFY(!font_style);
+            if (font_style)
+                return nullptr;
             font_style = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
+            break;
+        }
+        case PropertyID::FontVariant: {
+            if (font_variant)
+                return nullptr;
+            font_variant = value.release_nonnull();
+            break;
         }
         case PropertyID::FontWeight: {
-            VERIFY(!font_weight);
+            if (font_weight)
+                return nullptr;
             font_weight = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
+            break;
+        }
+        case PropertyID::FontWidth: {
+            if (font_width)
+                return nullptr;
+            font_width = value.release_nonnull();
+            break;
         }
         default:
             VERIFY_NOT_REACHED();
         }
-
-        return nullptr;
     }
-
-    // Since normal is the default value for all the properties that can have it, we don't have to actually
-    // set anything to normal here. It'll be set when we create the ShorthandStyleValue below.
-    // We just need to make sure we were not given more normals than will fit.
-    int unset_value_count = (font_style ? 0 : 1) + (font_weight ? 0 : 1) + (font_variant ? 0 : 1) + (font_width ? 0 : 1);
-    if (unset_value_count < normal_count)
-        return nullptr;
 
     if (!font_size || !font_families)
         return nullptr;
@@ -4750,6 +4706,8 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
     if (!line_height)
         line_height = property_initial_value(PropertyID::LineHeight);
 
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
     transaction.commit();
     return ShorthandStyleValue::create(PropertyID::Font,
         {

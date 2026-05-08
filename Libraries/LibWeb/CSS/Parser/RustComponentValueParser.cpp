@@ -1945,6 +1945,26 @@ Optional<Vector<RustComponentValueParser::LayerShorthandItem>> RustComponentValu
     return items;
 }
 
+Optional<Vector<RustComponentValueParser::FontShorthandItem>> RustComponentValueParser::parse_font_shorthand(StringView input)
+{
+    Vector<FontShorthandItem> items;
+    auto input_bytes = input.bytes();
+    if (!FFI::rust_css_parse_font_shorthand(
+            input_bytes.data(),
+            input_bytes.size(),
+            &items,
+            [](void* raw_items, u16 property_id, u8 const* value_ptr, size_t value_len) {
+                auto& items = *static_cast<Vector<FontShorthandItem>*>(raw_items);
+                items.append(FontShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = String::from_utf8_without_validation({ value_ptr, value_len }),
+                });
+            }))
+        return {};
+
+    return items;
+}
+
 Optional<Vector<RustComponentValueParser::PositionalValueListShorthandItem>> RustComponentValueParser::parse_positional_value_list_shorthand(PropertyID property_id, StringView input)
 {
     Vector<PositionalValueListShorthandItem> items;

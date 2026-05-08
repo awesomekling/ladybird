@@ -2158,6 +2158,12 @@ pub(crate) struct RustOwnedLayerShorthandItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFontShorthandItem {
+    property_id: PropertyId,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     index: usize,
     style_value: RustOwnedStyleValue,
@@ -10644,6 +10650,288 @@ fn source_parses_as_property(property_id: PropertyId, source: &str) -> bool {
         parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
         RustOwnedStyleValueParseResult::Parsed(_)
     )
+}
+
+pub(crate) fn parse_font_shorthand<C>(filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(u16, &str),
+{
+    let Some(items) = parse_rust_owned_font_shorthand(filtered_input) else {
+        return false;
+    };
+
+    for item in items {
+        callback(item.property_id as u16, &item.source);
+    }
+
+    true
+}
+
+fn parse_rust_owned_font_shorthand(filtered_input: &[u8]) -> Option<Vec<RustOwnedFontShorthandItem>> {
+    let source = filtered_input_to_string(filtered_input);
+    let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = stylesheet_parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut items = Vec::new();
+    let mut normal_count: u8 = 0;
+    let mut parsed_font_style = false;
+    let mut parsed_font_variant = false;
+    let mut parsed_font_weight = false;
+    let mut parsed_font_width = false;
+
+    loop {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            return None;
+        }
+
+        if parser.next_component_value().is_some_and(|component_value| {
+            matches!(
+                component_value,
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                }) if value.eq_ignore_ascii_case("normal")
+            )
+        }) {
+            normal_count += 1;
+            parser.index += 1;
+            continue;
+        }
+
+        // https://drafts.csswg.org/css-fonts-4/#font-prop
+        // [ [ <'font-style'> || <font-variant-css2> || <'font-weight'> ||
+        //     <font-width-css3> ]? <'font-size'> [ / <'line-height'> ]?
+        //     <'font-family'># ] | <system-family-name>
+        //
+        // FIXME: Handle <system-family-name>. This matches the old C++ parser.
+        if !parsed_font_variant
+            && let Some(item) = consume_font_shorthand_item(&mut parser, PropertyId::FontVariant, &source, |source| {
+                source.eq_ignore_ascii_case("small-caps")
+            })
+        {
+            parsed_font_variant = true;
+            items.push(item);
+            continue;
+        }
+
+        if !parsed_font_width
+            && let Some(item) = consume_font_shorthand_item(&mut parser, PropertyId::FontWidth, &source, |source| {
+                !source.eq_ignore_ascii_case("normal")
+                    && component_values_parse_as_generated_property_value_type(
+                        ValueTypeId::FontWidthCss3,
+                        source.as_bytes(),
+                    )
+            })
+        {
+            parsed_font_width = true;
+            items.push(item);
+            continue;
+        }
+
+        if let Some(final_items) = consume_font_size_line_height_and_family(&mut parser, &source) {
+            items.extend(final_items);
+            break;
+        }
+
+        if !parsed_font_style
+            && let Some(item) = consume_font_shorthand_item(&mut parser, PropertyId::FontStyle, &source, |source| {
+                source_parses_as_property(PropertyId::FontStyle, source)
+            })
+        {
+            parsed_font_style = true;
+            items.push(item);
+            continue;
+        }
+
+        if !parsed_font_weight
+            && let Some(item) = consume_font_shorthand_item(&mut parser, PropertyId::FontWeight, &source, |source| {
+                source_parses_as_property(PropertyId::FontWeight, source)
+            })
+        {
+            parsed_font_weight = true;
+            items.push(item);
+            continue;
+        }
+
+        return None;
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    let unset_value_count = u8::from(!parsed_font_style)
+        + u8::from(!parsed_font_variant)
+        + u8::from(!parsed_font_weight)
+        + u8::from(!parsed_font_width);
+    if normal_count > unset_value_count {
+        return None;
+    }
+
+    Some(items)
+}
+
+fn consume_font_shorthand_item<P>(
+    parser: &mut ComponentValueParser,
+    property_id: PropertyId,
+    source: &str,
+    predicate: P,
+) -> Option<RustOwnedFontShorthandItem>
+where
+    P: Fn(&str) -> bool,
+{
+    let start = parser.index;
+    for end in ((start + 1)..=parser.component_values.len()).rev() {
+        let candidate_source =
+            serialize_component_values_for_reparsing(strip_whitespace(&parser.component_values[start..end]), source)?;
+        if !predicate(&candidate_source) {
+            continue;
+        }
+        // AD-HOC: The Rust primitive validator accepts any function as an
+        // angle because final materialization and range-checking still happen
+        // in C++. In the `font` shorthand, that would make `oblique
+        // calc(200 + 300) 24px Arial` consume the calc() as a font-style
+        // angle instead of the following font-weight. Keep calc() with an
+        // angle dimension on the font-style path, and leave other calc()
+        // functions for the remaining shorthand slots.
+        if property_id == PropertyId::FontStyle
+            && font_style_shorthand_candidate_is_oblique_function_without_angle(strip_whitespace(
+                &parser.component_values[start..end],
+            ))
+        {
+            continue;
+        }
+
+        parser.index = end;
+        return Some(RustOwnedFontShorthandItem {
+            property_id,
+            source: candidate_source,
+        });
+    }
+
+    None
+}
+
+fn font_style_shorthand_candidate_is_oblique_function_without_angle(component_values: &[ComponentValue]) -> bool {
+    let component_values: Vec<_> = component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .collect();
+    let [
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }),
+        ComponentValue::Function(function),
+    ] = component_values.as_slice()
+    else {
+        return false;
+    };
+
+    value.eq_ignore_ascii_case("oblique") && !function_contains_dimension_type(function, DimensionType::Angle)
+}
+
+fn function_contains_dimension_type(function: &Function, dimension_type: DimensionType) -> bool {
+    function.value.iter().any(|component_value| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => dimension_for_unit(unit) == Some(dimension_type),
+        ComponentValue::Function(function) => function_contains_dimension_type(function, dimension_type),
+        ComponentValue::SimpleBlock(block) => block.value.iter().any(|component_value| {
+            matches!(
+                component_value,
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Dimension { unit, .. },
+                    ..
+                }) if dimension_for_unit(unit) == Some(dimension_type)
+            ) || matches!(
+                component_value,
+                ComponentValue::Function(function) if function_contains_dimension_type(function, dimension_type)
+            )
+        }),
+        _ => false,
+    })
+}
+
+fn consume_font_size_line_height_and_family(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<Vec<RustOwnedFontShorthandItem>> {
+    let start = parser.index;
+    for font_size_end in ((start + 1)..=parser.component_values.len()).rev() {
+        let font_size_source = serialize_component_values_for_reparsing(
+            strip_whitespace(&parser.component_values[start..font_size_end]),
+            source,
+        )?;
+        if !source_parses_as_property(PropertyId::FontSize, &font_size_source) {
+            continue;
+        }
+        let mut parser_after_font_size = ComponentValueParser::new(parser.component_values.clone());
+        parser_after_font_size.index = font_size_end;
+        parser_after_font_size.discard_whitespace();
+
+        if parser_after_font_size.consume_a_delim('/') {
+            parser_after_font_size.discard_whitespace();
+            let line_height_start = parser_after_font_size.index;
+            for line_height_end in ((line_height_start + 1)..=parser.component_values.len()).rev() {
+                let line_height_source = serialize_component_values_for_reparsing(
+                    strip_whitespace(&parser.component_values[line_height_start..line_height_end]),
+                    source,
+                )?;
+                if !source_parses_as_property(PropertyId::LineHeight, &line_height_source) {
+                    continue;
+                }
+                if let Some(font_family) = consume_font_family_after(parser, source, line_height_end) {
+                    parser.index = parser.component_values.len();
+                    return Some(vec![
+                        RustOwnedFontShorthandItem {
+                            property_id: PropertyId::FontSize,
+                            source: font_size_source,
+                        },
+                        RustOwnedFontShorthandItem {
+                            property_id: PropertyId::LineHeight,
+                            source: line_height_source,
+                        },
+                        font_family,
+                    ]);
+                }
+            }
+            continue;
+        }
+
+        if let Some(font_family) = consume_font_family_after(parser, source, font_size_end) {
+            parser.index = parser.component_values.len();
+            return Some(vec![
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::FontSize,
+                    source: font_size_source,
+                },
+                font_family,
+            ]);
+        }
+    }
+
+    None
+}
+
+fn consume_font_family_after(
+    parser: &ComponentValueParser,
+    source: &str,
+    start: usize,
+) -> Option<RustOwnedFontShorthandItem> {
+    let family_source =
+        serialize_component_values_for_reparsing(strip_whitespace(&parser.component_values[start..]), source)?;
+    if family_source.is_empty() || !source_parses_as_property(PropertyId::FontFamily, &family_source) {
+        return None;
+    }
+
+    Some(RustOwnedFontShorthandItem {
+        property_id: PropertyId::FontFamily,
+        source: family_source,
+    })
 }
 
 pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
@@ -27934,7 +28222,7 @@ mod tests {
         parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
         parse_crop_or_cross, parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
         parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
-        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+        parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
         parse_image_set_value, parse_layer_shorthand, parse_length_descriptor, parse_list_style_value,
@@ -29080,6 +29368,17 @@ mod tests {
                 ));
             },
         )
+        .then_some(items)
+    }
+
+    fn parse_font_shorthand_items(input: &str) -> Option<Vec<(PropertyId, String)>> {
+        let mut items = Vec::new();
+        parse_font_shorthand(input.as_bytes(), |property_id, value| {
+            items.push((
+                crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                value.to_string(),
+            ));
+        })
         .then_some(items)
     }
 
@@ -31959,6 +32258,82 @@ mod tests {
             parse_layer_shorthand_items(PropertyId::Mask, "url(mask.png) / cover"),
             None
         );
+    }
+
+    #[test]
+    fn parses_font_shorthands() {
+        assert_eq!(
+            parse_font_shorthand_items("italic small-caps bold condensed 16px / 1.5 Arial, serif"),
+            Some(vec![
+                (PropertyId::FontStyle, "italic".to_string()),
+                (PropertyId::FontVariant, "small-caps".to_string()),
+                (PropertyId::FontWeight, "bold".to_string()),
+                (PropertyId::FontWidth, "condensed".to_string()),
+                (PropertyId::FontSize, "16px".to_string()),
+                (PropertyId::LineHeight, "1.5".to_string()),
+                (PropertyId::FontFamily, "Arial, serif".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("normal normal 12px sans-serif"),
+            Some(vec![
+                (PropertyId::FontSize, "12px".to_string()),
+                (PropertyId::FontFamily, "sans-serif".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("oblique 10deg 700 14px/20px \"Serenity Sans\""),
+            Some(vec![
+                (PropertyId::FontStyle, "oblique 10deg".to_string()),
+                (PropertyId::FontWeight, "700".to_string()),
+                (PropertyId::FontSize, "14px".to_string()),
+                (PropertyId::LineHeight, "20px".to_string()),
+                (PropertyId::FontFamily, "\"Serenity Sans\"".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("bold normal 20%/1.2 fantasy"),
+            Some(vec![
+                (PropertyId::FontWeight, "bold".to_string()),
+                (PropertyId::FontSize, "20%".to_string()),
+                (PropertyId::LineHeight, "1.2".to_string()),
+                (PropertyId::FontFamily, "fantasy".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("italic condensed normal calc(30% - 40px)/calc(120% + 1.2em) fantasy"),
+            Some(vec![
+                (PropertyId::FontStyle, "italic".to_string()),
+                (PropertyId::FontWidth, "condensed".to_string()),
+                (PropertyId::FontSize, "calc(30% - 40px)".to_string()),
+                (PropertyId::LineHeight, "calc(120% + 1.2em)".to_string()),
+                (PropertyId::FontFamily, "fantasy".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("oblique calc(200 + 300) 24px Arial"),
+            Some(vec![
+                (PropertyId::FontStyle, "oblique".to_string()),
+                (PropertyId::FontWeight, "calc(200 + 300)".to_string()),
+                (PropertyId::FontSize, "24px".to_string()),
+                (PropertyId::FontFamily, "Arial".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_font_shorthand_items("oblique calc(30deg + 5deg) 24px Arial"),
+            Some(vec![
+                (PropertyId::FontStyle, "oblique calc(30deg + 5deg)".to_string()),
+                (PropertyId::FontSize, "24px".to_string()),
+                (PropertyId::FontFamily, "Arial".to_string()),
+            ])
+        );
+
+        assert_eq!(
+            parse_font_shorthand_items("normal normal normal normal normal 12px serif"),
+            None
+        );
+        assert_eq!(parse_font_shorthand_items("italic bold serif"), None);
+        assert_eq!(parse_font_shorthand_items("16px"), None);
     }
 
     #[test]

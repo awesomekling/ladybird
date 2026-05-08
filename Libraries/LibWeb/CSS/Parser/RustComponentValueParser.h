@@ -446,6 +446,11 @@ public:
 
     using LayerShorthandItem = CoordinatingValueListShorthandItem;
 
+    struct FontShorthandItem {
+        PropertyID property_id;
+        String value;
+    };
+
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         String value;
@@ -555,6 +560,7 @@ public:
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
     static Optional<Vector<CoordinatingValueListShorthandItem>> parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID>, StringView input);
     static Optional<Vector<LayerShorthandItem>> parse_layer_shorthand(PropertyID, StringView input);
+    static Optional<Vector<FontShorthandItem>> parse_font_shorthand(StringView input);
     static Optional<Vector<PositionalValueListShorthandItem>> parse_positional_value_list_shorthand(PropertyID, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
