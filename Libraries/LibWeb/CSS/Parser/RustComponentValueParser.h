@@ -648,6 +648,11 @@ public:
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
+        bool paint_is_none { false };
+        Optional<RustStyleColor> paint_color;
+        Optional<String> paint_url_source;
+        Optional<URL> paint_url;
+        Optional<RustStyleColor> paint_fallback_color;
         Optional<RustImageKind> image_kind;
         Optional<String> image_source;
         Optional<URL> image_url;

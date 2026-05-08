@@ -2207,6 +2207,40 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             } else if (kind == FFI::CssStyleValueKind::GridAutoFlow) {
                 value.grid_auto_flow_axis = color_red;
                 value.grid_auto_flow_dense = color_green;
+            } else if (kind == FFI::CssStyleValueKind::Paint) {
+                enum : u8 {
+                    None,
+                    Color,
+                    Url,
+                    FallbackColor = 4,
+                };
+
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Paint);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                auto event_kind = has_numeric_value ? static_cast<u8>(numeric_value) : color_red;
+                switch (event_kind) {
+                case None:
+                    style_value->paint_is_none = true;
+                    break;
+                case Color:
+                    style_value->paint_color = style_color_from_callback_payload(has_secondary_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    break;
+                case Url:
+                    style_value->paint_url_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->paint_url = image_url_from_callback_payload();
+                    break;
+                case FallbackColor:
+                    style_value->paint_fallback_color = style_color_from_callback_payload(has_secondary_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::PaintOrder) {
                 value.paint_order = FFI::CssPaintOrderValue {
                     .kind = static_cast<FFI::CssPaintOrderValueKind>(color_red),

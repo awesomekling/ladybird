@@ -1887,6 +1887,7 @@ pub enum CssStyleValueKind {
     GridTrackSizeList,
     ListStyle,
     MathDepth,
+    Paint,
     PaintOrder,
     PlaceContent,
     PlaceItems,
@@ -2028,6 +2029,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         primitive_kind: CssPrimitiveValueKind,
         value: f64,
     },
+    Paint(RustOwnedPaint),
     PaintOrder(RustOwnedPaintOrder),
     Percentage {
         value: f64,
@@ -2491,6 +2493,16 @@ pub(crate) enum RustOwnedLineWidth {
     Thin,
     Medium,
     Thick,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedPaint {
+    None,
+    Color(RustOwnedColor),
+    Url {
+        url: RustOwnedUrl,
+        fallback_color: Option<RustOwnedColor>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4003,6 +4015,12 @@ fn parse_rust_owned_generated_longhand_value(
     if value_type == PropertyValueType::Image
         && let Some(value) =
             rust_owned_image_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+    {
+        return RustOwnedStyleValue { property_id, value };
+    }
+
+    if value_type == PropertyValueType::Paint
+        && let Some(value) = rust_owned_paint_style_value_kind(filtered_input)
     {
         return RustOwnedStyleValue { property_id, value };
     }
@@ -5933,6 +5951,66 @@ fn rust_owned_color_from_component_value(component_value: &ComponentValue, sourc
         .then(|| serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source))
         .flatten()
         .map(RustOwnedColor::Source)
+}
+
+fn rust_owned_paint_color_or_none_from_component_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<Option<RustOwnedColor>> {
+    if let Some(color) = rust_owned_color_from_component_value(component_value, source) {
+        return Some(Some(color));
+    }
+
+    // NOTE: <color> also accepts identifiers, so we do this identifier check last.
+    if let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+        && value.eq_ignore_ascii_case("none")
+    {
+        return Some(None);
+    }
+
+    None
+}
+
+fn rust_owned_paint_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    // https://svgwg.org/svg2-draft/painting.html#SpecifyingPaint
+    // `<paint> = none | <color> | <url> [none | <color>]? | context-fill | context-stroke`
+    // FIXME: Accept `context-fill` and `context-stroke`.
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values)
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .collect::<Vec<_>>();
+
+    if let [component_value] = component_values.as_slice()
+        && let Some(color_or_none) =
+            rust_owned_paint_color_or_none_from_component_value(component_value, filtered_input_string)
+    {
+        return Some(RustOwnedStyleValueKind::Paint(match color_or_none {
+            Some(color) => RustOwnedPaint::Color(color),
+            None => RustOwnedPaint::None,
+        }));
+    }
+
+    let [url_component_value, fallback @ ..] = component_values.as_slice() else {
+        return None;
+    };
+    let url = rust_owned_url_from_component_value(url_component_value, filtered_input_string)?;
+    let fallback_color = match fallback {
+        [] => None,
+        [fallback_component_value] => {
+            rust_owned_paint_color_or_none_from_component_value(fallback_component_value, filtered_input_string)?
+        }
+        _ => return None,
+    };
+
+    Some(RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
+        url,
+        fallback_color,
+    }))
 }
 
 fn rust_owned_border_width_from_component_value(
@@ -8611,6 +8689,9 @@ where
                 callback_nested_primitive(callback, CssStyleValueKind::MathDepth, property_id, 2, 0, integer);
             }
         },
+        RustOwnedStyleValueKind::Paint(value) => {
+            callback_paint_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
             property_id,
@@ -10999,6 +11080,70 @@ where
         payload.as_bytes(),
         property_value_type_name(PropertyValueType::Url),
     );
+}
+
+fn callback_paint_style_value<C>(callback: &mut C, property_id: u16, paint: &RustOwnedPaint)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    const PAINT_CALLBACK_NONE: f64 = 0.0;
+    const PAINT_CALLBACK_COLOR: u8 = 1;
+    const PAINT_CALLBACK_URL: f64 = 2.0;
+    const PAINT_CALLBACK_FALLBACK_COLOR: u8 = 4;
+
+    match paint {
+        RustOwnedPaint::None => callback(
+            CssStyleValueKind::Paint,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            true,
+            PAINT_CALLBACK_NONE,
+            false,
+            0.0,
+            0,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedPaint::Color(color) => {
+            callback_rust_owned_color(
+                callback,
+                CssStyleValueKind::Paint,
+                property_id,
+                PAINT_CALLBACK_COLOR,
+                color,
+            );
+        }
+        RustOwnedPaint::Url { url, fallback_color } => {
+            let (url_function_type, payload) = url_callback_payload(url);
+            callback(
+                CssStyleValueKind::Paint,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                true,
+                PAINT_CALLBACK_URL,
+                false,
+                0.0,
+                0,
+                0,
+                0,
+                url_function_type,
+                payload.as_bytes(),
+                "",
+            );
+            if let Some(fallback_color) = fallback_color {
+                callback_rust_owned_color(
+                    callback,
+                    CssStyleValueKind::Paint,
+                    property_id,
+                    PAINT_CALLBACK_FALLBACK_COLOR,
+                    fallback_color,
+                );
+            }
+        }
+    }
 }
 
 fn callback_image_style_value<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
@@ -14652,6 +14797,7 @@ fn component_values_parse_as_property_value_type(value_type: PropertyValueType, 
         PropertyValueType::Image => {
             rust_owned_image_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input)).is_some()
         }
+        PropertyValueType::Paint => rust_owned_paint_style_value_kind(filtered_input).is_some(),
         _ => false,
     }
 }
@@ -32680,34 +32826,35 @@ mod tests {
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
-        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
-        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
-        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition,
-        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
-        RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
+        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
+        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle,
+        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
         RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
         RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformOriginComponentValue,
         RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedViewTimelineInset,
-        RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode, SelectorSyntax,
-        SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
-        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction,
-        TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline,
+        RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -34483,6 +34630,36 @@ mod tests {
                     alpha: 255,
                     name: Some("red".to_string()),
                 },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Fill], "none"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Fill,
+                value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::None),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Fill], "url(#paint) red"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Fill,
+                value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
+                    url: RustOwnedUrl {
+                        source: "url(#paint)".to_string(),
+                        url: Some(RustOwnedUrlPayload {
+                            function_type: CssUrlFunctionType::Url,
+                            url: "#paint".to_string(),
+                        }),
+                    },
+                    fallback_color: Some(RustOwnedColor::Simple {
+                        kind: CssParsedColorKind::Rgba,
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                        name: Some("red".to_string()),
+                    }),
+                }),
             })
         );
         assert_eq!(

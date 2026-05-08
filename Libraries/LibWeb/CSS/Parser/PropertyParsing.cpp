@@ -3979,6 +3979,39 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::Separator::Space) };
                 }
                 break;
+            case FFI::CssStyleValueKind::Paint:
+                if (rust_style_value->paint_is_none) {
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
+                }
+                if (rust_style_value->paint_color.has_value()) {
+                    auto color = materialize_rust_style_color(*rust_style_value->paint_color, parse_rust_source_as_color);
+                    if (!color)
+                        break;
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, color.release_nonnull() };
+                }
+                if (rust_style_value->paint_url_source.has_value()) {
+                    auto maybe_url = rust_style_value->paint_url.has_value()
+                        ? rust_style_value->paint_url
+                        : RustComponentValueParser::parse_a_url_function(rust_style_value->paint_url_source->bytes_as_string_view(), "utf-8"sv);
+                    if (!maybe_url.has_value())
+                        break;
+
+                    RefPtr<StyleValue const> paint_fallback;
+                    if (rust_style_value->paint_fallback_color.has_value()) {
+                        paint_fallback = materialize_rust_style_color(*rust_style_value->paint_fallback_color, parse_rust_source_as_color);
+                        if (!paint_fallback)
+                            break;
+                    }
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(maybe_url.release_value(), paint_fallback) };
+                }
+                break;
             case FFI::CssStyleValueKind::PaintOrder:
                 switch (rust_style_value->paint_order.kind) {
                 case FFI::CssPaintOrderValueKind::Invalid:
