@@ -1957,7 +1957,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     ColorScheme(RustOwnedColorScheme),
     Contain(RustOwnedContain),
     ContainerType(RustOwnedContainerType),
-    CornerShape(RustOwnedNestedPrimitiveValue),
+    CornerShape(RustOwnedCornerShape),
     Counter(RustOwnedCounterFunction),
     CounterStyle(CounterStyle),
     CounterDefinitions(RustOwnedCounterDefinitions),
@@ -1984,10 +1984,10 @@ pub(crate) enum RustOwnedStyleValueKind {
     ImageSet(RustOwnedImageSet),
     Border(RustOwnedBorder),
     BorderImage(RustOwnedBorderImage),
-    BorderImageOutset(Vec<RustOwnedBorderImageOutset>),
-    BorderImageRepeat(Vec<RustOwnedBorderImageRepeat>),
+    BorderImageOutset(RustOwnedBorderImageOutsetList),
+    BorderImageRepeat(RustOwnedBorderImageRepeatList),
     BorderImageSlice(RustOwnedBorderImageSlice),
-    BorderImageWidth(Vec<RustOwnedNestedPrimitiveValue>),
+    BorderImageWidth(RustOwnedBorderImageWidthList),
     Identifier(RustOwnedIdentifierValue),
     ListStyle(RustOwnedListStyle),
     MathDepth(RustOwnedMathDepth),
@@ -2002,7 +2002,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     PositionVisibility(RustOwnedPositionVisibility),
     Quotes(RustOwnedQuotes),
     RepeatStyle(RustOwnedRepeatStyleList),
-    OverflowClipMargin(RustOwnedNestedPrimitiveValue),
+    OverflowClipMargin(RustOwnedOverflowClipMargin),
     Shadow(RustOwnedShadow),
     ShapeOutside(RustOwnedShapeOutside),
     TextDecoration(RustOwnedTextDecoration),
@@ -2030,8 +2030,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     ValueList(RustOwnedStyleValueList),
     Url(RustOwnedUrl),
     EasingFunction(RustOwnedEasingFunction),
-    FitContent(RustOwnedNestedPrimitiveValue),
-    FontFamily(Vec<FontFamilyValue>),
+    FitContent(RustOwnedFitContent),
+    FontFamily(RustOwnedFontFamilyList),
     OpenTypeSettings(RustOwnedOpenTypeSettingsStyleValue),
     FontLanguageOverride(RustOwnedFontLanguageOverride),
     FontVariant(FontVariant),
@@ -2115,6 +2115,41 @@ pub(crate) struct RustOwnedViewFunction {
     axis: CssScrollFunctionAxisKind,
     inset: CssViewFunctionInsetKind,
     inset_position: CssViewFunctionInsetPosition,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCornerShape {
+    value: RustOwnedNestedPrimitiveValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderImageOutsetList {
+    values: Vec<RustOwnedBorderImageOutset>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderImageRepeatList {
+    values: Vec<RustOwnedBorderImageRepeat>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderImageWidthList {
+    values: Vec<RustOwnedNestedPrimitiveValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedOverflowClipMargin {
+    length: RustOwnedNestedPrimitiveValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFitContent {
+    value: RustOwnedNestedPrimitiveValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFontFamilyList {
+    values: Vec<FontFamilyValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4633,7 +4668,7 @@ fn rust_owned_font_family_style_value_kind(filtered_input: &[u8]) -> Option<Rust
     if !parse_a_font_family_value(filtered_input, |value| values.push(value.clone())) {
         return None;
     }
-    Some(RustOwnedStyleValueKind::FontFamily(values))
+    Some(RustOwnedStyleValueKind::FontFamily(RustOwnedFontFamilyList { values }))
 }
 
 fn rust_owned_font_feature_settings_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -5994,9 +6029,9 @@ fn rust_owned_corner_shape_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         value.as_str(),
         &["round", "scoop", "bevel", "notch", "square", "squircle"],
     ) {
-        return Some(RustOwnedStyleValueKind::CornerShape(
-            RustOwnedNestedPrimitiveValue::Keyword(value.to_string()),
-        ));
+        return Some(RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+            value: RustOwnedNestedPrimitiveValue::Keyword(value.to_string()),
+        }));
     }
 
     None
@@ -6049,7 +6084,9 @@ fn rust_owned_superellipse_style_value_kind(
         _ => return None,
     };
 
-    Some(RustOwnedStyleValueKind::CornerShape(parameter))
+    Some(RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+        value: parameter,
+    }))
 }
 
 fn rust_owned_border_width_from_component_value(
@@ -6159,7 +6196,9 @@ fn rust_owned_border_image_outset_style_value_kind(filtered_input: &[u8]) -> Opt
     // https://drafts.csswg.org/css-backgrounds-3/#border-image-outset
     // <'border-image-outset'> = [ <length [0,∞]> | <number [0,∞]> ]{1,4}
     let values = rust_owned_one_to_four_border_image_outsets(filtered_input)?;
-    Some(RustOwnedStyleValueKind::BorderImageOutset(values))
+    Some(RustOwnedStyleValueKind::BorderImageOutset(
+        RustOwnedBorderImageOutsetList { values },
+    ))
 }
 
 fn rust_owned_one_to_four_border_image_outsets(filtered_input: &[u8]) -> Option<Vec<RustOwnedBorderImageOutset>> {
@@ -6257,7 +6296,9 @@ fn rust_owned_border_image_width_style_value_kind(filtered_input: &[u8]) -> Opti
     // https://drafts.csswg.org/css-backgrounds-3/#border-image-width
     // <'border-image-width'> = [ <length-percentage [0,∞]> | <number [0,∞]> | auto ]{1,4}
     let values = rust_owned_one_to_four_border_image_widths(filtered_input)?;
-    Some(RustOwnedStyleValueKind::BorderImageWidth(values))
+    Some(RustOwnedStyleValueKind::BorderImageWidth(
+        RustOwnedBorderImageWidthList { values },
+    ))
 }
 
 fn rust_owned_one_to_four_border_image_widths(filtered_input: &[u8]) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
@@ -6361,7 +6402,9 @@ fn rust_owned_border_image_repeat_style_value_kind(filtered_input: &[u8]) -> Opt
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::BorderImageRepeat(values))
+    Some(RustOwnedStyleValueKind::BorderImageRepeat(
+        RustOwnedBorderImageRepeatList { values },
+    ))
 }
 
 fn consume_border_image_slice(parser: &mut ComponentValueParser, source: &str) -> Option<RustOwnedBorderImageSlice> {
@@ -6701,7 +6744,9 @@ fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Op
     };
 
     Some(RustOwnedStyleValueKind::OverflowClipMargin(
-        component_value_parse_as_nested_length(length, filtered_input_string)?,
+        RustOwnedOverflowClipMargin {
+            length: component_value_parse_as_nested_length(length, filtered_input_string)?,
+        },
     ))
 }
 
@@ -6720,7 +6765,9 @@ fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
     };
 
     Some(RustOwnedStyleValueKind::OverflowClipMargin(
-        component_value_parse_as_nested_length(length, filtered_input_string)?,
+        RustOwnedOverflowClipMargin {
+            length: component_value_parse_as_nested_length(length, filtered_input_string)?,
+        },
     ))
 }
 
@@ -7972,7 +8019,7 @@ fn rust_owned_fit_content_style_value_kind(
         _ => return None,
     };
 
-    Some(RustOwnedStyleValueKind::FitContent(value))
+    Some(RustOwnedStyleValueKind::FitContent(RustOwnedFitContent { value }))
 }
 
 fn rust_owned_rect_style_value_kind(
@@ -8288,7 +8335,7 @@ where
             callback_counter_function_style_value(callback, CssStyleValueKind::Counter, property_id, value);
         }
         RustOwnedStyleValueKind::CornerShape(value) => {
-            callback_corner_shape_style_value(callback, property_id, value);
+            callback_corner_shape_style_value(callback, property_id, &value.value);
         }
         RustOwnedStyleValueKind::ImageSet(image_set) => {
             callback_image_set_style_value(callback, property_id, image_set);
@@ -8399,12 +8446,12 @@ where
                 callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 1, 0, radius);
             }
         }
-        RustOwnedStyleValueKind::BorderImageOutset(values) => {
+        RustOwnedStyleValueKind::BorderImageOutset(value) => {
             callback_border_image_outset_style_value(
                 callback,
                 CssStyleValueKind::BorderImageOutset,
                 property_id,
-                values,
+                &value.values,
             );
         }
         RustOwnedStyleValueKind::BorderImage(value) => {
@@ -8476,19 +8523,24 @@ where
                 callback_rust_owned_color(callback, CssStyleValueKind::Border, property_id, COLOR, color);
             }
         }
-        RustOwnedStyleValueKind::BorderImageRepeat(values) => {
+        RustOwnedStyleValueKind::BorderImageRepeat(value) => {
             callback_border_image_repeat_style_value(
                 callback,
                 CssStyleValueKind::BorderImageRepeat,
                 property_id,
-                values,
+                &value.values,
             );
         }
         RustOwnedStyleValueKind::BorderImageSlice(value) => {
             callback_border_image_slice_style_value(callback, CssStyleValueKind::BorderImageSlice, property_id, value);
         }
-        RustOwnedStyleValueKind::BorderImageWidth(values) => {
-            callback_border_image_width_style_value(callback, CssStyleValueKind::BorderImageWidth, property_id, values);
+        RustOwnedStyleValueKind::BorderImageWidth(value) => {
+            callback_border_image_width_style_value(
+                callback,
+                CssStyleValueKind::BorderImageWidth,
+                property_id,
+                &value.values,
+            );
         }
         RustOwnedStyleValueKind::Columns(value) => {
             callback_optional_column_integer(callback, property_id, 0, value.column_count.as_ref());
@@ -8927,14 +8979,14 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::OverflowClipMargin(length) => {
+        RustOwnedStyleValueKind::OverflowClipMargin(value) => {
             callback_nested_primitive(
                 callback,
                 CssStyleValueKind::OverflowClipMargin,
                 property_id,
                 0,
                 0,
-                length,
+                &value.length,
             );
         }
         RustOwnedStyleValueKind::ScrollbarColor(value) => match value {
@@ -9378,10 +9430,10 @@ where
             callback_easing_function_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::FitContent(value) => {
-            callback_fit_content_style_value(callback, property_id, value);
+            callback_fit_content_style_value(callback, property_id, &value.value);
         }
-        RustOwnedStyleValueKind::FontFamily(values) => {
-            for value in values {
+        RustOwnedStyleValueKind::FontFamily(value) => {
+            for value in &value.values {
                 let (kind, family_name, is_string) = match value {
                     FontFamilyValue::Generic(value) => (CssFontFamilyValueKind::Generic, value, false),
                     FontFamilyValue::FamilyName(value) => {
@@ -33145,20 +33197,22 @@ mod tests {
         RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
         RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorder,
-        RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice,
-        RustOwnedBorderImageSource, RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
+        RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList, RustOwnedBorderImageRepeat,
+        RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
+        RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
         RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
-        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition, RustOwnedCounterDefinitions,
-        RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontLanguageOverride, RustOwnedFontStyle,
-        RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
-        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
-        RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
+        RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+        RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
+        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop,
+        RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
+        RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
+        RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin,
         RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor,
         RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem,
         RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
@@ -35047,16 +35101,18 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "squircle"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::CornerTopLeftShape,
-                value: RustOwnedStyleValueKind::CornerShape(RustOwnedNestedPrimitiveValue::Keyword(
-                    "squircle".to_string(),
-                )),
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+                    value: RustOwnedNestedPrimitiveValue::Keyword("squircle".to_string()),
+                }),
             })
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::CornerTopLeftShape], "superellipse(-infinity)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::CornerTopLeftShape,
-                value: RustOwnedStyleValueKind::CornerShape(RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY)),
+                value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+                    value: RustOwnedNestedPrimitiveValue::Number(f64::NEG_INFINITY),
+                }),
             })
         );
         assert_eq!(
@@ -35322,13 +35378,15 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif, \"Bongo Sans\""),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::FontFamily,
-                value: RustOwnedStyleValueKind::FontFamily(vec![
-                    FontFamilyValue::Generic("serif".to_string()),
-                    FontFamilyValue::FamilyName(FamilyName {
-                        name: "Bongo Sans".to_string(),
-                        is_string: true,
-                    }),
-                ]),
+                value: RustOwnedStyleValueKind::FontFamily(RustOwnedFontFamilyList {
+                    values: vec![
+                        FontFamilyValue::Generic("serif".to_string()),
+                        FontFamilyValue::FamilyName(FamilyName {
+                            name: "Bongo Sans".to_string(),
+                            is_string: true,
+                        }),
+                    ],
+                }),
             })
         );
         assert_eq!(
@@ -35642,26 +35700,28 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageOutset], "1px 2 3px 4"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageOutset,
-                value: RustOwnedStyleValueKind::BorderImageOutset(vec![
-                    RustOwnedBorderImageOutset {
-                        value: RustOwnedNestedPrimitiveValue::Length {
-                            value: 1.0,
-                            unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::BorderImageOutset(RustOwnedBorderImageOutsetList {
+                    values: vec![
+                        RustOwnedBorderImageOutset {
+                            value: RustOwnedNestedPrimitiveValue::Length {
+                                value: 1.0,
+                                unit: "px".to_string(),
+                            },
                         },
-                    },
-                    RustOwnedBorderImageOutset {
-                        value: RustOwnedNestedPrimitiveValue::Number(2.0),
-                    },
-                    RustOwnedBorderImageOutset {
-                        value: RustOwnedNestedPrimitiveValue::Length {
-                            value: 3.0,
-                            unit: "px".to_string(),
+                        RustOwnedBorderImageOutset {
+                            value: RustOwnedNestedPrimitiveValue::Number(2.0),
                         },
-                    },
-                    RustOwnedBorderImageOutset {
-                        value: RustOwnedNestedPrimitiveValue::Number(4.0),
-                    },
-                ]),
+                        RustOwnedBorderImageOutset {
+                            value: RustOwnedNestedPrimitiveValue::Length {
+                                value: 3.0,
+                                unit: "px".to_string(),
+                            },
+                        },
+                        RustOwnedBorderImageOutset {
+                            value: RustOwnedNestedPrimitiveValue::Number(4.0),
+                        },
+                    ],
+                }),
             })
         );
         assert_eq!(
@@ -35672,15 +35732,17 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageWidth], "1px 2% 3 auto"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageWidth,
-                value: RustOwnedStyleValueKind::BorderImageWidth(vec![
-                    RustOwnedNestedPrimitiveValue::Length {
-                        value: 1.0,
-                        unit: "px".to_string(),
-                    },
-                    RustOwnedNestedPrimitiveValue::Percentage(2.0),
-                    RustOwnedNestedPrimitiveValue::Number(3.0),
-                    auto_keyword(),
-                ]),
+                value: RustOwnedStyleValueKind::BorderImageWidth(RustOwnedBorderImageWidthList {
+                    values: vec![
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
+                        },
+                        RustOwnedNestedPrimitiveValue::Percentage(2.0),
+                        RustOwnedNestedPrimitiveValue::Number(3.0),
+                        auto_keyword(),
+                    ],
+                }),
             })
         );
         assert_eq!(
@@ -35691,10 +35753,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BorderImageRepeat], "stretch round"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BorderImageRepeat,
-                value: RustOwnedStyleValueKind::BorderImageRepeat(vec![
-                    RustOwnedBorderImageRepeat::Stretch,
-                    RustOwnedBorderImageRepeat::Round
-                ]),
+                value: RustOwnedStyleValueKind::BorderImageRepeat(RustOwnedBorderImageRepeatList {
+                    values: vec![RustOwnedBorderImageRepeat::Stretch, RustOwnedBorderImageRepeat::Round],
+                }),
             })
         );
         assert_eq!(
@@ -35820,9 +35881,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::OverflowClipMarginTop], "2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMarginTop,
-                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedNestedPrimitiveValue::Length {
-                    value: 2.0,
-                    unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedOverflowClipMargin {
+                    length: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
                 }),
             })
         );
@@ -35830,9 +35893,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::OverflowClipMargin], "2px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMargin,
-                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedNestedPrimitiveValue::Length {
-                    value: 2.0,
-                    unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::OverflowClipMargin(RustOwnedOverflowClipMargin {
+                    length: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
                 }),
             })
         );
@@ -35886,9 +35951,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Width], "fit-content(10px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Width,
-                value: RustOwnedStyleValueKind::FitContent(RustOwnedNestedPrimitiveValue::Length {
-                    value: 10.0,
-                    unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
+                    value: RustOwnedNestedPrimitiveValue::Length {
+                        value: 10.0,
+                        unit: "px".to_string(),
+                    },
                 }),
             })
         );
