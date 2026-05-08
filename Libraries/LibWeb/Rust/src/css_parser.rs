@@ -4184,7 +4184,15 @@ fn parse_rust_owned_generated_longhand_value(
         }
     } else if primitive_kind == CssPrimitiveValueKind::String {
         string_token_value(component_values).unwrap_or("").to_string()
-    } else if first_is_one_of(property_value_type_name(value_type), &["Length", "Time"]) {
+    } else if matches!(
+        primitive_kind,
+        CssPrimitiveValueKind::Angle
+            | CssPrimitiveValueKind::Flex
+            | CssPrimitiveValueKind::Frequency
+            | CssPrimitiveValueKind::Length
+            | CssPrimitiveValueKind::Resolution
+            | CssPrimitiveValueKind::Time
+    ) {
         style_value_dimension_unit(value_type, component_values)
             .unwrap_or("")
             .to_string()
@@ -9363,13 +9371,37 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::Angle(value)
-        | RustOwnedStyleValueKind::Flex(value)
-        | RustOwnedStyleValueKind::Frequency(value)
-        | RustOwnedStyleValueKind::Resolution(value) => callback_primitive_style_value(
+        RustOwnedStyleValueKind::Angle(value) => callback_primitive_style_value(
             callback,
             property_id,
-            CssPrimitiveValueKind::Invalid,
+            CssPrimitiveValueKind::Angle,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Flex(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Flex,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Frequency(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Frequency,
+            Some(value.value),
+            None,
+            value.unit.as_bytes(),
+            value.value_type,
+        ),
+        RustOwnedStyleValueKind::Resolution(value) => callback_primitive_style_value(
+            callback,
+            property_id,
+            CssPrimitiveValueKind::Resolution,
             Some(value.value),
             None,
             value.unit.as_bytes(),
@@ -33139,13 +33171,14 @@ mod tests {
         TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_property_value_type, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type,
+        emit_rust_owned_style_value, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -33170,17 +33203,18 @@ mod tests {
         parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
         parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
         parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_filter_value_list_value, parse_rust_owned_positional_value_list_shorthand,
-        parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
-        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
-        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_rust_owned_filter_value_list_value, parse_rust_owned_generated_longhand_value,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
+        parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
+        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
+        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -33191,7 +33225,7 @@ mod tests {
         PropertyId, PropertyNumericRange, PropertyValueType, longhands_for_shorthand,
         property_accepted_range_by_value_type, property_accepts_keyword, property_accepts_value_type,
         property_custom_ident_blacklist, property_id_from_string, property_name,
-        property_resolves_percentages_relative_to, resolve_legacy_value_alias,
+        property_resolves_percentages_relative_to, property_value_type_name, resolve_legacy_value_alias,
     };
     use crate::generated_pseudo_classes::{
         PseudoClassId, PseudoClassParameterType, pseudo_class_id_from_string, pseudo_class_metadata, pseudo_class_name,
@@ -34260,6 +34294,43 @@ mod tests {
              color_alpha,
              value,
              value_type| {
+                parsed_value = Some(ParsedStyleValue {
+                    kind,
+                    property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                    primitive_kind,
+                    numeric_value: has_numeric_value.then_some(numeric_value),
+                    secondary_numeric_value: has_secondary_numeric_value.then_some(secondary_numeric_value),
+                    color: (kind == CssStyleValueKind::Color).then_some((
+                        color_red,
+                        color_green,
+                        color_blue,
+                        color_alpha,
+                    )),
+                    value: String::from_utf8(value.to_vec()).unwrap(),
+                    value_type: value_type.to_string(),
+                });
+            },
+        );
+        parsed_value
+    }
+
+    fn emit_style_value(style_value: &RustOwnedStyleValue) -> Option<ParsedStyleValue> {
+        let mut parsed_value = None;
+        emit_rust_owned_style_value(
+            style_value,
+            &mut |kind,
+                  property_id,
+                  primitive_kind,
+                  has_numeric_value,
+                  numeric_value,
+                  has_secondary_numeric_value,
+                  secondary_numeric_value,
+                  color_red,
+                  color_green,
+                  color_blue,
+                  color_alpha,
+                  value,
+                  value_type| {
                 parsed_value = Some(ParsedStyleValue {
                     kind,
                     property_id: crate::generated_properties::property_id_from_u16(property_id).unwrap(),
@@ -40870,6 +40941,141 @@ mod tests {
             PropertyValueType::TimePercentage,
             b"50%"
         ));
+    }
+
+    #[test]
+    fn parses_primitive_generated_property_value_types_as_rust_owned_values() {
+        let parse_generated_value = |property_id, value_type, input: &str| {
+            parse_rust_owned_generated_longhand_value(property_id, value_type, input.as_bytes(), &parse(input))
+        };
+
+        assert_eq!(
+            parse_generated_value(PropertyId::Rotate, PropertyValueType::Angle, "1deg"),
+            RustOwnedStyleValue {
+                property_id: PropertyId::Rotate,
+                value: RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "deg".to_string(),
+                    value_type: PropertyValueType::Angle,
+                }),
+            }
+        );
+        assert_eq!(
+            parse_generated_value(PropertyId::GridTemplateColumns, PropertyValueType::Flex, "1fr"),
+            RustOwnedStyleValue {
+                property_id: PropertyId::GridTemplateColumns,
+                value: RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "fr".to_string(),
+                    value_type: PropertyValueType::Flex,
+                }),
+            }
+        );
+        assert_eq!(
+            parse_generated_value(PropertyId::TransitionDuration, PropertyValueType::Frequency, "1Hz"),
+            RustOwnedStyleValue {
+                property_id: PropertyId::TransitionDuration,
+                value: RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "Hz".to_string(),
+                    value_type: PropertyValueType::Frequency,
+                }),
+            }
+        );
+        assert_eq!(
+            parse_generated_value(PropertyId::Rotate, PropertyValueType::Resolution, "96dpi"),
+            RustOwnedStyleValue {
+                property_id: PropertyId::Rotate,
+                value: RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
+                    value: 96.0,
+                    unit: "dpi".to_string(),
+                    value_type: PropertyValueType::Resolution,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn emits_primitive_generated_dimension_property_value_types() {
+        let value = |property_id, primitive_kind, numeric_value, unit: &str, value_type| ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id,
+            primitive_kind,
+            numeric_value: Some(numeric_value),
+            secondary_numeric_value: None,
+            color: None,
+            value: unit.to_string(),
+            value_type: property_value_type_name(value_type).to_string(),
+        };
+
+        assert_eq!(
+            emit_style_value(&RustOwnedStyleValue {
+                property_id: PropertyId::Rotate,
+                value: RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "deg".to_string(),
+                    value_type: PropertyValueType::Angle,
+                }),
+            }),
+            Some(value(
+                PropertyId::Rotate,
+                CssPrimitiveValueKind::Angle,
+                1.0,
+                "deg",
+                PropertyValueType::Angle
+            ))
+        );
+        assert_eq!(
+            emit_style_value(&RustOwnedStyleValue {
+                property_id: PropertyId::GridTemplateColumns,
+                value: RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "fr".to_string(),
+                    value_type: PropertyValueType::Flex,
+                }),
+            }),
+            Some(value(
+                PropertyId::GridTemplateColumns,
+                CssPrimitiveValueKind::Flex,
+                1.0,
+                "fr",
+                PropertyValueType::Flex
+            ))
+        );
+        assert_eq!(
+            emit_style_value(&RustOwnedStyleValue {
+                property_id: PropertyId::TransitionDuration,
+                value: RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
+                    value: 1.0,
+                    unit: "Hz".to_string(),
+                    value_type: PropertyValueType::Frequency,
+                }),
+            }),
+            Some(value(
+                PropertyId::TransitionDuration,
+                CssPrimitiveValueKind::Frequency,
+                1.0,
+                "Hz",
+                PropertyValueType::Frequency
+            ))
+        );
+        assert_eq!(
+            emit_style_value(&RustOwnedStyleValue {
+                property_id: PropertyId::Rotate,
+                value: RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
+                    value: 96.0,
+                    unit: "dpi".to_string(),
+                    value_type: PropertyValueType::Resolution,
+                }),
+            }),
+            Some(value(
+                PropertyId::Rotate,
+                CssPrimitiveValueKind::Resolution,
+                96.0,
+                "dpi",
+                PropertyValueType::Resolution
+            ))
+        );
     }
 
     #[test]
