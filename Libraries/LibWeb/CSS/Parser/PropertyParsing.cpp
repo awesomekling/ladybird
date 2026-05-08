@@ -272,11 +272,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::BackgroundPositionY:
         case PropertyID::BackgroundRepeat:
         case PropertyID::BackgroundSize:
+        case PropertyID::Border:
+        case PropertyID::BorderBlock:
         case PropertyID::BorderImage:
         case PropertyID::BorderImageOutset:
         case PropertyID::BorderImageRepeat:
         case PropertyID::BorderImageSlice:
         case PropertyID::BorderImageWidth:
+        case PropertyID::BorderInline:
         case PropertyID::BorderBottomLeftRadius:
         case PropertyID::BorderBottomRightRadius:
         case PropertyID::BorderEndEndRadius:
@@ -2262,6 +2265,69 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                 }
                 break;
+            case FFI::CssStyleValueKind::Border: {
+                auto width_property = PropertyID::BorderWidth;
+                auto style_property = PropertyID::BorderStyle;
+                auto color_property = PropertyID::BorderColor;
+                switch (rust_style_value->property_id) {
+                case PropertyID::Border:
+                    break;
+                case PropertyID::BorderBlock:
+                    width_property = PropertyID::BorderBlockWidth;
+                    style_property = PropertyID::BorderBlockStyle;
+                    color_property = PropertyID::BorderBlockColor;
+                    break;
+                case PropertyID::BorderInline:
+                    width_property = PropertyID::BorderInlineWidth;
+                    style_property = PropertyID::BorderInlineStyle;
+                    color_property = PropertyID::BorderInlineColor;
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+
+                auto const make_single_value_shorthand = [&](PropertyID property_id, Vector<PropertyID> const& longhands, ValueComparingNonnullRefPtr<StyleValue const> const& value) {
+                    Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+                    longhand_values.resize_with_default_value(longhands.size(), value);
+
+                    return ShorthandStyleValue::create(property_id, longhands, longhand_values);
+                };
+                auto parse_single_value_shorthand = [&](PropertyID property_id, Optional<String> const& source) -> RefPtr<StyleValue const> {
+                    if (!source.has_value())
+                        return property_initial_value(property_id);
+
+                    auto value = parse_rust_source_as_property(property_id, *source);
+                    if (!value)
+                        return nullptr;
+
+                    return make_single_value_shorthand(property_id, longhands_for_shorthand(property_id), value.release_nonnull());
+                };
+
+                auto width = parse_single_value_shorthand(width_property, rust_style_value->border_width_source);
+                auto style = parse_single_value_shorthand(style_property, rust_style_value->border_style_source);
+                auto color = parse_single_value_shorthand(color_property, rust_style_value->border_color_source);
+                if (!width || !style || !color)
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+
+                if (first_is_one_of(rust_style_value->property_id, PropertyID::BorderBlock, PropertyID::BorderInline)) {
+                    return PropertyAndValue {
+                        rust_style_value->property_id,
+                        ShorthandStyleValue::create(rust_style_value->property_id,
+                            { width_property, style_property, color_property },
+                            { width.release_nonnull(), style.release_nonnull(), color.release_nonnull() })
+                    };
+                }
+
+                return PropertyAndValue {
+                    rust_style_value->property_id,
+                    ShorthandStyleValue::create(PropertyID::Border,
+                        { width_property, style_property, color_property, PropertyID::BorderImage },
+                        { width.release_nonnull(), style.release_nonnull(), color.release_nonnull(), property_initial_value(PropertyID::BorderImage) })
+                };
+            }
             case FFI::CssStyleValueKind::BorderImage: {
                 auto source = rust_style_value->border_image_source_source.has_value()
                     ? parse_rust_source_as_property(PropertyID::BorderImageSource, *rust_style_value->border_image_source_source)
@@ -3917,7 +3983,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::Border:
     case PropertyID::BorderBlock:
     case PropertyID::BorderInline:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_border_value(property_id, tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BorderImage:
     case PropertyID::BorderImageOutset:
     case PropertyID::BorderImageRepeat:
@@ -4558,87 +4624,6 @@ RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID, 
     }
 
     return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), maybe_y_value.release_nonnull()));
-}
-
-// https://drafts.csswg.org/css-backgrounds-3/#propdef-border
-RefPtr<StyleValue const> Parser::parse_border_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
-{
-    RefPtr<StyleValue const> border_width;
-    RefPtr<StyleValue const> border_color;
-    RefPtr<StyleValue const> border_style;
-
-    auto color_property = PropertyID::BorderColor;
-    auto style_property = PropertyID::BorderStyle;
-    auto width_property = PropertyID::BorderWidth;
-
-    switch (property_id) {
-    case PropertyID::Border:
-        // Already set above.
-        break;
-    case PropertyID::BorderBlock:
-        color_property = PropertyID::BorderBlockColor;
-        style_property = PropertyID::BorderBlockStyle;
-        width_property = PropertyID::BorderBlockWidth;
-        break;
-    case PropertyID::BorderInline:
-        color_property = PropertyID::BorderInlineColor;
-        style_property = PropertyID::BorderInlineStyle;
-        width_property = PropertyID::BorderInlineWidth;
-        break;
-
-    default:
-        VERIFY_NOT_REACHED();
-    }
-
-    auto const make_single_value_shorthand = [&](PropertyID property_id, Vector<PropertyID> const& longhands, ValueComparingNonnullRefPtr<StyleValue const> const& value) {
-        Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
-        longhand_values.resize_with_default_value(longhands.size(), value);
-
-        return ShorthandStyleValue::create(property_id, longhands, longhand_values);
-    };
-
-    auto remaining_longhands = Vector { width_property, color_property, style_property };
-    auto transaction = tokens.begin_transaction();
-
-    while (tokens.has_next_token()) {
-        auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-        if (!property_and_value.has_value())
-            return nullptr;
-        auto& value = property_and_value->style_value;
-        remove_property(remaining_longhands, property_and_value->property);
-
-        if (property_and_value->property == width_property) {
-            VERIFY(!border_width);
-            border_width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), value.release_nonnull());
-        } else if (property_and_value->property == color_property) {
-            VERIFY(!border_color);
-            border_color = make_single_value_shorthand(color_property, longhands_for_shorthand(color_property), value.release_nonnull());
-        } else if (property_and_value->property == style_property) {
-            VERIFY(!border_style);
-            border_style = make_single_value_shorthand(style_property, longhands_for_shorthand(style_property), value.release_nonnull());
-        } else {
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    if (!border_width)
-        border_width = property_initial_value(width_property);
-    if (!border_style)
-        border_style = property_initial_value(style_property);
-    if (!border_color)
-        border_color = property_initial_value(color_property);
-
-    transaction.commit();
-
-    if (first_is_one_of(property_id, PropertyID::BorderBlock, PropertyID::BorderInline))
-        return ShorthandStyleValue::create(property_id,
-            { width_property, style_property, color_property },
-            { border_width.release_nonnull(), border_style.release_nonnull(), border_color.release_nonnull() });
-
-    // The border shorthand also resets border-image to its initial value
-    return ShorthandStyleValue::create(property_id,
-        { width_property, style_property, color_property, PropertyID::BorderImage },
-        { border_width.release_nonnull(), border_style.release_nonnull(), border_color.release_nonnull(), property_initial_value(PropertyID::BorderImage) });
 }
 
 // https://drafts.csswg.org/css-backgrounds/#border-image

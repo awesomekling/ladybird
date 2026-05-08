@@ -1219,6 +1219,28 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 else
                     style_value->border_radius_vertical_sources.append(string_from_ffi_bytes(value_ptr, value_len));
                 return;
+            } else if (kind == FFI::CssStyleValueKind::Border) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Border);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                switch (color_red) {
+                case 0:
+                    style_value->border_width_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 1:
+                    style_value->border_style_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case 2:
+                    style_value->border_color_source = string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+                return;
             } else if (kind == FFI::CssStyleValueKind::BorderImageSlice) {
                 if (!style_value.has_value()) {
                     value.border_image_slice_fill = color_red != 0;

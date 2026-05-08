@@ -1857,6 +1857,7 @@ pub enum CssStyleValueKind {
     AnimationName,
     AnchorNameOrScope,
     BackgroundSize,
+    Border,
     BorderImage,
     BorderImageOutset,
     BorderImageRepeat,
@@ -1983,6 +1984,11 @@ pub(crate) enum RustOwnedStyleValueKind {
     GuaranteedInvalid,
     Image(RustOwnedImage),
     ImageSet(RustOwnedImageSet),
+    Border {
+        width_source: Option<String>,
+        style_source: Option<String>,
+        color_source: Option<String>,
+    },
     BorderImage(RustOwnedBorderImage),
     BorderImageOutset {
         sources: Vec<String>,
@@ -3308,11 +3314,14 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionX
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
+            | PropertyId::Border
+            | PropertyId::BorderBlock
             | PropertyId::BorderImage
             | PropertyId::BorderImageOutset
             | PropertyId::BorderImageRepeat
             | PropertyId::BorderImageSlice
             | PropertyId::BorderImageWidth
+            | PropertyId::BorderInline
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderEndEndRadius
@@ -3437,6 +3446,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
+        PropertyId::Border | PropertyId::BorderBlock | PropertyId::BorderInline => {
+            rust_owned_border_shorthand_style_value_kind(property_id, filtered_input)
+        }
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImage => rust_owned_border_image_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),
@@ -5396,6 +5408,79 @@ where
 
 fn serialize_consumed_component_values(parser: &ComponentValueParser, start: usize, source: &str) -> Option<String> {
     serialize_component_values_for_reparsing(strip_whitespace(&parser.component_values[start..parser.index]), source)
+}
+
+fn border_shorthand_component_properties(property_id: PropertyId) -> Option<(PropertyId, PropertyId, PropertyId)> {
+    match property_id {
+        PropertyId::Border => Some((
+            PropertyId::BorderWidth,
+            PropertyId::BorderStyle,
+            PropertyId::BorderColor,
+        )),
+        PropertyId::BorderBlock => Some((
+            PropertyId::BorderBlockWidth,
+            PropertyId::BorderBlockStyle,
+            PropertyId::BorderBlockColor,
+        )),
+        PropertyId::BorderInline => Some((
+            PropertyId::BorderInlineWidth,
+            PropertyId::BorderInlineStyle,
+            PropertyId::BorderInlineColor,
+        )),
+        _ => None,
+    }
+}
+
+fn rust_owned_border_shorthand_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+) -> Option<RustOwnedStyleValueKind> {
+    // https://drafts.csswg.org/css-backgrounds-3/#propdef-border
+    // <line-width> || <line-style> || <color>
+    let (width_property, style_property, color_property) = border_shorthand_component_properties(property_id)?;
+    let component_property_ids = [width_property as u16, color_property as u16, style_property as u16];
+
+    let source = filtered_input_to_string(filtered_input);
+    let (mut input_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = input_parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+
+    let mut width_source = None;
+    let mut style_source = None;
+    let mut color_source = None;
+
+    while parser.has_next_component_value() {
+        parser.discard_whitespace();
+        let start = parser.index;
+        parser.index += 1;
+
+        let component_source = serialize_consumed_component_values(&parser, start, &source)?;
+        let RustOwnedStyleValueParseResult::Parsed(component_style_value) =
+            parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes())
+        else {
+            return None;
+        };
+
+        if component_style_value.property_id == width_property && width_source.is_none() {
+            width_source = Some(component_source);
+        } else if component_style_value.property_id == style_property && style_source.is_none() {
+            style_source = Some(component_source);
+        } else if component_style_value.property_id == color_property && color_source.is_none() {
+            color_source = Some(component_source);
+        } else {
+            return None;
+        }
+    }
+
+    if width_source.is_none() && style_source.is_none() && color_source.is_none() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::Border {
+        width_source,
+        style_source,
+        color_source,
+    })
 }
 
 fn component_value_parse_as_border_image_source(component_value: &ComponentValue) -> bool {
@@ -7584,6 +7669,39 @@ where
                 if let Some(source) = source {
                     callback(
                         CssStyleValueKind::BorderImage,
+                        property_id,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        kind,
+                        0,
+                        0,
+                        0,
+                        source.as_bytes(),
+                        "",
+                    );
+                }
+            }
+        }
+        RustOwnedStyleValueKind::Border {
+            width_source,
+            style_source,
+            color_source,
+        } => {
+            const WIDTH: u8 = 0;
+            const STYLE: u8 = 1;
+            const COLOR: u8 = 2;
+
+            for (kind, source) in [
+                (WIDTH, width_source.as_ref()),
+                (STYLE, style_source.as_ref()),
+                (COLOR, color_source.as_ref()),
+            ] {
+                if let Some(source) = source {
+                    callback(
+                        CssStyleValueKind::Border,
                         property_id,
                         CssPrimitiveValueKind::Invalid,
                         false,
@@ -29626,6 +29744,32 @@ mod tests {
                     vertical_sources: vec!["3px".to_string(), "4px".to_string()],
                 }),
             })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::Border], "1px solid red"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::Border,
+                value: RustOwnedStyleValueKind::Border {
+                    width_source: Some("1px".to_string()),
+                    style_source: Some("solid".to_string()),
+                    color_source: Some("red".to_string()),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderBlock], "currentcolor thick dashed"),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BorderBlock,
+                value: RustOwnedStyleValueKind::Border {
+                    width_source: Some("thick".to_string()),
+                    style_source: Some("dashed".to_string()),
+                    color_source: Some("currentcolor".to_string()),
+                },
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[PropertyId::BorderInline], "solid solid"),
+            None
         );
         assert_eq!(
             parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10% 20 30% fill"),

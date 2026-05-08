@@ -315,6 +315,9 @@ public:
         Optional<String> aspect_ratio_denominator_source;
         Vector<String> border_radius_horizontal_sources;
         Vector<String> border_radius_vertical_sources;
+        Optional<String> border_width_source;
+        Optional<String> border_style_source;
+        Optional<String> border_color_source;
         Optional<String> border_image_source_source;
         Optional<String> border_image_shorthand_slice_source;
         Optional<String> border_image_shorthand_width_source;
