@@ -2088,6 +2088,33 @@ fn parses_style_values_with_rust_owned_ast() {
             })
         );
     }
+    for (property_id, input, value) in [
+        (PropertyId::ColumnCount, "3", 3),
+        (PropertyId::Order, "-2147483649", i32::MIN),
+        (PropertyId::Orphans, "1", 1),
+        (PropertyId::Widows, "2", 2),
+        (PropertyId::ZIndex, "2147483648", i32::MAX),
+    ] {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], input),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                    value: RustOwnedNestedPrimitiveValue::Integer(value),
+                    value_type: PropertyValueType::Integer,
+                }),
+            })
+        );
+    }
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::ColumnCount], "auto"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::ColumnCount,
+            value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword("auto".to_string())),
+        })
+    );
+    assert_eq!(parse_rust_owned_style_value(&[PropertyId::ColumnCount], "0"), None);
+    assert_eq!(parse_rust_owned_style_value(&[PropertyId::Orphans], "0"), None);
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Fill], "none"),
         Some(RustOwnedStyleValue {
@@ -4334,6 +4361,42 @@ fn parses_style_values_with_rust_owned_ast() {
             })
         );
     }
+    for (property_id, input, numeric_value) in [
+        (PropertyId::ColumnCount, "3", 3.0),
+        (PropertyId::Order, "-2147483649", i32::MIN as f64),
+        (PropertyId::Orphans, "1", 1.0),
+        (PropertyId::Widows, "2", 2.0),
+        (PropertyId::ZIndex, "2147483648", i32::MAX as f64),
+    ] {
+        assert_eq!(
+            parse_style_value(&[property_id], input),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Primitive,
+                property_id,
+                primitive_kind: CssPrimitiveValueKind::Integer,
+                numeric_value: Some(numeric_value),
+                secondary_numeric_value: None,
+                color: None,
+                value: String::new(),
+                value_type: "Integer".to_string(),
+            })
+        );
+    }
+    assert_eq!(
+        parse_style_value(&[PropertyId::ZIndex], "auto"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::ZIndex,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "auto".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(parse_style_value(&[PropertyId::ColumnCount], "0"), None);
+    assert_eq!(parse_style_value(&[PropertyId::Orphans], "0"), None);
     assert_eq!(
         parse_style_value(&[PropertyId::Color], "currentColor"),
         Some(ParsedStyleValue {

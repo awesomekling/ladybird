@@ -238,6 +238,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ClipRule
             | PropertyId::ColorInterpolation
             | PropertyId::ColorScheme
+            | PropertyId::ColumnCount
             | PropertyId::ColumnSpan
             | PropertyId::Columns
             | PropertyId::Contain
@@ -311,8 +312,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowX
             | PropertyId::OverflowY
             | PropertyId::Opacity
+            | PropertyId::Order
             | PropertyId::OutlineColor
             | PropertyId::OutlineStyle
+            | PropertyId::Orphans
             | PropertyId::PaintOrder
             | PropertyId::PointerEvents
             | PropertyId::Position
@@ -379,9 +382,11 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::WhiteSpace
             | PropertyId::WhiteSpaceCollapse
             | PropertyId::WhiteSpaceTrim
+            | PropertyId::Widows
             | PropertyId::WillChange
             | PropertyId::WordBreak
             | PropertyId::WritingMode
+            | PropertyId::ZIndex
     )
 }
 
@@ -446,16 +451,19 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::FlexGrow
         | PropertyId::FlexShrink
         | PropertyId::Opacity
+        | PropertyId::ColumnCount
+        | PropertyId::Order
         | PropertyId::OutlineColor
+        | PropertyId::Orphans
         | PropertyId::ShapeImageThreshold
         | PropertyId::StopColor
         | PropertyId::StopOpacity
         | PropertyId::Stroke
         | PropertyId::StrokeMiterlimit
         | PropertyId::StrokeOpacity
-        | PropertyId::TextDecorationColor => {
-            rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input)
-        }
+        | PropertyId::TextDecorationColor
+        | PropertyId::Widows
+        | PropertyId::ZIndex => rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input),
         PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
         PropertyId::Content => rust_owned_content_style_value_kind(filtered_input),
         PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
@@ -626,9 +634,12 @@ fn component_values_satisfy_property_numeric_range(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
 ) -> bool {
-    let Some(numeric_value) = style_value_numeric_value(value_type, component_values) else {
+    let Some(mut numeric_value) = style_value_numeric_value(value_type, component_values) else {
         return true;
     };
+    if value_type == PropertyValueType::Integer {
+        numeric_value = numeric_value.clamp(i32::MIN as f64, i32::MAX as f64);
+    }
     let Some(range) = property_accepted_range_by_value_type(property_id, value_type) else {
         return true;
     };

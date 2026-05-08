@@ -132,6 +132,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ClipRule:
     case PropertyID::ColorInterpolation:
     case PropertyID::ColorScheme:
+    case PropertyID::ColumnCount:
     case PropertyID::ColumnSpan:
     case PropertyID::Columns:
     case PropertyID::Contain:
@@ -205,8 +206,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowX:
     case PropertyID::OverflowY:
     case PropertyID::Opacity:
+    case PropertyID::Order:
     case PropertyID::OutlineColor:
     case PropertyID::OutlineStyle:
+    case PropertyID::Orphans:
     case PropertyID::PaintOrder:
     case PropertyID::PointerEvents:
     case PropertyID::Position:
@@ -273,9 +276,11 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::WhiteSpace:
     case PropertyID::WhiteSpaceCollapse:
     case PropertyID::WhiteSpaceTrim:
+    case PropertyID::Widows:
     case PropertyID::WillChange:
     case PropertyID::WordBreak:
     case PropertyID::WritingMode:
+    case PropertyID::ZIndex:
         return true;
     default:
         return false;
@@ -565,10 +570,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
 
                 switch (*rust_style_value->value_type) {
-                case ValueType::Integer:
-                    if (!metadata->range.contains(*rust_style_value->numeric_value))
+                case ValueType::Integer: {
+                    auto integer_value = *rust_style_value->numeric_value;
+                    if (integer_value < AK::NumericLimits<i32>::min())
+                        integer_value = AK::NumericLimits<i32>::min();
+                    if (integer_value > AK::NumericLimits<i32>::max())
+                        integer_value = AK::NumericLimits<i32>::max();
+                    if (!metadata->range.contains(integer_value))
                         return nullptr;
-                    return IntegerStyleValue::create(static_cast<i32>(*rust_style_value->numeric_value));
+                    return IntegerStyleValue::create(static_cast<i32>(integer_value));
+                }
                 case ValueType::Number:
                     if (!metadata->range.contains(*rust_style_value->numeric_value))
                         return nullptr;
