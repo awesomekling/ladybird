@@ -261,6 +261,22 @@ public:
         ItemCounter,
         AltTextString,
         AltTextCounter,
+        CounterJoinString,
+        CounterStyleName,
+        CounterStyleSymbols,
+        CounterStyleSymbol,
+    };
+
+    enum class RustCounterFunctionKind : u8 {
+        Counter,
+        Counters,
+    };
+
+    struct CounterStyle {
+        FFI::CssCounterStyleKind kind;
+        FFI::CssCounterStyleSymbolsType symbols_type;
+        FlyString name;
+        Vector<FlyString> symbols;
     };
 
     enum class RustShapeOutsideEventKind : u8 {
@@ -288,6 +304,10 @@ public:
     struct RustContentEvent {
         RustContentEventKind kind { RustContentEventKind::Normal };
         String source;
+        RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
+        FlyString counter_name;
+        FlyString counter_join_string;
+        Optional<CounterStyle> counter_style;
     };
 
     struct RustFilterValueListEvent {
@@ -572,13 +592,6 @@ public:
     enum class SelectorParsingMode : u8 {
         Normal,
         Forgiving,
-    };
-
-    struct CounterStyle {
-        FFI::CssCounterStyleKind kind;
-        FFI::CssCounterStyleSymbolsType symbols_type;
-        FlyString name;
-        Vector<FlyString> symbols;
     };
 
     struct CounterStyleRangeSyntax {

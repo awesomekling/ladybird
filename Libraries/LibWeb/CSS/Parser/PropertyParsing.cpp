@@ -31,6 +31,7 @@
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
@@ -1509,23 +1510,54 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_string = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_string_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
+            auto materialize_rust_counter_style = [&](Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style) -> NonnullRefPtr<StyleValue const> {
+                if (!maybe_counter_style.has_value())
+                    return CounterStyleStyleValue::create("decimal"_fly_string);
+
+                auto counter_style = *maybe_counter_style;
+                if (counter_style.kind == FFI::CssCounterStyleKind::Name) {
+                    auto counter_style_name = counter_style.name;
+
+                    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+                    // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
+                    // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
+                    // @counter-style rule, and in the counter() functions.
+
+                    // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
+                    auto const& keyword = keyword_from_string(counter_style_name);
+                    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+                        counter_style_name = counter_style_name.to_ascii_lowercase();
+
+                    return CounterStyleStyleValue::create(counter_style_name);
+                }
+
+                VERIFY(counter_style.kind == FFI::CssCounterStyleKind::SymbolsFunction);
+                auto symbols_type = [&] {
+                    switch (counter_style.symbols_type) {
+                    case FFI::CssCounterStyleSymbolsType::Cyclic:
+                        return SymbolsType::Cyclic;
+                    case FFI::CssCounterStyleSymbolsType::Numeric:
+                        return SymbolsType::Numeric;
+                    case FFI::CssCounterStyleSymbolsType::Alphabetic:
+                        return SymbolsType::Alphabetic;
+                    case FFI::CssCounterStyleSymbolsType::Symbolic:
+                        return SymbolsType::Symbolic;
+                    case FFI::CssCounterStyleSymbolsType::Fixed:
+                        return SymbolsType::Fixed;
+                    }
+                    VERIFY_NOT_REACHED();
+                }();
+                return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
             };
-            auto parse_rust_source_as_counter = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_counter_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
+            auto materialize_rust_counter = [&](RustComponentValueParser::RustContentEvent const& event) -> RefPtr<StyleValue const> {
+                auto counter_style = materialize_rust_counter_style(event.counter_style);
+                switch (event.counter_function) {
+                case RustComponentValueParser::RustCounterFunctionKind::Counter:
+                    return CounterStyleValue::create_counter(event.counter_name, counter_style);
+                case RustComponentValueParser::RustCounterFunctionKind::Counters:
+                    return CounterStyleValue::create_counters(event.counter_name, event.counter_join_string, counter_style);
+                }
+                VERIFY_NOT_REACHED();
             };
             auto materialize_rust_view_timeline_inset_value = [&]() -> RefPtr<StyleValue const> {
                 if (rust_style_value->view_timeline_inset_sources.is_empty())
@@ -1600,10 +1632,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         break;
                     }
                     case RustComponentValueParser::RustContentEventKind::ItemString:
-                        value = parse_rust_source_as_string(event.source);
-                        if (!value)
-                            return nullptr;
-                        content_values.append(value.release_nonnull());
+                        content_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemImage:
                         value = parse_rust_source_as_image(event.source);
@@ -1612,23 +1641,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         content_values.append(value.release_nonnull());
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemCounter:
-                        value = parse_rust_source_as_counter(event.source);
+                        value = materialize_rust_counter(event);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
                         break;
                     case RustComponentValueParser::RustContentEventKind::AltTextString:
-                        value = parse_rust_source_as_string(event.source);
-                        if (!value)
-                            return nullptr;
-                        alt_text_values.append(value.release_nonnull());
+                        alt_text_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::AltTextCounter:
-                        value = parse_rust_source_as_counter(event.source);
+                        value = materialize_rust_counter(event);
                         if (!value)
                             return nullptr;
                         alt_text_values.append(value.release_nonnull());
                         break;
+                    case RustComponentValueParser::RustContentEventKind::CounterJoinString:
+                    case RustComponentValueParser::RustContentEventKind::CounterStyleName:
+                    case RustComponentValueParser::RustContentEventKind::CounterStyleSymbols:
+                    case RustComponentValueParser::RustContentEventKind::CounterStyleSymbol:
+                        return nullptr;
                     }
                 }
 

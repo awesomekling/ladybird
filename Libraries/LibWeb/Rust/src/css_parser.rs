@@ -2479,13 +2479,13 @@ pub(crate) enum RustOwnedContentItem {
     Quote(String),
     String(String),
     Image(String),
-    Counter(String),
+    Counter(RustOwnedCounterFunction),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedContentAltTextItem {
     String(String),
-    Counter(String),
+    Counter(RustOwnedCounterFunction),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4121,12 +4121,20 @@ fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option
 
     if function.name.eq_ignore_ascii_case("counter") {
         // counter() = counter( <counter-name>, <counter-style>? )
-        return rust_owned_counter_function_value(function, filtered_input, filtered_input_string);
+        return Some(RustOwnedStyleValueKind::Counter(rust_owned_counter_function_value(
+            function,
+            filtered_input_string,
+            filtered_input_to_string(filtered_input),
+        )?));
     }
 
     if function.name.eq_ignore_ascii_case("counters") {
         // counters() = counters( <counter-name>, <string>, <counter-style>? )
-        return rust_owned_counters_function_value(function, filtered_input, filtered_input_string);
+        return Some(RustOwnedStyleValueKind::Counter(rust_owned_counters_function_value(
+            function,
+            filtered_input_string,
+            filtered_input_to_string(filtered_input),
+        )?));
     }
 
     None
@@ -4134,9 +4142,9 @@ fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option
 
 fn rust_owned_counter_function_value(
     function: &Function,
-    filtered_input: &[u8],
     filtered_input_string: &str,
-) -> Option<RustOwnedStyleValueKind> {
+    source: String,
+) -> Option<RustOwnedCounterFunction> {
     let groups = split_component_values_on_comma(&function.value);
     if groups.is_empty() || groups.len() > 2 {
         return None;
@@ -4152,20 +4160,20 @@ fn rust_owned_counter_function_value(
         None
     };
 
-    Some(RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+    Some(RustOwnedCounterFunction {
         function: RustOwnedCounterFunctionKind::Counter,
         counter_name,
         join_string: None,
         counter_style,
-        source: filtered_input_to_string(filtered_input),
-    }))
+        source,
+    })
 }
 
 fn rust_owned_counters_function_value(
     function: &Function,
-    filtered_input: &[u8],
     filtered_input_string: &str,
-) -> Option<RustOwnedStyleValueKind> {
+    source: String,
+) -> Option<RustOwnedCounterFunction> {
     let groups = split_component_values_on_comma(&function.value);
     if groups.len() < 2 || groups.len() > 3 {
         return None;
@@ -4182,13 +4190,13 @@ fn rust_owned_counters_function_value(
         None
     };
 
-    Some(RustOwnedStyleValueKind::Counter(RustOwnedCounterFunction {
+    Some(RustOwnedCounterFunction {
         function: RustOwnedCounterFunctionKind::Counters,
         counter_name,
         join_string: Some(join_string),
         counter_style,
-        source: filtered_input_to_string(filtered_input),
-    }))
+        source,
+    })
 }
 
 fn component_values_counter_name(component_values: &[ComponentValue]) -> Option<String> {
@@ -9740,6 +9748,8 @@ where
 
 const CURSOR_CALLBACK_IMAGE: u8 = 0;
 const CURSOR_CALLBACK_PREDEFINED: u8 = 1;
+const CURSOR_CALLBACK_IMAGE_COORDINATE_X: u8 = 2;
+const CURSOR_CALLBACK_IMAGE_COORDINATE_Y: u8 = 3;
 const CONTENT_CALLBACK_NORMAL: u8 = 0;
 const CONTENT_CALLBACK_NONE: u8 = 1;
 const CONTENT_CALLBACK_ITEM_QUOTE: u8 = 2;
@@ -9748,6 +9758,12 @@ const CONTENT_CALLBACK_ITEM_IMAGE: u8 = 4;
 const CONTENT_CALLBACK_ITEM_COUNTER: u8 = 5;
 const CONTENT_CALLBACK_ALT_TEXT_STRING: u8 = 6;
 const CONTENT_CALLBACK_ALT_TEXT_COUNTER: u8 = 7;
+const CONTENT_CALLBACK_COUNTER_JOIN_STRING: u8 = 8;
+const CONTENT_CALLBACK_COUNTER_STYLE_NAME: u8 = 9;
+const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOLS: u8 = 10;
+const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOL: u8 = 11;
+const COUNTER_FUNCTION_COUNTER: u8 = 0;
+const COUNTER_FUNCTION_COUNTERS: u8 = 1;
 const FILTER_VALUE_LIST_CALLBACK_NONE: u8 = 0;
 const FILTER_VALUE_LIST_CALLBACK_URL: u8 = 1;
 const FILTER_VALUE_LIST_CALLBACK_BLUR: u8 = 2;
@@ -9801,16 +9817,44 @@ where
             false,
             0.0,
             CURSOR_CALLBACK_IMAGE,
-            u8::from(image.x_source.is_some()),
+            0,
             0,
             0,
             image.image_source.as_bytes(),
-            &format!(
-                "{}\0{}",
-                image.x_source.as_deref().unwrap_or(""),
-                image.y_source.as_deref().unwrap_or("")
-            ),
+            "",
         );
+        if let (Some(x_source), Some(y_source)) = (&image.x_source, &image.y_source) {
+            callback(
+                CssStyleValueKind::Cursor,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                CURSOR_CALLBACK_IMAGE_COORDINATE_X,
+                0,
+                0,
+                0,
+                x_source.as_bytes(),
+                "",
+            );
+            callback(
+                CssStyleValueKind::Cursor,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                CURSOR_CALLBACK_IMAGE_COORDINATE_Y,
+                0,
+                0,
+                0,
+                y_source.as_bytes(),
+                "",
+            );
+        }
     }
 
     callback(
@@ -9849,8 +9893,8 @@ where
                     RustOwnedContentItem::Image(source) => {
                         callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_IMAGE, source);
                     }
-                    RustOwnedContentItem::Counter(source) => {
-                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_COUNTER, source);
+                    RustOwnedContentItem::Counter(counter) => {
+                        callback_content_counter_event(callback, property_id, CONTENT_CALLBACK_ITEM_COUNTER, counter);
                     }
                 }
             }
@@ -9859,9 +9903,70 @@ where
                     RustOwnedContentAltTextItem::String(source) => {
                         callback_content_event(callback, property_id, CONTENT_CALLBACK_ALT_TEXT_STRING, source);
                     }
-                    RustOwnedContentAltTextItem::Counter(source) => {
-                        callback_content_event(callback, property_id, CONTENT_CALLBACK_ALT_TEXT_COUNTER, source);
+                    RustOwnedContentAltTextItem::Counter(counter) => {
+                        callback_content_counter_event(
+                            callback,
+                            property_id,
+                            CONTENT_CALLBACK_ALT_TEXT_COUNTER,
+                            counter,
+                        );
                     }
+                }
+            }
+        }
+    }
+}
+
+fn callback_content_counter_event<C>(callback: &mut C, property_id: u16, kind: u8, counter: &RustOwnedCounterFunction)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::Content,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        match counter.function {
+            RustOwnedCounterFunctionKind::Counter => COUNTER_FUNCTION_COUNTER,
+            RustOwnedCounterFunctionKind::Counters => COUNTER_FUNCTION_COUNTERS,
+        },
+        0,
+        0,
+        counter.counter_name.as_bytes(),
+        "",
+    );
+
+    if let Some(join_string) = counter.join_string.as_ref() {
+        callback_content_event(callback, property_id, CONTENT_CALLBACK_COUNTER_JOIN_STRING, join_string);
+    }
+
+    if let Some(counter_style) = counter.counter_style.as_ref() {
+        match counter_style {
+            CounterStyle::Name(name) => {
+                callback_content_event(callback, property_id, CONTENT_CALLBACK_COUNTER_STYLE_NAME, name);
+            }
+            CounterStyle::SymbolsFunction { symbols_type, symbols } => {
+                callback(
+                    CssStyleValueKind::Content,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    CONTENT_CALLBACK_COUNTER_STYLE_SYMBOLS,
+                    *symbols_type as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+                for symbol in symbols {
+                    callback_content_event(callback, property_id, CONTENT_CALLBACK_COUNTER_STYLE_SYMBOL, symbol);
                 }
             }
         }
@@ -19299,8 +19404,8 @@ fn component_value_parse_as_content_item(
     }
 
     if parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String {
-        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-            .map(RustOwnedContentItem::String);
+        return component_values_string_value(std::slice::from_ref(component_value))
+            .map(|value| RustOwnedContentItem::String(value.to_string()));
     }
 
     if component_value_parse_as_content_image(component_value) {
@@ -19308,9 +19413,8 @@ fn component_value_parse_as_content_item(
             .map(RustOwnedContentItem::Image);
     }
 
-    if component_value_parse_as_content_counter(component_value, filtered_input_string) {
-        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-            .map(RustOwnedContentItem::Counter);
+    if let Some(counter) = component_value_parse_as_content_counter(component_value, filtered_input_string) {
+        return Some(RustOwnedContentItem::Counter(counter));
     }
 
     None
@@ -19326,13 +19430,12 @@ fn component_value_parse_as_content_alt_text(
     // NB: <attr()> is handled as an arbitrary substitution function before
     // property-specific Rust-owned value parsing.
     if parse_string_value_prefix(component_value) == CssPrimitiveValueKind::String {
-        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-            .map(RustOwnedContentAltTextItem::String);
+        return component_values_string_value(std::slice::from_ref(component_value))
+            .map(|value| RustOwnedContentAltTextItem::String(value.to_string()));
     }
 
-    if component_value_parse_as_content_counter(component_value, filtered_input_string) {
-        return serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-            .map(RustOwnedContentAltTextItem::Counter);
+    if let Some(counter) = component_value_parse_as_content_counter(component_value, filtered_input_string) {
+        return Some(RustOwnedContentAltTextItem::Counter(counter));
     }
 
     None
@@ -19353,20 +19456,25 @@ fn component_value_parse_as_content_image(component_value: &ComponentValue) -> b
         )
 }
 
-fn component_value_parse_as_content_counter(component_value: &ComponentValue, filtered_input_string: &str) -> bool {
+fn component_value_parse_as_content_counter(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedCounterFunction> {
     let ComponentValue::Function(function) = component_value else {
-        return false;
+        return None;
     };
 
+    let source =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
     if function.name.eq_ignore_ascii_case("counter") {
-        return rust_owned_counter_function_value(function, &[], filtered_input_string).is_some();
+        return rust_owned_counter_function_value(function, filtered_input_string, source);
     }
 
     if function.name.eq_ignore_ascii_case("counters") {
-        return rust_owned_counters_function_value(function, &[], filtered_input_string).is_some();
+        return rust_owned_counters_function_value(function, filtered_input_string, source);
     }
 
-    false
+    None
 }
 
 fn parse_cursor_predefined(component_values: &[ComponentValue]) -> Option<String> {
@@ -29157,37 +29265,38 @@ mod tests {
         RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageSlice, RustOwnedBorderRadius,
         RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
         RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
-        RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
-        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
-        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
-        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
-        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
-        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
-        RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator, SelectorParsingMode,
-        SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_OVERLINE,
-        TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType, component_values_parse_as_media_feature,
-        component_values_parse_as_mf_value_syntax, component_values_parse_as_syntax,
-        component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, parse_a_counter_style,
-        parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
-        parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
-        parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
-        parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
-        parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
-        parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
+        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
+        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedOpenTypeSettings, RustOwnedPaintOrder,
+        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline,
+        RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement,
+        RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
+        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
+        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
+        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
+        RustOwnedTransitionProperty, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
+        SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
+        TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunctionParameterType,
+        component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
+        component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+        component_values_parse_as_value_type, parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident,
+        parse_a_custom_property_name, parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value,
+        parse_a_font_feature_settings, parse_a_font_language_override, parse_a_font_source, parse_a_font_style,
+        parse_a_font_variant, parse_a_font_variant_alternates, parse_a_font_variant_east_asian,
+        parse_a_font_variant_ligatures, parse_a_font_variant_numeric, parse_a_font_variation_settings,
+        parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list,
+        parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
         parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
         parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type,
         parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
@@ -31006,9 +31115,13 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
                 value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
-                    items: vec![RustOwnedContentItem::Counter(
-                        "counter(section, upper-roman)".to_string(),
-                    )],
+                    items: vec![RustOwnedContentItem::Counter(RustOwnedCounterFunction {
+                        function: RustOwnedCounterFunctionKind::Counter,
+                        counter_name: "section".to_string(),
+                        join_string: None,
+                        counter_style: Some(CounterStyle::Name("upper-roman".to_string())),
+                        source: "counter(section, upper-roman)".to_string(),
+                    })],
                     alt_text: vec![],
                 }),
             })
@@ -31244,9 +31357,16 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Content,
                 value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
-                    items: vec![RustOwnedContentItem::Counter(
-                        "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
-                    )],
+                    items: vec![RustOwnedContentItem::Counter(RustOwnedCounterFunction {
+                        function: RustOwnedCounterFunctionKind::Counters,
+                        counter_name: "section".to_string(),
+                        join_string: Some(".".to_string()),
+                        counter_style: Some(CounterStyle::SymbolsFunction {
+                            symbols_type: CssCounterStyleSymbolsType::Symbolic,
+                            symbols: vec!["*".to_string(), "**".to_string()],
+                        }),
+                        source: "counters(section, \".\", symbols(\"*\" \"**\"))".to_string(),
+                    })],
                     alt_text: vec![],
                 }),
             })

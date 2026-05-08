@@ -1449,13 +1449,43 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case RustContentEventKind::ItemQuote:
                 case RustContentEventKind::ItemString:
                 case RustContentEventKind::ItemImage:
-                case RustContentEventKind::ItemCounter:
                 case RustContentEventKind::AltTextString:
-                case RustContentEventKind::AltTextCounter:
                     style_value->content_events.append({
                         .kind = static_cast<RustContentEventKind>(color_red),
                         .source = string_from_ffi_bytes(value_ptr, value_len),
                     });
+                    break;
+                case RustContentEventKind::ItemCounter:
+                case RustContentEventKind::AltTextCounter:
+                    style_value->content_events.append({
+                        .kind = static_cast<RustContentEventKind>(color_red),
+                        .counter_function = static_cast<RustCounterFunctionKind>(color_green),
+                        .counter_name = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                case RustContentEventKind::CounterJoinString:
+                    VERIFY(!style_value->content_events.is_empty());
+                    style_value->content_events.last().counter_join_string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                    break;
+                case RustContentEventKind::CounterStyleName:
+                    VERIFY(!style_value->content_events.is_empty());
+                    style_value->content_events.last().counter_style = CounterStyle {
+                        .kind = FFI::CssCounterStyleKind::Name,
+                        .symbols_type = FFI::CssCounterStyleSymbolsType::Symbolic,
+                        .name = fly_string_from_ffi_bytes(value_ptr, value_len),
+                    };
+                    break;
+                case RustContentEventKind::CounterStyleSymbols:
+                    VERIFY(!style_value->content_events.is_empty());
+                    style_value->content_events.last().counter_style = CounterStyle {
+                        .kind = FFI::CssCounterStyleKind::SymbolsFunction,
+                        .symbols_type = static_cast<FFI::CssCounterStyleSymbolsType>(color_green),
+                    };
+                    break;
+                case RustContentEventKind::CounterStyleSymbol:
+                    VERIFY(!style_value->content_events.is_empty());
+                    VERIFY(style_value->content_events.last().counter_style.has_value());
+                    style_value->content_events.last().counter_style->symbols.append(fly_string_from_ffi_bytes(value_ptr, value_len));
                     break;
                 }
                 return;
@@ -1559,6 +1589,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 enum : u8 {
                     Image,
                     Predefined,
+                    ImageCoordinateX,
+                    ImageCoordinateY,
                 };
 
                 if (!style_value.has_value())
@@ -1573,16 +1605,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 }
 
+                if (color_red == ImageCoordinateX) {
+                    VERIFY(!style_value->cursor_images.is_empty());
+                    style_value->cursor_images.last().x_source = string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
+                if (color_red == ImageCoordinateY) {
+                    VERIFY(!style_value->cursor_images.is_empty());
+                    style_value->cursor_images.last().y_source = string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
                 VERIFY(color_red == Image);
                 RustCursorImage image {
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
                 };
-                auto coordinate_sources = StringView { value_type_ptr, value_type_len }.split_view('\0');
-                if (color_green != 0) {
-                    VERIFY(coordinate_sources.size() == 2);
-                    image.x_source = String::from_utf8_without_validation(coordinate_sources[0].bytes());
-                    image.y_source = String::from_utf8_without_validation(coordinate_sources[1].bytes());
-                }
                 style_value->cursor_images.append(move(image));
                 return;
             } else if (first_is_one_of(kind,
