@@ -215,6 +215,12 @@ public:
         Optional<RustNestedPrimitiveValue> y;
     };
 
+    struct RustBackgroundSize {
+        Optional<Keyword> keyword;
+        Optional<RustNestedPrimitiveValue> width;
+        Optional<RustNestedPrimitiveValue> height;
+    };
+
     enum class RustFilterValueListEventKind : u8 {
         None,
         Url,
@@ -405,7 +411,7 @@ public:
         Optional<CounterStyle> counter_style;
         Vector<CounterDefinition> counter_definitions;
         Vector<String> counter_definition_value_sources;
-        Vector<String> background_size_sources;
+        Vector<RustBackgroundSize> background_sizes;
         u8 easing_function_kind { 0 };
         Vector<String> easing_function_sources;
         RustBasicShapeKind basic_shape_kind { RustBasicShapeKind::Inset };

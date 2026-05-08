@@ -1863,6 +1863,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return materialize_rust_nested_length_percentage(value, infinite_range);
             };
+            auto materialize_rust_nested_background_size_component = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                    auto maybe_keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
+                    if (!maybe_keyword.has_value() || *maybe_keyword != Keyword::Auto)
+                        return nullptr;
+                    return KeywordStyleValue::create(Keyword::Auto);
+                }
+                return materialize_rust_nested_length_percentage(value, non_negative_range);
+            };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_angle(value.source_or_unit);
@@ -2157,52 +2166,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::Invalid:
                 break;
             case FFI::CssStyleValueKind::BackgroundSize: {
-                if (!rust_style_value->background_size_sources.is_empty()) {
-                    auto materialize_background_size_component = [&](TokenStream<ComponentValue>& background_size_tokens) -> RefPtr<StyleValue const> {
-                        auto transaction = background_size_tokens.begin_transaction();
-                        background_size_tokens.discard_whitespace();
-                        if (auto keyword = parse_keyword_value(background_size_tokens); keyword && first_is_one_of(keyword->to_keyword(), Keyword::Auto, Keyword::Cover, Keyword::Contain)) {
-                            transaction.commit();
-                            return keyword.release_nonnull();
-                        }
-
-                        if (auto value = parse_length_percentage_value(background_size_tokens, non_negative_range, non_negative_range)) {
-                            transaction.commit();
-                            return value.release_nonnull();
-                        }
-
-                        return nullptr;
-                    };
-
+                if (!rust_style_value->background_sizes.is_empty()) {
                     StyleValueVector values;
-                    values.ensure_capacity(rust_style_value->background_size_sources.size());
-                    for (auto const& source : rust_style_value->background_size_sources) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                        TokenStream background_size_tokens { component_values };
-                        auto width = materialize_background_size_component(background_size_tokens);
-                        if (!width)
-                            break;
-
-                        if (width->to_keyword() == Keyword::Cover || width->to_keyword() == Keyword::Contain) {
-                            background_size_tokens.discard_whitespace();
-                            if (background_size_tokens.has_next_token())
+                    values.ensure_capacity(rust_style_value->background_sizes.size());
+                    for (auto const& background_size : rust_style_value->background_sizes) {
+                        if (background_size.keyword.has_value()) {
+                            if (!first_is_one_of(*background_size.keyword, Keyword::Cover, Keyword::Contain))
                                 break;
-                            values.append(width.release_nonnull());
+                            values.append(KeywordStyleValue::create(*background_size.keyword));
                             continue;
                         }
 
-                        auto height = materialize_background_size_component(background_size_tokens);
-                        if (!height)
-                            height = KeywordStyleValue::create(Keyword::Auto);
-
-                        background_size_tokens.discard_whitespace();
-                        if (background_size_tokens.has_next_token())
+                        if (!background_size.width.has_value())
+                            break;
+                        auto width = materialize_rust_nested_background_size_component(*background_size.width);
+                        auto height = background_size.height.has_value()
+                            ? materialize_rust_nested_background_size_component(*background_size.height)
+                            : KeywordStyleValue::create(Keyword::Auto);
+                        if (!width || !height)
                             break;
 
                         values.append(BackgroundSizeStyleValue::create(width.release_nonnull(), height.release_nonnull()));
                     }
 
-                    if (values.size() == rust_style_value->background_size_sources.size()) {
+                    if (values.size() == rust_style_value->background_sizes.size()) {
                         discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };

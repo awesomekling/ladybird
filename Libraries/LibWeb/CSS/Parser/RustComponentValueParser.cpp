@@ -1876,7 +1876,29 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::BackgroundSize);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
-                style_value->background_size_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                enum : u8 {
+                    Keyword,
+                    Width,
+                    Height,
+                };
+                if (color_red == Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    style_value->background_sizes.append({
+                        .keyword = keyword.release_value(),
+                    });
+                } else if (color_red == Width) {
+                    style_value->background_sizes.append({
+                        .width = nested_primitive_value_from_callback_payload(),
+                    });
+                } else {
+                    VERIFY(color_red == Height);
+                    VERIFY(!style_value->background_sizes.is_empty());
+                    VERIFY(style_value->background_sizes.last().width.has_value());
+                    VERIFY(!style_value->background_sizes.last().keyword.has_value());
+                    style_value->background_sizes.last().height = nested_primitive_value_from_callback_payload();
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
                 if (!style_value.has_value())

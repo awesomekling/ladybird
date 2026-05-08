@@ -2368,7 +2368,6 @@ pub(crate) struct RustOwnedAspectRatio {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedBackgroundSizeList {
     values: Vec<RustOwnedBackgroundSize>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2385,23 +2384,18 @@ pub(crate) struct RustOwnedBorderImageSlice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBackgroundSize {
-    Cover {
-        source: String,
-    },
-    Contain {
-        source: String,
-    },
+    Cover,
+    Contain,
     Explicit {
         width: RustOwnedBackgroundSizeComponent,
         height: Option<RustOwnedBackgroundSizeComponent>,
-        source: String,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBackgroundSizeComponent {
-    Auto { source: String },
-    LengthPercentage { source: String },
+    Auto,
+    LengthPercentage(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5296,7 +5290,6 @@ fn rust_owned_background_size_style_value_kind(filtered_input: &[u8]) -> Option<
 
     Some(RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList {
         values,
-        source,
     }))
 }
 
@@ -5304,7 +5297,6 @@ fn rust_owned_background_size_from_component_values(
     component_values: Vec<ComponentValue>,
     source: &str,
 ) -> Option<RustOwnedBackgroundSize> {
-    let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), source)?;
     let component_values = remove_whitespace_component_values(&component_values);
 
     if let [
@@ -5315,10 +5307,10 @@ fn rust_owned_background_size_from_component_values(
     ] = component_values.as_slice()
     {
         if value.eq_ignore_ascii_case("cover") {
-            return Some(RustOwnedBackgroundSize::Cover { source: value_source });
+            return Some(RustOwnedBackgroundSize::Cover);
         }
         if value.eq_ignore_ascii_case("contain") {
-            return Some(RustOwnedBackgroundSize::Contain { source: value_source });
+            return Some(RustOwnedBackgroundSize::Contain);
         }
     }
 
@@ -5331,14 +5323,12 @@ fn rust_owned_background_size_from_component_values(
         return Some(RustOwnedBackgroundSize::Explicit {
             width,
             height: Some(height),
-            source: value_source,
         });
     };
 
     Some(RustOwnedBackgroundSize::Explicit {
         width: rust_owned_background_size_component_from_component_value(width, source)?,
         height: None,
-        source: value_source,
     })
 }
 
@@ -5346,30 +5336,22 @@ fn rust_owned_background_size_component_from_component_value(
     component_value: &ComponentValue,
     source: &str,
 ) -> Option<RustOwnedBackgroundSizeComponent> {
-    let value_source = serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?;
-
     if let ComponentValue::PreservedToken(Token {
         token_type: TokenType::Ident { value },
         ..
     }) = component_value
         && value.eq_ignore_ascii_case("auto")
     {
-        return Some(RustOwnedBackgroundSizeComponent::Auto { source: value_source });
+        return Some(RustOwnedBackgroundSizeComponent::Auto);
     }
 
     if component_value_parse_as_non_negative_length_percentage(component_value) {
-        return Some(RustOwnedBackgroundSizeComponent::LengthPercentage { source: value_source });
+        return Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
+            component_value_parse_as_nested_length_percentage(component_value, source)?,
+        ));
     }
 
     None
-}
-
-fn rust_owned_background_size_source(value: &RustOwnedBackgroundSize) -> &str {
-    match value {
-        RustOwnedBackgroundSize::Cover { source }
-        | RustOwnedBackgroundSize::Contain { source }
-        | RustOwnedBackgroundSize::Explicit { source, .. } => source,
-    }
 }
 
 fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -7688,21 +7670,7 @@ where
         }
         RustOwnedStyleValueKind::BackgroundSize(value) => {
             for value in &value.values {
-                callback(
-                    CssStyleValueKind::BackgroundSize,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    rust_owned_background_size_source(value).as_bytes(),
-                    "",
-                );
+                callback_background_size(callback, property_id, value);
             }
         }
         RustOwnedStyleValueKind::BorderRadius(value) => {
@@ -10428,6 +10396,65 @@ fn callback_transform_origin_component<C>(
                 0,
                 offset,
             );
+        }
+    }
+}
+
+fn callback_background_size<C>(callback: &mut C, property_id: u16, value: &RustOwnedBackgroundSize)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    const KEYWORD: u8 = 0;
+    const WIDTH: u8 = 1;
+    const HEIGHT: u8 = 2;
+
+    match value {
+        RustOwnedBackgroundSize::Cover => callback_background_size_keyword(callback, property_id, KEYWORD, "cover"),
+        RustOwnedBackgroundSize::Contain => callback_background_size_keyword(callback, property_id, KEYWORD, "contain"),
+        RustOwnedBackgroundSize::Explicit { width, height } => {
+            callback_background_size_component(callback, property_id, WIDTH, width);
+            if let Some(height) = height {
+                callback_background_size_component(callback, property_id, HEIGHT, height);
+            }
+        }
+    }
+}
+
+fn callback_background_size_keyword<C>(callback: &mut C, property_id: u16, kind: u8, keyword: &str)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        CssStyleValueKind::BackgroundSize,
+        property_id,
+        CssPrimitiveValueKind::Keyword,
+        false,
+        0.0,
+        false,
+        0.0,
+        kind,
+        0,
+        1,
+        0,
+        keyword.as_bytes(),
+        "",
+    );
+}
+
+fn callback_background_size_component<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    value: &RustOwnedBackgroundSizeComponent,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedBackgroundSizeComponent::Auto => {
+            callback_background_size_keyword(callback, property_id, kind, "auto");
+        }
+        RustOwnedBackgroundSizeComponent::LengthPercentage(value) => {
+            callback_nested_primitive(callback, CssStyleValueKind::BackgroundSize, property_id, kind, 0, value);
         }
     }
 }
@@ -31873,29 +31900,25 @@ mod tests {
                 property_id: PropertyId::BackgroundSize,
                 value: RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList {
                     values: vec![
-                        RustOwnedBackgroundSize::Cover {
-                            source: "cover".to_string(),
+                        RustOwnedBackgroundSize::Cover,
+                        RustOwnedBackgroundSize::Explicit {
+                            width: RustOwnedBackgroundSizeComponent::Auto,
+                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
+                                RustOwnedNestedPrimitiveValue::Length {
+                                    value: 10.0,
+                                    unit: "px".to_string(),
+                                },
+                            )),
                         },
                         RustOwnedBackgroundSize::Explicit {
-                            width: RustOwnedBackgroundSizeComponent::Auto {
-                                source: "auto".to_string(),
-                            },
-                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage {
-                                source: "10px".to_string(),
-                            }),
-                            source: "auto 10px".to_string(),
-                        },
-                        RustOwnedBackgroundSize::Explicit {
-                            width: RustOwnedBackgroundSizeComponent::LengthPercentage {
-                                source: "2%".to_string(),
-                            },
-                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage {
-                                source: "calc(3px + 4%)".to_string(),
-                            }),
-                            source: "2% calc(3px + 4%)".to_string(),
+                            width: RustOwnedBackgroundSizeComponent::LengthPercentage(
+                                RustOwnedNestedPrimitiveValue::Percentage(2.0),
+                            ),
+                            height: Some(RustOwnedBackgroundSizeComponent::LengthPercentage(
+                                RustOwnedNestedPrimitiveValue::Source("calc(3px + 4%)".to_string()),
+                            )),
                         },
                     ],
-                    source: "cover, auto 10px, 2% calc(3px + 4%)".to_string(),
                 }),
             })
         );
