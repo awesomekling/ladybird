@@ -1949,7 +1949,10 @@ pub(crate) enum RustOwnedStyleValueKind {
     Anchor(RustOwnedAnchorFunction),
     AnchorSize(RustOwnedAnchorSizeFunction),
     AnchorNameOrScope(RustOwnedAnchorNameOrScope),
-    Angle(RustOwnedDimensionStyleValue),
+    Dimension {
+        value: RustOwnedNestedPrimitiveValue,
+        value_type: PropertyValueType,
+    },
     AnimationName(RustOwnedAnimationName),
     AspectRatio(RustOwnedAspectRatio),
     BackgroundSize(RustOwnedBackgroundSizeList),
@@ -1968,7 +1971,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     Content(RustOwnedContent),
     Cursor(RustOwnedCursor),
     Display(RustOwnedDisplay),
-    Flex(RustOwnedDimensionStyleValue),
     FlexShorthand(RustOwnedFlexShorthand),
     FlexFlow(RustOwnedFlexFlow),
     FilterValueList {
@@ -1990,7 +1992,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     PlaceContent(RustOwnedPlaceShorthand),
     PlaceItems(RustOwnedPlaceShorthand),
     PlaceSelf(RustOwnedPlaceShorthand),
-    Frequency(RustOwnedDimensionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
     GridAutoTrackSizes(RustOwnedGridTrackSizeList),
     GridTemplateAreas(RustOwnedGridTemplateAreas),
@@ -2024,7 +2025,6 @@ pub(crate) enum RustOwnedStyleValueKind {
         value: String,
         value_type: PropertyValueType,
     },
-    Length(RustOwnedDimensionStyleValue),
     ListStyle(RustOwnedListStyle),
     Number {
         value: f64,
@@ -2056,7 +2056,6 @@ pub(crate) enum RustOwnedStyleValueKind {
         value_type: PropertyValueType,
     },
     RepeatStyle(RustOwnedRepeatStyleList),
-    Resolution(RustOwnedDimensionStyleValue),
     OverflowClipMargin {
         length: RustOwnedNestedPrimitiveValue,
     },
@@ -2079,7 +2078,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     TextWrapStyle(RustOwnedTextWrapStyle),
     TextIndent(RustOwnedTextIndent),
     TextUnderlinePosition(RustOwnedTextUnderlinePosition),
-    Time(RustOwnedDimensionStyleValue),
     TouchAction(RustOwnedTouchAction),
     TransformLonghand(RustOwnedTransformLonghand),
     TransformOrigin(RustOwnedTransformOrigin),
@@ -2651,6 +2649,9 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Length { value: f64, unit: String },
     Angle { value: f64, unit: String },
     Flex { value: f64, unit: String },
+    Frequency { value: f64, unit: String },
+    Resolution { value: f64, unit: String },
+    Time { value: f64, unit: String },
     Keyword(String),
     Source(String),
     FlexSource(String),
@@ -3113,13 +3114,6 @@ pub(crate) struct RustOwnedWillChangeFeature {
 pub(crate) struct RustOwnedWillChange {
     kind: CssWillChangeValueKind,
     features: Vec<RustOwnedWillChangeFeature>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedDimensionStyleValue {
-    value: f64,
-    unit: String,
-    value_type: PropertyValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -8102,36 +8096,48 @@ fn rust_owned_primitive_style_value_kind(
             value: numeric_value.unwrap_or(0.0),
             value_type,
         },
-        CssPrimitiveValueKind::Angle => RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        CssPrimitiveValueKind::Angle => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Angle {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
-        CssPrimitiveValueKind::Flex => RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        },
+        CssPrimitiveValueKind::Flex => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Flex {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
-        CssPrimitiveValueKind::Frequency => RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        },
+        CssPrimitiveValueKind::Frequency => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Frequency {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
-        CssPrimitiveValueKind::Length => RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        },
+        CssPrimitiveValueKind::Length => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Length {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
-        CssPrimitiveValueKind::Resolution => RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        },
+        CssPrimitiveValueKind::Resolution => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Resolution {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
-        CssPrimitiveValueKind::Time => RustOwnedStyleValueKind::Time(RustOwnedDimensionStyleValue {
-            value: numeric_value.unwrap_or(0.0),
-            unit: value,
+        },
+        CssPrimitiveValueKind::Time => RustOwnedStyleValueKind::Dimension {
+            value: RustOwnedNestedPrimitiveValue::Time {
+                value: numeric_value.unwrap_or(0.0),
+                unit: value,
+            },
             value_type,
-        }),
+        },
         CssPrimitiveValueKind::Ratio => RustOwnedStyleValueKind::Ratio {
             numerator: numeric_value.unwrap_or(0.0),
             denominator: secondary_numeric_value.unwrap_or(1.0),
@@ -9298,42 +9304,18 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::Angle(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Angle,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
-        ),
-        RustOwnedStyleValueKind::Flex(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Flex,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
-        ),
-        RustOwnedStyleValueKind::Frequency(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Frequency,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
-        ),
-        RustOwnedStyleValueKind::Resolution(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Resolution,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
-        ),
+        RustOwnedStyleValueKind::Dimension { value, value_type } => {
+            let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+            callback_primitive_style_value(
+                callback,
+                property_id,
+                primitive_kind,
+                nested_primitive_callback_has_numeric_value(value).then_some(numeric_value),
+                None,
+                unit_or_source.as_bytes(),
+                *value_type,
+            );
+        }
         RustOwnedStyleValueKind::Integer { value, value_type } => callback_primitive_style_value(
             callback,
             property_id,
@@ -9342,15 +9324,6 @@ where
             None,
             &[],
             *value_type,
-        ),
-        RustOwnedStyleValueKind::Length(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Length,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
         ),
         RustOwnedStyleValueKind::Number { value, value_type } => callback_primitive_style_value(
             callback,
@@ -9424,15 +9397,6 @@ where
                 }
             }
         },
-        RustOwnedStyleValueKind::Time(value) => callback_primitive_style_value(
-            callback,
-            property_id,
-            CssPrimitiveValueKind::Time,
-            Some(value.value),
-            None,
-            value.unit.as_bytes(),
-            value.value_type,
-        ),
         RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             callback_source_backed_value_type_kind_style_value(
                 callback,
@@ -12733,6 +12697,9 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
         RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, *value, unit),
         RustOwnedNestedPrimitiveValue::Angle { value, unit } => (CssPrimitiveValueKind::Angle, *value, unit),
         RustOwnedNestedPrimitiveValue::Flex { value, unit } => (CssPrimitiveValueKind::Flex, *value, unit),
+        RustOwnedNestedPrimitiveValue::Frequency { value, unit } => (CssPrimitiveValueKind::Frequency, *value, unit),
+        RustOwnedNestedPrimitiveValue::Resolution { value, unit } => (CssPrimitiveValueKind::Resolution, *value, unit),
+        RustOwnedNestedPrimitiveValue::Time { value, unit } => (CssPrimitiveValueKind::Time, *value, unit),
         RustOwnedNestedPrimitiveValue::Keyword(keyword) => (CssPrimitiveValueKind::Keyword, 0.0, keyword),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
         RustOwnedNestedPrimitiveValue::FlexSource(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
@@ -33189,11 +33156,11 @@ mod tests {
         RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain,
         RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
         RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
-        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -36088,11 +36055,13 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::MarginLeft], "12px"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::MarginLeft,
-                value: RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
-                    value: 12.0,
-                    unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Length {
+                        value: 12.0,
+                        unit: "px".to_string(),
+                    },
                     value_type: PropertyValueType::Length,
-                }),
+                },
             })
         );
         assert_eq!(
@@ -37891,11 +37860,13 @@ mod tests {
             rust_items[1].style_value,
             RustOwnedStyleValue {
                 property_id: PropertyId::TransitionDuration,
-                value: RustOwnedStyleValueKind::Time(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "s".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Time {
+                        value: 1.0,
+                        unit: "s".to_string(),
+                    },
                     value_type: PropertyValueType::Time,
-                }),
+                },
             }
         );
         assert_eq!(
@@ -38111,11 +38082,13 @@ mod tests {
             rust_items[0].style_value,
             RustOwnedStyleValue {
                 property_id: PropertyId::Margin,
-                value: RustOwnedStyleValueKind::Length(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "px".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    },
                     value_type: PropertyValueType::Length,
-                }),
+                },
             }
         );
         assert_eq!(
@@ -41077,44 +41050,52 @@ mod tests {
             parse_generated_value(PropertyId::Rotate, PropertyValueType::Angle, "1deg"),
             RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
-                value: RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "deg".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Angle {
+                        value: 1.0,
+                        unit: "deg".to_string(),
+                    },
                     value_type: PropertyValueType::Angle,
-                }),
+                },
             }
         );
         assert_eq!(
             parse_generated_value(PropertyId::GridTemplateColumns, PropertyValueType::Flex, "1fr"),
             RustOwnedStyleValue {
                 property_id: PropertyId::GridTemplateColumns,
-                value: RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "fr".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Flex {
+                        value: 1.0,
+                        unit: "fr".to_string(),
+                    },
                     value_type: PropertyValueType::Flex,
-                }),
+                },
             }
         );
         assert_eq!(
             parse_generated_value(PropertyId::TransitionDuration, PropertyValueType::Frequency, "1Hz"),
             RustOwnedStyleValue {
                 property_id: PropertyId::TransitionDuration,
-                value: RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "Hz".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Frequency {
+                        value: 1.0,
+                        unit: "Hz".to_string(),
+                    },
                     value_type: PropertyValueType::Frequency,
-                }),
+                },
             }
         );
         assert_eq!(
             parse_generated_value(PropertyId::Rotate, PropertyValueType::Resolution, "96dpi"),
             RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
-                value: RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
-                    value: 96.0,
-                    unit: "dpi".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Resolution {
+                        value: 96.0,
+                        unit: "dpi".to_string(),
+                    },
                     value_type: PropertyValueType::Resolution,
-                }),
+                },
             }
         );
     }
@@ -41135,11 +41116,13 @@ mod tests {
         assert_eq!(
             emit_style_value(&RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
-                value: RustOwnedStyleValueKind::Angle(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "deg".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Angle {
+                        value: 1.0,
+                        unit: "deg".to_string(),
+                    },
                     value_type: PropertyValueType::Angle,
-                }),
+                },
             }),
             Some(value(
                 PropertyId::Rotate,
@@ -41152,11 +41135,13 @@ mod tests {
         assert_eq!(
             emit_style_value(&RustOwnedStyleValue {
                 property_id: PropertyId::GridTemplateColumns,
-                value: RustOwnedStyleValueKind::Flex(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "fr".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Flex {
+                        value: 1.0,
+                        unit: "fr".to_string(),
+                    },
                     value_type: PropertyValueType::Flex,
-                }),
+                },
             }),
             Some(value(
                 PropertyId::GridTemplateColumns,
@@ -41169,11 +41154,13 @@ mod tests {
         assert_eq!(
             emit_style_value(&RustOwnedStyleValue {
                 property_id: PropertyId::TransitionDuration,
-                value: RustOwnedStyleValueKind::Frequency(RustOwnedDimensionStyleValue {
-                    value: 1.0,
-                    unit: "Hz".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Frequency {
+                        value: 1.0,
+                        unit: "Hz".to_string(),
+                    },
                     value_type: PropertyValueType::Frequency,
-                }),
+                },
             }),
             Some(value(
                 PropertyId::TransitionDuration,
@@ -41186,11 +41173,13 @@ mod tests {
         assert_eq!(
             emit_style_value(&RustOwnedStyleValue {
                 property_id: PropertyId::Rotate,
-                value: RustOwnedStyleValueKind::Resolution(RustOwnedDimensionStyleValue {
-                    value: 96.0,
-                    unit: "dpi".to_string(),
+                value: RustOwnedStyleValueKind::Dimension {
+                    value: RustOwnedNestedPrimitiveValue::Resolution {
+                        value: 96.0,
+                        unit: "dpi".to_string(),
+                    },
                     value_type: PropertyValueType::Resolution,
-                }),
+                },
             }),
             Some(value(
                 PropertyId::Rotate,
