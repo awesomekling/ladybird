@@ -325,11 +325,23 @@ public:
         Fixed,
     };
 
+    enum class RustGridTrackBreadthKind : u8 {
+        Invalid,
+        LengthPercentage,
+        Flex,
+        MinContent,
+        MaxContent,
+        Auto,
+    };
+
     struct RustGridTrackSizeListEvent {
         RustGridTrackSizeListEventKind kind { RustGridTrackSizeListEventKind::None };
         RustGridRepeatType repeat_type { RustGridRepeatType::AutoFill };
+        RustGridTrackBreadthKind breadth_kind { RustGridTrackBreadthKind::Invalid };
+        RustGridTrackBreadthKind secondary_breadth_kind { RustGridTrackBreadthKind::Invalid };
+        RustNestedPrimitiveValue value;
+        RustNestedPrimitiveValue secondary_value;
         String source;
-        String secondary_source;
     };
 
     struct RustCursorImage {

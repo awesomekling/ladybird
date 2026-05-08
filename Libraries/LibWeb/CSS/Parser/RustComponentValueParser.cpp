@@ -1971,8 +1971,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->grid_track_size_list_events.append(RustGridTrackSizeListEvent {
                     .kind = static_cast<RustGridTrackSizeListEventKind>(color_red),
                     .repeat_type = static_cast<RustGridRepeatType>(color_green),
+                    .breadth_kind = static_cast<RustGridTrackBreadthKind>(color_blue),
+                    .secondary_breadth_kind = static_cast<RustGridTrackBreadthKind>(color_green),
+                    .value = nested_primitive_value_from_callback_payload(),
+                    .secondary_value = secondary_nested_primitive_value_from_callback_payload(),
                     .source = string_from_ffi_bytes(value_ptr, value_len),
-                    .secondary_source = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::GridTrackPlacement) {

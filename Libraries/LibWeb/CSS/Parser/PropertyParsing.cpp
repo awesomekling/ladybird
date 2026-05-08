@@ -2549,41 +2549,58 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 VERIFY_NOT_REACHED();
             };
-            auto parse_rust_source_as_grid_track_breadth = [&](String const& source) -> Optional<GridSize> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_grid_track_breadth(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value.has_value() || value_tokens.has_next_token())
+            auto materialize_rust_grid_track_breadth = [&](RustComponentValueParser::RustGridTrackBreadthKind kind, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> Optional<GridSize> {
+                switch (kind) {
+                case RustComponentValueParser::RustGridTrackBreadthKind::Invalid:
                     return {};
-                return value.release_value();
-            };
-            auto parse_rust_source_as_grid_fixed_breadth = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_grid_fixed_breadth(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
+                case RustComponentValueParser::RustGridTrackBreadthKind::LengthPercentage: {
+                    auto fixed_breadth = materialize_rust_nested_length_percentage(value, non_negative_range);
+                    if (!fixed_breadth)
+                        return {};
+                    return GridSize { fixed_breadth.release_nonnull() };
+                }
+                case RustComponentValueParser::RustGridTrackBreadthKind::Flex: {
+                    RefPtr<StyleValue const> flex_value;
+                    if (value.numeric_value.has_value()) {
+                        if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || *value.numeric_value < 0)
+                            return {};
+                        flex_value = FlexStyleValue::create(Flex::make_fr(*value.numeric_value));
+                    } else {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream value_tokens { component_values };
+                        flex_value = parse_flex_value(value_tokens, non_negative_range);
+                        value_tokens.discard_whitespace();
+                        if (!flex_value || value_tokens.has_next_token())
+                            return {};
+                    }
+                    return GridSize { flex_value.release_nonnull() };
+                }
+                case RustComponentValueParser::RustGridTrackBreadthKind::MinContent:
+                    return GridSize(KeywordStyleValue::create(Keyword::MinContent));
+                case RustComponentValueParser::RustGridTrackBreadthKind::MaxContent:
+                    return GridSize(KeywordStyleValue::create(Keyword::MaxContent));
+                case RustComponentValueParser::RustGridTrackBreadthKind::Auto:
+                    return GridSize::make_auto();
+                }
+                VERIFY_NOT_REACHED();
             };
             auto materialize_rust_grid_track_size = [&](RustComponentValueParser::RustGridTrackSizeListEvent const& event) -> Optional<ExplicitGridTrack> {
                 switch (event.kind) {
                 case RustComponentValueParser::RustGridTrackSizeListEventKind::Breadth: {
-                    auto value = parse_rust_source_as_grid_track_breadth(event.source);
+                    auto value = materialize_rust_grid_track_breadth(event.breadth_kind, event.value);
                     if (!value.has_value())
                         return {};
                     return ExplicitGridTrack(value.release_value());
                 }
                 case RustComponentValueParser::RustGridTrackSizeListEventKind::MinMax: {
-                    auto min_value = parse_rust_source_as_grid_track_breadth(event.source);
-                    auto max_value = parse_rust_source_as_grid_track_breadth(event.secondary_source);
+                    auto min_value = materialize_rust_grid_track_breadth(event.breadth_kind, event.value);
+                    auto max_value = materialize_rust_grid_track_breadth(event.secondary_breadth_kind, event.secondary_value);
                     if (!min_value.has_value() || !max_value.has_value())
                         return {};
                     return ExplicitGridTrack(GridMinMax(min_value.release_value(), max_value.release_value()));
                 }
                 case RustComponentValueParser::RustGridTrackSizeListEventKind::FitContent: {
-                    auto length_percentage = parse_rust_source_as_grid_fixed_breadth(event.source);
+                    auto length_percentage = materialize_rust_nested_length_percentage(event.value, non_negative_range);
                     if (!length_percentage)
                         return {};
                     return ExplicitGridTrack(GridSize(FunctionStyleValue::create("fit-content"_fly_string, length_percentage.release_nonnull())));
@@ -2634,7 +2651,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         RefPtr<StyleValue const> repeat_count;
                         if (repeat_type == GridRepeatType::Fixed) {
-                            repeat_count = parse_rust_source_as_integer(event.source);
+                            repeat_count = materialize_rust_nested_integer(event.value, NumericRange { .min = 1, .max = AK::NumericLimits<i32>::max() });
                             if (!repeat_count)
                                 return {};
                         }

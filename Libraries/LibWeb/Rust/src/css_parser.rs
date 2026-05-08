@@ -2706,9 +2706,21 @@ pub(crate) enum RustOwnedExplicitGridTrack {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedGridTrackSize {
-    Breadth(String),
-    MinMax { min_source: String, max_source: String },
-    FitContent(String),
+    Breadth(RustOwnedGridTrackBreadth),
+    MinMax {
+        min: RustOwnedGridTrackBreadth,
+        max: RustOwnedGridTrackBreadth,
+    },
+    FitContent(RustOwnedNestedPrimitiveValue),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedGridTrackBreadth {
+    LengthPercentage(RustOwnedNestedPrimitiveValue),
+    Flex(RustOwnedNestedPrimitiveValue),
+    MinContent,
+    MaxContent,
+    Auto,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2721,7 +2733,7 @@ pub(crate) struct RustOwnedGridRepeat {
 pub(crate) enum RustOwnedGridRepeatType {
     AutoFill,
     AutoFit,
-    Fixed { count_source: String },
+    Fixed { count: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10468,6 +10480,12 @@ const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_END: u8 = 6;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FILL: u8 = 0;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FIT: u8 = 1;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_FIXED: u8 = 2;
+const GRID_TRACK_BREADTH_INVALID: u8 = 0;
+const GRID_TRACK_BREADTH_LENGTH_PERCENTAGE: u8 = 1;
+const GRID_TRACK_BREADTH_FLEX: u8 = 2;
+const GRID_TRACK_BREADTH_MIN_CONTENT: u8 = 3;
+const GRID_TRACK_BREADTH_MAX_CONTENT: u8 = 4;
+const GRID_TRACK_BREADTH_AUTO: u8 = 5;
 
 const GRID_TEMPLATE_AREAS_CALLBACK_NONE: u8 = 0;
 const GRID_TEMPLATE_AREAS_CALLBACK_ROW: u8 = 1;
@@ -10590,74 +10608,93 @@ fn callback_explicit_grid_track<C>(
 {
     match track {
         RustOwnedExplicitGridTrack::Size(size) => match size {
-            RustOwnedGridTrackSize::Breadth(source) => callback(
-                kind,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                GRID_TRACK_SIZE_LIST_CALLBACK_BREADTH,
-                0,
-                0,
-                0,
-                source.as_bytes(),
-                "",
-            ),
-            RustOwnedGridTrackSize::MinMax { min_source, max_source } => callback(
-                kind,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                GRID_TRACK_SIZE_LIST_CALLBACK_MINMAX,
-                0,
-                0,
-                0,
-                min_source.as_bytes(),
-                max_source,
-            ),
-            RustOwnedGridTrackSize::FitContent(source) => callback(
-                kind,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                GRID_TRACK_SIZE_LIST_CALLBACK_FIT_CONTENT,
-                0,
-                0,
-                0,
-                source.as_bytes(),
-                "",
-            ),
+            RustOwnedGridTrackSize::Breadth(breadth) => {
+                let payload = grid_track_breadth_callback_payload(breadth);
+                callback(
+                    kind,
+                    property_id,
+                    payload.primitive_kind,
+                    payload.has_numeric_value,
+                    payload.numeric_value,
+                    false,
+                    0.0,
+                    GRID_TRACK_SIZE_LIST_CALLBACK_BREADTH,
+                    0,
+                    payload.breadth_kind,
+                    0,
+                    payload.source_or_unit.as_bytes(),
+                    "",
+                );
+            }
+            RustOwnedGridTrackSize::MinMax { min, max } => {
+                let min_payload = grid_track_breadth_callback_payload(min);
+                let max_payload = grid_track_breadth_callback_payload(max);
+                callback(
+                    kind,
+                    property_id,
+                    min_payload.primitive_kind,
+                    min_payload.has_numeric_value,
+                    min_payload.numeric_value,
+                    max_payload.has_numeric_value,
+                    max_payload.numeric_value,
+                    GRID_TRACK_SIZE_LIST_CALLBACK_MINMAX,
+                    max_payload.breadth_kind,
+                    min_payload.breadth_kind,
+                    max_payload.primitive_kind as u8,
+                    min_payload.source_or_unit.as_bytes(),
+                    max_payload.source_or_unit,
+                );
+            }
+            RustOwnedGridTrackSize::FitContent(value) => {
+                let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+                callback(
+                    kind,
+                    property_id,
+                    primitive_kind,
+                    !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                    numeric_value,
+                    false,
+                    0.0,
+                    GRID_TRACK_SIZE_LIST_CALLBACK_FIT_CONTENT,
+                    0,
+                    GRID_TRACK_BREADTH_LENGTH_PERCENTAGE,
+                    0,
+                    unit_or_source.as_bytes(),
+                    "",
+                );
+            }
         },
         RustOwnedExplicitGridTrack::Repeat(repeat) => {
-            let (repeat_type, count_source) = match &repeat.repeat_type {
+            let (repeat_type, count) = match &repeat.repeat_type {
                 RustOwnedGridRepeatType::AutoFill => (GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FILL, None),
                 RustOwnedGridRepeatType::AutoFit => (GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FIT, None),
-                RustOwnedGridRepeatType::Fixed { count_source } => {
-                    (GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_FIXED, Some(count_source.as_str()))
-                }
+                RustOwnedGridRepeatType::Fixed { count } => (GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_FIXED, Some(count)),
+            };
+            let (primitive_kind, has_numeric_value, numeric_value, source_or_unit) = if let Some(count) = count {
+                let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(count);
+                (
+                    primitive_kind,
+                    !matches!(count, RustOwnedNestedPrimitiveValue::Source(_)),
+                    numeric_value,
+                    source_or_unit,
+                )
+            } else {
+                (CssPrimitiveValueKind::Invalid, false, 0.0, "")
             };
 
             callback(
                 kind,
                 property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
+                primitive_kind,
+                has_numeric_value,
+                numeric_value,
                 false,
                 0.0,
                 GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_BEGIN,
                 repeat_type,
                 0,
                 0,
-                count_source.unwrap_or("").as_bytes(),
+                source_or_unit.as_bytes(),
                 "",
             );
             callback_grid_track_size_list_items(callback, kind, property_id, &repeat.track_list);
@@ -10677,6 +10714,60 @@ fn callback_explicit_grid_track<C>(
                 "",
             );
         }
+    }
+}
+
+struct GridTrackBreadthCallbackPayload<'a> {
+    breadth_kind: u8,
+    primitive_kind: CssPrimitiveValueKind,
+    has_numeric_value: bool,
+    numeric_value: f64,
+    source_or_unit: &'a str,
+}
+
+fn grid_track_breadth_callback_payload(breadth: &RustOwnedGridTrackBreadth) -> GridTrackBreadthCallbackPayload<'_> {
+    match breadth {
+        RustOwnedGridTrackBreadth::LengthPercentage(value) => {
+            let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(value);
+            GridTrackBreadthCallbackPayload {
+                breadth_kind: GRID_TRACK_BREADTH_LENGTH_PERCENTAGE,
+                primitive_kind,
+                has_numeric_value: !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                numeric_value,
+                source_or_unit,
+            }
+        }
+        RustOwnedGridTrackBreadth::Flex(value) => {
+            let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(value);
+            GridTrackBreadthCallbackPayload {
+                breadth_kind: GRID_TRACK_BREADTH_FLEX,
+                primitive_kind,
+                has_numeric_value: !matches!(value, RustOwnedNestedPrimitiveValue::Source(_)),
+                numeric_value,
+                source_or_unit,
+            }
+        }
+        RustOwnedGridTrackBreadth::MinContent => GridTrackBreadthCallbackPayload {
+            breadth_kind: GRID_TRACK_BREADTH_MIN_CONTENT,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            has_numeric_value: false,
+            numeric_value: 0.0,
+            source_or_unit: "",
+        },
+        RustOwnedGridTrackBreadth::MaxContent => GridTrackBreadthCallbackPayload {
+            breadth_kind: GRID_TRACK_BREADTH_MAX_CONTENT,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            has_numeric_value: false,
+            numeric_value: 0.0,
+            source_or_unit: "",
+        },
+        RustOwnedGridTrackBreadth::Auto => GridTrackBreadthCallbackPayload {
+            breadth_kind: GRID_TRACK_BREADTH_AUTO,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            has_numeric_value: false,
+            numeric_value: 0.0,
+            source_or_unit: "",
+        },
     }
 }
 
@@ -18104,9 +18195,8 @@ fn parse_grid_repeat_type(
         return Some(RustOwnedGridRepeatType::AutoFit);
     }
     if parse_positive_integer_component_values(component_values) {
-        return Some(RustOwnedGridRepeatType::Fixed {
-            count_source: serialize_component_values_for_reparsing(component_values, filtered_input_string)?,
-        });
+        let count = component_value_parse_as_nested_integer(component_value, filtered_input_string)?;
+        return Some(RustOwnedGridRepeatType::Fixed { count });
     }
     None
 }
@@ -18122,13 +18212,13 @@ fn parse_grid_track_size(
         return Some(RustOwnedGridTrackSize::Breadth(source));
     }
 
-    if let Some((min_source, max_source)) = parse_grid_minmax_function(
+    if let Some((min, max)) = parse_grid_minmax_function(
         parser,
         filtered_input_string,
         parse_grid_inflexible_breadth,
         parse_grid_track_breadth,
     ) {
-        return Some(RustOwnedGridTrackSize::MinMax { min_source, max_source });
+        return Some(RustOwnedGridTrackSize::MinMax { min, max });
     }
 
     parser.index = start;
@@ -18146,13 +18236,13 @@ fn parse_grid_fixed_size(
         return Some(RustOwnedGridTrackSize::Breadth(source));
     }
 
-    if let Some((min_source, max_source)) = parse_grid_minmax_function(
+    if let Some((min, max)) = parse_grid_minmax_function(
         parser,
         filtered_input_string,
         parse_grid_fixed_breadth,
         parse_grid_track_breadth,
     ) {
-        return Some(RustOwnedGridTrackSize::MinMax { min_source, max_source });
+        return Some(RustOwnedGridTrackSize::MinMax { min, max });
     }
 
     parser.index = start;
@@ -18162,7 +18252,7 @@ fn parse_grid_fixed_size(
         parse_grid_inflexible_breadth,
         parse_grid_fixed_breadth,
     )
-    .map(|(min_source, max_source)| RustOwnedGridTrackSize::MinMax { min_source, max_source })
+    .map(|(min, max)| RustOwnedGridTrackSize::MinMax { min, max })
 }
 
 fn parse_grid_minmax_function<F, G>(
@@ -18170,10 +18260,10 @@ fn parse_grid_minmax_function<F, G>(
     filtered_input_string: &str,
     min_parser: F,
     max_parser: G,
-) -> Option<(String, String)>
+) -> Option<(RustOwnedGridTrackBreadth, RustOwnedGridTrackBreadth)>
 where
-    F: Fn(&mut ComponentValueParser, &str) -> Option<String>,
-    G: Fn(&mut ComponentValueParser, &str) -> Option<String>,
+    F: Fn(&mut ComponentValueParser, &str) -> Option<RustOwnedGridTrackBreadth>,
+    G: Fn(&mut ComponentValueParser, &str) -> Option<RustOwnedGridTrackBreadth>,
 {
     parser.discard_whitespace();
     let start = parser.index;
@@ -18191,7 +18281,7 @@ where
 
     let mut min_value_parser = ComponentValueParser::new(min_value.clone());
     let mut max_value_parser = ComponentValueParser::new(max_value.clone());
-    let Some(min_source) = min_parser(&mut min_value_parser, filtered_input_string) else {
+    let Some(min) = min_parser(&mut min_value_parser, filtered_input_string) else {
         parser.index = start;
         return None;
     };
@@ -18200,7 +18290,7 @@ where
         parser.index = start;
         return None;
     }
-    let Some(max_source) = max_parser(&mut max_value_parser, filtered_input_string) else {
+    let Some(max) = max_parser(&mut max_value_parser, filtered_input_string) else {
         parser.index = start;
         return None;
     };
@@ -18211,10 +18301,13 @@ where
     }
 
     parser.index += 1;
-    Some((min_source, max_source))
+    Some((min, max))
 }
 
-fn parse_grid_fit_content_function(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn parse_grid_fit_content_function(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
     parser.discard_whitespace();
     let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
         return None;
@@ -18222,51 +18315,70 @@ fn parse_grid_fit_content_function(parser: &mut ComponentValueParser, filtered_i
     if !function.name.eq_ignore_ascii_case("fit-content") {
         return None;
     }
-    if !component_values_parse_as_single_non_negative_length_percentage(&function.value) {
+    let [component_value] = strip_whitespace(&function.value) else {
         return None;
-    }
+    };
+    let value = component_value_parse_as_nested_non_negative_length_percentage(component_value, filtered_input_string)?;
 
-    let source = serialize_component_values_for_reparsing(&function.value, filtered_input_string)?;
     parser.index += 1;
-    Some(source)
+    Some(value)
 }
 
-fn parse_grid_track_breadth(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn parse_grid_track_breadth(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedGridTrackBreadth> {
     // https://www.w3.org/TR/css-grid-2/#typedef-track-breadth
     // <track-breadth> = <length-percentage [0,∞]> | <flex [0,∞]> | min-content | max-content | auto
     parse_grid_inflexible_breadth(parser, filtered_input_string)
         .or_else(|| consume_grid_flex_component_value(parser, filtered_input_string))
 }
 
-fn parse_grid_inflexible_breadth(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn parse_grid_inflexible_breadth(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedGridTrackBreadth> {
     // https://www.w3.org/TR/css-grid-2/#typedef-inflexible-breadth
     // <inflexible-breadth>  = <length-percentage [0,∞]> | min-content | max-content | auto
     parse_grid_fixed_breadth(parser, filtered_input_string)
-        .or_else(|| consume_optional_ident_matching_source(parser, "min-content"))
-        .or_else(|| consume_optional_ident_matching_source(parser, "max-content"))
-        .or_else(|| consume_optional_ident_matching_source(parser, "auto"))
+        .or_else(|| {
+            consume_optional_ident_matching(parser, "min-content").then_some(RustOwnedGridTrackBreadth::MinContent)
+        })
+        .or_else(|| {
+            consume_optional_ident_matching(parser, "max-content").then_some(RustOwnedGridTrackBreadth::MaxContent)
+        })
+        .or_else(|| consume_optional_ident_matching(parser, "auto").then_some(RustOwnedGridTrackBreadth::Auto))
 }
 
-fn parse_grid_fixed_breadth(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn parse_grid_fixed_breadth(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedGridTrackBreadth> {
     // https://www.w3.org/TR/css-grid-2/#typedef-fixed-breadth
     // <fixed-breadth> = <length-percentage [0,∞]>
     parser.discard_whitespace();
     let component_value = parser.next_component_value()?;
+    let value = component_value_parse_as_nested_non_negative_length_percentage(component_value, filtered_input_string)?;
+    parser.index += 1;
+    Some(RustOwnedGridTrackBreadth::LengthPercentage(value))
+}
+
+fn component_value_parse_as_nested_non_negative_length_percentage(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
     if !component_value_parse_as_non_negative_length_percentage(component_value) {
         return None;
     }
-
-    let source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
-    parser.index += 1;
-    Some(source)
-}
-
-fn component_values_parse_as_single_non_negative_length_percentage(component_values: &[ComponentValue]) -> bool {
-    let [component_value] = strip_whitespace(component_values) else {
-        return false;
-    };
-    component_value_parse_as_non_negative_length_percentage(component_value)
+    // AD-HOC: The Rust side does not yet compute math-function result types.
+    // Grid track breadth needs to distinguish calc(1fr) from calc(1px), so
+    // classify math functions containing flex dimensions as <flex> instead.
+    if matches!(component_value, ComponentValue::Function(function) if is_math_function_name(&function.name))
+        && component_value_contains_flex_dimension(component_value)
+    {
+        return None;
+    }
+    component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)
 }
 
 fn component_value_parse_as_non_negative_length_percentage(component_value: &ComponentValue) -> bool {
@@ -18311,17 +18423,53 @@ fn component_value_parse_as_non_negative_length(component_value: &ComponentValue
     }
 }
 
-fn consume_grid_flex_component_value(parser: &mut ComponentValueParser, filtered_input_string: &str) -> Option<String> {
+fn consume_grid_flex_component_value(
+    parser: &mut ComponentValueParser,
+    filtered_input_string: &str,
+) -> Option<RustOwnedGridTrackBreadth> {
     parser.discard_whitespace();
     let component_value = parser.next_component_value()?;
     if !component_value_parse_as_non_negative_flex(component_value) {
         return None;
     }
 
-    let source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    let value = component_value_parse_as_nested_non_negative_flex(component_value, filtered_input_string)?;
     parser.index += 1;
-    Some(source)
+    Some(RustOwnedGridTrackBreadth::Flex(value))
+}
+
+fn component_value_parse_as_nested_non_negative_flex(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, .. },
+            ..
+        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        ComponentValue::Function(_) => {
+            if !component_value_contains_flex_dimension(component_value) {
+                return None;
+            }
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing and range-checking math functions still happens in C++.
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => None,
+    }
+}
+
+fn component_value_contains_flex_dimension(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { unit, .. },
+            ..
+        }) => unit.eq_ignore_ascii_case("fr"),
+        ComponentValue::Function(function) => function.value.iter().any(component_value_contains_flex_dimension),
+        ComponentValue::SimpleBlock(block) => block.value.iter().any(component_value_contains_flex_dimension),
+        _ => false,
+    }
 }
 
 fn component_value_parse_as_non_negative_flex(component_value: &ComponentValue) -> bool {
@@ -18332,7 +18480,9 @@ fn component_value_parse_as_non_negative_flex(component_value: &ComponentValue) 
         }) => number.value() >= 0.0 && unit.eq_ignore_ascii_case("fr"),
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        ComponentValue::Function(function) => {
+            is_math_function_name(&function.name) && component_value_contains_flex_dimension(component_value)
+        }
         _ => false,
     }
 }
@@ -32178,7 +32328,7 @@ mod tests {
         RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
         RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
         RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -35245,12 +35395,20 @@ mod tests {
                 property_id: PropertyId::GridAutoRows,
                 value: RustOwnedStyleValueKind::GridAutoTrackSizes(RustOwnedGridTrackSizeList::List(vec![
                     RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
-                        RustOwnedGridTrackSize::Breadth("10px".to_string()),
+                        RustOwnedGridTrackSize::Breadth(RustOwnedGridTrackBreadth::LengthPercentage(
+                            RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            },
+                        )),
                     )),
                     RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
                         RustOwnedGridTrackSize::MinMax {
-                            min_source: "1px".to_string(),
-                            max_source: "1fr".to_string(),
+                            min: RustOwnedGridTrackBreadth::LengthPercentage(RustOwnedNestedPrimitiveValue::Length {
+                                value: 1.0,
+                                unit: "px".to_string(),
+                            }),
+                            max: RustOwnedGridTrackBreadth::Flex(RustOwnedNestedPrimitiveValue::Number(1.0)),
                         },
                     )),
                 ])),
@@ -35263,15 +35421,22 @@ mod tests {
                 value: RustOwnedStyleValueKind::GridTrackSizeList(RustOwnedGridTrackSizeList::List(vec![
                     RustOwnedGridTrackSizeListItem::LineNames(vec!["a".to_string()]),
                     RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
-                        RustOwnedGridTrackSize::Breadth("10px".to_string()),
+                        RustOwnedGridTrackSize::Breadth(RustOwnedGridTrackBreadth::LengthPercentage(
+                            RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            },
+                        )),
                     )),
                     RustOwnedGridTrackSizeListItem::LineNames(vec!["b".to_string()]),
                     RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Repeat(RustOwnedGridRepeat {
                         repeat_type: RustOwnedGridRepeatType::Fixed {
-                            count_source: "2".to_string(),
+                            count: RustOwnedNestedPrimitiveValue::Integer(2),
                         },
                         track_list: vec![RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
-                            RustOwnedGridTrackSize::Breadth("1fr".to_string(),)
+                            RustOwnedGridTrackSize::Breadth(RustOwnedGridTrackBreadth::Flex(
+                                RustOwnedNestedPrimitiveValue::Number(1.0),
+                            ))
                         ),)],
                     },)),
                 ])),
