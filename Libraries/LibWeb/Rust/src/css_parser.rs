@@ -2707,6 +2707,7 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Percentage(f64),
     Length { value: f64, unit: String },
     Angle { value: f64, unit: String },
+    Flex { value: f64, unit: String },
     Source(String),
 }
 
@@ -12814,6 +12815,7 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
         RustOwnedNestedPrimitiveValue::Integer(value) => (CssPrimitiveValueKind::Integer, *value as f64, ""),
         RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, *value, unit),
         RustOwnedNestedPrimitiveValue::Angle { value, unit } => (CssPrimitiveValueKind::Angle, *value, unit),
+        RustOwnedNestedPrimitiveValue::Flex { value, unit } => (CssPrimitiveValueKind::Flex, *value, unit),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
 }
@@ -19324,9 +19326,14 @@ fn component_value_parse_as_nested_non_negative_flex(
 ) -> Option<RustOwnedNestedPrimitiveValue> {
     match component_value {
         ComponentValue::PreservedToken(Token {
-            token_type: TokenType::Dimension { number, .. },
+            token_type: TokenType::Dimension { number, unit },
             ..
-        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Flex)) => {
+            Some(RustOwnedNestedPrimitiveValue::Flex {
+                value: number.value(),
+                unit: unit.to_string(),
+            })
+        }
         ComponentValue::Function(_) => {
             if !component_value_contains_flex_dimension(component_value) {
                 return None;
@@ -36434,7 +36441,10 @@ mod tests {
                                 value: 1.0,
                                 unit: "px".to_string(),
                             }),
-                            max: RustOwnedGridTrackBreadth::Flex(RustOwnedNestedPrimitiveValue::Number(1.0)),
+                            max: RustOwnedGridTrackBreadth::Flex(RustOwnedNestedPrimitiveValue::Flex {
+                                value: 1.0,
+                                unit: "fr".to_string(),
+                            }),
                         },
                     )),
                 ])),
@@ -36461,7 +36471,10 @@ mod tests {
                         },
                         track_list: vec![RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
                             RustOwnedGridTrackSize::Breadth(RustOwnedGridTrackBreadth::Flex(
-                                RustOwnedNestedPrimitiveValue::Number(1.0),
+                                RustOwnedNestedPrimitiveValue::Flex {
+                                    value: 1.0,
+                                    unit: "fr".to_string(),
+                                },
                             ))
                         ),)],
                     },)),

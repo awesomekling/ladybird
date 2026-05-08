@@ -2490,9 +2490,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case RustComponentValueParser::RustGridTrackBreadthKind::Flex: {
                     RefPtr<StyleValue const> flex_value;
                     if (value.numeric_value.has_value()) {
-                        if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || *value.numeric_value < 0)
+                        if (value.primitive_kind != FFI::CssPrimitiveValueKind::Flex)
                             return {};
-                        flex_value = FlexStyleValue::create(Flex::make_fr(*value.numeric_value));
+                        auto flex_unit = string_to_flex_unit(value.source_or_unit);
+                        if (!flex_unit.has_value())
+                            return {};
+                        Flex flex { *value.numeric_value, flex_unit.release_value() };
+                        if (!non_negative_range.contains(flex.to_fr()))
+                            return {};
+                        flex_value = FlexStyleValue::create(flex);
                     } else {
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
                         TokenStream value_tokens { component_values };
