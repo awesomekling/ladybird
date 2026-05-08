@@ -2107,7 +2107,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Url(RustOwnedUrl),
     CounterStyleName(String),
     EasingFunction(RustOwnedEasingFunction),
-    FitContent(RustOwnedFitContent),
+    FitContent(RustOwnedNestedPrimitiveValue),
     FontFamily {
         values: Vec<FontFamilyValue>,
     },
@@ -2394,17 +2394,6 @@ pub(crate) enum RustOwnedStepPosition {
     JumpBoth,
     Start,
     End,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedFitContent {
-    value: RustOwnedFitContentValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedFitContentValue {
-    Keyword,
-    Function { argument: RustOwnedNestedPrimitiveValue },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -7992,7 +7981,9 @@ fn rust_owned_fit_content_style_value_kind(
                 token_type: TokenType::Ident { value },
                 ..
             }),
-        ] if value.eq_ignore_ascii_case("fit-content") => RustOwnedFitContentValue::Keyword,
+        ] if value.eq_ignore_ascii_case("fit-content") => {
+            RustOwnedNestedPrimitiveValue::Keyword("fit-content".to_string())
+        }
         [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("fit-content") => {
             // https://drafts.csswg.org/css-sizing-3/#funcdef-width-fit-content
             // fit-content() = fit-content( <length-percentage [0,∞]> )
@@ -8002,14 +7993,12 @@ fn rust_owned_fit_content_style_value_kind(
             if !component_value_parse_as_length_percentage(component_value) {
                 return None;
             }
-            RustOwnedFitContentValue::Function {
-                argument: component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?,
-            }
+            component_value_parse_as_nested_length_percentage(component_value, filtered_input_string)?
         }
         _ => return None,
     };
 
-    Some(RustOwnedStyleValueKind::FitContent(RustOwnedFitContent { value }))
+    Some(RustOwnedStyleValueKind::FitContent(value))
 }
 
 fn rust_owned_rect_style_value_kind(
@@ -10250,12 +10239,12 @@ fn callback_border_image_repeat_style_value<C>(
     }
 }
 
-fn callback_fit_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedFitContent)
+fn callback_fit_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedNestedPrimitiveValue)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    match &value.value {
-        RustOwnedFitContentValue::Keyword => callback(
+    if matches!(value, RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "fit-content") {
+        callback(
             CssStyleValueKind::FitContent,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -10269,15 +10258,16 @@ where
             0,
             b"",
             "",
-        ),
-        RustOwnedFitContentValue::Function { argument } => callback_nested_primitive(
+        );
+    } else {
+        callback_nested_primitive(
             callback,
             CssStyleValueKind::FitContent,
             property_id,
             FIT_CONTENT_CALLBACK_FUNCTION,
             0,
-            argument,
-        ),
+            value,
+        );
     }
 }
 
@@ -33209,10 +33199,9 @@ mod tests {
         RustOwnedCornerShape, RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
         RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
         RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
+        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
         RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
         RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
@@ -35956,13 +35945,9 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::Width], "fit-content(10px)"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Width,
-                value: RustOwnedStyleValueKind::FitContent(RustOwnedFitContent {
-                    value: RustOwnedFitContentValue::Function {
-                        argument: RustOwnedNestedPrimitiveValue::Length {
-                            value: 10.0,
-                            unit: "px".to_string(),
-                        },
-                    },
+                value: RustOwnedStyleValueKind::FitContent(RustOwnedNestedPrimitiveValue::Length {
+                    value: 10.0,
+                    unit: "px".to_string(),
                 }),
             })
         );
