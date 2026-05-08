@@ -2133,7 +2133,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         axis: CssScrollFunctionAxisKind,
     },
     ViewTimelineInset {
-        values: Vec<RustOwnedViewTimelineInset>,
+        values: Vec<RustOwnedNestedPrimitiveValue>,
     },
     ViewFunction {
         axis: CssScrollFunctionAxisKind,
@@ -2700,12 +2700,6 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Source(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedViewTimelineInset {
-    Auto,
-    LengthPercentage(RustOwnedNestedPrimitiveValue),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RustOwnedSimpleFilterFunction {
     Brightness,
@@ -2785,21 +2779,9 @@ pub(crate) struct RustOwnedContainerType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedColumns {
-    column_count: Option<RustOwnedColumnInteger>,
-    column_width: Option<RustOwnedColumnLength>,
-    column_height: Option<RustOwnedColumnLength>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedColumnInteger {
-    Auto,
-    Value(RustOwnedNestedPrimitiveValue),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedColumnLength {
-    Auto,
-    Value(RustOwnedNestedPrimitiveValue),
+    column_count: Option<RustOwnedNestedPrimitiveValue>,
+    column_width: Option<RustOwnedNestedPrimitiveValue>,
+    column_height: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3037,16 +3019,9 @@ pub(crate) struct RustOwnedTextDecorationLine {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTextDecoration {
     line: Option<RustOwnedTextDecorationLine>,
-    thickness: Option<RustOwnedTextDecorationThickness>,
+    thickness: Option<RustOwnedNestedPrimitiveValue>,
     style: Option<RustOwnedTextDecorationStyle>,
     color: Option<RustOwnedColor>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedTextDecorationThickness {
-    Auto,
-    FromFont,
-    LengthPercentage(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3122,7 +3097,7 @@ pub(crate) struct RustOwnedScrollTimeline {
 pub(crate) struct RustOwnedViewTimeline {
     names: Vec<RustOwnedTimelineNameItem>,
     axes: Vec<CssScrollFunctionAxisKind>,
-    insets: Vec<Vec<RustOwnedViewTimelineInset>>,
+    insets: Vec<Vec<RustOwnedNestedPrimitiveValue>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -6714,12 +6689,12 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
             return None;
         }
         if component_value_is_ident(column_height.first(), "auto") {
-            Some(RustOwnedColumnLength::Auto)
+            Some(auto_keyword())
         } else if parse_single_column_component_value(PropertyId::ColumnHeight, column_height, filtered_input_string) {
-            Some(RustOwnedColumnLength::Value(component_value_parse_as_nested_length(
+            Some(component_value_parse_as_nested_length(
                 &column_height[0],
                 filtered_input_string,
-            )?))
+            )?)
         } else {
             return None;
         }
@@ -6740,20 +6715,20 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         if column_width.is_none()
             && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
         {
-            column_width = Some(RustOwnedColumnLength::Value(component_value_parse_as_nested_length(
+            column_width = Some(component_value_parse_as_nested_length(
                 component_value,
                 filtered_input_string,
-            )?));
+            )?);
             continue;
         }
 
         if column_count.is_none()
             && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
         {
-            column_count = Some(RustOwnedColumnInteger::Value(component_value_parse_as_nested_integer(
+            column_count = Some(component_value_parse_as_nested_integer(
                 component_value,
                 filtered_input_string,
-            )?));
+            )?);
             continue;
         }
 
@@ -6765,10 +6740,10 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
     }
     if found_autos > 0 {
         if column_count.is_none() {
-            column_count = Some(RustOwnedColumnInteger::Auto);
+            column_count = Some(auto_keyword());
         }
         if column_width.is_none() {
-            column_width = Some(RustOwnedColumnLength::Auto);
+            column_width = Some(auto_keyword());
         }
     }
 
@@ -7170,7 +7145,7 @@ fn rust_owned_view_timeline_style_value_kind(filtered_input: &[u8]) -> Option<Ru
         }
 
         axes.push(axis.unwrap_or(CssScrollFunctionAxisKind::Block));
-        insets.push(inset.unwrap_or_else(|| vec![RustOwnedViewTimelineInset::Auto]));
+        insets.push(inset.unwrap_or_else(|| vec![auto_keyword()]));
 
         if parser.consume_a_comma() {
             parser.discard_whitespace();
@@ -10330,12 +10305,12 @@ where
 fn callback_text_decoration_thickness_style_value<C>(
     callback: &mut C,
     property_id: u16,
-    value: &RustOwnedTextDecorationThickness,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     match value {
-        RustOwnedTextDecorationThickness::Auto => callback(
+        RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => callback(
             CssStyleValueKind::TextDecoration,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -10350,7 +10325,7 @@ fn callback_text_decoration_thickness_style_value<C>(
             &[],
             "",
         ),
-        RustOwnedTextDecorationThickness::FromFont => callback(
+        RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "from-font" => callback(
             CssStyleValueKind::TextDecoration,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -10365,7 +10340,7 @@ fn callback_text_decoration_thickness_style_value<C>(
             &[],
             "",
         ),
-        RustOwnedTextDecorationThickness::LengthPercentage(value) => {
+        _ => {
             callback_nested_primitive(callback, CssStyleValueKind::TextDecoration, property_id, 1, 2, value);
         }
     }
@@ -12455,12 +12430,12 @@ fn callback_optional_column_integer<C>(
     callback: &mut C,
     property_id: u16,
     kind: u8,
-    value: Option<&RustOwnedColumnInteger>,
+    value: Option<&RustOwnedNestedPrimitiveValue>,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     match value {
-        Some(RustOwnedColumnInteger::Auto) => callback(
+        Some(RustOwnedNestedPrimitiveValue::Keyword(keyword)) if keyword == "auto" => callback(
             CssStyleValueKind::Columns,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -12475,7 +12450,7 @@ fn callback_optional_column_integer<C>(
             &[],
             "",
         ),
-        Some(RustOwnedColumnInteger::Value(value)) => {
+        Some(value) => {
             callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
         }
         None => {}
@@ -12486,12 +12461,12 @@ fn callback_optional_column_length<C>(
     callback: &mut C,
     property_id: u16,
     kind: u8,
-    value: Option<&RustOwnedColumnLength>,
+    value: Option<&RustOwnedNestedPrimitiveValue>,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     match value {
-        Some(RustOwnedColumnLength::Auto) => callback(
+        Some(RustOwnedNestedPrimitiveValue::Keyword(keyword)) if keyword == "auto" => callback(
             CssStyleValueKind::Columns,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -12506,7 +12481,7 @@ fn callback_optional_column_length<C>(
             &[],
             "",
         ),
-        Some(RustOwnedColumnLength::Value(value)) => {
+        Some(value) => {
             callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
         }
         None => {}
@@ -12578,12 +12553,12 @@ fn callback_view_timeline_inset_value<C>(
     callback: &mut C,
     style_value_kind: CssStyleValueKind,
     property_id: u16,
-    value: &RustOwnedViewTimelineInset,
+    value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     match value {
-        RustOwnedViewTimelineInset::Auto => {
+        RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => {
             let auto_kind = if style_value_kind == CssStyleValueKind::ViewTimeline {
                 2
             } else {
@@ -12605,7 +12580,7 @@ fn callback_view_timeline_inset_value<C>(
                 property_value_type_name(PropertyValueType::ViewTimelineInset),
             );
         }
-        RustOwnedViewTimelineInset::LengthPercentage(value) => {
+        _ => {
             let length_percentage_kind = if style_value_kind == CssStyleValueKind::ViewTimeline {
                 3
             } else {
@@ -17141,7 +17116,7 @@ pub(crate) fn parse_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> C
     }
 }
 
-fn parse_rust_owned_view_timeline_inset_value(filtered_input: &[u8]) -> Option<Vec<RustOwnedViewTimelineInset>> {
+fn parse_rust_owned_view_timeline_inset_value(filtered_input: &[u8]) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
     let (values, has_remaining_component_values) =
         parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input)?;
     if has_remaining_component_values {
@@ -17151,13 +17126,15 @@ fn parse_rust_owned_view_timeline_inset_value(filtered_input: &[u8]) -> Option<V
     Some(values)
 }
 
-fn parse_rust_owned_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> Option<Vec<RustOwnedViewTimelineInset>> {
+fn parse_rust_owned_view_timeline_inset_value_prefix(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
     parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input).map(|(values, _)| values)
 }
 
 fn parse_rust_owned_view_timeline_inset_value_prefix_impl(
     filtered_input: &[u8],
-) -> Option<(Vec<RustOwnedViewTimelineInset>, bool)> {
+) -> Option<(Vec<RustOwnedNestedPrimitiveValue>, bool)> {
     let filtered_input_string = filtered_input_to_string(filtered_input);
 
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
@@ -22694,16 +22671,14 @@ fn component_value_parse_as_text_decoration_thickness(component_value: &Componen
 fn rust_owned_text_decoration_thickness_from_component_value(
     component_value: &ComponentValue,
     source: &str,
-) -> Option<RustOwnedTextDecorationThickness> {
+) -> Option<RustOwnedNestedPrimitiveValue> {
     if component_value_is_ident(Some(component_value), "auto") {
-        return Some(RustOwnedTextDecorationThickness::Auto);
+        return Some(auto_keyword());
     }
     if component_value_is_ident(Some(component_value), "from-font") {
-        return Some(RustOwnedTextDecorationThickness::FromFont);
+        return Some(RustOwnedNestedPrimitiveValue::Keyword("from-font".to_string()));
     }
-    Some(RustOwnedTextDecorationThickness::LengthPercentage(
-        component_value_parse_as_nested_length_percentage(component_value, source)?,
-    ))
+    component_value_parse_as_nested_length_percentage(component_value, source)
 }
 
 fn component_value_is_list_style_position(component_value: &ComponentValue) -> bool {
@@ -23023,6 +22998,10 @@ fn zero_pixel_length() -> RustOwnedNestedPrimitiveValue {
         value: 0.0,
         unit: "px".to_string(),
     }
+}
+
+fn auto_keyword() -> RustOwnedNestedPrimitiveValue {
+    RustOwnedNestedPrimitiveValue::Keyword("auto".to_string())
 }
 
 fn component_value_parse_as_nested_length_percentage(
@@ -23724,7 +23703,7 @@ fn parse_non_negative_number_prefix_value(parser: &mut ComponentValueParser) -> 
 struct ViewTimelineInsetPrefix {
     kind: CssViewFunctionInsetKind,
     count: usize,
-    values: Vec<RustOwnedViewTimelineInset>,
+    values: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 fn parse_view_function_axis(parser: &mut ComponentValueParser) -> Option<CssScrollFunctionAxisKind> {
@@ -23756,7 +23735,7 @@ fn parse_view_timeline_inset_prefix(
         };
 
         if component_value_is_ident(Some(component_value), "auto") {
-            values.push(RustOwnedViewTimelineInset::Auto);
+            values.push(auto_keyword());
             parser.index += 1;
             count += 1;
             continue;
@@ -23764,9 +23743,10 @@ fn parse_view_timeline_inset_prefix(
 
         if component_value_parse_as_length_percentage(component_value) {
             if let Some(filtered_input) = filtered_input {
-                values.push(RustOwnedViewTimelineInset::LengthPercentage(
-                    component_value_parse_as_nested_length_percentage(component_value, filtered_input)?,
-                ));
+                values.push(component_value_parse_as_nested_length_percentage(
+                    component_value,
+                    filtered_input,
+                )?);
             }
             parser.index += 1;
             count += 1;
@@ -33176,38 +33156,36 @@ mod tests {
         RustOwnedBasicShapeRadiusComponent, RustOwnedBasicShapeRectangleComponent, RustOwnedBorderImage,
         RustOwnedBorderImageOutset, RustOwnedBorderImageRepeat, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
         RustOwnedBorderImageWidth, RustOwnedBorderRadius, RustOwnedBorderWidth, RustOwnedColor, RustOwnedColorScheme,
-        RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType,
-        RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
-        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
-        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
-        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
-        RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-        RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-        RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
-        RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedListStyleImage,
-        RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
-        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaint, RustOwnedPaintOrder,
-        RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-        RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
-        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
-        RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
-        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+        RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+        RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
+        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
+        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
+        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
+        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow,
+        RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackBreadth, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+        RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind,
+        RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLineWidth, RustOwnedLinearEasingStop,
+        RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
+        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
+        RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor,
+        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem,
+        RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
         RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedStyleValue, RustOwnedStepPosition,
         RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
         RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextDecorationThickness, RustOwnedTextIndent,
-        RustOwnedTextIndentLengthPercentage, RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode,
-        RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction,
-        RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-        RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior,
-        RustOwnedTransitionProperty, RustOwnedUrl, RustOwnedUrlPayload, RustOwnedViewTimeline,
-        RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
+        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+        RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+        RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
+        RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty, RustOwnedUrl,
+        RustOwnedUrlPayload, RustOwnedViewTimeline, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim, SelectorCombinator,
         SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
         TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
-        TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
+        TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, auto_keyword,
         component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
         component_values_parse_as_property_value_type, component_values_parse_as_syntax,
         component_values_parse_as_syntax_with_source, component_values_parse_as_value_type,
@@ -35252,12 +35230,12 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Columns,
                 value: RustOwnedStyleValueKind::Columns(RustOwnedColumns {
-                    column_count: Some(RustOwnedColumnInteger::Value(RustOwnedNestedPrimitiveValue::Integer(3))),
-                    column_width: Some(RustOwnedColumnLength::Value(RustOwnedNestedPrimitiveValue::Length {
+                    column_count: Some(RustOwnedNestedPrimitiveValue::Integer(3)),
+                    column_width: Some(RustOwnedNestedPrimitiveValue::Length {
                         value: 12.0,
                         unit: "em".to_string(),
-                    })),
-                    column_height: Some(RustOwnedColumnLength::Auto),
+                    }),
+                    column_height: Some(auto_keyword()),
                 }),
             })
         );
@@ -36054,14 +36032,14 @@ mod tests {
                 property_id: PropertyId::ViewTimelineInset,
                 value: RustOwnedStyleValueKind::ViewTimelineInset {
                     values: vec![
-                        RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Length {
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
                             unit: "px".to_string(),
-                        }),
-                        RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Length {
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 2.0,
                             unit: "px".to_string(),
-                        }),
+                        },
                     ],
                 },
             })
@@ -36075,14 +36053,14 @@ mod tests {
                 property_id: PropertyId::ViewTimelineInset,
                 value: RustOwnedStyleValueKind::ViewTimelineInset {
                     values: vec![
-                        RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Length {
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 1.0,
                             unit: "px".to_string(),
-                        }),
-                        RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Length {
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
                             value: 2.0,
                             unit: "px".to_string(),
-                        }),
+                        },
                     ],
                 },
             })
@@ -36666,13 +36644,11 @@ mod tests {
                     ],
                     axes: vec![CssScrollFunctionAxisKind::Inline, CssScrollFunctionAxisKind::Block],
                     insets: vec![
-                        vec![RustOwnedViewTimelineInset::LengthPercentage(
-                            RustOwnedNestedPrimitiveValue::Length {
-                                value: 1.0,
-                                unit: "px".to_string(),
-                            }
-                        )],
-                        vec![RustOwnedViewTimelineInset::Auto],
+                        vec![RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
+                        }],
+                        vec![auto_keyword()],
                     ],
                 }),
             })
@@ -36780,7 +36756,7 @@ mod tests {
                     line: Some(RustOwnedTextDecorationLine {
                         bits: TEXT_DECORATION_LINE_OVERLINE,
                     }),
-                    thickness: Some(RustOwnedTextDecorationThickness::FromFont),
+                    thickness: Some(RustOwnedNestedPrimitiveValue::Keyword("from-font".to_string())),
                     style: None,
                     color: Some(RustOwnedColor::Simple {
                         kind: CssParsedColorKind::Rgba,
@@ -40334,18 +40310,13 @@ mod tests {
         assert_eq!(
             parse_rust_owned_view_timeline_inset_value("calc(1px + 2px) 5%".as_bytes()),
             Some(vec![
-                RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Source(
-                    "calc(1px + 2px)".to_string()
-                )),
-                RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Percentage(5.0)),
+                RustOwnedNestedPrimitiveValue::Source("calc(1px + 2px)".to_string()),
+                RustOwnedNestedPrimitiveValue::Percentage(5.0),
             ])
         );
         assert_eq!(
             parse_rust_owned_view_timeline_inset_value("10% auto".as_bytes()),
-            Some(vec![
-                RustOwnedViewTimelineInset::LengthPercentage(RustOwnedNestedPrimitiveValue::Percentage(10.0)),
-                RustOwnedViewTimelineInset::Auto,
-            ])
+            Some(vec![RustOwnedNestedPrimitiveValue::Percentage(10.0), auto_keyword(),])
         );
     }
 
