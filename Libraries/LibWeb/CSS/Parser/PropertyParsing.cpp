@@ -4219,26 +4219,6 @@ RefPtr<StyleValue const> Parser::parse_animation_value(TokenStream<ComponentValu
     return parse_coordinating_value_list_shorthand(tokens, PropertyID::Animation, longhand_ids, { PropertyID::AnimationTimeline });
 }
 
-RefPtr<StyleValue const> Parser::parse_background_position_value(TokenStream<ComponentValue>& tokens)
-{
-    auto const& background_position_value = parse_comma_separated_value_list(tokens, [this](auto& tokens) { return parse_position_value(tokens, PositionParsingMode::BackgroundPosition); });
-
-    if (!background_position_value)
-        return nullptr;
-
-    StyleValueVector background_position_x_values;
-    StyleValueVector background_position_y_values;
-
-    for (auto const& background_position : background_position_value->values()) {
-        background_position_x_values.append(background_position->as_position().edge_x());
-        background_position_y_values.append(background_position->as_position().edge_y());
-    }
-
-    return ShorthandStyleValue::create(PropertyID::BackgroundPosition,
-        { PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY },
-        { StyleValueList::create(move(background_position_x_values), StyleValueList::Separator::Comma), StyleValueList::create(move(background_position_y_values), StyleValueList::Separator::Comma) });
-}
-
 RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -4435,52 +4415,6 @@ RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentVal
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>& tokens, PropertyID property)
-{
-    Optional<PositionEdge> relative_edge {};
-
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    auto validate_parsed_position_longhand = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
-        if (!value)
-            return nullptr;
-
-        auto serialized_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto is_horizontal = property == PropertyID::BackgroundPositionX;
-        if (RustComponentValueParser::parse_background_position_longhand(serialized_position.bytes_as_string_view(), "utf-8"sv, is_horizontal) == FFI::CssPositionValueKind::Invalid)
-            return nullptr;
-
-        transaction.commit();
-        return value;
-    };
-
-    auto value = parse_css_value_for_property(property, tokens);
-    if (!value)
-        return nullptr;
-
-    if (value->is_keyword()) {
-        auto keyword = value->to_keyword();
-        if (keyword == Keyword::Center) {
-            return validate_parsed_position_longhand(EdgeStyleValue::create(PositionEdge::Center, {}));
-        }
-        if (auto edge = keyword_to_position_edge(keyword); edge.has_value()) {
-            relative_edge = edge;
-        } else {
-            return nullptr;
-        }
-
-        value = parse_length_percentage_value(tokens, infinite_range, infinite_range);
-        if (!value) {
-            return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, {}));
-        }
-    }
-
-    return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, value));
-}
-
 // https://drafts.csswg.org/css-fonts-4/#font-prop
 RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& tokens)
 {
@@ -4618,44 +4552,6 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
                                                                        // FIXME: font-size-adjust,
             property_initial_value(PropertyID::FontVariationSettings), // font-variation-settings
         });
-}
-
-// https://drafts.csswg.org/css-fonts-4/#font-family-prop
-RefPtr<StyleValue const> Parser::parse_font_family_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ <family-name> | <generic-family> ]#
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_font_family = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto font_family = RustComponentValueParser::parse_font_family_value(serialized_font_family.bytes_as_string_view(), "utf-8"sv);
-    if (!font_family.has_value())
-        return nullptr;
-
-    StyleValueVector values;
-    values.ensure_capacity(font_family->size());
-    for (auto const& family_value : *font_family) {
-        switch (family_value.kind) {
-        case FFI::CssFontFamilyValueKind::Generic: {
-            auto maybe_keyword = keyword_from_string(family_value.value);
-            if (!maybe_keyword.has_value() || !keyword_to_generic_font_family(*maybe_keyword).has_value())
-                return nullptr;
-            values.append(KeywordStyleValue::create(*maybe_keyword));
-            break;
-        }
-        case FFI::CssFontFamilyValueKind::FamilyName:
-            if (family_value.is_string)
-                values.append(StringStyleValue::create(family_value.value));
-            else
-                values.append(CustomIdentStyleValue::create(family_value.value));
-            break;
-        }
-    }
-
-    transaction.commit();
-    return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
 }
 
 RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& tokens)

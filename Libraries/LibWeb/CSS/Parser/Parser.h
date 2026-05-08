@@ -388,10 +388,7 @@ private:
 
     RefPtr<StyleValue const> parse_animation_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_background_position_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>&, PropertyID);
     RefPtr<StyleValue const> parse_font_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_font_family_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_alternates_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_east_asian_value(TokenStream<ComponentValue>&);
