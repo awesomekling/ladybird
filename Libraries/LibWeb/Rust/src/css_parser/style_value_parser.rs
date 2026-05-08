@@ -59,14 +59,6 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
         }
     }
 
-    if property_ids.len() == 1
-        && let Some(property_id) = property_id_from_u16(property_ids[0])
-        && property_uses_rust_owned_whole_grammar(property_id)
-        && !(is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id))
-    {
-        return RustOwnedStyleValueParseResult::Invalid;
-    }
-
     if let [
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Ident { value },
@@ -88,6 +80,14 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                 });
             }
         }
+    }
+
+    if property_ids.len() == 1
+        && let Some(property_id) = property_id_from_u16(property_ids[0])
+        && property_uses_rust_owned_whole_grammar(property_id)
+        && !(is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id))
+    {
+        return RustOwnedStyleValueParseResult::Invalid;
     }
 
     for property_id in property_ids {
@@ -261,6 +261,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
             | PropertyId::MathDepth
+            | PropertyId::OverflowWrap
             | PropertyId::OverflowClipMargin
             | PropertyId::OverflowClipMarginBlock
             | PropertyId::OverflowClipMarginBlockEnd
@@ -284,6 +285,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Quotes
             | PropertyId::Rotate
             | PropertyId::Scale
+            | PropertyId::ScrollBehavior
             | PropertyId::ScrollTimeline
             | PropertyId::ScrollTimelineName
             | PropertyId::ScrollbarColor
@@ -301,6 +303,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TimelineScope
             | PropertyId::TouchAction
             | PropertyId::TransformOrigin
+            | PropertyId::TransformStyle
             | PropertyId::TransitionBehavior
             | PropertyId::TransitionProperty
             | PropertyId::Translate
@@ -310,6 +313,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::WhiteSpace
             | PropertyId::WhiteSpaceTrim
             | PropertyId::WillChange
+            | PropertyId::WordBreak
     )
 }
 

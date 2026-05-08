@@ -155,6 +155,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
     case PropertyID::MathDepth:
+    case PropertyID::OverflowWrap:
     case PropertyID::OverflowClipMargin:
     case PropertyID::OverflowClipMarginBlock:
     case PropertyID::OverflowClipMarginBlockEnd:
@@ -178,6 +179,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Quotes:
     case PropertyID::Rotate:
     case PropertyID::Scale:
+    case PropertyID::ScrollBehavior:
     case PropertyID::ScrollTimeline:
     case PropertyID::ScrollTimelineName:
     case PropertyID::ScrollbarColor:
@@ -195,6 +197,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TimelineScope:
     case PropertyID::TouchAction:
     case PropertyID::TransformOrigin:
+    case PropertyID::TransformStyle:
     case PropertyID::TransitionBehavior:
     case PropertyID::TransitionProperty:
     case PropertyID::Translate:
@@ -204,6 +207,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::WhiteSpace:
     case PropertyID::WhiteSpaceTrim:
     case PropertyID::WillChange:
+    case PropertyID::WordBreak:
         return true;
     default:
         return false;

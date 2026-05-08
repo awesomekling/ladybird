@@ -2462,6 +2462,24 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(parse_rust_owned_style_value(&[PropertyId::Top], "red"), None);
+    for (property_id, source, keyword) in [
+        (PropertyId::OverflowWrap, "break-word", "break-word"),
+        (PropertyId::ScrollBehavior, "smooth", "smooth"),
+        (PropertyId::TransformStyle, "preserve-3d", "preserve-3d"),
+        (PropertyId::WordBreak, "keep-all", "keep-all"),
+    ] {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], source),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(keyword.to_string())),
+            })
+        );
+    }
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::ScrollBehavior], "smooth auto"),
+        None
+    );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Width], "anchor-size(--target width, 10px)"),
         Some(RustOwnedStyleValue {
@@ -4410,6 +4428,27 @@ fn parses_style_values_with_rust_owned_ast() {
             value_type: "OpacityValue".to_string(),
         })
     );
+    for (property_id, source) in [
+        (PropertyId::OverflowWrap, "anywhere"),
+        (PropertyId::ScrollBehavior, "smooth"),
+        (PropertyId::TransformStyle, "preserve-3d"),
+        (PropertyId::WordBreak, "break-all"),
+    ] {
+        assert_eq!(
+            parse_style_value(&[property_id], source),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Keyword,
+                property_id,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: source.to_string(),
+                value_type: String::new(),
+            })
+        );
+    }
+    assert_eq!(parse_style_value(&[PropertyId::WordBreak], "break all"), None);
     assert_eq!(
         parse_style_value(&[PropertyId::BackgroundPositionX], "50%"),
         Some(ParsedStyleValue {
