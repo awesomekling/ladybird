@@ -200,6 +200,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
+            | PropertyId::Appearance
             | PropertyId::AspectRatio
             | PropertyId::BackgroundRepeat
             | PropertyId::BackgroundPosition
@@ -214,33 +215,52 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderImageSlice
             | PropertyId::BorderImageWidth
             | PropertyId::BorderInline
+            | PropertyId::BorderBottomStyle
+            | PropertyId::BorderCollapse
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderEndEndRadius
             | PropertyId::BorderEndStartRadius
+            | PropertyId::BorderLeftStyle
             | PropertyId::BorderRadius
+            | PropertyId::BorderRightStyle
             | PropertyId::BorderStartEndRadius
             | PropertyId::BorderStartStartRadius
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
+            | PropertyId::BorderTopStyle
             | PropertyId::BoxShadow
+            | PropertyId::BoxSizing
             | PropertyId::BackdropFilter
+            | PropertyId::CaptionSide
             | PropertyId::CaretColor
+            | PropertyId::Clear
+            | PropertyId::ClipRule
+            | PropertyId::ColorInterpolation
             | PropertyId::ColorScheme
+            | PropertyId::ColumnSpan
             | PropertyId::Columns
             | PropertyId::Contain
             | PropertyId::ContainerType
             | PropertyId::Content
+            | PropertyId::ContentVisibility
             | PropertyId::CounterIncrement
             | PropertyId::CounterReset
             | PropertyId::CounterSet
             | PropertyId::Cursor
+            | PropertyId::Direction
             | PropertyId::Display
+            | PropertyId::DominantBaseline
+            | PropertyId::EmptyCells
             | PropertyId::Fill
             | PropertyId::FillOpacity
+            | PropertyId::FillRule
             | PropertyId::Filter
             | PropertyId::Flex
+            | PropertyId::FlexDirection
             | PropertyId::FlexFlow
+            | PropertyId::FlexWrap
+            | PropertyId::Float
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
             | PropertyId::FontLanguageOverride
@@ -264,11 +284,18 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::InsetBlockStart
             | PropertyId::InsetInlineEnd
             | PropertyId::InsetInlineStart
+            | PropertyId::ImageRendering
+            | PropertyId::Isolation
             | PropertyId::ListStyle
+            | PropertyId::ListStylePosition
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
             | PropertyId::MathDepth
+            | PropertyId::MathShift
+            | PropertyId::MathStyle
+            | PropertyId::MixBlendMode
+            | PropertyId::ObjectFit
             | PropertyId::OverflowWrap
             | PropertyId::OverflowClipMargin
             | PropertyId::OverflowClipMarginBlock
@@ -281,9 +308,14 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowClipMarginLeft
             | PropertyId::OverflowClipMarginRight
             | PropertyId::OverflowClipMarginTop
+            | PropertyId::OverflowX
+            | PropertyId::OverflowY
             | PropertyId::Opacity
             | PropertyId::OutlineColor
+            | PropertyId::OutlineStyle
             | PropertyId::PaintOrder
+            | PropertyId::PointerEvents
+            | PropertyId::Position
             | PropertyId::PlaceContent
             | PropertyId::PlaceItems
             | PropertyId::PlaceSelf
@@ -293,6 +325,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::PositionTryOrder
             | PropertyId::PositionVisibility
             | PropertyId::Quotes
+            | PropertyId::Resize
             | PropertyId::Rotate
             | PropertyId::Scale
             | PropertyId::ScrollBehavior
@@ -300,37 +333,55 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ScrollTimelineName
             | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
+            | PropertyId::ScrollbarWidth
+            | PropertyId::ShapeRendering
             | PropertyId::ShapeOutside
             | PropertyId::ShapeImageThreshold
             | PropertyId::StopColor
             | PropertyId::StopOpacity
             | PropertyId::Stroke
             | PropertyId::StrokeDasharray
+            | PropertyId::StrokeLinecap
+            | PropertyId::StrokeLinejoin
             | PropertyId::StrokeMiterlimit
             | PropertyId::StrokeOpacity
+            | PropertyId::TableLayout
+            | PropertyId::TextAlign
+            | PropertyId::TextAnchor
             | PropertyId::TextDecoration
             | PropertyId::TextDecorationColor
             | PropertyId::TextDecorationLine
+            | PropertyId::TextDecorationSkipInk
+            | PropertyId::TextDecorationStyle
             | PropertyId::TextIndent
+            | PropertyId::TextJustify
+            | PropertyId::TextRendering
             | PropertyId::TextShadow
+            | PropertyId::TextTransform
             | PropertyId::TextUnderlinePosition
             | PropertyId::TextWrap
             | PropertyId::TextWrapMode
             | PropertyId::TextWrapStyle
             | PropertyId::TimelineScope
             | PropertyId::TouchAction
+            | PropertyId::TransformBox
             | PropertyId::TransformOrigin
             | PropertyId::TransformStyle
             | PropertyId::TransitionBehavior
             | PropertyId::TransitionProperty
             | PropertyId::Translate
+            | PropertyId::UnicodeBidi
+            | PropertyId::UserSelect
             | PropertyId::ViewTimeline
             | PropertyId::ViewTimelineName
             | PropertyId::ViewTransitionName
+            | PropertyId::Visibility
             | PropertyId::WhiteSpace
+            | PropertyId::WhiteSpaceCollapse
             | PropertyId::WhiteSpaceTrim
             | PropertyId::WillChange
             | PropertyId::WordBreak
+            | PropertyId::WritingMode
     )
 }
 

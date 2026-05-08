@@ -1981,6 +1981,72 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::TextDecorationColor], "red blue"),
         None
     );
+    let rust_owned_keyword_longhands = [
+        (PropertyId::Appearance, "auto", "auto"),
+        (PropertyId::BorderBottomStyle, "solid", "solid"),
+        (PropertyId::BorderCollapse, "collapse", "collapse"),
+        (PropertyId::BorderLeftStyle, "dashed", "dashed"),
+        (PropertyId::BorderRightStyle, "dotted", "dotted"),
+        (PropertyId::BorderTopStyle, "double", "double"),
+        (PropertyId::BoxSizing, "border-box", "border-box"),
+        (PropertyId::CaptionSide, "bottom", "bottom"),
+        (PropertyId::Clear, "inline-start", "inline-start"),
+        (PropertyId::ClipRule, "evenodd", "evenodd"),
+        (PropertyId::ColorInterpolation, "srgb", "srgb"),
+        (PropertyId::ColumnSpan, "all", "all"),
+        (PropertyId::ContentVisibility, "hidden", "hidden"),
+        (PropertyId::Direction, "rtl", "rtl"),
+        (PropertyId::DominantBaseline, "alphabetic", "alphabetic"),
+        (PropertyId::EmptyCells, "hide", "hide"),
+        (PropertyId::FillRule, "evenodd", "evenodd"),
+        (PropertyId::FlexDirection, "column", "column"),
+        (PropertyId::FlexWrap, "wrap", "wrap"),
+        (PropertyId::Float, "inline-end", "inline-end"),
+        (PropertyId::ImageRendering, "pixelated", "pixelated"),
+        (PropertyId::Isolation, "isolate", "isolate"),
+        (PropertyId::ListStylePosition, "inside", "inside"),
+        (PropertyId::MathShift, "compact", "compact"),
+        (PropertyId::MathStyle, "compact", "compact"),
+        (PropertyId::MixBlendMode, "multiply", "multiply"),
+        (PropertyId::ObjectFit, "contain", "contain"),
+        (PropertyId::OutlineStyle, "auto", "auto"),
+        (PropertyId::OverflowX, "hidden", "hidden"),
+        (PropertyId::OverflowY, "scroll", "scroll"),
+        (PropertyId::PointerEvents, "all", "all"),
+        (PropertyId::Position, "sticky", "sticky"),
+        (PropertyId::Resize, "block", "block"),
+        (PropertyId::ScrollbarWidth, "thin", "thin"),
+        (PropertyId::ShapeRendering, "crispedges", "crispedges"),
+        (PropertyId::StrokeLinecap, "round", "round"),
+        (PropertyId::StrokeLinejoin, "bevel", "bevel"),
+        (PropertyId::TableLayout, "fixed", "fixed"),
+        (PropertyId::TextAlign, "end", "end"),
+        (PropertyId::TextAnchor, "middle", "middle"),
+        (PropertyId::TextDecorationSkipInk, "none", "none"),
+        (PropertyId::TextDecorationStyle, "wavy", "wavy"),
+        (PropertyId::TextJustify, "inter-word", "inter-word"),
+        (PropertyId::TextRendering, "optimizelegibility", "optimizelegibility"),
+        (PropertyId::TextTransform, "uppercase", "uppercase"),
+        (PropertyId::TransformBox, "view-box", "view-box"),
+        (PropertyId::UnicodeBidi, "plaintext", "plaintext"),
+        (PropertyId::UserSelect, "text", "text"),
+        (PropertyId::Visibility, "collapse", "collapse"),
+        (PropertyId::WhiteSpaceCollapse, "break-spaces", "break-spaces"),
+        (PropertyId::WritingMode, "vertical-rl", "vertical-rl"),
+    ];
+    for (property_id, input, keyword) in rust_owned_keyword_longhands {
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], input),
+            Some(RustOwnedStyleValue {
+                property_id,
+                value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(keyword.to_string())),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(&[property_id], &format!("{input} {input}")),
+            None
+        );
+    }
     for (property_id, input, value, value_type) in [
         (
             PropertyId::FlexGrow,
@@ -4198,6 +4264,22 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(parse_style_value(&[PropertyId::TextDecorationColor], "red blue"), None);
+    for (property_id, input, keyword) in rust_owned_keyword_longhands {
+        assert_eq!(
+            parse_style_value(&[property_id], input),
+            Some(ParsedStyleValue {
+                kind: CssStyleValueKind::Keyword,
+                property_id,
+                primitive_kind: CssPrimitiveValueKind::Invalid,
+                numeric_value: None,
+                secondary_numeric_value: None,
+                color: None,
+                value: keyword.to_string(),
+                value_type: String::new(),
+            })
+        );
+        assert_eq!(parse_style_value(&[property_id], &format!("{input} {input}")), None);
+    }
     for (property_id, input, primitive_kind, numeric_value, value, value_type) in [
         (
             PropertyId::FlexShrink,

@@ -94,6 +94,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
     case PropertyID::AnimationName:
+    case PropertyID::Appearance:
     case PropertyID::AspectRatio:
     case PropertyID::BackgroundPosition:
     case PropertyID::BackgroundPositionX:
@@ -108,33 +109,52 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderImageSlice:
     case PropertyID::BorderImageWidth:
     case PropertyID::BorderInline:
+    case PropertyID::BorderBottomStyle:
+    case PropertyID::BorderCollapse:
     case PropertyID::BorderBottomLeftRadius:
     case PropertyID::BorderBottomRightRadius:
     case PropertyID::BorderEndEndRadius:
     case PropertyID::BorderEndStartRadius:
+    case PropertyID::BorderLeftStyle:
     case PropertyID::BorderRadius:
+    case PropertyID::BorderRightStyle:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
+    case PropertyID::BorderTopStyle:
     case PropertyID::BoxShadow:
+    case PropertyID::BoxSizing:
     case PropertyID::BackdropFilter:
+    case PropertyID::CaptionSide:
     case PropertyID::CaretColor:
+    case PropertyID::Clear:
+    case PropertyID::ClipRule:
+    case PropertyID::ColorInterpolation:
     case PropertyID::ColorScheme:
+    case PropertyID::ColumnSpan:
     case PropertyID::Columns:
     case PropertyID::Contain:
     case PropertyID::ContainerType:
     case PropertyID::Content:
+    case PropertyID::ContentVisibility:
     case PropertyID::CounterIncrement:
     case PropertyID::CounterReset:
     case PropertyID::CounterSet:
     case PropertyID::Cursor:
+    case PropertyID::Direction:
     case PropertyID::Display:
+    case PropertyID::DominantBaseline:
+    case PropertyID::EmptyCells:
     case PropertyID::Fill:
     case PropertyID::FillOpacity:
+    case PropertyID::FillRule:
     case PropertyID::Filter:
     case PropertyID::Flex:
+    case PropertyID::FlexDirection:
     case PropertyID::FlexFlow:
+    case PropertyID::FlexWrap:
+    case PropertyID::Float:
     case PropertyID::FontFamily:
     case PropertyID::FontFeatureSettings:
     case PropertyID::FontLanguageOverride:
@@ -158,11 +178,18 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::InsetBlockStart:
     case PropertyID::InsetInlineEnd:
     case PropertyID::InsetInlineStart:
+    case PropertyID::ImageRendering:
+    case PropertyID::Isolation:
     case PropertyID::ListStyle:
+    case PropertyID::ListStylePosition:
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
     case PropertyID::MathDepth:
+    case PropertyID::MathShift:
+    case PropertyID::MathStyle:
+    case PropertyID::MixBlendMode:
+    case PropertyID::ObjectFit:
     case PropertyID::OverflowWrap:
     case PropertyID::OverflowClipMargin:
     case PropertyID::OverflowClipMarginBlock:
@@ -175,9 +202,14 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowClipMarginLeft:
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
+    case PropertyID::OverflowX:
+    case PropertyID::OverflowY:
     case PropertyID::Opacity:
     case PropertyID::OutlineColor:
+    case PropertyID::OutlineStyle:
     case PropertyID::PaintOrder:
+    case PropertyID::PointerEvents:
+    case PropertyID::Position:
     case PropertyID::PlaceContent:
     case PropertyID::PlaceItems:
     case PropertyID::PlaceSelf:
@@ -187,6 +219,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::PositionTryOrder:
     case PropertyID::PositionVisibility:
     case PropertyID::Quotes:
+    case PropertyID::Resize:
     case PropertyID::Rotate:
     case PropertyID::Scale:
     case PropertyID::ScrollBehavior:
@@ -194,37 +227,55 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ScrollTimelineName:
     case PropertyID::ScrollbarColor:
     case PropertyID::ScrollbarGutter:
+    case PropertyID::ScrollbarWidth:
+    case PropertyID::ShapeRendering:
     case PropertyID::ShapeOutside:
     case PropertyID::ShapeImageThreshold:
     case PropertyID::StopColor:
     case PropertyID::StopOpacity:
     case PropertyID::Stroke:
     case PropertyID::StrokeDasharray:
+    case PropertyID::StrokeLinecap:
+    case PropertyID::StrokeLinejoin:
     case PropertyID::StrokeMiterlimit:
     case PropertyID::StrokeOpacity:
+    case PropertyID::TableLayout:
+    case PropertyID::TextAlign:
+    case PropertyID::TextAnchor:
     case PropertyID::TextDecoration:
     case PropertyID::TextDecorationColor:
     case PropertyID::TextDecorationLine:
+    case PropertyID::TextDecorationSkipInk:
+    case PropertyID::TextDecorationStyle:
     case PropertyID::TextIndent:
+    case PropertyID::TextJustify:
+    case PropertyID::TextRendering:
     case PropertyID::TextShadow:
+    case PropertyID::TextTransform:
     case PropertyID::TextUnderlinePosition:
     case PropertyID::TextWrap:
     case PropertyID::TextWrapMode:
     case PropertyID::TextWrapStyle:
     case PropertyID::TimelineScope:
     case PropertyID::TouchAction:
+    case PropertyID::TransformBox:
     case PropertyID::TransformOrigin:
     case PropertyID::TransformStyle:
     case PropertyID::TransitionBehavior:
     case PropertyID::TransitionProperty:
     case PropertyID::Translate:
+    case PropertyID::UnicodeBidi:
+    case PropertyID::UserSelect:
     case PropertyID::ViewTimeline:
     case PropertyID::ViewTimelineName:
     case PropertyID::ViewTransitionName:
+    case PropertyID::Visibility:
     case PropertyID::WhiteSpace:
+    case PropertyID::WhiteSpaceCollapse:
     case PropertyID::WhiteSpaceTrim:
     case PropertyID::WillChange:
     case PropertyID::WordBreak:
+    case PropertyID::WritingMode:
         return true;
     default:
         return false;
