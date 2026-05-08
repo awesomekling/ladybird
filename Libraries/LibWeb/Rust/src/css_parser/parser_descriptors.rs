@@ -18,6 +18,12 @@ pub(crate) struct RustOwnedCounterStyleAdditiveTuple {
     pub(crate) source: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedCounterStylePadDescriptor {
+    pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
+    pub(crate) source: String,
+}
+
 pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -148,6 +154,90 @@ pub(crate) fn parse_rust_owned_counter_style_additive_symbols_descriptor(
 
     parser.discard_whitespace();
     (!tuples.is_empty() && !parser.has_next_component_value()).then_some(tuples)
+}
+
+pub(crate) fn parse_rust_owned_counter_style_pad_descriptor(
+    filtered_input: &[u8],
+) -> Option<RustOwnedCounterStylePadDescriptor> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-counter-styles-3/#counter-style-pad
+    // <integer [0,∞]> && <symbol>
+    parser.discard_whitespace();
+    let start = parser.index;
+    let order = parser.parse_a_nonnegative_integer_symbol_pair()?;
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    Some(RustOwnedCounterStylePadDescriptor {
+        order,
+        source: serialize_component_values_for_reparsing(
+            &parser.component_values[start..parser.index],
+            &filtered_input,
+        )?,
+    })
+}
+
+pub(crate) fn parse_rust_owned_counter_style_symbol_descriptor(filtered_input: &[u8]) -> Option<String> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+
+    // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
+    // <symbol> = <string> | <image> | <custom-ident>
+    parser.discard_whitespace();
+    let symbol = parser.consume_symbol_source(&filtered_input)?;
+    parser.discard_whitespace();
+    (!parser.has_next_component_value()).then_some(symbol)
+}
+
+pub(crate) fn parse_rust_owned_font_src_list_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    // https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing
+    // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
+    let sources = split_component_values_on_comma(&component_values)
+        .into_iter()
+        .map(|source| serialize_component_values_for_reparsing(strip_whitespace(source), &filtered_input))
+        .collect::<Option<Vec<_>>>()?;
+
+    (!sources.is_empty()).then_some(sources)
+}
+
+pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let filtered_input = filtered_input_to_string(filtered_input);
+
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut weights = Vec::new();
+
+    // https://drafts.csswg.org/css-fonts-4/#font-prop-desc
+    // <font-weight-absolute>{1,2}
+    for _ in 0..2 {
+        parser.discard_whitespace();
+        let start = parser.index;
+        if !parser.consume_font_weight_absolute_syntax() {
+            break;
+        }
+        weights.push(serialize_component_values_for_reparsing(
+            &parser.component_values[start..parser.index],
+            &filtered_input,
+        )?);
+    }
+
+    parser.discard_whitespace();
+    (!weights.is_empty() && !parser.has_next_component_value()).then_some(weights)
 }
 
 pub(crate) fn parse_a_counter_style_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool

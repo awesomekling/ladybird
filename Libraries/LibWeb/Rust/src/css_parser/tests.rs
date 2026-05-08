@@ -45,16 +45,16 @@ use super::{
     RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
     RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
     RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
-    RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStyleRangeDescriptor, RustOwnedCursor, RustOwnedCursorImage,
-    RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
-    RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFlexBasis, RustOwnedFlexDirection,
-    RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap, RustOwnedFontFamilyList,
-    RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand, RustOwnedGridAutoFlow,
-    RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
-    RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
-    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop, RustOwnedListStyle,
-    RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
-    RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
+    RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
+    RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue,
+    RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+    RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
+    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
+    RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
+    RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
+    RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedLinearEasingStop,
+    RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
+    RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
     RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPaint, RustOwnedPaintOrder,
     RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
@@ -107,8 +107,10 @@ use super::{
     parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
     parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
     parse_rust_owned_counter_style_additive_symbols_descriptor, parse_rust_owned_counter_style_negative_descriptor,
-    parse_rust_owned_counter_style_range_descriptor, parse_rust_owned_counter_style_symbols_descriptor,
-    parse_rust_owned_filter_value_list_value, parse_rust_owned_generated_longhand_value,
+    parse_rust_owned_counter_style_pad_descriptor, parse_rust_owned_counter_style_range_descriptor,
+    parse_rust_owned_counter_style_symbol_descriptor, parse_rust_owned_counter_style_symbols_descriptor,
+    parse_rust_owned_filter_value_list_value, parse_rust_owned_font_src_list_descriptor,
+    parse_rust_owned_font_weight_absolute_pair_descriptor, parse_rust_owned_generated_longhand_value,
     parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
     parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
     parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
@@ -6723,6 +6725,19 @@ fn rejects_invalid_counter_style_symbol_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_counter_style_symbol_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_symbol_descriptor("\"*\"".as_bytes()),
+        Some("\"*\"".to_string())
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_symbol_descriptor("symbol".as_bytes()),
+        Some("symbol".to_string())
+    );
+    assert_eq!(parse_rust_owned_counter_style_symbol_descriptor("1".as_bytes()), None);
+}
+
+#[test]
 fn parses_string_descriptors() {
     assert!(parse_string_descriptor_value("\"hello\""));
     assert!(parse_string_descriptor_value("\"\""));
@@ -6907,6 +6922,25 @@ fn parses_rust_owned_counter_style_additive_symbols_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_counter_style_pad_descriptors() {
+    assert_eq!(
+        parse_rust_owned_counter_style_pad_descriptor("2 \"0\"".as_bytes()),
+        Some(RustOwnedCounterStylePadDescriptor {
+            order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
+            source: "2 \"0\"".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_pad_descriptor("\"0\" 2".as_bytes()),
+        Some(RustOwnedCounterStylePadDescriptor {
+            order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
+            source: "\"0\" 2".to_string(),
+        })
+    );
+    assert_eq!(parse_rust_owned_counter_style_pad_descriptor("2".as_bytes()), None);
+}
+
+#[test]
 fn parses_crop_or_cross_descriptors() {
     assert_eq!(parse_crop_or_cross_descriptor("crop"), Some(CssCropOrCrossKind::Crop));
     assert_eq!(parse_crop_or_cross_descriptor("cross"), Some(CssCropOrCrossKind::Cross));
@@ -6933,6 +6967,18 @@ fn rejects_invalid_crop_or_cross_descriptors() {
 }
 
 #[test]
+fn parses_rust_owned_font_src_list_descriptors() {
+    assert_eq!(
+        parse_rust_owned_font_src_list_descriptor("url(example.woff2), local(Example)".as_bytes()),
+        Some(vec!["url(example.woff2)".to_string(), "local(Example)".to_string()])
+    );
+    assert_eq!(
+        parse_rust_owned_font_src_list_descriptor(", url(example.woff2)".as_bytes()),
+        Some(vec!["".to_string(), "url(example.woff2)".to_string()])
+    );
+}
+
+#[test]
 fn parses_font_weight_absolute_pair_descriptors() {
     assert_eq!(parse_font_weight_absolute_pair_descriptor("normal"), Some(1));
     assert_eq!(parse_font_weight_absolute_pair_descriptor("bold"), Some(1));
@@ -6943,6 +6989,22 @@ fn parses_font_weight_absolute_pair_descriptors() {
     assert_eq!(
         parse_font_weight_absolute_pair_descriptor("calc(100 + 100) bold"),
         Some(2)
+    );
+}
+
+#[test]
+fn parses_rust_owned_font_weight_absolute_pair_descriptors() {
+    assert_eq!(
+        parse_rust_owned_font_weight_absolute_pair_descriptor("normal bold".as_bytes()),
+        Some(vec!["normal".to_string(), "bold".to_string()])
+    );
+    assert_eq!(
+        parse_rust_owned_font_weight_absolute_pair_descriptor("calc(100 + 100) 900".as_bytes()),
+        Some(vec!["calc(100 + 100)".to_string(), "900".to_string()])
+    );
+    assert_eq!(
+        parse_rust_owned_font_weight_absolute_pair_descriptor("100 400 900".as_bytes()),
+        None
     );
 }
 

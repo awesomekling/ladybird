@@ -303,11 +303,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto order = RustComponentValueParser::parse_a_nonnegative_integer_symbol_pair(serialized_pair.bytes_as_string_view(), "utf-8"sv);
-                    if (!order.has_value())
+                    auto pad = RustComponentValueParser::parse_counter_style_pad_descriptor_source(serialized_pair.bytes_as_string_view(), "utf-8"sv);
+                    if (!pad.has_value())
                         return nullptr;
 
-                    return materialize_nonnegative_integer_symbol_pair(tokens.tokens_since(start), *order);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(pad->source.bytes_as_string_view(), "utf-8"sv);
+                    return materialize_nonnegative_integer_symbol_pair(component_values, pad->order);
                 }
                 case DescriptorMetadata::ValueType::CounterStyleRange: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
@@ -427,20 +428,27 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // These parsing rules allow for graceful fallback of fonts for user agents which don’t support a
                     // particular font tech or font format."
                     // https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing
-                    auto source_lists = parse_a_comma_separated_list_of_component_values(tokens);
+                    auto start = tokens.current_index();
+                    while (tokens.has_next_token())
+                        tokens.discard_a_token();
+
+                    auto serialized_font_src_list = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                    auto source_lists = RustComponentValueParser::parse_font_src_list_descriptor_sources(serialized_font_src_list.bytes_as_string_view(), "utf-8"sv);
+                    if (!source_lists.has_value())
+                        return nullptr;
+
                     StyleValueVector valid_sources;
-                    for (auto const& source_list : source_lists) {
+                    for (auto const& source_list : *source_lists) {
                         // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
                         // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
-                        auto serialized_font_source = serialize_component_values_for_reparsing(source_list);
-                        auto font_source = RustComponentValueParser::parse_a_font_source(serialized_font_source.bytes_as_string_view(), "utf-8"sv);
+                        auto font_source = RustComponentValueParser::parse_a_font_source(source_list.bytes_as_string_view(), "utf-8"sv);
                         if (!font_source.has_value())
                             continue;
 
                         if (font_source->format.has_value() && !font_format_is_supported(*font_source->format)) {
                             ErrorReporter::the().report(InvalidValueError {
                                 .value_type = "<font-src>"_fly_string,
-                                .value_string = serialized_font_source,
+                                .value_string = source_list,
                                 .description = MUST(String::formatted("format({}) is not supported.", *font_source->format)),
                             });
                             continue;
@@ -453,7 +461,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                             ErrorReporter::the().report(InvalidValueError {
                                 .value_type = "<font-src>"_fly_string,
-                                .value_string = serialized_font_source,
+                                .value_string = source_list,
                                 .description = MUST(String::formatted("tech({}) is not supported.", to_string(font_tech))),
                             });
                             supports_all_tech = false;
@@ -485,30 +493,22 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_font_weight_absolute_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto count = RustComponentValueParser::parse_font_weight_absolute_pair(serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
-                    if (!count.has_value())
+                    auto weight_sources = RustComponentValueParser::parse_font_weight_absolute_pair_descriptor_sources(serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
+                    if (!weight_sources.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
+                    StyleValueVector weights;
+                    for (auto const& source : *weight_sources) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
+                        auto weight = parse_font_weight_absolute_value(font_weight_absolute_tokens);
+                        font_weight_absolute_tokens.discard_whitespace();
+                        if (!weight || font_weight_absolute_tokens.has_next_token())
+                            return nullptr;
+                        weights.append(weight.release_nonnull());
+                    }
 
-                    auto first = parse_font_weight_absolute_value(font_weight_absolute_tokens);
-                    if (!first)
-                        return nullptr;
-
-                    if (*count == 1)
-                        return StyleValueList::create({ first.release_nonnull() }, StyleValueList::Separator::Space);
-
-                    font_weight_absolute_tokens.discard_whitespace();
-                    auto second = parse_font_weight_absolute_value(font_weight_absolute_tokens);
-                    if (!second)
-                        return nullptr;
-
-                    font_weight_absolute_tokens.discard_whitespace();
-                    if (font_weight_absolute_tokens.has_next_token())
-                        return nullptr;
-
-                    return StyleValueList::create({ first.release_nonnull(), second.release_nonnull() }, StyleValueList::Separator::Space);
+                    return StyleValueList::create(move(weights), StyleValueList::Separator::Space);
                 }
                 case DescriptorMetadata::ValueType::Length: {
                     // https://drafts.csswg.org/css-values-4/#lengths
@@ -693,10 +693,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbol = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_counter_style_symbol(serialized_symbol.bytes_as_string_view(), "utf-8"sv))
+                    auto symbol_source = RustComponentValueParser::parse_counter_style_symbol_descriptor_source(serialized_symbol.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_source.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_source->bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> symbol_tokens { component_values };
 
                     auto symbol = parse_symbol_value(symbol_tokens);
@@ -743,23 +744,15 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_unicode_ranges = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    if (!RustComponentValueParser::parse_a_unicode_range_list(serialized_unicode_ranges.bytes_as_string_view(), "utf-8"sv).has_value())
+                    auto unicode_ranges = RustComponentValueParser::parse_a_unicode_range_list(serialized_unicode_ranges.bytes_as_string_view(), "utf-8"sv);
+                    if (!unicode_ranges.has_value())
                         return nullptr;
 
-                    auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
-                    TokenStream<ComponentValue> unicode_range_tokens { component_values };
+                    StyleValueVector unicode_range_values;
+                    for (auto const& unicode_range : *unicode_ranges)
+                        unicode_range_values.append(UnicodeRangeStyleValue::create(unicode_range));
 
-                    auto unicode_ranges = parse_comma_separated_value_list(unicode_range_tokens, [this](auto& tokens) -> RefPtr<StyleValue const> {
-                        return parse_unicode_range_value(tokens);
-                    });
-                    if (!unicode_ranges)
-                        return nullptr;
-
-                    unicode_range_tokens.discard_whitespace();
-                    if (unicode_range_tokens.has_next_token())
-                        return nullptr;
-
-                    return unicode_ranges.release_nonnull();
+                    return StyleValueList::create(move(unicode_range_values), StyleValueList::Separator::Comma);
                 }
                 }
                 return nullptr;

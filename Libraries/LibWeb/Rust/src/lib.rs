@@ -3108,6 +3108,123 @@ pub unsafe extern "C" fn rust_css_parse_counter_style_additive_symbols_descripto
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_counter_style_pad_descriptor_source(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    pad_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        order: CssNonnegativeIntegerSymbolPairOrder,
+        source_ptr: *const u8,
+        source_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            let Some(pad) = css_parser::parse_rust_owned_counter_style_pad_descriptor(input) else {
+                return false;
+            };
+
+            pad_callback(ctx, pad.order, pad.source.as_ptr(), pad.source.len());
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_counter_style_symbol_descriptor_source(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            let Some(symbol) = css_parser::parse_rust_owned_counter_style_symbol_descriptor(input) else {
+                return false;
+            };
+
+            symbol_callback(ctx, symbol.as_ptr(), symbol.len());
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_src_list_descriptor_sources(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    source_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            let Some(sources) = css_parser::parse_rust_owned_font_src_list_descriptor(input) else {
+                return false;
+            };
+
+            for source in sources {
+                source_callback(ctx, source.as_ptr(), source.len());
+            }
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_font_weight_absolute_pair_descriptor_sources(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    weight_callback: unsafe extern "C" fn(ctx: *mut c_void, source_ptr: *const u8, source_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            let Some(weights) = css_parser::parse_rust_owned_font_weight_absolute_pair_descriptor(input) else {
+                return false;
+            };
+
+            for weight in weights {
+                weight_callback(ctx, weight.as_ptr(), weight.len());
+            }
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_counter_style_additive_symbols(
     input: *const u8,
     input_len: usize,

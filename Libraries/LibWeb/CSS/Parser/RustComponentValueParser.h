@@ -850,6 +850,11 @@ public:
         String source;
     };
 
+    struct CounterStylePadDescriptor {
+        FFI::CssNonnegativeIntegerSymbolPairOrder order;
+        String source;
+    };
+
     struct SyntaxComponent {
         OwnPtr<SyntaxNode> syntax;
         size_t consumed_byte_length { 0 };
@@ -922,6 +927,9 @@ public:
     static Optional<Vector<String>> parse_counter_style_symbols_descriptor_sources(StringView input, StringView encoding);
     static Optional<CounterStyleRangeDescriptor> parse_counter_style_range_descriptor_sources(StringView input, StringView encoding);
     static Optional<Vector<CounterStyleAdditiveSymbolsDescriptorTuple>> parse_counter_style_additive_symbols_descriptor_sources(StringView input, StringView encoding);
+    static Optional<CounterStylePadDescriptor> parse_counter_style_pad_descriptor_source(StringView input, StringView encoding);
+    static Optional<String> parse_counter_style_symbol_descriptor_source(StringView input, StringView encoding);
+    static Optional<Vector<String>> parse_font_src_list_descriptor_sources(StringView input, StringView encoding);
     static Optional<FFI::CssCropOrCrossKind> parse_crop_or_cross(StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
@@ -945,6 +953,7 @@ public:
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static FFI::CssImageSetValueKind parse_image_set(StringView input, StringView encoding);
     static Optional<size_t> parse_font_weight_absolute_pair(StringView input, StringView encoding);
+    static Optional<Vector<String>> parse_font_weight_absolute_pair_descriptor_sources(StringView input, StringView encoding);
     static bool parse_string_descriptor(StringView input, StringView encoding);
     static bool parse_length_descriptor(StringView input, StringView encoding);
     static bool parse_positive_percentage_descriptor(StringView input, StringView encoding);
