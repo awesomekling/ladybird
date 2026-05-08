@@ -1127,7 +1127,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_red != 0) {
                     style_value->stroke_dasharray_none = true;
                 } else {
-                    style_value->stroke_dasharray_values.append(string_from_ffi_bytes(value_ptr, value_len));
+                    style_value->stroke_dasharray_values.append(nested_primitive_value_from_callback_payload());
                 }
                 return;
             } else if (first_is_one_of(kind, FFI::CssStyleValueKind::PlaceContent, FFI::CssStyleValueKind::PlaceItems, FFI::CssStyleValueKind::PlaceSelf)) {

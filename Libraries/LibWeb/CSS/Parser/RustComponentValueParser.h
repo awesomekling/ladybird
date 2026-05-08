@@ -355,7 +355,7 @@ public:
         FFI::CssScrollFunctionScrollerKind scroll_function_scroller { FFI::CssScrollFunctionScrollerKind::None };
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
         bool stroke_dasharray_none { false };
-        Vector<String> stroke_dasharray_values;
+        Vector<RustNestedPrimitiveValue> stroke_dasharray_values;
         String place_align_source;
         String place_justify_source;
         Optional<RustNestedPrimitiveValue> overflow_clip_margin;

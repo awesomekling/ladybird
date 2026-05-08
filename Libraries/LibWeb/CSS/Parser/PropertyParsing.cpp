@@ -1886,6 +1886,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 return nullptr;
             };
+            auto materialize_rust_nested_non_negative_number_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.numeric_value.has_value()) {
+                    if (auto number_value = parse_rust_source_as_non_negative_number(value.source_or_unit))
+                        return number_value;
+                    return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
+                }
+                if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number) {
+                    if (*value.numeric_value < 0)
+                        return nullptr;
+                    return NumberStyleValue::create(*value.numeric_value);
+                }
+                return materialize_rust_nested_length_percentage(value, non_negative_range);
+            };
             auto rust_keyword_style_value = [](FlyString const& keyword_string) -> RefPtr<StyleValue const> {
                 auto maybe_keyword = keyword_from_string(keyword_string);
                 if (!maybe_keyword.has_value())
@@ -3710,13 +3723,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     Vector<ValueComparingNonnullRefPtr<StyleValue const>> dashes;
                     dashes.ensure_capacity(rust_style_value->stroke_dasharray_values.size());
                     for (auto const& dash_value : rust_style_value->stroke_dasharray_values) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(dash_value, "utf-8"sv);
-                        TokenStream value_tokens { component_values };
-                        auto value = parse_number_value(value_tokens, non_negative_range);
+                        auto value = materialize_rust_nested_non_negative_number_length_percentage(dash_value);
                         if (!value)
-                            value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
-                        value_tokens.discard_whitespace();
-                        if (!value || value_tokens.has_next_token())
                             break;
                         dashes.append(value.release_nonnull());
                     }

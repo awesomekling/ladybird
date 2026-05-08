@@ -2770,7 +2770,7 @@ pub(crate) enum RustOwnedShadowPlacement {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStrokeDasharray {
     None,
-    Values(Vec<String>),
+    Values(Vec<RustOwnedNestedPrimitiveValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -6262,8 +6262,8 @@ fn rust_owned_stroke_dasharray_style_value_kind(filtered_input: &[u8]) -> Option
             return None;
         }
 
-        values.push(serialize_component_values_for_reparsing(
-            std::slice::from_ref(component_value),
+        values.push(component_value_parse_as_nested_dasharray_value(
+            component_value,
             filtered_input_string,
         )?);
         parser.index += 1;
@@ -8715,21 +8715,7 @@ where
             ),
             RustOwnedStrokeDasharray::Values(values) => {
                 for value in values {
-                    callback(
-                        CssStyleValueKind::StrokeDasharray,
-                        property_id,
-                        CssPrimitiveValueKind::Invalid,
-                        false,
-                        0.0,
-                        false,
-                        0.0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        value.as_bytes(),
-                        "",
-                    );
+                    callback_nested_primitive(callback, CssStyleValueKind::StrokeDasharray, property_id, 0, 0, value);
                 }
             }
         },
@@ -19637,6 +19623,25 @@ fn component_value_parse_as_nested_number_percentage(
                 .map(RustOwnedNestedPrimitiveValue::Source)
         }
         _ => None,
+    }
+}
+
+fn component_value_parse_as_nested_dasharray_value(
+    component_value: &ComponentValue,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) if number.value() >= 0.0 => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        ComponentValue::Function(_) => {
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing and range-checking math functions still happens in C++.
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
+                .map(RustOwnedNestedPrimitiveValue::Source)
+        }
+        _ => component_value_parse_as_nested_length_percentage(component_value, source),
     }
 }
 
@@ -32556,9 +32561,12 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::StrokeDasharray,
                 value: RustOwnedStyleValueKind::StrokeDasharray(RustOwnedStrokeDasharray::Values(vec![
-                    "2".to_string(),
-                    "3px".to_string(),
-                    "calc(4%)".to_string(),
+                    RustOwnedNestedPrimitiveValue::Number(2.0),
+                    RustOwnedNestedPrimitiveValue::Length {
+                        value: 3.0,
+                        unit: "px".to_string(),
+                    },
+                    RustOwnedNestedPrimitiveValue::Source("calc(4%)".to_string()),
                 ])),
             })
         );
