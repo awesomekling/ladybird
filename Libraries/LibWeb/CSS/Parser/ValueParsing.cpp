@@ -46,7 +46,6 @@
 #include <LibWeb/CSS/StyleValues/FontStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FunctionStyleValue.h>
-#include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GuaranteedInvalidStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
@@ -4597,99 +4596,6 @@ GridTrackSizeList Parser::parse_explicit_track_list(TokenStream<ComponentValue>&
         return {};
     transaction.commit();
     return track_list;
-}
-
-RefPtr<GridTrackPlacementStyleValue const> Parser::parse_grid_track_placement(TokenStream<ComponentValue>& tokens)
-{
-    // https://www.w3.org/TR/css-grid-2/#line-placement
-    // Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
-    // <grid-line> =
-    //     auto |
-    //     <custom-ident> |
-    //     [ [ <integer [-∞,-1]> | <integer [1,∞]> ] && <custom-ident>? ] |
-    //     [ span && [ <integer [1,∞]> || <custom-ident> ] ]
-    auto remaining_tokens = tokens.remaining_tokens();
-    auto contains_whitespace = false;
-    for (auto const& component_value : remaining_tokens) {
-        if (component_value.is(Token::Type::Whitespace)) {
-            contains_whitespace = true;
-            break;
-        }
-    }
-    // AD-HOC: Some shorthand parsers split grid-line values into synthetic
-    // token streams without preserving the original separating whitespace.
-    // Reparsing those streams would merge adjacent tokens such as `2 i` into
-    // `2i`, so keep C++ as the source of truth for those materialization paths.
-    if (remaining_tokens.size() <= 1 || contains_whitespace) {
-        auto serialized_grid_track_placement = serialize_component_values_for_reparsing(remaining_tokens);
-        if (RustComponentValueParser::parse_grid_track_placement(serialized_grid_track_placement.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackPlacementValueKind::Invalid)
-            return nullptr;
-    }
-
-    bool is_span = false;
-    Optional<String> parsed_custom_ident;
-    RefPtr<StyleValue const> parsed_integer;
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    if (auto auto_keyword = parse_all_as_single_keyword_value(tokens, Keyword::Auto)) {
-        transaction.commit();
-        return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_auto());
-    }
-
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is_ident("span"sv)) {
-            if (is_span)
-                return nullptr;
-
-            tokens.discard_a_token(); // span
-
-            // NOTE: "span" must not appear in between <custom-ident> and <integer>
-            if (tokens.has_next_token() && (parsed_custom_ident.has_value() || parsed_integer))
-                return nullptr;
-
-            is_span = true;
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        if (auto maybe_parsed_custom_ident = parse_custom_ident(tokens, { { "auto"sv } }); maybe_parsed_custom_ident.has_value()) {
-            if (parsed_custom_ident.has_value())
-                return nullptr;
-
-            parsed_custom_ident = maybe_parsed_custom_ident->to_string();
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        // FIXME: Use the correct value parsing context here to clamp calculated values (note the non-contiguous valid
-        //        range for integers for non-span)
-        if (auto maybe_parsed_integer = parse_integer_value(tokens, infinite_integer_range)) {
-            if (parsed_integer)
-                return nullptr;
-
-            parsed_integer = maybe_parsed_integer;
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    transaction.commit();
-
-    // <custom-ident>
-    // [ [ <integer [-∞,-1]> | <integer [1,∞]> ] && <custom-ident>? ]
-    if (!is_span && (parsed_integer || parsed_custom_ident.has_value()) && (!parsed_integer || !parsed_integer->is_integer() || parsed_integer->as_integer().integer() != 0))
-        return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_line(parsed_integer, parsed_custom_ident));
-
-    // [ span && [ <integer [1,∞]> || <custom-ident> ] ]
-    if (is_span && (parsed_integer || parsed_custom_ident.has_value()) && (!parsed_integer || !parsed_integer->is_integer() || parsed_integer->as_integer().integer() > 0))
-        // If the <integer> is omitted, it defaults to 1.
-        return GridTrackPlacementStyleValue::create(GridTrackPlacement::make_span(parsed_integer ? parsed_integer.release_nonnull() : IntegerStyleValue::create(1), parsed_custom_ident));
-
-    return nullptr;
 }
 
 RefPtr<CalculatedStyleValue const> Parser::parse_calculated_value(ComponentValue const& component_value, CalculationContext&& context)

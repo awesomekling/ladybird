@@ -1573,6 +1573,27 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .line_number_source = value_len == 0 ? Optional<String> {} : string_from_ffi_bytes(value_ptr, value_len),
                     .name = value_type_len == 0 ? Optional<String> {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
                 };
+            } else if (kind == FFI::CssStyleValueKind::GridTemplateAreas) {
+                enum : u8 {
+                    None,
+                    Row,
+                };
+
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == kind);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                if (color_red == None) {
+                    style_value->grid_template_areas_is_none = true;
+                    return;
+                }
+
+                VERIFY(color_red == Row);
+                style_value->grid_template_area_rows.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (kind == FFI::CssStyleValueKind::PositionArea) {
                 enum : u8 {
                     None,
@@ -4075,36 +4096,6 @@ FFI::CssGridAutoFlowValueKind RustComponentValueParser::parse_grid_auto_flow(Str
     auto filtered_input_bytes = filtered_input.bytes();
 
     return FFI::rust_css_parse_grid_auto_flow(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssGridTrackPlacementValueKind RustComponentValueParser::parse_grid_track_placement(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_grid_track_placement(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_auto_track_sizes(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_grid_auto_track_sizes(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssGridTrackSizeListValueKind RustComponentValueParser::parse_grid_track_size_list(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_grid_track_size_list(
         filtered_input_bytes.data(),
         filtered_input_bytes.size());
 }

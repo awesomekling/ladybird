@@ -15,7 +15,6 @@
 
 #include <AK/Debug.h>
 #include <AK/QuickSort.h>
-#include <LibWeb/CSS/CharacterTypes.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -316,6 +315,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::GridColumnStart:
         case PropertyID::GridRowEnd:
         case PropertyID::GridRowStart:
+        case PropertyID::GridTemplateAreas:
         case PropertyID::GridTemplateColumns:
         case PropertyID::GridTemplateRows:
         case PropertyID::ListStyle:
@@ -1582,6 +1582,42 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return {};
                 return grid_track_size_list;
             };
+            auto materialize_rust_grid_template_areas = [](RustComponentValueParser::RustStyleValue const& rust_style_value) -> RefPtr<GridTemplateAreaStyleValue const> {
+                if (rust_style_value.grid_template_areas_is_none)
+                    return GridTemplateAreaStyleValue::create({}, 0, 0);
+
+                Vector<Vector<String>> grid_area_rows;
+                grid_area_rows.ensure_capacity(rust_style_value.grid_template_area_rows.size());
+                for (auto const& row_source : rust_style_value.grid_template_area_rows) {
+                    Vector<String> row;
+                    for (auto cell : row_source.bytes_as_string_view().split_view('\0')) {
+                        if (!cell.is_empty())
+                            row.append(String::from_utf8_without_validation(cell.bytes()));
+                    }
+                    grid_area_rows.append(move(row));
+                }
+
+                HashMap<String, GridArea> grid_areas;
+                for (size_t y = 0; y < grid_area_rows.size(); y++) {
+                    for (size_t x = 0; x < grid_area_rows[y].size(); x++) {
+                        auto const& name = grid_area_rows[y][x];
+                        if (name == "."sv || grid_areas.contains(name))
+                            continue;
+
+                        size_t x_end = x;
+                        while (x_end < grid_area_rows[y].size() && grid_area_rows[y][x_end] == name)
+                            x_end++;
+                        size_t y_end = y;
+                        while (y_end < grid_area_rows.size() && grid_area_rows[y_end][x] == name)
+                            y_end++;
+
+                        grid_areas.set(name, { y, y_end, x, x_end });
+                    }
+                }
+
+                auto column_count = grid_area_rows.is_empty() ? 0 : grid_area_rows[0].size();
+                return GridTemplateAreaStyleValue::create(move(grid_areas), grid_area_rows.size(), column_count);
+            };
             auto materialize_rust_simple_filter_function = [](RustComponentValueParser::RustSimpleFilterFunction function) {
                 switch (function) {
                 case RustComponentValueParser::RustSimpleFilterFunction::Brightness:
@@ -2599,6 +2635,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 generated_transaction.commit();
                 return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
             }
+            case FFI::CssStyleValueKind::GridTemplateAreas:
+                if (rust_style_value->grid_template_areas_is_none || !rust_style_value->grid_template_area_rows.is_empty()) {
+                    auto value = materialize_rust_grid_template_areas(*rust_style_value);
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                }
+                break;
             case FFI::CssStyleValueKind::GridAutoTrackSizes:
                 if (!rust_style_value->grid_track_size_list_is_none || !rust_style_value->grid_track_size_list_events.is_empty()) {
                     size_t event_index = 0;
@@ -4048,7 +4092,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::GridTemplate:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_track_size_list_shorthand_value(PropertyID::GridTemplate, tokens); });
     case PropertyID::GridTemplateAreas:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_grid_template_areas_value(tokens); });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridTemplateColumns:
         return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::GridTemplateRows:
@@ -5149,7 +5193,7 @@ RefPtr<StyleValue const> Parser::parse_grid_track_placement_shorthand_value(Prop
     for (auto const& item : rust_items.value()) {
         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
         TokenStream placement_tokens { component_values };
-        auto value = parse_grid_track_placement(placement_tokens);
+        auto value = parse_css_value_for_property(item.property_id, placement_tokens);
         placement_tokens.discard_whitespace();
         if (!value || placement_tokens.has_next_token())
             return nullptr;
@@ -5192,25 +5236,7 @@ RefPtr<StyleValue const> Parser::parse_grid_track_size_list_shorthand_value(Prop
     auto materialize_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
         TokenStream property_tokens { component_values };
-        RefPtr<StyleValue const> value;
-        switch (property_id) {
-        case PropertyID::GridAutoFlow:
-            value = parse_grid_auto_flow_value(property_tokens);
-            break;
-        case PropertyID::GridAutoRows:
-        case PropertyID::GridAutoColumns:
-            value = parse_grid_auto_track_sizes(property_tokens);
-            break;
-        case PropertyID::GridTemplateAreas:
-            value = parse_grid_template_areas_value(property_tokens);
-            break;
-        case PropertyID::GridTemplateRows:
-        case PropertyID::GridTemplateColumns:
-            value = parse_grid_track_size_list(property_tokens);
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+        auto value = parse_css_value_for_property(property_id, property_tokens);
         property_tokens.discard_whitespace();
         if (!value || property_tokens.has_next_token())
             return nullptr;
@@ -5250,7 +5276,7 @@ RefPtr<StyleValue const> Parser::parse_grid_area_shorthand_value(TokenStream<Com
     for (auto const& item : rust_items.value()) {
         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
         TokenStream placement_tokens { component_values };
-        auto value = parse_grid_track_placement(placement_tokens);
+        auto value = parse_css_value_for_property(item.property_id, placement_tokens);
         placement_tokens.discard_whitespace();
         if (!value || placement_tokens.has_next_token())
             return nullptr;
@@ -5268,255 +5294,6 @@ RefPtr<StyleValue const> Parser::parse_grid_area_shorthand_value(TokenStream<Com
 RefPtr<StyleValue const> Parser::parse_grid_shorthand_value(TokenStream<ComponentValue>& tokens)
 {
     return parse_grid_track_size_list_shorthand_value(PropertyID::Grid, tokens, true);
-}
-
-// https://www.w3.org/TR/css-grid-1/#grid-template-areas-property
-RefPtr<StyleValue const> Parser::parse_grid_template_areas_value(TokenStream<ComponentValue>& tokens)
-{
-    // none | <string>+
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return GridTemplateAreaStyleValue::create({}, 0, 0);
-
-    auto is_full_stop = [](u32 code_point) {
-        return code_point == '.';
-    };
-
-    auto consume_while = [](Utf8CodePointIterator& code_points, AK::Function<bool(u32)> predicate) {
-        StringBuilder builder;
-        while (!code_points.done() && predicate(*code_points)) {
-            builder.append_code_point(*code_points);
-            ++code_points;
-        }
-        return MUST(builder.to_string());
-    };
-
-    Vector<Vector<String>> grid_area_rows;
-    Optional<size_t> column_count;
-
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    while (tokens.has_next_token() && tokens.next_token().is(Token::Type::String)) {
-        Vector<String> grid_area_columns;
-        auto string = tokens.consume_a_token().token().string().code_points();
-        auto code_points = string.begin();
-
-        while (!code_points.done()) {
-            if (is_whitespace(*code_points)) {
-                consume_while(code_points, is_whitespace);
-            } else if (is_full_stop(*code_points)) {
-                consume_while(code_points, *is_full_stop);
-                grid_area_columns.append("."_string);
-            } else if (is_ident_code_point(*code_points)) {
-                auto token = consume_while(code_points, is_ident_code_point);
-                grid_area_columns.append(move(token));
-            } else {
-                return nullptr;
-            }
-        }
-
-        if (grid_area_columns.is_empty())
-            return nullptr;
-
-        if (column_count.has_value()) {
-            if (grid_area_columns.size() != column_count)
-                return nullptr;
-        } else {
-            column_count = grid_area_columns.size();
-        }
-
-        grid_area_rows.append(move(grid_area_columns));
-        tokens.discard_whitespace();
-    }
-
-    // https://www.w3.org/TR/css-grid-2/#grid-template-areas-property
-    // If a named grid area spans multiple grid cells, but those cells do not form a single
-    // filled-in rectangle, the declaration is invalid.
-
-    // Pre-compute occurrence counts for each named area.
-    HashMap<String, size_t> name_counts;
-    for (auto const& row : grid_area_rows) {
-        for (auto const& cell : row) {
-            if (cell != "."sv)
-                name_counts.set(cell, name_counts.get(cell).value_or(0) + 1);
-        }
-    }
-
-    HashMap<String, GridArea> grid_areas;
-    for (size_t y = 0; y < grid_area_rows.size(); y++) {
-        for (size_t x = 0; x < grid_area_rows[y].size(); x++) {
-            auto const& name = grid_area_rows[y][x];
-            if (name == "."sv)
-                continue;
-            if (grid_areas.contains(name))
-                continue;
-
-            size_t x_end = x;
-            while (x_end < grid_area_rows[y].size() && grid_area_rows[y][x_end] == name)
-                x_end++;
-            size_t y_end = y;
-            while (y_end < grid_area_rows.size() && grid_area_rows[y_end][x] == name)
-                y_end++;
-
-            // Verify the bounding rectangle is fully filled with this name.
-            size_t expected_count = (x_end - x) * (y_end - y);
-            for (size_t check_y = y; check_y < y_end; check_y++) {
-                for (size_t check_x = x; check_x < x_end; check_x++) {
-                    if (grid_area_rows[check_y][check_x] != name)
-                        return nullptr;
-                }
-            }
-
-            // Verify there are no occurrences of this name outside the rectangle.
-            if (name_counts.get(name).value_or(0) != expected_count)
-                return nullptr;
-
-            grid_areas.set(name, { y, y_end, x, x_end });
-        }
-    }
-
-    transaction.commit();
-    return GridTemplateAreaStyleValue::create(move(grid_areas), grid_area_rows.size(), column_count.value_or(0));
-}
-
-RefPtr<StyleValue const> Parser::parse_grid_auto_track_sizes(TokenStream<ComponentValue>& tokens)
-{
-    // https://www.w3.org/TR/css-grid-2/#auto-tracks
-    // <track-size>+
-    auto remaining_tokens = tokens.remaining_tokens();
-    auto contains_solidus = false;
-    for (auto const& component_value : remaining_tokens) {
-        if (component_value.is_delim('/')) {
-            contains_solidus = true;
-            break;
-        }
-    }
-    // AD-HOC: The grid shorthand calls this as an optional prefix parser
-    // before consuming `/ <'grid-template-columns'>`. Rust validates the
-    // complete property form, so keep C++ in charge of those prefixes.
-    if (!contains_solidus) {
-        auto serialized_grid_auto_track_sizes = serialize_component_values_for_reparsing(remaining_tokens);
-        if (RustComponentValueParser::parse_grid_auto_track_sizes(serialized_grid_auto_track_sizes.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackSizeListValueKind::Invalid)
-            return GridTrackSizeListStyleValue::create({});
-    }
-
-    auto transaction = tokens.begin_transaction();
-    GridTrackSizeList track_list;
-    while (tokens.has_next_token()) {
-        tokens.discard_whitespace();
-        auto track_size = parse_grid_track_size(tokens);
-        if (!track_size.has_value())
-            break;
-        track_list.append(track_size.release_value());
-    }
-    if (!track_list.is_empty())
-        transaction.commit();
-    return GridTrackSizeListStyleValue::create(move(track_list));
-}
-
-// https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property
-RefPtr<GridAutoFlowStyleValue const> Parser::parse_grid_auto_flow_value(TokenStream<ComponentValue>& tokens)
-{
-    // [ row | column ] || dense
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    auto serialized_grid_auto_flow = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    if (RustComponentValueParser::parse_grid_auto_flow(serialized_grid_auto_flow.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridAutoFlowValueKind::Invalid)
-        return nullptr;
-
-    auto transaction = tokens.begin_transaction();
-
-    auto parse_axis = [&]() -> Optional<GridAutoFlowStyleValue::Axis> {
-        auto axis_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        auto const& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-        auto const& ident = token.token().ident();
-        if (ident.equals_ignoring_ascii_case("row"sv)) {
-            axis_transaction.commit();
-            return GridAutoFlowStyleValue::Axis::Row;
-        }
-        if (ident.equals_ignoring_ascii_case("column"sv)) {
-            axis_transaction.commit();
-            return GridAutoFlowStyleValue::Axis::Column;
-        }
-        return {};
-    };
-
-    auto parse_dense = [&]() -> Optional<GridAutoFlowStyleValue::Dense> {
-        auto dense_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        auto const& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-        auto const& ident = token.token().ident();
-        if (ident.equals_ignoring_ascii_case("dense"sv)) {
-            dense_transaction.commit();
-            return GridAutoFlowStyleValue::Dense::Yes;
-        }
-        return {};
-    };
-
-    Optional<GridAutoFlowStyleValue::Axis> axis;
-    Optional<GridAutoFlowStyleValue::Dense> dense;
-    if (axis = parse_axis(); axis.has_value()) {
-        dense = parse_dense();
-    } else if (dense = parse_dense(); dense.has_value()) {
-        axis = parse_axis();
-    }
-
-    tokens.discard_whitespace();
-    if (tokens.has_next_token())
-        return nullptr;
-
-    transaction.commit();
-    return GridAutoFlowStyleValue::create(axis.value_or(GridAutoFlowStyleValue::Axis::Row), dense.value_or(GridAutoFlowStyleValue::Dense::No));
-}
-
-// https://www.w3.org/TR/css-grid-2/#track-sizing
-RefPtr<StyleValue const> Parser::parse_grid_track_size_list(TokenStream<ComponentValue>& tokens)
-{
-    // none | <track-list> | <auto-track-list> | FIXME: subgrid <line-name-list>?
-    auto remaining_tokens = tokens.remaining_tokens();
-    auto contains_solidus = false;
-    for (auto const& component_value : remaining_tokens) {
-        if (component_value.is_delim('/')) {
-            contains_solidus = true;
-            break;
-        }
-    }
-    // AD-HOC: The grid-template shorthand calls this as a prefix parser before
-    // consuming the `/ <'grid-template-columns'>` half. Rust validates the
-    // complete property form, so keep the C++ prefix parser in charge there.
-    if (!contains_solidus) {
-        auto serialized_grid_track_size_list = serialize_component_values_for_reparsing(remaining_tokens);
-        if (RustComponentValueParser::parse_grid_track_size_list(serialized_grid_track_size_list.bytes_as_string_view(), "utf-8"sv) == FFI::CssGridTrackSizeListValueKind::Invalid)
-            return nullptr;
-    }
-
-    // none
-    {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (tokens.has_next_token() && tokens.next_token().is_ident("none"sv)) {
-            tokens.discard_a_token(); // none
-            transaction.commit();
-            return GridTrackSizeListStyleValue::make_none();
-        }
-    }
-
-    // <auto-track-list>
-    if (auto auto_track_list = parse_grid_auto_track_list(tokens); !auto_track_list.is_empty()) {
-        return GridTrackSizeListStyleValue::create(GridTrackSizeList(move(auto_track_list)));
-    }
-
-    // <track-list>
-    if (auto track_list = parse_grid_track_list(tokens); !track_list.is_empty()) {
-        return GridTrackSizeListStyleValue::create(GridTrackSizeList(move(track_list)));
-    }
-
-    return nullptr;
 }
 
 }

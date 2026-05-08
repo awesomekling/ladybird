@@ -1876,6 +1876,7 @@ pub enum CssStyleValueKind {
     FlexFlow,
     GridAutoFlow,
     GridAutoTrackSizes,
+    GridTemplateAreas,
     GridTrackPlacement,
     GridTrackSizeList,
     ListStyle,
@@ -1979,6 +1980,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
     GridAutoTrackSizes(RustOwnedGridTrackSizeList),
+    GridTemplateAreas(RustOwnedGridTemplateAreas),
     GridTrackPlacement(RustOwnedGridTrackPlacement),
     GridTrackSizeList(RustOwnedGridTrackSizeList),
     GuaranteedInvalid,
@@ -2538,6 +2540,12 @@ pub(crate) enum RustOwnedSimpleFilterFunction {
 pub(crate) enum RustOwnedGridTrackSizeList {
     None,
     List(Vec<RustOwnedGridTrackSizeListItem>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedGridTemplateAreas {
+    None,
+    Rows(Vec<Vec<String>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3402,6 +3410,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridColumnStart
             | PropertyId::GridRowEnd
             | PropertyId::GridRowStart
+            | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
             | PropertyId::ListStyle
@@ -3536,6 +3545,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::GridColumnEnd | PropertyId::GridColumnStart | PropertyId::GridRowEnd | PropertyId::GridRowStart => {
             rust_owned_grid_track_placement_style_value_kind(filtered_input)
         }
+        PropertyId::GridTemplateAreas => rust_owned_grid_template_areas_style_value_kind(filtered_input),
         PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows => {
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
@@ -4770,6 +4780,12 @@ fn rust_owned_grid_track_placement_style_value_kind(filtered_input: &[u8]) -> Op
 fn rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     Some(RustOwnedStyleValueKind::GridAutoTrackSizes(
         parse_rust_owned_grid_track_size_list_value(filtered_input, GridTrackSizeListSyntax::TrackSizeList)?,
+    ))
+}
+
+fn rust_owned_grid_template_areas_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    Some(RustOwnedStyleValueKind::GridTemplateAreas(
+        parse_rust_owned_grid_template_areas_value(filtered_input)?,
     ))
 }
 
@@ -8024,6 +8040,9 @@ where
                 value,
             );
         }
+        RustOwnedStyleValueKind::GridTemplateAreas(value) => {
+            callback_grid_template_areas_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::GridTrackPlacement(value) => {
             callback_grid_track_placement_style_value(callback, property_id, value);
         }
@@ -9307,6 +9326,52 @@ const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_END: u8 = 6;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FILL: u8 = 0;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FIT: u8 = 1;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_FIXED: u8 = 2;
+
+const GRID_TEMPLATE_AREAS_CALLBACK_NONE: u8 = 0;
+const GRID_TEMPLATE_AREAS_CALLBACK_ROW: u8 = 1;
+
+fn callback_grid_template_areas_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedGridTemplateAreas)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        RustOwnedGridTemplateAreas::None => callback(
+            CssStyleValueKind::GridTemplateAreas,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GRID_TEMPLATE_AREAS_CALLBACK_NONE,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        RustOwnedGridTemplateAreas::Rows(rows) => {
+            for row in rows {
+                let row = null_separated_string_list_bytes(row);
+                callback(
+                    CssStyleValueKind::GridTemplateAreas,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    GRID_TEMPLATE_AREAS_CALLBACK_ROW,
+                    0,
+                    0,
+                    0,
+                    &row,
+                    "",
+                );
+            }
+        }
+    }
+}
 
 fn callback_grid_track_size_list_style_value<C>(
     callback: &mut C,
@@ -11120,14 +11185,14 @@ fn parse_rust_owned_grid_template_areas_syntax(
     Some(items)
 }
 
-fn parse_rust_owned_grid_template_areas_value(filtered_input: &[u8]) -> Option<()> {
+fn parse_rust_owned_grid_template_areas_value(filtered_input: &[u8]) -> Option<RustOwnedGridTemplateAreas> {
     let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = stylesheet_parser.parse_a_list_of_component_values();
     let stripped_component_values = strip_whitespace(&component_values);
 
     if matches!(stripped_component_values, [component_value] if component_value_is_ident(Some(component_value), "none"))
     {
-        return Some(());
+        return Some(RustOwnedGridTemplateAreas::None);
     }
 
     let mut column_count = None;
@@ -11161,7 +11226,9 @@ fn parse_rust_owned_grid_template_areas_value(filtered_input: &[u8]) -> Option<(
         return None;
     }
 
-    Some(())
+    validate_grid_template_areas_form_rectangles(&grid_area_rows)?;
+
+    Some(RustOwnedGridTemplateAreas::Rows(grid_area_rows))
 }
 
 fn parse_grid_template_area_string(input: &str) -> Option<Vec<String>> {
@@ -11169,16 +11236,68 @@ fn parse_grid_template_area_string(input: &str) -> Option<Vec<String>> {
     for token in input.split_whitespace() {
         if token.chars().all(|character| character == '.') {
             row.push(".".to_string());
-        } else if token
-            .chars()
-            .all(|character| character == '_' || character.is_ascii_alphanumeric())
-        {
+        } else if token.chars().all(is_grid_template_area_name_code_point) {
             row.push(token.to_string());
         } else {
             return None;
         }
     }
     Some(row)
+}
+
+fn is_grid_template_area_name_code_point(character: char) -> bool {
+    // https://drafts.csswg.org/css-syntax-3/#ident-code-point
+    // An ident-start code point, a digit, or U+002D HYPHEN-MINUS (-).
+    character == '_' || character == '-' || character.is_ascii_alphanumeric() || !character.is_ascii()
+}
+
+fn validate_grid_template_areas_form_rectangles(grid_area_rows: &[Vec<String>]) -> Option<()> {
+    use std::collections::HashMap;
+
+    let mut name_counts = HashMap::new();
+    for row in grid_area_rows {
+        for cell in row {
+            if cell != "." {
+                *name_counts.entry(cell.as_str()).or_insert(0usize) += 1;
+            }
+        }
+    }
+
+    let mut grid_areas = HashMap::new();
+    for (y, row) in grid_area_rows.iter().enumerate() {
+        for (x, name) in row.iter().enumerate() {
+            if name == "." || grid_areas.contains_key(name.as_str()) {
+                continue;
+            }
+
+            let mut x_end = x;
+            while x_end < row.len() && row[x_end] == *name {
+                x_end += 1;
+            }
+
+            let mut y_end = y;
+            while y_end < grid_area_rows.len() && grid_area_rows[y_end][x] == *name {
+                y_end += 1;
+            }
+
+            let expected_count = (x_end - x) * (y_end - y);
+            for check_row in grid_area_rows.iter().take(y_end).skip(y) {
+                for cell in check_row.iter().take(x_end).skip(x) {
+                    if cell != name {
+                        return None;
+                    }
+                }
+            }
+
+            if name_counts.get(name.as_str()).copied().unwrap_or(0) != expected_count {
+                return None;
+            }
+
+            grid_areas.insert(name.as_str(), (y, y_end, x, x_end));
+        }
+    }
+
+    Some(())
 }
 
 fn push_grid_template_line_names(
@@ -14939,6 +15058,12 @@ fn parse_rust_owned_grid_track_placement_value(filtered_input: &[u8]) -> Option<
     while parser.has_next_component_value() {
         if parser.consume_ident_matching("span") {
             if is_span {
+                return None;
+            }
+
+            // NOTE: "span" must not appear in between <custom-ident> and <integer>.
+            parser.discard_whitespace();
+            if parser.has_next_component_value() && (parsed_custom_ident.is_some() || parsed_integer_source.is_some()) {
                 return None;
             }
 
@@ -36553,10 +36678,6 @@ mod tests {
             CssGridTrackPlacementValueKind::Valid
         );
         assert_eq!(
-            parse_grid_track_placement("foo span 2"),
-            CssGridTrackPlacementValueKind::Valid
-        );
-        assert_eq!(
             parse_grid_track_placement("span sibling-count()"),
             CssGridTrackPlacementValueKind::Valid
         );
@@ -36571,6 +36692,10 @@ mod tests {
         );
         assert_eq!(
             parse_grid_track_placement("auto foo"),
+            CssGridTrackPlacementValueKind::Invalid
+        );
+        assert_eq!(
+            parse_grid_track_placement("foo span 2"),
             CssGridTrackPlacementValueKind::Invalid
         );
     }

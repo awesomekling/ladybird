@@ -395,6 +395,8 @@ public:
         Optional<RustPositionArea> position_area;
         bool position_try_fallbacks_is_none { false };
         Vector<RustPositionTryFallback> position_try_fallbacks;
+        bool grid_template_areas_is_none { false };
+        Vector<String> grid_template_area_rows;
         Optional<RustGridTrackPlacement> grid_track_placement;
         bool grid_track_size_list_is_none { false };
         Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
@@ -628,9 +630,6 @@ public:
     static FFI::CssFitContentValueKind parse_fit_content(StringView input, StringView encoding);
     static FFI::CssBasicShapeValueKind parse_basic_shape(StringView input, StringView encoding);
     static FFI::CssGridAutoFlowValueKind parse_grid_auto_flow(StringView input, StringView encoding);
-    static FFI::CssGridTrackPlacementValueKind parse_grid_track_placement(StringView input, StringView encoding);
-    static FFI::CssGridTrackSizeListValueKind parse_grid_auto_track_sizes(StringView input, StringView encoding);
-    static FFI::CssGridTrackSizeListValueKind parse_grid_track_size_list(StringView input, StringView encoding);
     static FFI::CssPositionValueKind parse_position(StringView input, StringView encoding, bool allow_background_position_3_value_syntax);
     static FFI::CssPositionValueKind parse_background_position_longhand(StringView input, StringView encoding, bool is_horizontal);
     static FFI::CssBackgroundSizeValueKind parse_background_size(StringView input, StringView encoding);
