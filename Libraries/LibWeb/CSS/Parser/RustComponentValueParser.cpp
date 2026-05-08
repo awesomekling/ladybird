@@ -1144,7 +1144,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->place_justify_source = string_from_ffi_bytes(value_ptr, value_len);
                 return;
             } else if (kind == FFI::CssStyleValueKind::OverflowClipMargin) {
-                value.overflow_clip_margin_source = string_from_ffi_bytes(value_ptr, value_len);
+                value.overflow_clip_margin = nested_primitive_value_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::Columns) {
                 if (!style_value.has_value())
                     style_value = move(value);
@@ -1153,12 +1153,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == 0)
-                    style_value->column_count_source = string_from_ffi_bytes(value_ptr, value_len);
-                else if (color_red == 1)
-                    style_value->column_width_source = string_from_ffi_bytes(value_ptr, value_len);
-                else
-                    style_value->column_height_source = string_from_ffi_bytes(value_ptr, value_len);
+                if (color_red == 0) {
+                    if (color_green != 0)
+                        style_value->column_count_is_auto = true;
+                    else
+                        style_value->column_count = nested_primitive_value_from_callback_payload();
+                } else if (color_red == 1) {
+                    if (color_green != 0)
+                        style_value->column_width_is_auto = true;
+                    else
+                        style_value->column_width = nested_primitive_value_from_callback_payload();
+                } else {
+                    if (color_green != 0)
+                        style_value->column_height_is_auto = true;
+                    else
+                        style_value->column_height = nested_primitive_value_from_callback_payload();
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::FlexFlow) {
                 if (!style_value.has_value())

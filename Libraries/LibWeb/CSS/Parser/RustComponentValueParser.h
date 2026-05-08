@@ -358,10 +358,13 @@ public:
         Vector<String> stroke_dasharray_values;
         String place_align_source;
         String place_justify_source;
-        String overflow_clip_margin_source;
-        Optional<String> column_count_source;
-        Optional<String> column_width_source;
-        Optional<String> column_height_source;
+        Optional<RustNestedPrimitiveValue> overflow_clip_margin;
+        Optional<RustNestedPrimitiveValue> column_count;
+        bool column_count_is_auto { false };
+        Optional<RustNestedPrimitiveValue> column_width;
+        bool column_width_is_auto { false };
+        Optional<RustNestedPrimitiveValue> column_height;
+        bool column_height_is_auto { false };
         bool flex_shorthand_is_none { false };
         Optional<String> flex_grow_source;
         Optional<String> flex_shrink_source;

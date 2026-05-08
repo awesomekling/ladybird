@@ -2045,7 +2045,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     RepeatStyle(RustOwnedRepeatStyleList),
     Resolution(RustOwnedDimensionStyleValue),
     OverflowClipMargin {
-        length_source: String,
+        length: RustOwnedNestedPrimitiveValue,
     },
     Shadow(RustOwnedShadow),
     ShapeOutside(RustOwnedShapeOutside),
@@ -2602,9 +2602,21 @@ pub(crate) struct RustOwnedContainerType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedColumns {
-    column_count_source: Option<String>,
-    column_width_source: Option<String>,
-    column_height_source: Option<String>,
+    column_count: Option<RustOwnedColumnInteger>,
+    column_width: Option<RustOwnedColumnLength>,
+    column_height: Option<RustOwnedColumnLength>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedColumnInteger {
+    Auto,
+    Value(RustOwnedNestedPrimitiveValue),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedColumnLength {
+    Auto,
+    Value(RustOwnedNestedPrimitiveValue),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5954,17 +5966,17 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         return None;
     }
 
-    let column_height_source = if let Some(column_height) = column_height {
+    let column_height = if let Some(column_height) = column_height {
         if column_height.len() != 1 {
             return None;
         }
         if component_value_is_ident(column_height.first(), "auto") {
-            Some("auto".to_string())
+            Some(RustOwnedColumnLength::Auto)
         } else if parse_single_column_component_value(PropertyId::ColumnHeight, column_height, filtered_input_string) {
-            Some(serialize_component_values_for_reparsing(
-                column_height,
+            Some(RustOwnedColumnLength::Value(component_value_parse_as_nested_length(
+                &column_height[0],
                 filtered_input_string,
-            )?)
+            )?))
         } else {
             return None;
         }
@@ -5973,8 +5985,8 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
     };
 
     let mut found_autos = 0_u8;
-    let mut column_count_source = None;
-    let mut column_width_source = None;
+    let mut column_count = None;
+    let mut column_width = None;
     for component_value in columns {
         if component_value_is_ident(Some(component_value), "auto") {
             found_autos += 1;
@@ -5982,23 +5994,23 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         }
 
         let component_values = std::slice::from_ref(component_value);
-        if column_width_source.is_none()
+        if column_width.is_none()
             && parse_single_column_component_value(PropertyId::ColumnWidth, component_values, filtered_input_string)
         {
-            column_width_source = Some(serialize_component_values_for_reparsing(
-                component_values,
+            column_width = Some(RustOwnedColumnLength::Value(component_value_parse_as_nested_length(
+                component_value,
                 filtered_input_string,
-            )?);
+            )?));
             continue;
         }
 
-        if column_count_source.is_none()
+        if column_count.is_none()
             && parse_single_column_component_value(PropertyId::ColumnCount, component_values, filtered_input_string)
         {
-            column_count_source = Some(serialize_component_values_for_reparsing(
-                component_values,
+            column_count = Some(RustOwnedColumnInteger::Value(component_value_parse_as_nested_integer(
+                component_value,
                 filtered_input_string,
-            )?);
+            )?));
             continue;
         }
 
@@ -6009,18 +6021,18 @@ fn rust_owned_columns_style_value_kind(filtered_input: &[u8]) -> Option<RustOwne
         return None;
     }
     if found_autos > 0 {
-        if column_count_source.is_none() {
-            column_count_source = Some("auto".to_string());
+        if column_count.is_none() {
+            column_count = Some(RustOwnedColumnInteger::Auto);
         }
-        if column_width_source.is_none() {
-            column_width_source = Some("auto".to_string());
+        if column_width.is_none() {
+            column_width = Some(RustOwnedColumnLength::Auto);
         }
     }
 
     Some(RustOwnedStyleValueKind::Columns(RustOwnedColumns {
-        column_count_source,
-        column_width_source,
-        column_height_source,
+        column_count,
+        column_width,
+        column_height,
     }))
 }
 
@@ -6037,8 +6049,15 @@ fn rust_owned_overflow_clip_margin_style_value_kind(filtered_input: &[u8]) -> Op
         return None;
     }
 
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let [length] = component_values.as_slice() else {
+        return None;
+    };
+
     Some(RustOwnedStyleValueKind::OverflowClipMargin {
-        length_source: filtered_input_to_string(filtered_input),
+        length: component_value_parse_as_nested_length(length, filtered_input_string)?,
     })
 }
 
@@ -6049,8 +6068,15 @@ fn rust_owned_overflow_clip_margin_shorthand_style_value_kind(
         return None;
     }
 
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+    let [length] = component_values.as_slice() else {
+        return None;
+    };
+
     Some(RustOwnedStyleValueKind::OverflowClipMargin {
-        length_source: filtered_input_to_string(filtered_input),
+        length: component_value_parse_as_nested_length(length, filtered_input_string)?,
     })
 }
 
@@ -7833,27 +7859,9 @@ where
             }
         }
         RustOwnedStyleValueKind::Columns(value) => {
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::Columns,
-                property_id,
-                0,
-                value.column_count_source.as_ref(),
-            );
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::Columns,
-                property_id,
-                1,
-                value.column_width_source.as_ref(),
-            );
-            callback_optional_longhand_source(
-                callback,
-                CssStyleValueKind::Columns,
-                property_id,
-                2,
-                value.column_height_source.as_ref(),
-            );
+            callback_optional_column_integer(callback, property_id, 0, value.column_count.as_ref());
+            callback_optional_column_length(callback, property_id, 1, value.column_width.as_ref());
+            callback_optional_column_length(callback, property_id, 2, value.column_height.as_ref());
         }
         RustOwnedStyleValueKind::Content(value) => {
             callback_content_style_value(callback, property_id, value);
@@ -8230,12 +8238,14 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::OverflowClipMargin { length_source } => {
-            callback_source_backed_style_value(
+        RustOwnedStyleValueKind::OverflowClipMargin { length } => {
+            callback_nested_primitive(
                 callback,
                 CssStyleValueKind::OverflowClipMargin,
                 property_id,
-                length_source,
+                0,
+                0,
+                length,
             );
         }
         RustOwnedStyleValueKind::ScrollbarColor(value) => callback(
@@ -10301,6 +10311,68 @@ fn callback_optional_filter_nested_primitive<C>(
             &[],
             "",
         );
+    }
+}
+
+fn callback_optional_column_integer<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    value: Option<&RustOwnedColumnInteger>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        Some(RustOwnedColumnInteger::Auto) => callback(
+            CssStyleValueKind::Columns,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            kind,
+            1,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        Some(RustOwnedColumnInteger::Value(value)) => {
+            callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
+        }
+        None => {}
+    }
+}
+
+fn callback_optional_column_length<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: u8,
+    value: Option<&RustOwnedColumnLength>,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    match value {
+        Some(RustOwnedColumnLength::Auto) => callback(
+            CssStyleValueKind::Columns,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            kind,
+            1,
+            0,
+            0,
+            &[],
+            "",
+        ),
+        Some(RustOwnedColumnLength::Value(value)) => {
+            callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
+        }
+        None => {}
     }
 }
 
@@ -29571,25 +29643,25 @@ mod tests {
         RustOwnedAnchorNameOrScope, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
         RustOwnedBackgroundSize, RustOwnedBackgroundSizeComponent, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
         RustOwnedBasicShapeKind, RustOwnedBorderImage, RustOwnedBorderImageSlice, RustOwnedBorderRadius,
-        RustOwnedColorScheme, RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
-        RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCounterDefinition,
-        RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind, RustOwnedCursor,
-        RustOwnedCursorImage, RustOwnedDimensionStyleValue, RustOwnedDisplay, RustOwnedEasingFunction,
-        RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList,
-        RustOwnedFitContent, RustOwnedFitContentValue, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle,
-        RustOwnedGridAutoFlow, RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement,
-        RustOwnedGridTrackSize, RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedImage,
-        RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption, RustOwnedLinearEasingStop, RustOwnedListStyle,
-        RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
-        RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor,
-        RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionTryFallback,
-        RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-        RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle, RustOwnedRepeatStyleList,
-        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedColorScheme, RustOwnedColumnInteger, RustOwnedColumnLength, RustOwnedColumns, RustOwnedContain,
+        RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem,
+        RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction,
+        RustOwnedCounterFunctionKind, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDimensionStyleValue,
+        RustOwnedDisplay, RustOwnedEasingFunction, RustOwnedEasingFunctionValue, RustOwnedExplicitGridTrack,
+        RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent, RustOwnedFitContentValue,
+        RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFontStyle, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
+        RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
+        RustOwnedGridTrackSizeListItem, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet, RustOwnedImageSetOption,
+        RustOwnedLinearEasingStop, RustOwnedListStyle, RustOwnedMathDepth, RustOwnedMathFunction,
+        RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
+        RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
+        RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
+        RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
+        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
         RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
@@ -31487,9 +31559,12 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::Columns,
                 value: RustOwnedStyleValueKind::Columns(RustOwnedColumns {
-                    column_count_source: Some("3".to_string()),
-                    column_width_source: Some("12em".to_string()),
-                    column_height_source: Some("auto".to_string()),
+                    column_count: Some(RustOwnedColumnInteger::Value(RustOwnedNestedPrimitiveValue::Integer(3))),
+                    column_width: Some(RustOwnedColumnLength::Value(RustOwnedNestedPrimitiveValue::Length {
+                        value: 12.0,
+                        unit: "em".to_string(),
+                    })),
+                    column_height: Some(RustOwnedColumnLength::Auto),
                 }),
             })
         );
@@ -31981,7 +32056,10 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMarginTop,
                 value: RustOwnedStyleValueKind::OverflowClipMargin {
-                    length_source: "2px".to_string(),
+                    length: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
                 },
             })
         );
@@ -31990,7 +32068,10 @@ mod tests {
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::OverflowClipMargin,
                 value: RustOwnedStyleValueKind::OverflowClipMargin {
-                    length_source: "2px".to_string(),
+                    length: RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
                 },
             })
         );
@@ -33380,7 +33461,7 @@ mod tests {
                 numeric_value: None,
                 secondary_numeric_value: None,
                 color: None,
-                value: "auto".to_string(),
+                value: String::new(),
                 value_type: String::new(),
             })
         );
@@ -33389,11 +33470,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::OverflowClipMargin,
                 property_id: PropertyId::OverflowClipMargin,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(2.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "2px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );
@@ -33402,11 +33483,11 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::OverflowClipMargin,
                 property_id: PropertyId::OverflowClipMarginTop,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(2.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "2px".to_string(),
+                value: "px".to_string(),
                 value_type: String::new(),
             })
         );

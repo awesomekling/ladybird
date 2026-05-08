@@ -1855,12 +1855,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return AngleStyleValue::create(Angle { *value.numeric_value, angle_unit.release_value() });
             };
-            auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
-                    return parse_rust_source_as_integer(value.source_or_unit);
+                    return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer)
                     return nullptr;
                 if (*value.numeric_value < AK::NumericLimits<i32>::min() || *value.numeric_value > AK::NumericLimits<i32>::max())
+                    return nullptr;
+                if (!range.contains(*value.numeric_value))
                     return nullptr;
                 return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
             };
@@ -2886,16 +2888,31 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Columns:
-                if (rust_style_value->column_count_source.has_value() || rust_style_value->column_width_source.has_value() || rust_style_value->column_height_source.has_value()) {
-                    auto column_count = rust_style_value->column_count_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ColumnCount, *rust_style_value->column_count_source)
-                        : property_initial_value(PropertyID::ColumnCount);
-                    auto column_width = rust_style_value->column_width_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ColumnWidth, *rust_style_value->column_width_source)
-                        : property_initial_value(PropertyID::ColumnWidth);
-                    auto column_height = rust_style_value->column_height_source.has_value()
-                        ? parse_rust_source_as_property(PropertyID::ColumnHeight, *rust_style_value->column_height_source)
-                        : property_initial_value(PropertyID::ColumnHeight);
+                if (rust_style_value->column_count.has_value() || rust_style_value->column_count_is_auto || rust_style_value->column_width.has_value() || rust_style_value->column_width_is_auto || rust_style_value->column_height.has_value() || rust_style_value->column_height_is_auto) {
+                    RefPtr<StyleValue const> column_count;
+                    if (rust_style_value->column_count.has_value())
+                        column_count = materialize_rust_nested_integer(*rust_style_value->column_count, NumericRange { .min = 1, .max = AK::NumericLimits<i32>::max() });
+                    else if (rust_style_value->column_count_is_auto)
+                        column_count = KeywordStyleValue::create(Keyword::Auto);
+                    else
+                        column_count = property_initial_value(PropertyID::ColumnCount);
+
+                    RefPtr<StyleValue const> column_width;
+                    if (rust_style_value->column_width.has_value())
+                        column_width = materialize_rust_nested_length(*rust_style_value->column_width, non_negative_range);
+                    else if (rust_style_value->column_width_is_auto)
+                        column_width = KeywordStyleValue::create(Keyword::Auto);
+                    else
+                        column_width = property_initial_value(PropertyID::ColumnWidth);
+
+                    RefPtr<StyleValue const> column_height;
+                    if (rust_style_value->column_height.has_value())
+                        column_height = materialize_rust_nested_length(*rust_style_value->column_height, non_negative_range);
+                    else if (rust_style_value->column_height_is_auto)
+                        column_height = KeywordStyleValue::create(Keyword::Auto);
+                    else
+                        column_height = property_initial_value(PropertyID::ColumnHeight);
+
                     if (!column_count || !column_width || !column_height)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -3180,7 +3197,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::AutoAdd) };
                 }
                 if (rust_style_value->math_depth_integer.has_value()) {
-                    auto integer_value = materialize_rust_nested_integer(*rust_style_value->math_depth_integer);
+                    auto integer_value = materialize_rust_nested_integer(*rust_style_value->math_depth_integer, infinite_integer_range);
                     if (!integer_value)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -3604,14 +3621,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::OverflowClipMargin:
-                if (!rust_style_value->overflow_clip_margin_source.is_empty()) {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->overflow_clip_margin_source, "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    auto value = parse_length_value(value_tokens, non_negative_range);
-                    value_tokens.discard_whitespace();
-                    if (!value || value_tokens.has_next_token())
+                if (rust_style_value->overflow_clip_margin.has_value()) {
+                    auto value = materialize_rust_nested_length(*rust_style_value->overflow_clip_margin, non_negative_range);
+                    if (!value)
                         break;
-
                     auto const& longhands = longhands_for_shorthand(rust_style_value->property_id);
                     if (longhands.is_empty()) {
                         discard_rust_owned_property_value_tokens();
