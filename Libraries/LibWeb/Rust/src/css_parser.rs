@@ -1991,7 +1991,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     PlaceItems(RustOwnedPlaceShorthand),
     PlaceSelf(RustOwnedPlaceShorthand),
     Frequency(RustOwnedDimensionStyleValue),
-    Function(RustOwnedFunctionStyleValue),
     GridAutoFlow(RustOwnedGridAutoFlow),
     GridAutoTrackSizes(RustOwnedGridTrackSizeList),
     GridTemplateAreas(RustOwnedGridTemplateAreas),
@@ -2204,7 +2203,6 @@ pub(crate) struct RustOwnedPositionalValueListShorthandItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedMathFunction {
     name: String,
-    arguments: Vec<String>,
     source: String,
 }
 
@@ -2279,7 +2277,6 @@ pub(crate) struct RustOwnedBasicShape {
     radial_shape_position: Option<RustOwnedResolvedPosition>,
     polygon_points: Vec<RustOwnedBasicShapePolygonPoint>,
     path_data: Option<String>,
-    source: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3232,13 +3229,6 @@ pub(crate) struct RustOwnedDimensionStyleValue {
     value: f64,
     unit: String,
     value_type: PropertyValueType,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedFunctionStyleValue {
-    name: String,
-    value: Box<RustOwnedStyleValueKind>,
-    source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4675,7 +4665,6 @@ fn rust_owned_basic_shape_style_value_kind(
         radial_shape_position,
         polygon_points,
         path_data,
-        source: filtered_input_string.to_string(),
     })))
 }
 
@@ -8294,45 +8283,11 @@ fn parse_rust_owned_math_function(
     let filtered_input = std::str::from_utf8(filtered_input)
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
-    let arguments = serialize_math_function_arguments_for_reparsing(&function.value, filtered_input)?;
 
     Some(RustOwnedMathFunction {
         name: function.name.clone(),
-        arguments,
         source,
     })
-}
-
-fn serialize_math_function_arguments_for_reparsing(
-    component_values: &[ComponentValue],
-    filtered_input: &str,
-) -> Option<Vec<String>> {
-    let mut arguments = Vec::new();
-    let mut start = 0;
-
-    for (index, component_value) in component_values.iter().enumerate() {
-        if !matches!(
-            component_value,
-            ComponentValue::PreservedToken(Token {
-                token_type: TokenType::Comma,
-                ..
-            })
-        ) {
-            continue;
-        }
-
-        arguments.push(serialize_component_values_for_reparsing(
-            strip_whitespace(&component_values[start..index]),
-            filtered_input,
-        )?);
-        start = index + 1;
-    }
-
-    arguments.push(serialize_component_values_for_reparsing(
-        strip_whitespace(&component_values[start..]),
-        filtered_input,
-    )?);
-    Some(arguments)
 }
 
 fn parse_rust_owned_tree_counting_function(
@@ -9596,9 +9551,6 @@ where
             value.unit.as_bytes(),
             value.value_type,
         ),
-        RustOwnedStyleValueKind::Function(function) => {
-            let _ = function;
-        }
         RustOwnedStyleValueKind::TreeCountingFunction(function) => {
             callback_source_backed_value_type_kind_style_value(
                 callback,
@@ -35242,7 +35194,6 @@ mod tests {
                         radial_shape_position: None,
                         polygon_points: vec![],
                         path_data: None,
-                        source: "circle(10px)".to_string(),
                     })),
                     shape_box: Some(RustOwnedShapeBox::Border),
                 }),
@@ -35262,7 +35213,6 @@ mod tests {
                         radial_shape_position: None,
                         polygon_points: vec![],
                         path_data: None,
-                        source: "circle()".to_string(),
                     })),
                     shape_box: None,
                 }),
@@ -36023,7 +35973,6 @@ mod tests {
                     radial_shape_position: None,
                     polygon_points: vec![],
                     path_data: None,
-                    source: "inset(10px)".to_string(),
                 })),
             })
         );
@@ -36040,7 +35989,6 @@ mod tests {
                     radial_shape_position: None,
                     polygon_points: vec![],
                     path_data: Some("M 0 0 L 1 1".to_string()),
-                    source: "path(evenodd, \"M 0 0 L 1 1\")".to_string(),
                 })),
             })
         );
@@ -36075,7 +36023,6 @@ mod tests {
                         },
                     ],
                     path_data: None,
-                    source: "polygon(evenodd, 0 0, 100% 0)".to_string(),
                 })),
             })
         );
@@ -36171,7 +36118,6 @@ mod tests {
                     value_type: PropertyValueType::Length,
                     function: RustOwnedMathFunction {
                         name: "calc".to_string(),
-                        arguments: vec!["1px + 2px".to_string()],
                         source: "calc(1px + 2px)".to_string(),
                     },
                 },
@@ -36185,7 +36131,6 @@ mod tests {
                     value_type: PropertyValueType::OpacityValue,
                     function: RustOwnedMathFunction {
                         name: "clamp".to_string(),
-                        arguments: vec!["0".to_string(), "0.5".to_string(), "1".to_string()],
                         source: "clamp(0, 0.5, 1)".to_string(),
                     },
                 },
@@ -36199,7 +36144,6 @@ mod tests {
                     value_type: PropertyValueType::FontWeightAbsolute,
                     function: RustOwnedMathFunction {
                         name: "calc".to_string(),
-                        arguments: vec!["600 + 100".to_string()],
                         source: "calc(600 + 100)".to_string(),
                     },
                 },
