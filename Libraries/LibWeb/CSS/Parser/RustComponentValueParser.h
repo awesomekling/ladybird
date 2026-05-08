@@ -319,6 +319,7 @@ public:
         FFI::CssContainerTypeValueKind container_type { FFI::CssContainerTypeValueKind::Invalid };
         Vector<CounterDefinition> counter_definitions;
         Vector<String> counter_definition_value_sources;
+        Vector<String> background_size_sources;
         RustDisplayValueKind display_kind { RustDisplayValueKind::Invalid };
         u8 display_value { 0 };
         RustDisplayInside display_inside { RustDisplayInside::Flow };
@@ -359,8 +360,8 @@ public:
         FlyString position_anchor_name;
         FFI::CssPositionTryOrderValue position_try_order { FFI::CssPositionTryOrderValue::Invalid };
         FFI::CssPositionVisibilityValue position_visibility {};
-        u8 repeat_x { 1 };
-        u8 repeat_y { 1 };
+        Vector<u8> repeat_x_values;
+        Vector<u8> repeat_y_values;
         u8 scrollbar_color_kind { 0 };
         FFI::CssScrollbarGutterValueKind scrollbar_gutter { FFI::CssScrollbarGutterValueKind::Invalid };
         FFI::CssTextWrapValue text_wrap {};

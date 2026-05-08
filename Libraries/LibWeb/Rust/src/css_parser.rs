@@ -2015,7 +2015,7 @@ pub(crate) enum RustOwnedStyleValueKind {
         has_denominator: bool,
         value_type: PropertyValueType,
     },
-    RepeatStyle(RustOwnedRepeatStyle),
+    RepeatStyle(RustOwnedRepeatStyleList),
     Resolution(RustOwnedDimensionStyleValue),
     OverflowClipMargin {
         length_source: String,
@@ -2615,6 +2615,11 @@ pub(crate) enum RustOwnedPositionComponent {
 pub(crate) struct RustOwnedQuotes {
     kind: CssQuotesValueKind,
     strings: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedRepeatStyleList {
+    values: Vec<RustOwnedRepeatStyle>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3242,6 +3247,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
             | PropertyId::AspectRatio
+            | PropertyId::BackgroundRepeat
+            | PropertyId::BackgroundSize
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderEndEndRadius
@@ -3281,6 +3288,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
             | PropertyId::ListStyle
+            | PropertyId::MaskRepeat
+            | PropertyId::MaskSize
             | PropertyId::MathDepth
             | PropertyId::OverflowClipMargin
             | PropertyId::OverflowClipMarginBlock
@@ -4962,24 +4971,40 @@ fn rust_owned_quotes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwned
 fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
+    let values = parse_comma_separated_component_values(component_values, |component_values| {
+        rust_owned_repeat_style_from_component_values(component_values)
+    })?;
+
+    if values.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyleList {
+        values,
+    }))
+}
+
+fn rust_owned_repeat_style_from_component_values(
+    component_values: Vec<ComponentValue>,
+) -> Option<RustOwnedRepeatStyle> {
     let mut parser = ComponentValueParser::new(component_values);
 
     // https://drafts.csswg.org/css-backgrounds-3/#typedef-repeat-style
     // <repeat-style> = repeat-x | repeat-y | [ repeat | space | round | no-repeat ]{1,2}
     if consume_optional_ident_matching(&mut parser, "repeat-x") && parser_has_no_remaining_component_values(&mut parser)
     {
-        return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+        return Some(RustOwnedRepeatStyle {
             repeat_x: CssRepeatStyleRepetition::Repeat,
             repeat_y: CssRepeatStyleRepetition::NoRepeat,
-        }));
+        });
     }
 
     if consume_optional_ident_matching(&mut parser, "repeat-y") && parser_has_no_remaining_component_values(&mut parser)
     {
-        return Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
+        return Some(RustOwnedRepeatStyle {
             repeat_x: CssRepeatStyleRepetition::NoRepeat,
             repeat_y: CssRepeatStyleRepetition::Repeat,
-        }));
+        });
     }
 
     let repeat_x = consume_non_directional_repeat_style_value_kind(&mut parser)?;
@@ -4988,10 +5013,7 @@ fn rust_owned_repeat_style_style_value_kind(filtered_input: &[u8]) -> Option<Rus
         return None;
     }
 
-    Some(RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
-        repeat_x,
-        repeat_y,
-    }))
+    Some(RustOwnedRepeatStyle { repeat_x, repeat_y })
 }
 
 fn consume_non_directional_repeat_style_value_kind(
@@ -5096,6 +5118,14 @@ fn rust_owned_background_size_component_from_component_value(
     }
 
     None
+}
+
+fn rust_owned_background_size_source(value: &RustOwnedBackgroundSize) -> &str {
+    match value {
+        RustOwnedBackgroundSize::Cover { source }
+        | RustOwnedBackgroundSize::Contain { source }
+        | RustOwnedBackgroundSize::Explicit { source, .. } => source,
+    }
 }
 
 fn rust_owned_aspect_ratio_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -6991,21 +7021,25 @@ where
                 value.denominator_source.as_ref(),
             );
         }
-        RustOwnedStyleValueKind::BackgroundSize(_) => callback(
-            CssStyleValueKind::Invalid,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            0,
-            0,
-            0,
-            0,
-            &[],
-            "",
-        ),
+        RustOwnedStyleValueKind::BackgroundSize(value) => {
+            for value in &value.values {
+                callback(
+                    CssStyleValueKind::BackgroundSize,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    rust_owned_background_size_source(value).as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::BorderRadius(value) => {
             for source in &value.horizontal_sources {
                 callback_optional_longhand_source(
@@ -7407,21 +7441,25 @@ where
                 "",
             );
         }
-        RustOwnedStyleValueKind::RepeatStyle(value) => callback(
-            CssStyleValueKind::RepeatStyle,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            value.repeat_x as u8,
-            value.repeat_y as u8,
-            0,
-            0,
-            &[],
-            "",
-        ),
+        RustOwnedStyleValueKind::RepeatStyle(value) => {
+            for value in &value.values {
+                callback(
+                    CssStyleValueKind::RepeatStyle,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    value.repeat_x as u8,
+                    value.repeat_y as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::OverflowClipMargin { length_source } => {
             callback_source_backed_style_value(
                 callback,
@@ -26841,11 +26879,11 @@ mod tests {
         RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
         RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
         RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRepeatStyle,
-        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
-        RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow,
-        RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-        RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
-        RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
+        RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter,
+        RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
+        RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+        RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+        RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
         RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
         RustOwnedTransformOrigin, RustOwnedTransformation, RustOwnedTransformationArgument,
@@ -29442,9 +29480,11 @@ mod tests {
             parse_rust_owned_style_value(&[PropertyId::BackgroundRepeat], "repeat space"),
             Some(RustOwnedStyleValue {
                 property_id: PropertyId::BackgroundRepeat,
-                value: RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyle {
-                    repeat_x: CssRepeatStyleRepetition::Repeat,
-                    repeat_y: CssRepeatStyleRepetition::Space,
+                value: RustOwnedStyleValueKind::RepeatStyle(RustOwnedRepeatStyleList {
+                    values: vec![RustOwnedRepeatStyle {
+                        repeat_x: CssRepeatStyleRepetition::Repeat,
+                        repeat_y: CssRepeatStyleRepetition::Space,
+                    }],
                 }),
             })
         );

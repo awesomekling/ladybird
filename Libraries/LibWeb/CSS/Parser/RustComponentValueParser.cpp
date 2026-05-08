@@ -1608,9 +1608,25 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.quotes_kind = static_cast<FFI::CssQuotesValueKind>(color_red);
                 for (auto string : StringView { value_ptr, value_len }.split_view('\0'))
                     value.quotes_strings.append(FlyString::from_utf8_without_validation(string.bytes()));
+            } else if (kind == FFI::CssStyleValueKind::BackgroundSize) {
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::BackgroundSize);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                style_value->background_size_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+                return;
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
-                value.repeat_x = color_red;
-                value.repeat_y = color_green;
+                if (!style_value.has_value())
+                    style_value = move(value);
+                else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::RepeatStyle);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+                style_value->repeat_x_values.append(color_red);
+                style_value->repeat_y_values.append(color_green);
+                return;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarColor) {
                 value.scrollbar_color_kind = color_red;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {

@@ -267,6 +267,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::AnchorScope:
         case PropertyID::AnimationName:
         case PropertyID::AspectRatio:
+        case PropertyID::BackgroundRepeat:
+        case PropertyID::BackgroundSize:
         case PropertyID::BorderBottomLeftRadius:
         case PropertyID::BorderBottomRightRadius:
         case PropertyID::BorderEndEndRadius:
@@ -306,6 +308,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         case PropertyID::GridTemplateColumns:
         case PropertyID::GridTemplateRows:
         case PropertyID::ListStyle:
+        case PropertyID::MaskRepeat:
+        case PropertyID::MaskSize:
         case PropertyID::MathDepth:
         case PropertyID::OverflowClipMargin:
         case PropertyID::OverflowClipMarginBlock:
@@ -1588,8 +1592,60 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
                 break;
-            case FFI::CssStyleValueKind::BackgroundSize:
+            case FFI::CssStyleValueKind::BackgroundSize: {
+                if (!rust_style_value->background_size_sources.is_empty()) {
+                    auto materialize_background_size_component = [&](TokenStream<ComponentValue>& background_size_tokens) -> RefPtr<StyleValue const> {
+                        auto transaction = background_size_tokens.begin_transaction();
+                        background_size_tokens.discard_whitespace();
+                        if (auto keyword = parse_keyword_value(background_size_tokens); keyword && first_is_one_of(keyword->to_keyword(), Keyword::Auto, Keyword::Cover, Keyword::Contain)) {
+                            transaction.commit();
+                            return keyword.release_nonnull();
+                        }
+
+                        if (auto value = parse_length_percentage_value(background_size_tokens, non_negative_range, non_negative_range)) {
+                            transaction.commit();
+                            return value.release_nonnull();
+                        }
+
+                        return nullptr;
+                    };
+
+                    StyleValueVector values;
+                    values.ensure_capacity(rust_style_value->background_size_sources.size());
+                    for (auto const& source : rust_style_value->background_size_sources) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                        TokenStream background_size_tokens { component_values };
+                        auto width = materialize_background_size_component(background_size_tokens);
+                        if (!width)
+                            break;
+
+                        if (width->to_keyword() == Keyword::Cover || width->to_keyword() == Keyword::Contain) {
+                            background_size_tokens.discard_whitespace();
+                            if (background_size_tokens.has_next_token())
+                                break;
+                            values.append(width.release_nonnull());
+                            continue;
+                        }
+
+                        auto height = materialize_background_size_component(background_size_tokens);
+                        if (!height)
+                            height = KeywordStyleValue::create(Keyword::Auto);
+
+                        background_size_tokens.discard_whitespace();
+                        if (background_size_tokens.has_next_token())
+                            break;
+
+                        values.append(BackgroundSizeStyleValue::create(width.release_nonnull(), height.release_nonnull()));
+                    }
+
+                    if (values.size() == rust_style_value->background_size_sources.size()) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
+                    }
+                }
                 break;
+            }
             case FFI::CssStyleValueKind::Keyword:
                 if (rust_style_value->keyword.has_value()) {
                     tokens.discard_a_token();
@@ -2780,14 +2836,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::RepeatStyle:
-                discard_rust_owned_property_value_tokens();
-                generated_transaction.commit();
-                return PropertyAndValue {
-                    rust_style_value->property_id,
-                    RepeatStyleStyleValue::create(
-                        repetition_from_rust(rust_style_value->repeat_x),
-                        repetition_from_rust(rust_style_value->repeat_y))
-                };
+                VERIFY(rust_style_value->repeat_x_values.size() == rust_style_value->repeat_y_values.size());
+                if (!rust_style_value->repeat_x_values.is_empty()) {
+                    StyleValueVector values;
+                    values.ensure_capacity(rust_style_value->repeat_x_values.size());
+                    for (size_t i = 0; i < rust_style_value->repeat_x_values.size(); ++i) {
+                        values.append(RepeatStyleStyleValue::create(
+                            repetition_from_rust(rust_style_value->repeat_x_values[i]),
+                            repetition_from_rust(rust_style_value->repeat_y_values[i])));
+                    }
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
+                }
+                break;
             case FFI::CssStyleValueKind::ScrollFunction:
                 if (auto value = materialize_rust_scroll_function_value()) {
                     tokens.discard_a_token();
@@ -3652,13 +3715,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
             return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) { return parse_single_background_position_x_or_y_value(tokens, property_id); });
         });
     case PropertyID::BackgroundRepeat:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) { return parse_single_repeat_style_value(property_id, tokens); });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::BackgroundSize:
-        return parse_all_as(tokens, [this, property_id](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) { return parse_single_background_size_value(property_id, tokens); });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::Border:
     case PropertyID::BorderBlock:
     case PropertyID::BorderInline:
@@ -3745,17 +3804,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
             });
         });
     case PropertyID::MaskRepeat:
-        return parse_all_as(tokens, [this](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this](auto& tokens) {
-                return parse_single_repeat_style_value(PropertyID::MaskRepeat, tokens);
-            });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::MaskSize:
-        return parse_all_as(tokens, [this](auto& tokens) {
-            return parse_comma_separated_value_list(tokens, [this](auto& tokens) {
-                return parse_single_background_size_value(PropertyID::MaskSize, tokens);
-            });
-        });
+        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
     case PropertyID::OverflowClipMarginBlockEnd:
     case PropertyID::OverflowClipMarginBlockStart:
     case PropertyID::OverflowClipMarginBottom:
@@ -4264,10 +4315,28 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
     return validate_parsed_position_longhand(EdgeStyleValue::create(relative_edge, value));
 }
 
-RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID property, TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
     auto start = tokens.current_index();
+
+    auto parse_background_size_component = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+        auto transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (auto keyword_value = parse_keyword_value(tokens)) {
+            if (first_is_one_of(keyword_value->to_keyword(), Keyword::Auto, Keyword::Cover, Keyword::Contain)) {
+                transaction.commit();
+                return keyword_value.release_nonnull();
+            }
+        }
+
+        if (auto value = parse_length_percentage_value(tokens, non_negative_range, non_negative_range)) {
+            transaction.commit();
+            return value.release_nonnull();
+        }
+
+        return nullptr;
+    };
 
     auto validate_parsed_background_size = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
         if (!value)
@@ -4281,7 +4350,7 @@ RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID p
         return value;
     };
 
-    auto maybe_x_value = parse_css_value_for_property(property, tokens);
+    auto maybe_x_value = parse_background_size_component(tokens);
     if (!maybe_x_value)
         return nullptr;
 
@@ -4289,7 +4358,7 @@ RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID p
         return validate_parsed_background_size(maybe_x_value);
     }
 
-    auto maybe_y_value = parse_css_value_for_property(property, tokens);
+    auto maybe_y_value = parse_background_size_component(tokens);
     if (!maybe_y_value) {
         return validate_parsed_background_size(BackgroundSizeStyleValue::create(maybe_x_value.release_nonnull(), KeywordStyleValue::create(Keyword::Auto)));
     }
@@ -5079,13 +5148,17 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
     };
 
     auto serialized_repeat_style = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property, 1 }, serialized_repeat_style.bytes_as_string_view()); rust_style_value.has_value() && rust_style_value->kind == FFI::CssStyleValueKind::RepeatStyle) {
+    if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property, 1 }, serialized_repeat_style.bytes_as_string_view());
+        rust_style_value.has_value()
+        && rust_style_value->kind == FFI::CssStyleValueKind::RepeatStyle
+        && rust_style_value->repeat_x_values.size() == 1
+        && rust_style_value->repeat_y_values.size() == 1) {
         while (tokens.has_next_token())
             tokens.discard_a_token();
         transaction.commit();
         return RepeatStyleStyleValue::create(
-            repetition_from_rust(rust_style_value->repeat_x),
-            repetition_from_rust(rust_style_value->repeat_y));
+            repetition_from_rust(rust_style_value->repeat_x_values[0]),
+            repetition_from_rust(rust_style_value->repeat_y_values[0]));
     }
 
     auto validate_parsed_repeat_style = [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
@@ -5120,7 +5193,7 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
         }
     };
 
-    auto maybe_x_value = parse_css_value_for_property(property, tokens);
+    auto maybe_x_value = parse_keyword_value(tokens);
     if (!maybe_x_value)
         return nullptr;
     auto x_value = maybe_x_value.release_nonnull();
@@ -5137,18 +5210,25 @@ RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID prop
         return nullptr;
 
     // See if we have a second value for Y
-    auto maybe_y_value = parse_css_value_for_property(property, tokens);
-    if (!maybe_y_value) {
-        // We don't have a second value, so use x for both
+    Optional<Repetition> y_repeat;
+    {
+        auto y_value_transaction = tokens.begin_transaction();
+        auto maybe_y_value = parse_keyword_value(tokens);
+        if (maybe_y_value) {
+            auto y_value = maybe_y_value.release_nonnull();
+            if (is_directional_repeat(*y_value))
+                return nullptr;
+
+            y_repeat = as_repeat(y_value->to_keyword());
+            if (y_repeat.has_value())
+                y_value_transaction.commit();
+        }
+    }
+
+    if (!y_repeat.has_value()) {
+        // We don't have a second value, so use x for both.
         return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), x_repeat.value()));
     }
-    auto y_value = maybe_y_value.release_nonnull();
-    if (is_directional_repeat(*y_value))
-        return nullptr;
-
-    auto y_repeat = as_repeat(y_value->to_keyword());
-    if (!y_repeat.has_value())
-        return nullptr;
 
     return validate_parsed_repeat_style(RepeatStyleStyleValue::create(x_repeat.value(), y_repeat.value()));
 }
