@@ -39,6 +39,8 @@ use crate::generated_value_types::{
 
 #[path = "css_parser/parser_component_values.rs"]
 mod parser_component_values;
+#[path = "css_parser/parser_descriptors.rs"]
+mod parser_descriptors;
 #[path = "css_parser/parser_emitters.rs"]
 mod parser_emitters;
 #[path = "css_parser/parser_entrypoints.rs"]
@@ -66,6 +68,7 @@ mod style_value_shorthands;
 #[path = "css_parser/style_values.rs"]
 mod style_values;
 
+pub(crate) use parser_descriptors::*;
 use parser_emitters::*;
 pub(crate) use parser_entrypoints::*;
 use parser_selectors::*;
