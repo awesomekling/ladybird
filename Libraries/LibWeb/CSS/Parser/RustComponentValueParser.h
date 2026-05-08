@@ -253,6 +253,25 @@ public:
         RustNestedPrimitiveValue length_percentage;
     };
 
+    enum class RustPositionEdge : u8 {
+        None,
+        Center,
+        Left,
+        Right,
+        Top,
+        Bottom,
+    };
+
+    struct RustPositionComponent {
+        RustPositionEdge edge { RustPositionEdge::None };
+        Optional<RustNestedPrimitiveValue> offset;
+    };
+
+    struct RustPosition {
+        RustPositionComponent x;
+        RustPositionComponent y;
+    };
+
     enum class RustGridTrackPlacementKind : u8 {
         Auto,
         Line,
@@ -552,7 +571,8 @@ public:
         u8 grid_auto_flow_axis { 0 };
         u8 grid_auto_flow_dense { 0 };
         FFI::CssPaintOrderValue paint_order {};
-        Vector<String> position_sources;
+        Vector<RustPosition> positions;
+        Vector<RustPositionComponent> position_components;
         FFI::CssPositionAnchorValueKind position_anchor_kind { FFI::CssPositionAnchorValueKind::Invalid };
         FlyString position_anchor_name;
         FFI::CssPositionTryOrderValue position_try_order { FFI::CssPositionTryOrderValue::Invalid };

@@ -1771,6 +1771,41 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return nullptr;
             };
+            auto materialize_rust_position_edge = [](RustComponentValueParser::RustPositionEdge edge) -> Optional<PositionEdge> {
+                switch (edge) {
+                case RustComponentValueParser::RustPositionEdge::None:
+                    return {};
+                case RustComponentValueParser::RustPositionEdge::Center:
+                    return PositionEdge::Center;
+                case RustComponentValueParser::RustPositionEdge::Left:
+                    return PositionEdge::Left;
+                case RustComponentValueParser::RustPositionEdge::Right:
+                    return PositionEdge::Right;
+                case RustComponentValueParser::RustPositionEdge::Top:
+                    return PositionEdge::Top;
+                case RustComponentValueParser::RustPositionEdge::Bottom:
+                    return PositionEdge::Bottom;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto materialize_rust_position_component = [&](RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<StyleValue const> {
+                RefPtr<StyleValue const> offset;
+                if (component.offset.has_value()) {
+                    offset = materialize_rust_nested_length_percentage(*component.offset, infinite_range);
+                    if (!offset)
+                        return nullptr;
+                }
+                return EdgeStyleValue::create(materialize_rust_position_edge(component.edge), offset);
+            };
+            auto materialize_rust_position = [&](RustComponentValueParser::RustPosition const& position) -> RefPtr<StyleValue const> {
+                auto x = materialize_rust_position_component(position.x);
+                if (!x)
+                    return nullptr;
+                auto y = materialize_rust_position_component(position.y);
+                if (!y)
+                    return nullptr;
+                return PositionStyleValue::create(x->as_edge(), y->as_edge());
+            };
             auto materialize_rust_view_timeline_insets = [&](ReadonlySpan<RustComponentValueParser::RustViewTimelineInset> insets) -> RefPtr<StyleValue const> {
                 if (insets.is_empty())
                     return nullptr;
@@ -3594,42 +3629,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::Position:
-                if (!rust_style_value->position_sources.is_empty() && rust_style_value->value_type.has_value()) {
+                if (rust_style_value->value_type.has_value()) {
                     if (first_is_one_of(rust_style_value->property_id, PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY)) {
                         StyleValueVector values;
-                        values.ensure_capacity(rust_style_value->position_sources.size());
-                        for (auto const& source : rust_style_value->position_sources) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            Optional<PositionEdge> relative_edge {};
-                            RefPtr<StyleValue const> value;
-
-                            if (auto keyword_value = parse_keyword_value(value_tokens)) {
-                                auto keyword = keyword_value->to_keyword();
-                                if (keyword == Keyword::Center) {
-                                    value = EdgeStyleValue::create(PositionEdge::Center, {});
-                                } else if (auto edge = keyword_to_position_edge(keyword); edge.has_value()) {
-                                    relative_edge = edge;
-                                    if (auto length_percentage = parse_length_percentage_value(value_tokens, infinite_range, infinite_range))
-                                        value = EdgeStyleValue::create(relative_edge, length_percentage.release_nonnull());
-                                    else
-                                        value = EdgeStyleValue::create(relative_edge, {});
-                                } else {
-                                    break;
-                                }
-                            } else if (auto length_percentage = parse_length_percentage_value(value_tokens, infinite_range, infinite_range)) {
-                                value = EdgeStyleValue::create(relative_edge, length_percentage.release_nonnull());
-                            } else {
-                                break;
-                            }
-
-                            value_tokens.discard_whitespace();
-                            if (value_tokens.has_next_token())
+                        values.ensure_capacity(rust_style_value->position_components.size());
+                        for (auto const& component : rust_style_value->position_components) {
+                            auto value = materialize_rust_position_component(component);
+                            if (!value)
                                 break;
                             values.append(value.release_nonnull());
                         }
 
-                        if (values.size() == rust_style_value->position_sources.size()) {
+                        if (values.size() == rust_style_value->position_components.size()) {
                             discard_rust_owned_property_value_tokens();
                             generated_transaction.commit();
                             return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
@@ -3637,22 +3648,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     } else if (*rust_style_value->value_type == ValueType::BackgroundPosition) {
                         StyleValueVector background_position_x_values;
                         StyleValueVector background_position_y_values;
-                        background_position_x_values.ensure_capacity(rust_style_value->position_sources.size());
-                        background_position_y_values.ensure_capacity(rust_style_value->position_sources.size());
+                        background_position_x_values.ensure_capacity(rust_style_value->positions.size());
+                        background_position_y_values.ensure_capacity(rust_style_value->positions.size());
 
-                        for (auto const& source : rust_style_value->position_sources) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            auto position = parse_position_value(value_tokens, PositionParsingMode::BackgroundPosition);
-                            value_tokens.discard_whitespace();
-                            if (!position || value_tokens.has_next_token())
+                        for (auto const& position : rust_style_value->positions) {
+                            auto x = materialize_rust_position_component(position.x);
+                            if (!x)
+                                break;
+                            auto y = materialize_rust_position_component(position.y);
+                            if (!y)
                                 break;
 
-                            background_position_x_values.append(position->as_position().edge_x());
-                            background_position_y_values.append(position->as_position().edge_y());
+                            background_position_x_values.append(x.release_nonnull());
+                            background_position_y_values.append(y.release_nonnull());
                         }
 
-                        if (background_position_x_values.size() == rust_style_value->position_sources.size()) {
+                        if (background_position_x_values.size() == rust_style_value->positions.size()) {
                             discard_rust_owned_property_value_tokens();
                             generated_transaction.commit();
                             return PropertyAndValue { rust_style_value->property_id,
@@ -3661,21 +3672,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                     { StyleValueList::create(move(background_position_x_values), StyleValueList::Separator::Comma),
                                         StyleValueList::create(move(background_position_y_values), StyleValueList::Separator::Comma) }) };
                         }
+                    } else if (*rust_style_value->value_type == ValueType::Position && rust_style_value->property_id != PropertyID::MaskPosition) {
+                        if (rust_style_value->positions.size() == 1) {
+                            if (auto value = materialize_rust_position(rust_style_value->positions[0])) {
+                                discard_rust_owned_property_value_tokens();
+                                generated_transaction.commit();
+                                return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+                            }
+                        }
                     } else if (*rust_style_value->value_type == ValueType::Position) {
                         StyleValueVector values;
-                        values.ensure_capacity(rust_style_value->position_sources.size());
-                        for (auto const& source : rust_style_value->position_sources) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            auto position = parse_position_value(value_tokens);
-                            value_tokens.discard_whitespace();
-                            if (!position || value_tokens.has_next_token())
+                        values.ensure_capacity(rust_style_value->positions.size());
+                        for (auto const& position : rust_style_value->positions) {
+                            auto value = materialize_rust_position(position);
+                            if (!value)
                                 break;
 
-                            values.append(position.release_nonnull());
+                            values.append(value.release_nonnull());
                         }
 
-                        if (values.size() == rust_style_value->position_sources.size()) {
+                        if (values.size() == rust_style_value->positions.size()) {
                             discard_rust_owned_property_value_tokens();
                             generated_transaction.commit();
                             return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };

@@ -2821,20 +2821,31 @@ pub(crate) struct RustOwnedPositionVisibility {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPosition {
     value_type: PropertyValueType,
-    components: Vec<RustOwnedPositionComponent>,
-    source: String,
+    value: RustOwnedResolvedPosition,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionList {
     value_type: PropertyValueType,
-    sources: Vec<String>,
+    values: Vec<RustOwnedPositionListItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedPositionComponent {
-    Edge { edge: PositionEdge, source: String },
-    LengthPercentage { source: String },
+pub(crate) enum RustOwnedPositionListItem {
+    Position(RustOwnedResolvedPosition),
+    Component(RustOwnedPositionComponent),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedResolvedPosition {
+    x: RustOwnedPositionComponent,
+    y: RustOwnedPositionComponent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedPositionComponent {
+    edge: Option<PositionEdge>,
+    offset: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5292,25 +5303,18 @@ fn rust_owned_position_style_value_kind(
     value_type: PropertyValueType,
     source: String,
 ) -> Option<RustOwnedStyleValueKind> {
-    let allow_background_position_3_value_syntax = value_type == PropertyValueType::BackgroundPosition;
-    if parse_position_value(source.as_bytes(), allow_background_position_3_value_syntax)
-        == CssPositionValueKind::Invalid
-    {
-        return None;
-    }
-
     let (mut parser, _) = parser_from_filtered_input(source.as_bytes());
     let component_values = parser.parse_a_list_of_component_values();
-    let components = strip_whitespace(&component_values)
-        .iter()
-        .filter(|component_value| !is_whitespace_component_value(component_value))
-        .map(|component_value| rust_owned_position_component_from_component_value(component_value, &source))
-        .collect::<Option<Vec<_>>>()?;
+    let allow_background_position_3_value_syntax = value_type == PropertyValueType::BackgroundPosition;
+    let value = parse_rust_owned_position_value(
+        strip_whitespace(&component_values),
+        &source,
+        allow_background_position_3_value_syntax,
+    )?;
 
     Some(RustOwnedStyleValueKind::Position(RustOwnedPosition {
         value_type,
-        components,
-        source,
+        value,
     }))
 }
 
@@ -5321,19 +5325,24 @@ fn rust_owned_position_list_style_value_kind(
     let source = filtered_input_to_string(filtered_input);
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let sources = parse_comma_separated_component_values(component_values, |component_values| {
-        let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
-        rust_owned_position_style_value_kind(value_type, value_source.clone())?;
-        Some(value_source)
+    let values = parse_comma_separated_component_values(component_values, |component_values| {
+        serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
+        let allow_background_position_3_value_syntax = value_type == PropertyValueType::BackgroundPosition;
+        parse_rust_owned_position_value(
+            strip_whitespace(&component_values),
+            &source,
+            allow_background_position_3_value_syntax,
+        )
+        .map(RustOwnedPositionListItem::Position)
     })?;
 
-    if sources.is_empty() {
+    if values.is_empty() {
         return None;
     }
 
     Some(RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
         value_type,
-        sources,
+        values,
     }))
 }
 
@@ -5345,64 +5354,20 @@ fn rust_owned_background_position_longhand_list_style_value_kind(
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let is_horizontal = property_id == PropertyId::BackgroundPositionX;
-    let sources = parse_comma_separated_component_values(component_values, |component_values| {
-        let value_source = serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
-        if parse_background_position_longhand_value(value_source.as_bytes(), is_horizontal)
-            == CssPositionValueKind::Invalid
-        {
-            return None;
-        }
-        Some(value_source)
+    let values = parse_comma_separated_component_values(component_values, |component_values| {
+        serialize_component_values_for_reparsing(strip_whitespace(&component_values), &source)?;
+        parse_rust_owned_background_position_longhand_value(strip_whitespace(&component_values), &source, is_horizontal)
+            .map(RustOwnedPositionListItem::Component)
     })?;
 
-    if sources.is_empty() {
+    if values.is_empty() {
         return None;
     }
 
     Some(RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
         value_type: PropertyValueType::BackgroundPosition,
-        sources,
+        values,
     }))
-}
-
-fn rust_owned_position_component_from_component_value(
-    component_value: &ComponentValue,
-    source: &str,
-) -> Option<RustOwnedPositionComponent> {
-    let component_source = serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)?;
-
-    if let ComponentValue::PreservedToken(Token {
-        token_type: TokenType::Ident { value },
-        ..
-    }) = component_value
-    {
-        let edge = if value.eq_ignore_ascii_case("left") {
-            PositionEdge::Left
-        } else if value.eq_ignore_ascii_case("right") {
-            PositionEdge::Right
-        } else if value.eq_ignore_ascii_case("top") {
-            PositionEdge::Top
-        } else if value.eq_ignore_ascii_case("bottom") {
-            PositionEdge::Bottom
-        } else if value.eq_ignore_ascii_case("center") {
-            PositionEdge::Center
-        } else {
-            return None;
-        };
-
-        return Some(RustOwnedPositionComponent::Edge {
-            edge,
-            source: component_source,
-        });
-    }
-
-    if component_value_parse_as_length_percentage(component_value) {
-        return Some(RustOwnedPositionComponent::LengthPercentage {
-            source: component_source,
-        });
-    }
-
-    None
 }
 
 fn rust_owned_quotes_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
@@ -8493,25 +8458,52 @@ where
             callback_position_area_style_value(callback, CssStyleValueKind::PositionArea, property_id, value);
         }
         RustOwnedStyleValueKind::Position(value) => {
-            callback_style_value_type(callback, CssStyleValueKind::ValueType, property_id, value.value_type);
+            callback_style_value_type(callback, CssStyleValueKind::Position, property_id, value.value_type);
+            callback(
+                CssStyleValueKind::Position,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                1,
+                0,
+                0,
+                0,
+                &[],
+                "",
+            );
+            callback_position_component(callback, property_id, 2, &value.value.x);
+            callback_position_component(callback, property_id, 3, &value.value.y);
         }
         RustOwnedStyleValueKind::PositionList(value) => {
-            for source in &value.sources {
-                callback(
-                    CssStyleValueKind::Position,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    source.as_bytes(),
-                    property_value_type_name(value.value_type),
-                );
+            callback_style_value_type(callback, CssStyleValueKind::Position, property_id, value.value_type);
+            for value in &value.values {
+                match value {
+                    RustOwnedPositionListItem::Position(position) => {
+                        callback(
+                            CssStyleValueKind::Position,
+                            property_id,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            false,
+                            0.0,
+                            1,
+                            0,
+                            0,
+                            0,
+                            &[],
+                            "",
+                        );
+                        callback_position_component(callback, property_id, 2, &position.x);
+                        callback_position_component(callback, property_id, 3, &position.y);
+                    }
+                    RustOwnedPositionListItem::Component(component) => {
+                        callback_position_component(callback, property_id, 4, component);
+                    }
+                }
             }
         }
         RustOwnedStyleValueKind::PositionTryFallbacks(value) => {
@@ -11220,6 +11212,62 @@ fn callback_view_timeline_inset_value<C>(
                 value,
             );
         }
+    }
+}
+
+fn callback_position_component<C>(
+    callback: &mut C,
+    property_id: u16,
+    component_kind: u8,
+    component: &RustOwnedPositionComponent,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let edge = component.edge.map_or(0, rust_owned_position_edge_to_callback_value);
+    let Some(offset) = component.offset.as_ref() else {
+        callback(
+            CssStyleValueKind::Position,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            component_kind,
+            edge,
+            0,
+            0,
+            &[],
+            "",
+        );
+        return;
+    };
+
+    let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(offset);
+    callback(
+        CssStyleValueKind::Position,
+        property_id,
+        primitive_kind,
+        !matches!(offset, RustOwnedNestedPrimitiveValue::Source(_)),
+        numeric_value,
+        false,
+        0.0,
+        component_kind,
+        edge,
+        1,
+        0,
+        unit_or_source.as_bytes(),
+        "",
+    );
+}
+
+fn rust_owned_position_edge_to_callback_value(edge: PositionEdge) -> u8 {
+    match edge {
+        PositionEdge::Center => 1,
+        PositionEdge::Left => 2,
+        PositionEdge::Right => 3,
+        PositionEdge::Top => 4,
+        PositionEdge::Bottom => 5,
     }
 }
 
@@ -17480,6 +17528,217 @@ fn component_values_parse_as_position(
     consume_position_alternative_1(&mut parser) && parser_has_no_remaining_component_values(&mut parser)
 }
 
+fn parse_rust_owned_position_value(
+    component_values: &[ComponentValue],
+    source: &str,
+    allow_background_position_3_value_syntax: bool,
+) -> Option<RustOwnedResolvedPosition> {
+    // Note: The alternatives must be attempted in this order since shorter alternatives can match a prefix of longer ones.
+    if let Some(position) = parse_rust_owned_position_with_alternative(component_values, |parser| {
+        parse_rust_owned_position_alternative_4(parser, source)
+    }) {
+        return Some(position);
+    }
+
+    if allow_background_position_3_value_syntax
+        && let Some(position) = parse_rust_owned_position_with_alternative(component_values, |parser| {
+            parse_rust_owned_position_alternative_5_for_background_position(parser, source)
+        })
+    {
+        return Some(position);
+    }
+
+    if let Some(position) = parse_rust_owned_position_with_alternative(component_values, |parser| {
+        parse_rust_owned_position_alternative_3(parser, source)
+    }) {
+        return Some(position);
+    }
+
+    if let Some(position) =
+        parse_rust_owned_position_with_alternative(component_values, parse_rust_owned_position_alternative_2)
+    {
+        return Some(position);
+    }
+
+    parse_rust_owned_position_with_alternative(component_values, |parser| {
+        parse_rust_owned_position_alternative_1(parser, source)
+    })
+}
+
+fn parse_rust_owned_position_with_alternative(
+    component_values: &[ComponentValue],
+    alternative: impl FnOnce(&mut ComponentValueParser) -> Option<RustOwnedResolvedPosition>,
+) -> Option<RustOwnedResolvedPosition> {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let position = alternative(&mut parser)?;
+    parser_has_no_remaining_component_values(&mut parser).then_some(position)
+}
+
+fn parse_rust_owned_position_alternative_1(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedResolvedPosition> {
+    let start = parser.index;
+
+    // [ left | center | right | top | bottom | <length-percentage> ]
+    if let Some(edge) = consume_position_edge(parser) {
+        if is_horizontal_position_edge(edge, false) {
+            return Some(RustOwnedResolvedPosition {
+                x: rust_owned_position_edge_component(edge),
+                y: rust_owned_position_edge_component(PositionEdge::Center),
+            });
+        }
+
+        if is_vertical_position_edge(edge, false) {
+            return Some(RustOwnedResolvedPosition {
+                x: rust_owned_position_edge_component(PositionEdge::Center),
+                y: rust_owned_position_edge_component(edge),
+            });
+        }
+
+        return Some(RustOwnedResolvedPosition {
+            x: rust_owned_position_edge_component(PositionEdge::Center),
+            y: rust_owned_position_edge_component(PositionEdge::Center),
+        });
+    }
+
+    if let Some(offset) = consume_rust_owned_length_percentage_component_value(parser, source) {
+        return Some(RustOwnedResolvedPosition {
+            x: RustOwnedPositionComponent {
+                edge: None,
+                offset: Some(offset),
+            },
+            y: rust_owned_position_edge_component(PositionEdge::Center),
+        });
+    }
+
+    parser.index = start;
+    None
+}
+
+fn parse_rust_owned_position_alternative_2(parser: &mut ComponentValueParser) -> Option<RustOwnedResolvedPosition> {
+    let start = parser.index;
+
+    // [ left | center | right ] && [ top | center | bottom ]
+    let Some(mut first_edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    let Some(mut second_edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    // If 'left' or 'right' is given, that position is X and the other is Y.
+    // Conversely -
+    // If 'top' or 'bottom' is given, that position is Y and the other is X.
+    if is_vertical_position_edge(first_edge, false) || is_horizontal_position_edge(second_edge, false) {
+        std::mem::swap(&mut first_edge, &mut second_edge);
+    }
+
+    // [ left | center | right ] [ top | bottom | center ]
+    if is_horizontal_position_edge(first_edge, true) && is_vertical_position_edge(second_edge, true) {
+        return Some(RustOwnedResolvedPosition {
+            x: rust_owned_position_edge_component(first_edge),
+            y: rust_owned_position_edge_component(second_edge),
+        });
+    }
+
+    parser.index = start;
+    None
+}
+
+fn parse_rust_owned_position_alternative_3(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedResolvedPosition> {
+    let start = parser.index;
+
+    // [ left | center | right | <length-percentage> ]
+    let Some(x) = consume_rust_owned_position_or_length(parser, source, PositionAxis::Horizontal) else {
+        parser.index = start;
+        return None;
+    };
+
+    // [ top | center | bottom | <length-percentage> ]
+    let Some(y) = consume_rust_owned_position_or_length(parser, source, PositionAxis::Vertical) else {
+        parser.index = start;
+        return None;
+    };
+
+    Some(RustOwnedResolvedPosition { x, y })
+}
+
+fn parse_rust_owned_position_alternative_4(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedResolvedPosition> {
+    let start = parser.index;
+
+    // [ [ left | right ] <length-percentage> ] &&
+    // [ [ top | bottom ] <length-percentage> ]
+    let Some(group1) = consume_rust_owned_position_and_length(parser, source) else {
+        parser.index = start;
+        return None;
+    };
+
+    let Some(group2) = consume_rust_owned_position_and_length(parser, source) else {
+        parser.index = start;
+        return None;
+    };
+
+    if is_horizontal_position_edge(group1.edge?, false) && is_vertical_position_edge(group2.edge?, false) {
+        return Some(RustOwnedResolvedPosition { x: group1, y: group2 });
+    }
+
+    if is_vertical_position_edge(group1.edge?, false) && is_horizontal_position_edge(group2.edge?, false) {
+        return Some(RustOwnedResolvedPosition { x: group2, y: group1 });
+    }
+
+    parser.index = start;
+    None
+}
+
+fn parse_rust_owned_position_alternative_5_for_background_position(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedResolvedPosition> {
+    let start = parser.index;
+
+    // The extra 3-value syntax that's allowed for background-position:
+    // [ center | [ left | right ] <length-percentage>? ] &&
+    // [ center | [ top | bottom ] <length-percentage>? ]
+    let Some(mut group1) = consume_rust_owned_position_and_maybe_length(parser, source) else {
+        parser.index = start;
+        return None;
+    };
+
+    let Some(mut group2) = consume_rust_owned_position_and_maybe_length(parser, source) else {
+        parser.index = start;
+        return None;
+    };
+
+    if group1.offset.is_some() == group2.offset.is_some() {
+        parser.index = start;
+        return None;
+    }
+
+    if is_vertical_position_edge(group1.edge?, false) || is_horizontal_position_edge(group2.edge?, false) {
+        std::mem::swap(&mut group1, &mut group2);
+    }
+
+    if !is_horizontal_position_edge(group1.edge?, true) || !is_vertical_position_edge(group2.edge?, true) {
+        parser.index = start;
+        return None;
+    }
+
+    Some(RustOwnedResolvedPosition {
+        x: rust_owned_position_component_for_background_position(group1),
+        y: rust_owned_position_component_for_background_position(group2),
+    })
+}
+
 fn parser_has_no_remaining_component_values(parser: &mut ComponentValueParser) -> bool {
     parser.discard_whitespace();
     !parser.has_next_component_value()
@@ -17624,6 +17883,109 @@ enum PositionAxis {
     Vertical,
 }
 
+fn consume_rust_owned_position_or_length(
+    parser: &mut ComponentValueParser,
+    source: &str,
+    axis: PositionAxis,
+) -> Option<RustOwnedPositionComponent> {
+    let start = parser.index;
+
+    if let Some(edge) = consume_position_edge(parser) {
+        let valid = match axis {
+            PositionAxis::Horizontal => is_horizontal_position_edge(edge, true),
+            PositionAxis::Vertical => is_vertical_position_edge(edge, true),
+        };
+        if valid {
+            return Some(rust_owned_position_edge_component(edge));
+        }
+
+        parser.index = start;
+        return None;
+    }
+
+    consume_rust_owned_length_percentage_component_value(parser, source).map(|offset| RustOwnedPositionComponent {
+        edge: None,
+        offset: Some(offset),
+    })
+}
+
+fn consume_rust_owned_position_and_length(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedPositionComponent> {
+    let start = parser.index;
+
+    let Some(edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    let Some(offset) = consume_rust_owned_length_percentage_component_value(parser, source) else {
+        parser.index = start;
+        return None;
+    };
+
+    Some(RustOwnedPositionComponent {
+        edge: Some(edge),
+        offset: Some(offset),
+    })
+}
+
+fn consume_rust_owned_position_and_maybe_length(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedPositionComponent> {
+    let start = parser.index;
+
+    let Some(edge) = consume_position_edge(parser) else {
+        parser.index = start;
+        return None;
+    };
+
+    let offset = consume_rust_owned_length_percentage_component_value(parser, source);
+    if offset.is_some() && edge == PositionEdge::Center {
+        parser.index = start;
+        return None;
+    }
+
+    Some(RustOwnedPositionComponent {
+        edge: Some(edge),
+        offset,
+    })
+}
+
+fn consume_rust_owned_length_percentage_component_value(
+    parser: &mut ComponentValueParser,
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if !component_value_parse_as_length_percentage(component_value) {
+        return None;
+    }
+
+    let value = component_value_parse_as_nested_length_percentage(component_value, source)?;
+    parser.index += 1;
+    Some(value)
+}
+
+fn rust_owned_position_component_for_background_position(
+    component: RustOwnedPositionComponent,
+) -> RustOwnedPositionComponent {
+    if component.edge == Some(PositionEdge::Center) {
+        return rust_owned_position_edge_component(PositionEdge::Center);
+    }
+
+    component
+}
+
+fn rust_owned_position_edge_component(edge: PositionEdge) -> RustOwnedPositionComponent {
+    RustOwnedPositionComponent {
+        edge: Some(edge),
+        offset: None,
+    }
+}
+
 fn consume_position_or_length(parser: &mut ComponentValueParser, axis: PositionAxis) -> bool {
     let start = parser.index;
 
@@ -17735,6 +18097,16 @@ pub(crate) fn parse_background_position_longhand_value(
     }
 }
 
+fn parse_rust_owned_background_position_longhand_value(
+    component_values: &[ComponentValue],
+    source: &str,
+    is_horizontal: bool,
+) -> Option<RustOwnedPositionComponent> {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let component = consume_rust_owned_background_position_longhand_value(&mut parser, source, is_horizontal)?;
+    parser_has_no_remaining_component_values(&mut parser).then_some(component)
+}
+
 fn consume_background_position_longhand_value(parser: &mut ComponentValueParser, is_horizontal: bool) -> bool {
     // https://drafts.csswg.org/css-backgrounds-4/#propdef-background-position-x
     // background-position-x = [ center | [ left | right | x-start | x-end ]? <length-percentage>? ]#
@@ -17759,6 +18131,44 @@ fn consume_background_position_longhand_value(parser: &mut ComponentValueParser,
 
     let parsed_offset = consume_length_percentage_component_value(parser);
     parsed_edge || parsed_offset
+}
+
+fn consume_rust_owned_background_position_longhand_value(
+    parser: &mut ComponentValueParser,
+    source: &str,
+    is_horizontal: bool,
+) -> Option<RustOwnedPositionComponent> {
+    // https://drafts.csswg.org/css-backgrounds-4/#propdef-background-position-x
+    // background-position-x = [ center | [ left | right | x-start | x-end ]? <length-percentage>? ]#
+    //
+    // https://drafts.csswg.org/css-backgrounds-4/#propdef-background-position-y
+    // background-position-y = [ center | [ top | bottom | y-start | y-end ]? <length-percentage>? ]#
+    if consume_optional_ident_matching(parser, "center") {
+        return Some(rust_owned_position_edge_component(PositionEdge::Center));
+    }
+
+    let edge = if is_horizontal {
+        if consume_optional_ident_matching(parser, "left") {
+            Some(PositionEdge::Left)
+        } else if consume_optional_ident_matching(parser, "right") {
+            Some(PositionEdge::Right)
+        } else {
+            None
+        }
+    } else if consume_optional_ident_matching(parser, "top") {
+        Some(PositionEdge::Top)
+    } else if consume_optional_ident_matching(parser, "bottom") {
+        Some(PositionEdge::Bottom)
+    } else {
+        None
+    };
+
+    let offset = consume_rust_owned_length_percentage_component_value(parser, source);
+    if edge.is_none() && offset.is_none() {
+        return None;
+    }
+
+    Some(RustOwnedPositionComponent { edge, offset })
 }
 
 pub(crate) fn parse_background_size_value(filtered_input: &[u8]) -> CssBackgroundSizeValueKind {
@@ -30764,12 +31174,13 @@ mod tests {
         RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction,
         RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedPaintOrder, RustOwnedPlaceShorthand,
         RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent,
-        RustOwnedPositionList, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-        RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedRect, RustOwnedRectSide,
-        RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-        RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-        RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray,
-        RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+        RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks,
+        RustOwnedPositionTryOrder, RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem,
+        RustOwnedRect, RustOwnedRectSide, RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition,
+        RustOwnedScrollTimeline, RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow,
+        RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside, RustOwnedSimpleFilterFunction,
+        RustOwnedSingleShadow, RustOwnedStepPosition, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+        RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
         RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine,
         RustOwnedTextDecorationThickness, RustOwnedTextIndent, RustOwnedTextIndentLengthPercentage,
         RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
@@ -30843,6 +31254,27 @@ mod tests {
         PseudoElementId, PseudoElementParameterType, aliased_pseudo_element_id_from_string,
         pseudo_element_id_from_string, pseudo_element_metadata, pseudo_element_name,
     };
+
+    fn position_edge(edge: PositionEdge) -> RustOwnedPositionComponent {
+        RustOwnedPositionComponent {
+            edge: Some(edge),
+            offset: None,
+        }
+    }
+
+    fn position_offset(offset: RustOwnedNestedPrimitiveValue) -> RustOwnedPositionComponent {
+        RustOwnedPositionComponent {
+            edge: None,
+            offset: Some(offset),
+        }
+    }
+
+    fn position_edge_offset(edge: PositionEdge, offset: RustOwnedNestedPrimitiveValue) -> RustOwnedPositionComponent {
+        RustOwnedPositionComponent {
+            edge: Some(edge),
+            offset: Some(offset),
+        }
+    }
     use crate::generated_units::{DimensionType, dimension_for_unit};
     use crate::generated_value_types::ValueTypeId;
 
@@ -33472,23 +33904,16 @@ mod tests {
                 property_id: PropertyId::ObjectPosition,
                 value: RustOwnedStyleValueKind::Position(RustOwnedPosition {
                     value_type: PropertyValueType::Position,
-                    components: vec![
-                        RustOwnedPositionComponent::Edge {
-                            edge: PositionEdge::Left,
-                            source: "left".to_string(),
-                        },
-                        RustOwnedPositionComponent::LengthPercentage {
-                            source: "10px".to_string(),
-                        },
-                        RustOwnedPositionComponent::Edge {
-                            edge: PositionEdge::Top,
-                            source: "top".to_string(),
-                        },
-                        RustOwnedPositionComponent::LengthPercentage {
-                            source: "20%".to_string(),
-                        },
-                    ],
-                    source: "left 10px top 20%".to_string(),
+                    value: RustOwnedResolvedPosition {
+                        x: position_edge_offset(
+                            PositionEdge::Left,
+                            RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            },
+                        ),
+                        y: position_edge_offset(PositionEdge::Top, RustOwnedNestedPrimitiveValue::Percentage(20.0)),
+                    },
                 }),
             })
         );
@@ -33498,7 +33923,44 @@ mod tests {
                 property_id: PropertyId::BackgroundPosition,
                 value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                     value_type: PropertyValueType::BackgroundPosition,
-                    sources: vec!["left 10px top".to_string(), "center".to_string()],
+                    values: vec![
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_edge_offset(
+                                PositionEdge::Left,
+                                RustOwnedNestedPrimitiveValue::Length {
+                                    value: 10.0,
+                                    unit: "px".to_string(),
+                                },
+                            ),
+                            y: position_edge(PositionEdge::Top),
+                        }),
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_edge(PositionEdge::Center),
+                            y: position_edge(PositionEdge::Center),
+                        }),
+                    ],
+                }),
+            })
+        );
+        assert_eq!(
+            parse_rust_owned_style_value(
+                &[PropertyId::BackgroundPosition],
+                "calc(0% + 20px) calc(0% + 20px), calc(0% + 40px) calc(0% + 40px)"
+            ),
+            Some(RustOwnedStyleValue {
+                property_id: PropertyId::BackgroundPosition,
+                value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
+                    value_type: PropertyValueType::BackgroundPosition,
+                    values: vec![
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 20px)".to_string(),)),
+                            y: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 20px)".to_string(),)),
+                        }),
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 40px)".to_string(),)),
+                            y: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 40px)".to_string(),)),
+                        }),
+                    ],
                 }),
             })
         );
@@ -33508,7 +33970,16 @@ mod tests {
                 property_id: PropertyId::BackgroundPositionX,
                 value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                     value_type: PropertyValueType::BackgroundPosition,
-                    sources: vec!["left 10px".to_string(), "center".to_string()],
+                    values: vec![
+                        RustOwnedPositionListItem::Component(position_edge_offset(
+                            PositionEdge::Left,
+                            RustOwnedNestedPrimitiveValue::Length {
+                                value: 10.0,
+                                unit: "px".to_string(),
+                            },
+                        )),
+                        RustOwnedPositionListItem::Component(position_edge(PositionEdge::Center)),
+                    ],
                 }),
             })
         );
@@ -33518,7 +33989,18 @@ mod tests {
                 property_id: PropertyId::BackgroundPositionY,
                 value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                     value_type: PropertyValueType::BackgroundPosition,
-                    sources: vec!["top 20px".to_string(), "50%".to_string()],
+                    values: vec![
+                        RustOwnedPositionListItem::Component(position_edge_offset(
+                            PositionEdge::Top,
+                            RustOwnedNestedPrimitiveValue::Length {
+                                value: 20.0,
+                                unit: "px".to_string(),
+                            },
+                        )),
+                        RustOwnedPositionListItem::Component(position_offset(
+                            RustOwnedNestedPrimitiveValue::Percentage(50.0),
+                        )),
+                    ],
                 }),
             })
         );
@@ -33528,7 +34010,28 @@ mod tests {
                 property_id: PropertyId::MaskPosition,
                 value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                     value_type: PropertyValueType::Position,
-                    sources: vec!["left 10px top 20px".to_string(), "center".to_string()],
+                    values: vec![
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_edge_offset(
+                                PositionEdge::Left,
+                                RustOwnedNestedPrimitiveValue::Length {
+                                    value: 10.0,
+                                    unit: "px".to_string(),
+                                },
+                            ),
+                            y: position_edge_offset(
+                                PositionEdge::Top,
+                                RustOwnedNestedPrimitiveValue::Length {
+                                    value: 20.0,
+                                    unit: "px".to_string(),
+                                },
+                            ),
+                        }),
+                        RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                            x: position_edge(PositionEdge::Center),
+                            y: position_edge(PositionEdge::Center),
+                        }),
+                    ],
                 }),
             })
         );
@@ -34600,12 +35103,12 @@ mod tests {
             Some(ParsedStyleValue {
                 kind: CssStyleValueKind::Position,
                 property_id: PropertyId::BackgroundPositionX,
-                primitive_kind: CssPrimitiveValueKind::Invalid,
-                numeric_value: None,
+                primitive_kind: CssPrimitiveValueKind::Percentage,
+                numeric_value: Some(50.0),
                 secondary_numeric_value: None,
                 color: None,
-                value: "50%".to_string(),
-                value_type: "BackgroundPosition".to_string(),
+                value: String::new(),
+                value_type: String::new(),
             })
         );
         assert_eq!(

@@ -1980,6 +1980,23 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .second = static_cast<FFI::CssPaintOrderKeyword>(color_blue),
                 };
             } else if (kind == FFI::CssStyleValueKind::Position) {
+                enum : u8 {
+                    Header,
+                    BeginPosition,
+                    PositionX,
+                    PositionY,
+                    LonghandComponent,
+                };
+
+                auto position_component_from_callback_payload = [&]() {
+                    RustPositionComponent component {
+                        .edge = static_cast<RustPositionEdge>(color_green),
+                    };
+                    if (color_blue != 0)
+                        component.offset = nested_primitive_value_from_callback_payload();
+                    return component;
+                };
+
                 if (!style_value.has_value()) {
                     auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                     if (!value_type.has_value())
@@ -1990,7 +2007,24 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Position);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
-                style_value->position_sources.append(string_from_ffi_bytes(value_ptr, value_len));
+
+                if (color_red == Header) {
+                    auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                    if (!value_type.has_value())
+                        return;
+                    style_value->value_type = value_type.release_value();
+                } else if (color_red == BeginPosition) {
+                    style_value->positions.append({});
+                } else if (color_red == PositionX) {
+                    VERIFY(!style_value->positions.is_empty());
+                    style_value->positions.last().x = position_component_from_callback_payload();
+                } else if (color_red == PositionY) {
+                    VERIFY(!style_value->positions.is_empty());
+                    style_value->positions.last().y = position_component_from_callback_payload();
+                } else {
+                    VERIFY(color_red == LonghandComponent);
+                    style_value->position_components.append(position_component_from_callback_payload());
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::PositionAnchor) {
                 value.position_anchor_kind = static_cast<FFI::CssPositionAnchorValueKind>(color_red);
