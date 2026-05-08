@@ -1923,6 +1923,28 @@ Optional<Vector<RustComponentValueParser::CoordinatingValueListShorthandItem>> R
     return items;
 }
 
+Optional<Vector<RustComponentValueParser::LayerShorthandItem>> RustComponentValueParser::parse_layer_shorthand(PropertyID property_id, StringView input)
+{
+    Vector<LayerShorthandItem> items;
+    auto input_bytes = input.bytes();
+    if (!FFI::rust_css_parse_layer_shorthand(
+            static_cast<u16>(to_underlying(property_id)),
+            input_bytes.data(),
+            input_bytes.size(),
+            &items,
+            [](void* raw_items, size_t layer_index, u16 property_id, u8 const* value_ptr, size_t value_len) {
+                auto& items = *static_cast<Vector<LayerShorthandItem>*>(raw_items);
+                items.append(LayerShorthandItem {
+                    .layer_index = layer_index,
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = String::from_utf8_without_validation({ value_ptr, value_len }),
+                });
+            }))
+        return {};
+
+    return items;
+}
+
 Optional<Vector<RustComponentValueParser::PositionalValueListShorthandItem>> RustComponentValueParser::parse_positional_value_list_shorthand(PropertyID property_id, StringView input)
 {
     Vector<PositionalValueListShorthandItem> items;

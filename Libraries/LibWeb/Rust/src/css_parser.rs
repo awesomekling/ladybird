@@ -2151,6 +2151,13 @@ pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedLayerShorthandItem {
+    layer_index: usize,
+    property_id: PropertyId,
+    source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     index: usize,
     style_value: RustOwnedStyleValue,
@@ -3104,7 +3111,16 @@ where
             if !property_accepts_value_type(property_id, *value_type) {
                 continue;
             }
-            if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+            let value_type_matches = if *value_type == PropertyValueType::Url {
+                match property_id {
+                    PropertyId::ClipPath => parse_a_url_function(filtered_input, |_| {}, |_| {}),
+                    PropertyId::MaskImage => component_values_parse_as_fragment_url(filtered_input),
+                    _ => false,
+                }
+            } else {
+                component_values_parse_as_property_value_type(*value_type, filtered_input)
+            };
+            if !value_type_matches {
                 continue;
             }
 
@@ -3246,8 +3262,12 @@ fn parse_rust_owned_style_value_for_property_with_mode(
                 }
                 continue;
             }
-            let value_type_matches = if *value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
-                parse_a_url_function(filtered_input, |_| {}, |_| {})
+            let value_type_matches = if *value_type == PropertyValueType::Url {
+                match property_id {
+                    PropertyId::ClipPath => parse_a_url_function(filtered_input, |_| {}, |_| {}),
+                    PropertyId::MaskImage => component_values_parse_as_fragment_url(filtered_input),
+                    _ => false,
+                }
             } else {
                 component_values_parse_as_property_value_type(*value_type, filtered_input)
             };
@@ -3673,7 +3693,10 @@ fn parse_rust_owned_generated_longhand_value(
         return RustOwnedStyleValue { property_id, value };
     }
 
-    if value_type == PropertyValueType::Url && property_id == PropertyId::ClipPath {
+    if value_type == PropertyValueType::Url
+        && (property_id == PropertyId::ClipPath
+            || (property_id == PropertyId::MaskImage && component_values_parse_as_fragment_url(filtered_input)))
+    {
         return RustOwnedStyleValue {
             property_id,
             value: RustOwnedStyleValueKind::Url(filtered_input_to_string(filtered_input)),
@@ -10420,6 +10443,209 @@ fn parsed_transition_shorthand_is_invalid(items: &[RustOwnedCoordinatingValueLis
         })
 }
 
+pub(crate) fn parse_layer_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(usize, u16, &str),
+{
+    let Some(items) = parse_rust_owned_layer_shorthand(property_id, filtered_input) else {
+        return false;
+    };
+
+    for item in items {
+        callback(item.layer_index, item.property_id as u16, &item.source);
+    }
+
+    true
+}
+
+pub(crate) fn parse_rust_owned_layer_shorthand(
+    property_id: u16,
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedLayerShorthandItem>> {
+    let property_id = property_id_from_u16(property_id)?;
+    let longhand_property_ids = match property_id {
+        PropertyId::Background => &[
+            PropertyId::BackgroundAttachment,
+            PropertyId::BackgroundClip,
+            PropertyId::BackgroundColor,
+            PropertyId::BackgroundImage,
+            PropertyId::BackgroundOrigin,
+            PropertyId::BackgroundPosition,
+            PropertyId::BackgroundRepeat,
+        ][..],
+        PropertyId::Mask => &[
+            PropertyId::MaskImage,
+            PropertyId::MaskPosition,
+            PropertyId::MaskRepeat,
+            PropertyId::MaskOrigin,
+            PropertyId::MaskClip,
+            PropertyId::MaskComposite,
+            PropertyId::MaskMode,
+        ][..],
+        _ => return None,
+    };
+
+    let source = filtered_input_to_string(filtered_input);
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let layers = parse_comma_separated_component_values(component_values, Some)?;
+
+    if layers.is_empty() {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    let last_layer_index = layers.len() - 1;
+    for (layer_index, layer) in layers.into_iter().enumerate() {
+        let layer_items = parse_layer_shorthand_layer(property_id, longhand_property_ids, layer_index, layer, &source)?;
+
+        if layer_items.is_empty() {
+            return None;
+        }
+
+        // https://drafts.csswg.org/css-backgrounds-3/#propdef-background
+        // The <background-color> value may only be included in the last layer
+        // specified.
+        if property_id == PropertyId::Background
+            && layer_index != last_layer_index
+            && layer_items
+                .iter()
+                .any(|item| item.property_id == PropertyId::BackgroundColor)
+        {
+            return None;
+        }
+
+        items.extend(layer_items);
+    }
+
+    Some(items)
+}
+
+fn parse_layer_shorthand_layer(
+    shorthand_property_id: PropertyId,
+    longhand_property_ids: &[PropertyId],
+    layer_index: usize,
+    component_values: Vec<ComponentValue>,
+    source: &str,
+) -> Option<Vec<RustOwnedLayerShorthandItem>> {
+    let mut remaining_property_ids = longhand_property_ids.to_vec();
+    let mut items = Vec::new();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut parsed_size = false;
+
+    loop {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+
+        let item = consume_layer_shorthand_item(
+            shorthand_property_id,
+            &mut remaining_property_ids,
+            &mut parser,
+            layer_index,
+            source,
+            &mut parsed_size,
+        )?;
+        items.extend(item);
+    }
+
+    Some(items)
+}
+
+fn consume_layer_shorthand_item(
+    shorthand_property_id: PropertyId,
+    remaining_property_ids: &mut Vec<PropertyId>,
+    parser: &mut ComponentValueParser,
+    layer_index: usize,
+    source: &str,
+    parsed_size: &mut bool,
+) -> Option<Vec<RustOwnedLayerShorthandItem>> {
+    let start = parser.index;
+    let mut candidate_property_ids = remaining_property_ids.clone();
+
+    if shorthand_property_id == PropertyId::Background && *parsed_size {
+        candidate_property_ids.retain(|property_id| *property_id != PropertyId::BackgroundPosition);
+    } else if shorthand_property_id == PropertyId::Mask && *parsed_size {
+        candidate_property_ids.retain(|property_id| *property_id != PropertyId::MaskPosition);
+    }
+
+    for property_id in candidate_property_ids {
+        for end in ((start + 1)..=parser.component_values.len()).rev() {
+            let candidate_source = serialize_component_values_for_reparsing(
+                strip_whitespace(&parser.component_values[start..end]),
+                source,
+            )?;
+            if !source_parses_as_property(property_id, &candidate_source) {
+                continue;
+            }
+
+            parser.index = end;
+            let mut items = vec![RustOwnedLayerShorthandItem {
+                layer_index,
+                property_id,
+                source: candidate_source,
+            }];
+            remaining_property_ids.retain(|remaining_property_id| *remaining_property_id != property_id);
+
+            if matches!(property_id, PropertyId::BackgroundPosition | PropertyId::MaskPosition) {
+                parser.discard_whitespace();
+                if parser.consume_a_delim('/') {
+                    if *parsed_size {
+                        return None;
+                    }
+                    parser.discard_whitespace();
+                    let size_property_id = if property_id == PropertyId::BackgroundPosition {
+                        PropertyId::BackgroundSize
+                    } else {
+                        PropertyId::MaskSize
+                    };
+                    let size_start = parser.index;
+                    let size = consume_layer_shorthand_size(layer_index, size_property_id, parser, source, size_start)?;
+                    items.push(size);
+                    *parsed_size = true;
+                }
+            }
+
+            return Some(items);
+        }
+    }
+
+    None
+}
+
+fn consume_layer_shorthand_size(
+    layer_index: usize,
+    property_id: PropertyId,
+    parser: &mut ComponentValueParser,
+    source: &str,
+    start: usize,
+) -> Option<RustOwnedLayerShorthandItem> {
+    for end in ((start + 1)..=parser.component_values.len()).rev() {
+        let candidate_source =
+            serialize_component_values_for_reparsing(strip_whitespace(&parser.component_values[start..end]), source)?;
+        if !source_parses_as_property(property_id, &candidate_source) {
+            continue;
+        }
+
+        parser.index = end;
+        return Some(RustOwnedLayerShorthandItem {
+            layer_index,
+            property_id,
+            source: candidate_source,
+        });
+    }
+
+    None
+}
+
+fn source_parses_as_property(property_id: PropertyId, source: &str) -> bool {
+    matches!(
+        parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
+        RustOwnedStyleValueParseResult::Parsed(_)
+    )
+}
+
 pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
 where
     C: FnMut(usize, &str),
@@ -15266,6 +15492,18 @@ fn component_value_parse_as_image_url(component_value: &ComponentValue) -> bool 
     // so we can parse as URL further on. These URLs are used as references inside SVG documents for masks.
     // FIXME: Remove this special case once mask-image accepts `<image>`.
     !url.url.starts_with('#')
+}
+
+fn component_values_parse_as_fragment_url(filtered_input: &[u8]) -> bool {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut component_value_parser = ComponentValueParser::new(component_values);
+    component_value_parser.discard_whitespace();
+    let Some(url) = component_value_parser.parse_a_url_function() else {
+        return false;
+    };
+
+    url.url.starts_with('#')
 }
 
 fn component_value_parse_as_image_gradient(component_value: &ComponentValue) -> bool {
@@ -27699,25 +27937,26 @@ mod tests {
         parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
         parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
         parse_grid_auto_track_sizes_value, parse_grid_track_placement_value, parse_grid_track_size_list_value,
-        parse_image_set_value, parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
-        parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
-        parse_paint_order_value, parse_place_content_value, parse_place_items_value, parse_place_self_value,
-        parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
-        parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
-        parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
-        parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
-        parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
-        parse_rust_owned_filter_value_list_value, parse_rust_owned_positional_value_list_shorthand,
-        parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
-        parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
-        parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
-        parse_style_value_for_property, parse_text_decoration_line_value, parse_text_decoration_value,
-        parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
-        parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
-        parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
-        parse_transition_property_value, parse_translate_value, parse_view_function_value,
-        parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-        parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+        parse_image_set_value, parse_layer_shorthand, parse_length_descriptor, parse_list_style_value,
+        parse_math_depth_value, parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value,
+        parse_page_size_descriptor, parse_paint_order_value, parse_place_content_value, parse_place_items_value,
+        parse_place_self_value, parse_position_anchor_value, parse_position_area_value,
+        parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
+        parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
+        parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
+        parse_rect_value, parse_repeat_style_value, parse_rotate_value,
+        parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_filter_value_list_value,
+        parse_rust_owned_positional_value_list_shorthand, parse_rust_owned_style_value_for_property,
+        parse_rust_owned_view_timeline_inset_value, parse_scale_value, parse_scroll_function_value,
+        parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value, parse_simple_color_value,
+        parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
+        parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
+        parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
+        parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value,
+        parse_transform_origin_value, parse_transition_behavior_value, parse_transition_property_value,
+        parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+        parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+        parse_will_change_value, strip_whitespace,
     };
     use crate::css_tokenizer::{self, TokenType};
     use crate::generated_media_features::{
@@ -28828,6 +29067,22 @@ mod tests {
         parse_rust_owned_coordinating_value_list_shorthand(&property_ids, input.as_bytes())
     }
 
+    fn parse_layer_shorthand_items(property_id: PropertyId, input: &str) -> Option<Vec<(usize, PropertyId, String)>> {
+        let mut items = Vec::new();
+        parse_layer_shorthand(
+            property_id as u16,
+            input.as_bytes(),
+            |layer_index, property_id, value| {
+                items.push((
+                    layer_index,
+                    crate::generated_properties::property_id_from_u16(property_id).unwrap(),
+                    value.to_string(),
+                ));
+            },
+        )
+        .then_some(items)
+    }
+
     fn parse_positional_shorthand(property_id: PropertyId, input: &str) -> Option<Vec<(usize, String)>> {
         let mut items = Vec::new();
         parse_positional_value_list_shorthand(property_id as u16, input.as_bytes(), |index, value| {
@@ -29361,6 +29616,15 @@ mod tests {
                 PropertyId::MaskImage,
                 String::new(),
                 "Image".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_generated_property(&[PropertyId::MaskImage], "url(#mask)"),
+            Some((
+                CssGeneratedPropertyValueKind::ValueType,
+                PropertyId::MaskImage,
+                String::new(),
+                "Url".to_string()
             ))
         );
         assert_eq!(parse_generated_property(&[PropertyId::Color], "10px"), None);
@@ -31640,6 +31904,59 @@ mod tests {
                 ],
                 "none, opacity 1s"
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_layer_shorthands() {
+        assert_eq!(
+            parse_layer_shorthand_items(
+                PropertyId::Background,
+                "url(bg.png) left top / cover no-repeat fixed border-box content-box red"
+            ),
+            Some(vec![
+                (0, PropertyId::BackgroundImage, "url(bg.png)".to_string()),
+                (0, PropertyId::BackgroundPosition, "left top".to_string()),
+                (0, PropertyId::BackgroundSize, "cover".to_string()),
+                (0, PropertyId::BackgroundRepeat, "no-repeat".to_string()),
+                (0, PropertyId::BackgroundAttachment, "fixed".to_string()),
+                (0, PropertyId::BackgroundClip, "border-box".to_string()),
+                (0, PropertyId::BackgroundOrigin, "content-box".to_string()),
+                (0, PropertyId::BackgroundColor, "red".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_layer_shorthand_items(PropertyId::Background, "url(a.png) no-repeat, blue"),
+            Some(vec![
+                (0, PropertyId::BackgroundImage, "url(a.png)".to_string()),
+                (0, PropertyId::BackgroundRepeat, "no-repeat".to_string()),
+                (1, PropertyId::BackgroundColor, "blue".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_layer_shorthand_items(
+                PropertyId::Mask,
+                "url(#mask) left 10px top 20px / 50% 25% no-repeat border-box no-clip add luminance"
+            ),
+            Some(vec![
+                (0, PropertyId::MaskImage, "url(#mask)".to_string()),
+                (0, PropertyId::MaskPosition, "left 10px top 20px".to_string()),
+                (0, PropertyId::MaskSize, "50% 25%".to_string()),
+                (0, PropertyId::MaskRepeat, "no-repeat".to_string()),
+                (0, PropertyId::MaskOrigin, "border-box".to_string()),
+                (0, PropertyId::MaskClip, "no-clip".to_string()),
+                (0, PropertyId::MaskComposite, "add".to_string()),
+                (0, PropertyId::MaskMode, "luminance".to_string()),
+            ])
+        );
+
+        assert_eq!(
+            parse_layer_shorthand_items(PropertyId::Background, "red, url(bg.png)"),
+            None
+        );
+        assert_eq!(
+            parse_layer_shorthand_items(PropertyId::Mask, "url(mask.png) / cover"),
             None
         );
     }

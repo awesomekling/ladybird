@@ -4350,17 +4350,6 @@ RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentVal
     RefPtr<StyleValue const> background_clip;
     RefPtr<StyleValue const> background_origin;
 
-    // BackgroundSize is always parsed as part of BackgroundPosition, so we don't include it here.
-    Vector<PropertyID> remaining_layer_properties {
-        PropertyID::BackgroundAttachment,
-        PropertyID::BackgroundClip,
-        PropertyID::BackgroundColor,
-        PropertyID::BackgroundImage,
-        PropertyID::BackgroundOrigin,
-        PropertyID::BackgroundPosition,
-        PropertyID::BackgroundRepeat,
-    };
-
     auto background_layer_is_valid = [&](bool allow_background_color) -> bool {
         if (allow_background_color) {
             if (background_color)
@@ -4397,136 +4386,130 @@ RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentVal
         background_attachment = nullptr;
         background_clip = nullptr;
         background_origin = nullptr;
-
-        remaining_layer_properties.clear_with_capacity();
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundAttachment);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundClip);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundColor);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundImage);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundOrigin);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundPosition);
-        remaining_layer_properties.unchecked_append(PropertyID::BackgroundRepeat);
     };
 
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            if (!background_layer_is_valid(false))
-                return nullptr;
-            complete_background_layer();
-            tokens.discard_a_token();
-            tokens.discard_whitespace();
-            continue;
-        }
+    {
+        auto rust_transaction = tokens.begin_transaction();
+        auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+        if (auto rust_items = RustComponentValueParser::parse_layer_shorthand(PropertyID::Background, source.bytes_as_string_view()); rust_items.has_value()) {
+            auto parse_single_layer_value = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_css_value_for_property(property_id, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return {};
+                if (value->is_value_list() && value->as_value_list().size() == 1)
+                    return value->as_value_list().values()[0];
+                return value;
+            };
 
-        Optional<PropertyAndValue> property_and_value;
-        {
-            auto value_transaction = tokens.begin_transaction();
-            property_and_value = parse_css_value_for_properties(remaining_layer_properties, tokens);
-            if (!property_and_value.has_value())
-                return nullptr;
-            // FIXME: background-repeat can't be parsed fully with parse_css_value_for_properties(), so don't commit
-            //        the transaction, and then parse it manually below.
-            if (property_and_value->property != PropertyID::BackgroundRepeat)
-                value_transaction.commit();
-        }
-        auto& [property, value] = *property_and_value;
-        remove_property(remaining_layer_properties, property);
-
-        switch (property) {
-        case PropertyID::BackgroundAttachment:
-            VERIFY(!background_attachment);
-            background_attachment = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        case PropertyID::BackgroundColor:
-            VERIFY(!background_color);
-            background_color = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        case PropertyID::BackgroundImage:
-            VERIFY(!background_image);
-            background_image = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        case PropertyID::BackgroundClip:
-        case PropertyID::BackgroundOrigin: {
-            // background-origin and background-clip accept the same values. From the spec:
-            //   "If one <box> value is present then it sets both background-origin and background-clip to that value.
-            //    If two values are present, then the first sets background-origin and the second background-clip."
-            //        - https://www.w3.org/TR/css-backgrounds-3/#background
-            // So, we put the first one in background-origin, then if we get a second, we put it in background-clip.
-            // If we only get one, we copy the value before creating the ShorthandStyleValue.
-            if (!background_origin) {
-                background_origin = value.release_nonnull();
-            } else if (!background_clip) {
-                background_clip = value.release_nonnull();
-            } else {
-                VERIFY_NOT_REACHED();
-            }
-            tokens.discard_whitespace();
-            continue;
-        }
-        case PropertyID::BackgroundPosition: {
-            VERIFY(!background_position_x && !background_position_y);
-            auto position = value.release_nonnull();
-            background_position_x = position->as_position().edge_x();
-            background_position_y = position->as_position().edge_y();
-
-            // Attempt to parse `/ <background-size>`
-            auto background_size_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            auto& maybe_slash = tokens.consume_a_token();
-            if (maybe_slash.is_delim('/')) {
-                tokens.discard_whitespace();
-                if (auto maybe_background_size = parse_single_background_size_value(PropertyID::BackgroundSize, tokens)) {
-                    background_size_transaction.commit();
-                    background_size = maybe_background_size.release_nonnull();
-                    tokens.discard_whitespace();
-                    continue;
+            bool failed_to_materialize_rust_background = false;
+            size_t current_layer_index = 0;
+            for (auto const& item : rust_items.value()) {
+                while (item.layer_index > current_layer_index) {
+                    if (!background_layer_is_valid(false)) {
+                        failed_to_materialize_rust_background = true;
+                        break;
+                    }
+                    complete_background_layer();
+                    ++current_layer_index;
                 }
-                return nullptr;
-            }
-            tokens.discard_whitespace();
-            continue;
-        }
-        case PropertyID::BackgroundRepeat: {
-            VERIFY(!background_repeat);
-            // NB: The tokens for this didn't get consumed, see above. So we parse it fully now.
-            if (auto maybe_repeat = parse_single_repeat_style_value(property, tokens)) {
-                background_repeat = maybe_repeat.release_nonnull();
-                tokens.discard_whitespace();
-                continue;
-            }
-            return nullptr;
-        }
-        default:
-            VERIFY_NOT_REACHED();
-        }
+                if (failed_to_materialize_rust_background)
+                    break;
 
-        return nullptr;
+                switch (item.property_id) {
+                case PropertyID::BackgroundAttachment:
+                    background_attachment = parse_single_layer_value(item.property_id, item.value);
+                    if (!background_attachment)
+                        failed_to_materialize_rust_background = true;
+                    break;
+                case PropertyID::BackgroundColor:
+                    background_color = parse_single_layer_value(item.property_id, item.value);
+                    if (!background_color)
+                        failed_to_materialize_rust_background = true;
+                    break;
+                case PropertyID::BackgroundImage:
+                    background_image = parse_single_layer_value(item.property_id, item.value);
+                    if (!background_image)
+                        failed_to_materialize_rust_background = true;
+                    break;
+                case PropertyID::BackgroundClip:
+                case PropertyID::BackgroundOrigin: {
+                    auto value = parse_single_layer_value(item.property_id, item.value);
+                    if (!value) {
+                        failed_to_materialize_rust_background = true;
+                        break;
+                    }
+                    if (!background_origin)
+                        background_origin = value.release_nonnull();
+                    else
+                        background_clip = value.release_nonnull();
+                    break;
+                }
+                case PropertyID::BackgroundPosition: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    auto position = parse_position_value(value_tokens, PositionParsingMode::BackgroundPosition);
+                    value_tokens.discard_whitespace();
+                    if (!position || value_tokens.has_next_token()) {
+                        failed_to_materialize_rust_background = true;
+                        break;
+                    }
+                    background_position_x = position->as_position().edge_x();
+                    background_position_y = position->as_position().edge_y();
+                    break;
+                }
+                case PropertyID::BackgroundRepeat: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    background_repeat = parse_single_repeat_style_value(item.property_id, value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!background_repeat || value_tokens.has_next_token())
+                        failed_to_materialize_rust_background = true;
+                    break;
+                }
+                case PropertyID::BackgroundSize: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    background_size = parse_single_background_size_value(item.property_id, value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!background_size || value_tokens.has_next_token())
+                        failed_to_materialize_rust_background = true;
+                    break;
+                }
+                default:
+                    failed_to_materialize_rust_background = true;
+                    break;
+                }
+            }
+
+            if (!failed_to_materialize_rust_background && background_layer_is_valid(true)) {
+                complete_background_layer();
+
+                if (!background_color)
+                    background_color = initial_background_color;
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+                rust_transaction.commit();
+                transaction.commit();
+                return make_background_shorthand(
+                    background_color.release_nonnull(),
+                    StyleValueList::create(move(background_images), StyleValueList::Separator::Comma),
+                    ShorthandStyleValue::create(PropertyID::BackgroundPosition,
+                        { PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY },
+                        { StyleValueList::create(move(background_position_xs), StyleValueList::Separator::Comma),
+                            StyleValueList::create(move(background_position_ys), StyleValueList::Separator::Comma) }),
+                    StyleValueList::create(move(background_sizes), StyleValueList::Separator::Comma),
+                    StyleValueList::create(move(background_repeats), StyleValueList::Separator::Comma),
+                    StyleValueList::create(move(background_attachments), StyleValueList::Separator::Comma),
+                    StyleValueList::create(move(background_origins), StyleValueList::Separator::Comma),
+                    StyleValueList::create(move(background_clips), StyleValueList::Separator::Comma));
+            }
+        }
     }
 
-    if (!background_layer_is_valid(true))
-        return nullptr;
-
-    complete_background_layer();
-
-    if (!background_color)
-        background_color = initial_background_color;
-    transaction.commit();
-    return make_background_shorthand(
-        background_color.release_nonnull(),
-        StyleValueList::create(move(background_images), StyleValueList::Separator::Comma),
-        ShorthandStyleValue::create(PropertyID::BackgroundPosition,
-            { PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY },
-            { StyleValueList::create(move(background_position_xs), StyleValueList::Separator::Comma),
-                StyleValueList::create(move(background_position_ys), StyleValueList::Separator::Comma) }),
-        StyleValueList::create(move(background_sizes), StyleValueList::Separator::Comma),
-        StyleValueList::create(move(background_repeats), StyleValueList::Separator::Comma),
-        StyleValueList::create(move(background_attachments), StyleValueList::Separator::Comma),
-        StyleValueList::create(move(background_origins), StyleValueList::Separator::Comma),
-        StyleValueList::create(move(background_clips), StyleValueList::Separator::Comma));
+    return nullptr;
 }
 
 RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>& tokens, PropertyID property)
@@ -4895,17 +4878,6 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
     RefPtr<StyleValue const> mask_mode;
 
     bool has_multiple_layers = false;
-    // MaskSize is always parsed as part of MaskPosition, so we don't include it here.
-    Vector<PropertyID> remaining_layer_properties {
-        PropertyID::MaskImage,
-        PropertyID::MaskPosition,
-        PropertyID::MaskRepeat,
-        PropertyID::MaskOrigin,
-        PropertyID::MaskClip,
-        PropertyID::MaskComposite,
-        PropertyID::MaskMode,
-    };
-
     auto mask_layer_is_valid = [&]() -> bool {
         return mask_image || mask_position || mask_size || mask_repeat || mask_origin || mask_clip || mask_composite || mask_mode;
     };
@@ -4933,169 +4905,153 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
         mask_clip = nullptr;
         mask_composite = nullptr;
         mask_mode = nullptr;
-
-        remaining_layer_properties.clear_with_capacity();
-        remaining_layer_properties.unchecked_append(PropertyID::MaskImage);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskPosition);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskRepeat);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskOrigin);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskClip);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskComposite);
-        remaining_layer_properties.unchecked_append(PropertyID::MaskMode);
     };
 
-    tokens.discard_whitespace();
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is(Token::Type::Comma)) {
-            has_multiple_layers = true;
-            if (!mask_layer_is_valid())
-                return nullptr;
-            complete_mask_layer();
-            tokens.discard_a_token(); // ,
-            tokens.discard_whitespace();
-            continue;
-        }
+    {
+        auto rust_transaction = tokens.begin_transaction();
+        auto source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+        if (auto rust_items = RustComponentValueParser::parse_layer_shorthand(PropertyID::Mask, source.bytes_as_string_view()); rust_items.has_value()) {
+            auto parse_single_layer_value = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                TokenStream value_tokens { component_values };
+                auto value = parse_css_value_for_property(property_id, value_tokens);
+                value_tokens.discard_whitespace();
+                if (!value || value_tokens.has_next_token())
+                    return {};
+                if (value->is_value_list() && value->as_value_list().size() == 1)
+                    return value->as_value_list().values()[0];
+                return value;
+            };
 
-        Optional<PropertyAndValue> property_and_value;
-        {
-            auto value_transaction = tokens.begin_transaction();
-            property_and_value = parse_css_value_for_properties(remaining_layer_properties, tokens);
-            if (!property_and_value.has_value())
-                return nullptr;
-            // FIXME: mask-repeat can't be parsed fully with parse_css_value_for_properties(), so don't commit
-            //        the transaction, and then parse it manually below.
-            if (property_and_value->property != PropertyID::MaskRepeat)
-                value_transaction.commit();
-        }
-        auto& [property, value] = *property_and_value;
-        remove_property(remaining_layer_properties, property);
-
-        switch (property) {
-        // <mask-reference>
-        case PropertyID::MaskImage:
-            VERIFY(!mask_image);
-            mask_image = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        // <position> [ / <bg-size> ]?
-        case PropertyID::MaskPosition: {
-            VERIFY(!mask_position);
-            mask_position = value.release_nonnull();
-
-            // Attempt to parse `/ <bg-size>`
-            auto mask_size_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            if (auto const& maybe_slash = tokens.consume_a_token(); maybe_slash.is_delim('/')) {
-                tokens.discard_whitespace();
-                if (auto maybe_mask_size = parse_single_background_size_value(PropertyID::MaskSize, tokens)) {
-                    mask_size_transaction.commit();
-                    tokens.discard_whitespace();
-                    mask_size = maybe_mask_size.release_nonnull();
-                    continue;
+            bool failed_to_materialize_rust_mask = false;
+            size_t current_layer_index = 0;
+            has_multiple_layers = rust_items->last().layer_index > 0;
+            for (auto const& item : rust_items.value()) {
+                while (item.layer_index > current_layer_index) {
+                    if (!mask_layer_is_valid()) {
+                        failed_to_materialize_rust_mask = true;
+                        break;
+                    }
+                    complete_mask_layer();
+                    ++current_layer_index;
                 }
-                return nullptr;
-            }
-            tokens.discard_whitespace();
-            continue;
-        }
-        // <repeat-style>
-        case PropertyID::MaskRepeat: {
-            VERIFY(!mask_repeat);
-            // NB: The tokens for this didn't get consumed, see above. So we parse it fully now.
-            if (auto maybe_repeat = parse_single_repeat_style_value(property, tokens)) {
-                mask_repeat = maybe_repeat.release_nonnull();
-                tokens.discard_whitespace();
-                continue;
-            }
-            return nullptr;
-        }
-        // <geometry-box> || [ <geometry-box> | no-clip ]
-        // If one <geometry-box> value and the no-clip keyword are present then <geometry-box> sets mask-origin and
-        // no-clip sets mask-clip to that value.
-        // If one <geometry-box> value and no no-clip keyword are present then <geometry-box> sets both mask-origin and
-        // mask-clip to that value.
-        // If two <geometry-box> values are present, then the first sets mask-origin and the second mask-clip.
-        case PropertyID::MaskOrigin:
-        case PropertyID::MaskClip: {
-            VERIFY(value->is_keyword());
-            if (value->as_keyword().keyword() == Keyword::NoClip) {
-                VERIFY(!mask_clip);
-                mask_clip = value.release_nonnull();
-            } else if (!mask_origin) {
-                mask_origin = value.release_nonnull();
-            } else if (!mask_clip) {
-                mask_clip = value.release_nonnull();
-            } else {
-                VERIFY_NOT_REACHED();
-            }
-            tokens.discard_whitespace();
-            continue;
-        }
-        // <compositing-operator>
-        case PropertyID::MaskComposite:
-            VERIFY(!mask_composite);
-            mask_composite = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        // <masking-mode>
-        case PropertyID::MaskMode:
-            VERIFY(!mask_mode);
-            mask_mode = value.release_nonnull();
-            tokens.discard_whitespace();
-            continue;
-        default:
-            VERIFY_NOT_REACHED();
-        }
+                if (failed_to_materialize_rust_mask)
+                    break;
 
-        VERIFY_NOT_REACHED();
+                switch (item.property_id) {
+                case PropertyID::MaskImage:
+                    mask_image = parse_single_layer_value(item.property_id, item.value);
+                    if (!mask_image)
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                case PropertyID::MaskPosition: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    mask_position = parse_position_value(value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!mask_position || value_tokens.has_next_token())
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                }
+                case PropertyID::MaskSize: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    mask_size = parse_single_background_size_value(item.property_id, value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!mask_size || value_tokens.has_next_token())
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                }
+                case PropertyID::MaskRepeat: {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    mask_repeat = parse_single_repeat_style_value(item.property_id, value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!mask_repeat || value_tokens.has_next_token())
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                }
+                case PropertyID::MaskOrigin:
+                case PropertyID::MaskClip: {
+                    auto value = parse_single_layer_value(item.property_id, item.value);
+                    if (!value) {
+                        failed_to_materialize_rust_mask = true;
+                        break;
+                    }
+                    if (value->is_keyword() && value->as_keyword().keyword() == Keyword::NoClip)
+                        mask_clip = value.release_nonnull();
+                    else if (!mask_origin)
+                        mask_origin = value.release_nonnull();
+                    else
+                        mask_clip = value.release_nonnull();
+                    break;
+                }
+                case PropertyID::MaskComposite:
+                    mask_composite = parse_single_layer_value(item.property_id, item.value);
+                    if (!mask_composite)
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                case PropertyID::MaskMode:
+                    mask_mode = parse_single_layer_value(item.property_id, item.value);
+                    if (!mask_mode)
+                        failed_to_materialize_rust_mask = true;
+                    break;
+                default:
+                    failed_to_materialize_rust_mask = true;
+                    break;
+                }
+            }
+
+            if (!failed_to_materialize_rust_mask && mask_layer_is_valid()) {
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+                rust_transaction.commit();
+                transaction.commit();
+
+                if (has_multiple_layers) {
+                    complete_mask_layer();
+                    return make_mask_shorthand(
+                        StyleValueList::create(move(mask_images), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_positions), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_sizes), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_repeats), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_origins), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_clips), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_composites), StyleValueList::Separator::Comma),
+                        StyleValueList::create(move(mask_modes), StyleValueList::Separator::Comma));
+                }
+
+                if (!mask_image)
+                    mask_image = initial_mask_image;
+                if (!mask_position)
+                    mask_position = initial_mask_position;
+                if (!mask_size)
+                    mask_size = initial_mask_size;
+                if (!mask_repeat)
+                    mask_repeat = initial_mask_repeat;
+                if (!mask_origin)
+                    mask_origin = initial_mask_origin;
+                if (!mask_clip)
+                    mask_clip = mask_origin;
+                if (!mask_composite)
+                    mask_composite = initial_mask_composite;
+                if (!mask_mode)
+                    mask_mode = initial_mask_mode;
+
+                return make_mask_shorthand(
+                    mask_image.release_nonnull(),
+                    mask_position.release_nonnull(),
+                    mask_size.release_nonnull(),
+                    mask_repeat.release_nonnull(),
+                    mask_origin.release_nonnull(),
+                    mask_clip.release_nonnull(),
+                    mask_composite.release_nonnull(),
+                    mask_mode.release_nonnull());
+            }
+        }
     }
 
-    if (!mask_layer_is_valid())
-        return nullptr;
-
-    // We only need to create StyleValueLists if there are multiple layers.
-    // Otherwise, we can pass the single StyleValue directly
-    if (has_multiple_layers) {
-        complete_mask_layer();
-        transaction.commit();
-        return make_mask_shorthand(
-            StyleValueList::create(move(mask_images), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_positions), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_sizes), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_repeats), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_origins), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_clips), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_composites), StyleValueList::Separator::Comma),
-            StyleValueList::create(move(mask_modes), StyleValueList::Separator::Comma));
-    }
-
-    if (!mask_image)
-        mask_image = initial_mask_image;
-    if (!mask_position)
-        mask_position = initial_mask_position;
-    if (!mask_size)
-        mask_size = initial_mask_size;
-    if (!mask_repeat)
-        mask_repeat = initial_mask_repeat;
-    if (!mask_origin)
-        mask_origin = initial_mask_origin;
-    if (!mask_clip)
-        mask_clip = mask_origin; // intentionally not initial value
-    if (!mask_composite)
-        mask_composite = initial_mask_composite;
-    if (!mask_mode)
-        mask_mode = initial_mask_mode;
-
-    transaction.commit();
-    return make_mask_shorthand(
-        mask_image.release_nonnull(),
-        mask_position.release_nonnull(),
-        mask_size.release_nonnull(),
-        mask_repeat.release_nonnull(),
-        mask_origin.release_nonnull(),
-        mask_clip.release_nonnull(),
-        mask_composite.release_nonnull(),
-        mask_mode.release_nonnull());
+    return nullptr;
 }
 
 RefPtr<StyleValue const> Parser::parse_single_repeat_style_value(PropertyID property, TokenStream<ComponentValue>& tokens)
