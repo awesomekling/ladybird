@@ -1785,45 +1785,35 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto materialize_rust_easing_function = [&]() -> RefPtr<StyleValue const> {
                 return materialize_rust_easing_function_values(rust_style_value->easing_function_kind, rust_style_value->easing_function_values, rust_style_value->linear_easing_stops, rust_style_value->easing_function_step_position);
             };
-            auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_image_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
+            auto materialize_rust_url_image = [&](Optional<URL> const& typed_url) -> RefPtr<ImageStyleValue const> {
+                if (!typed_url.has_value() || typed_url->url().starts_with('#'))
                     return nullptr;
-                return value.release_nonnull();
+                return ImageStyleValue::create(*typed_url);
             };
-            auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
-                case RustComponentValueParser::RustImageKind::Url: {
-                    auto url = typed_url.has_value()
-                        ? typed_url
-                        : RustComponentValueParser::parse_a_url_function(source.bytes_as_string_view(), "utf-8"sv);
-                    if (!url.has_value() || url->url().starts_with('#'))
-                        return nullptr;
-                    return ImageStyleValue::create(url.release_value());
-                }
+                case RustComponentValueParser::RustImageKind::Url:
+                    return materialize_rust_url_image(typed_url);
                 case RustComponentValueParser::RustImageKind::Gradient:
                 case RustComponentValueParser::RustImageKind::ImageSet:
-                    return parse_rust_source_as_image(source);
+                    if (source_component_values.is_empty())
+                        return nullptr;
+                    TokenStream image_tokens { source_component_values };
+                    auto image = parse_image_value(image_tokens);
+                    image_tokens.discard_whitespace();
+                    if (!image || image_tokens.has_next_token())
+                        return nullptr;
+                    return image.release_nonnull();
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_image_from_component_values = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image_from_component_values = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
-                    return materialize_rust_image(kind, source, typed_url);
+                    return materialize_rust_image(kind, typed_url, source_component_values);
                 case RustComponentValueParser::RustImageKind::Gradient:
                 case RustComponentValueParser::RustImageKind::ImageSet:
-                    if (!source_component_values.is_empty()) {
-                        TokenStream image_tokens { source_component_values };
-                        auto image = parse_image_value(image_tokens);
-                        image_tokens.discard_whitespace();
-                        if (image && !image_tokens.has_next_token())
-                            return image.release_nonnull();
-                    }
-                    return materialize_rust_image(kind, source, typed_url);
+                    return materialize_rust_image(kind, typed_url, source_component_values);
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -1841,7 +1831,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (!image || image_tokens.has_next_token())
                             return nullptr;
                     } else {
-                        image = parse_rust_source_as_image(option.image_source);
+                        return nullptr;
                     }
                     if (!image)
                         return nullptr;
@@ -1854,12 +1844,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (!resolution || resolution_tokens.has_next_token())
                             return nullptr;
                     } else if (option.resolution.has_value()) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*option.resolution, "utf-8"sv);
-                        TokenStream resolution_tokens { component_values };
-                        resolution = parse_resolution_value(resolution_tokens, infinite_range);
-                        resolution_tokens.discard_whitespace();
-                        if (!resolution || resolution_tokens.has_next_token())
-                            return nullptr;
+                        return nullptr;
                     } else {
                         resolution = ResolutionStyleValue::create(Resolution { 1, ResolutionUnit::X });
                     }
@@ -1874,10 +1859,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return ImageSetStyleValue::create(move(options));
             };
-            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values = {}) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values = {}) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
-                    return materialize_rust_image(kind, source, typed_url);
+                    return materialize_rust_image(kind, typed_url, source_component_values);
                 case RustComponentValueParser::RustImageKind::Gradient:
                 case RustComponentValueParser::RustImageKind::ImageSet:
                     if (!source_component_values.is_empty()) {
@@ -2283,7 +2268,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         content_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemImage:
-                        value = materialize_rust_image_from_component_values(event.image_kind, event.source, event.image_url, event.image_source_component_values);
+                        value = materialize_rust_image_from_component_values(event.image_kind, event.image_url, event.image_source_component_values);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
@@ -2327,7 +2312,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->shape_outside_image_source.has_value()) {
                     if (!rust_style_value->shape_outside_image_source_kind.has_value())
                         return nullptr;
-                    return materialize_rust_image_from_component_values(*rust_style_value->shape_outside_image_source_kind, *rust_style_value->shape_outside_image_source, rust_style_value->shape_outside_image_source_url, rust_style_value->shape_outside_image_source_component_values);
+                    return materialize_rust_image_from_component_values(*rust_style_value->shape_outside_image_source_kind, rust_style_value->shape_outside_image_source_url, rust_style_value->shape_outside_image_source_component_values);
                 }
 
                 RefPtr<StyleValue const> basic_shape_value;
@@ -2915,7 +2900,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case RustComponentValueParser::RustListStyleImageKind::Source:
                     if (!rust_style_value->list_style_image_source.has_value() || !rust_style_value->list_style_image_source_kind.has_value())
                         return nullptr;
-                    return materialize_rust_image_from_component_values(*rust_style_value->list_style_image_source_kind, *rust_style_value->list_style_image_source, rust_style_value->list_style_image_source_url, rust_style_value->list_style_image_source_component_values);
+                    return materialize_rust_image_from_component_values(*rust_style_value->list_style_image_source_kind, rust_style_value->list_style_image_source_url, rust_style_value->list_style_image_source_component_values);
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -3663,7 +3648,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
                 }
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
-                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
+                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
                         if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url || !rust_style_value->image_source_component_values.is_empty())
                             discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
@@ -4478,7 +4463,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     case RustComponentValueParser::RustBorderImageSourceKind::Source:
                         if (!rust_style_value->border_image_source_source.has_value() || !rust_style_value->border_image_source_source_kind.has_value())
                             break;
-                        source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, *rust_style_value->border_image_source_source, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_source_component_values);
+                        source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_source_component_values);
                         break;
                     }
                 } else {
@@ -4735,7 +4720,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     StyleValueVector cursors;
                     cursors.ensure_capacity(rust_style_value->cursor_images.size() + 1);
                     for (auto const& cursor_image : rust_style_value->cursor_images) {
-                        auto image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_source, cursor_image.image_url, cursor_image.image_source_component_values);
+                        auto image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_url, cursor_image.image_source_component_values);
                         if (!image)
                             break;
 
@@ -5076,7 +5061,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
 
                     if (item.image_kind.has_value() && item.image_source.has_value()) {
-                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, *item.image_source, item.image_url, item.image_source_component_values))
+                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, item.image_url, item.image_source_component_values))
                             return image;
                     }
 
