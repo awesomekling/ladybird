@@ -1026,7 +1026,7 @@ where
     true
 }
 
-fn parse_rust_owned_font_shorthand(filtered_input: &[u8]) -> Option<Vec<RustOwnedFontShorthandItem>> {
+pub(super) fn parse_rust_owned_font_shorthand(filtered_input: &[u8]) -> Option<Vec<RustOwnedFontShorthandItem>> {
     let source = filtered_input_to_string(filtered_input);
     let (mut stylesheet_parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = stylesheet_parser.parse_a_list_of_component_values();

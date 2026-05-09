@@ -49,22 +49,22 @@ use super::{
     RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay,
     RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
     RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
-    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
-    RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
-    RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-    RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage, RustOwnedImageKind, RustOwnedLineStyle,
-    RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
-    RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
-    RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint,
-    RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-    RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
-    RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-    RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
-    RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-    RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-    RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue, RustOwnedSourceBackedValueKind,
-    RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
-    RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+    RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontShorthandItem, RustOwnedFontStyle,
+    RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow,
+    RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+    RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage,
+    RustOwnedImageKind, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition,
+    RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
+    RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin,
+    RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+    RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
+    RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+    RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect,
+    RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline,
+    RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox,
+    RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue,
+    RustOwnedSourceBackedValueKind, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
+    RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
     RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
     RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
     RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
@@ -2493,6 +2493,34 @@ fn parses_style_values_with_rust_owned_ast() {
                     }),
                 ],
             }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Font], "italic bold 16px / 1.5 serif"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Font,
+            value: RustOwnedStyleValueKind::FontShorthand(vec![
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::FontStyle,
+                    source: "italic".to_string(),
+                },
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::FontWeight,
+                    source: "bold".to_string(),
+                },
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::FontSize,
+                    source: "16px".to_string(),
+                },
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::LineHeight,
+                    source: "1.5".to_string(),
+                },
+                RustOwnedFontShorthandItem {
+                    property_id: PropertyId::FontFamily,
+                    source: "serif".to_string(),
+                },
+            ]),
         })
     );
     assert_eq!(

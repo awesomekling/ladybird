@@ -218,6 +218,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FlexFlow:
     case PropertyID::FlexWrap:
     case PropertyID::Float:
+    case PropertyID::Font:
     case PropertyID::FontFamily:
     case PropertyID::FontFeatureSettings:
     case PropertyID::FontKerning:
@@ -3363,6 +3364,146 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Comma) };
                 }
                 break;
+            case FFI::CssStyleValueKind::FontShorthand: {
+                RefPtr<StyleValue const> font_style;
+                RefPtr<StyleValue const> font_variant;
+                RefPtr<StyleValue const> font_weight;
+                RefPtr<StyleValue const> font_width;
+                RefPtr<StyleValue const> font_size;
+                RefPtr<StyleValue const> line_height;
+                RefPtr<StyleValue const> font_families;
+
+                auto parse_value = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream value_tokens { component_values };
+                    auto value = parse_css_value_for_property(property_id, value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!value || value_tokens.has_next_token())
+                        return {};
+                    return value;
+                };
+
+                bool is_valid = true;
+                for (auto const& item : rust_style_value->font_shorthand_items) {
+                    auto value = parse_value(item.property_id, item.value);
+                    if (!value) {
+                        is_valid = false;
+                        break;
+                    }
+
+                    switch (item.property_id) {
+                    case PropertyID::FontSize:
+                        if (font_size) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_size = value.release_nonnull();
+                        break;
+                    case PropertyID::LineHeight:
+                        if (line_height) {
+                            is_valid = false;
+                            break;
+                        }
+                        line_height = value.release_nonnull();
+                        break;
+                    case PropertyID::FontFamily:
+                        if (font_families) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_families = value.release_nonnull();
+                        break;
+                    case PropertyID::FontStyle:
+                        if (font_style) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_style = value.release_nonnull();
+                        break;
+                    case PropertyID::FontVariant:
+                        if (font_variant) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_variant = value.release_nonnull();
+                        break;
+                    case PropertyID::FontWeight:
+                        if (font_weight) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_weight = value.release_nonnull();
+                        break;
+                    case PropertyID::FontWidth:
+                        if (font_width) {
+                            is_valid = false;
+                            break;
+                        }
+                        font_width = value.release_nonnull();
+                        break;
+                    default:
+                        VERIFY_NOT_REACHED();
+                    }
+
+                    if (!is_valid)
+                        break;
+                }
+
+                if (!is_valid || !font_size || !font_families)
+                    break;
+
+                if (!font_style)
+                    font_style = property_initial_value(PropertyID::FontStyle);
+                if (!font_variant)
+                    font_variant = property_initial_value(PropertyID::FontVariant);
+                if (!font_weight)
+                    font_weight = property_initial_value(PropertyID::FontWeight);
+                if (!font_width)
+                    font_width = property_initial_value(PropertyID::FontWidth);
+                if (!line_height)
+                    line_height = property_initial_value(PropertyID::LineHeight);
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { PropertyID::Font,
+                    ShorthandStyleValue::create(PropertyID::Font,
+                        {
+                            // Set explicitly https://drafts.csswg.org/css-fonts/#set-explicitly
+                            PropertyID::FontFamily,
+                            PropertyID::FontSize,
+                            PropertyID::FontWidth,
+                            PropertyID::FontStyle,
+                            PropertyID::FontVariant,
+                            PropertyID::FontWeight,
+                            PropertyID::LineHeight,
+
+                            // Reset implicitly https://drafts.csswg.org/css-fonts/#reset-implicitly
+                            PropertyID::FontFeatureSettings,
+                            PropertyID::FontKerning,
+                            PropertyID::FontLanguageOverride,
+                            PropertyID::FontOpticalSizing,
+                            // FIXME: PropertyID::FontSizeAdjust,
+                            PropertyID::FontVariationSettings,
+                        },
+                        {
+                            // Set explicitly
+                            font_families.release_nonnull(),
+                            font_size.release_nonnull(),
+                            font_width.release_nonnull(),
+                            font_style.release_nonnull(),
+                            font_variant.release_nonnull(),
+                            font_weight.release_nonnull(),
+                            line_height.release_nonnull(),
+
+                            // Reset implicitly
+                            property_initial_value(PropertyID::FontFeatureSettings),
+                            property_initial_value(PropertyID::FontKerning),
+                            property_initial_value(PropertyID::FontLanguageOverride),
+                            property_initial_value(PropertyID::FontOpticalSizing),
+                            // FIXME: font-size-adjust,
+                            property_initial_value(PropertyID::FontVariationSettings),
+                        }) };
+            }
             case FFI::CssStyleValueKind::FontFeatureSettings:
                 if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::Normal) {
                     discard_rust_owned_property_value_tokens();

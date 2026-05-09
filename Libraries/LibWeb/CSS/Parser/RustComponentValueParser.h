@@ -125,6 +125,11 @@ public:
         bool is_string { false };
     };
 
+    struct FontShorthandItem {
+        PropertyID property_id;
+        String value;
+    };
+
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
@@ -624,6 +629,7 @@ public:
         bool color_scheme_only { false };
         Vector<String> color_scheme_schemes;
         Vector<FontFamilyValue> font_family;
+        Vector<FontShorthandItem> font_shorthand_items;
         FFI::CssFontLanguageOverrideKind font_language_override_kind { FFI::CssFontLanguageOverrideKind::Normal };
         Optional<FlyString> font_language_override;
         FontStyle font_style;
@@ -753,11 +759,6 @@ public:
     };
 
     using LayerShorthandItem = CoordinatingValueListShorthandItem;
-
-    struct FontShorthandItem {
-        PropertyID property_id;
-        String value;
-    };
 
     using GridPlacementShorthandItem = FontShorthandItem;
     using GridTemplateShorthandItem = FontShorthandItem;

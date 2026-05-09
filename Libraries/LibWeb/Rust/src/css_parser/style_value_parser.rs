@@ -5,6 +5,7 @@
  */
 
 use super::*;
+use crate::css_parser::style_value_shorthands::parse_rust_owned_font_shorthand;
 
 pub(crate) fn parse_rust_owned_style_value_for_property(
     property_ids: &[u16],
@@ -351,6 +352,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FlexFlow
             | PropertyId::FlexWrap
             | PropertyId::Float
+            | PropertyId::Font
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
             | PropertyId::FontKerning
@@ -784,6 +786,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackdropFilter | PropertyId::Filter => {
             rust_owned_filter_value_list_style_value_kind(filtered_input)
         }
+        PropertyId::Font => parse_rust_owned_font_shorthand(filtered_input).map(RustOwnedStyleValueKind::FontShorthand),
         PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
         PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
         PropertyId::FontKerning

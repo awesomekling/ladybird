@@ -1484,6 +1484,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .is_string = color_green != 0,
                 });
                 return;
+            } else if (kind == FFI::CssStyleValueKind::FontShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = PropertyID::Font;
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::FontShorthand);
+                    VERIFY(style_value->property_id == PropertyID::Font);
+                }
+
+                style_value->font_shorthand_items.append(FontShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::FontLanguageOverride) {
                 value.font_language_override_kind = static_cast<FFI::CssFontLanguageOverrideKind>(color_red);
                 if (value_len > 0)

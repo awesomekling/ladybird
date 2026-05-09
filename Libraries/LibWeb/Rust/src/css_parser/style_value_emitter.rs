@@ -42,6 +42,25 @@ where
         RustOwnedStyleValueKind::ImageSet(image_set) => {
             callback_image_set_style_value(callback, property_id, image_set);
         }
+        RustOwnedStyleValueKind::FontShorthand(items) => {
+            for item in items {
+                callback(
+                    CssStyleValueKind::FontShorthand,
+                    item.property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::FontStyle(value) => callback(
             CssStyleValueKind::FontStyle,
             property_id,

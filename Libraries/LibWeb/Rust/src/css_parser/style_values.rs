@@ -37,6 +37,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FlexShorthand(RustOwnedFlexShorthand),
     FlexFlow(RustOwnedFlexFlow),
     FilterValueList(RustOwnedFilterValueList),
+    FontShorthand(Vec<RustOwnedFontShorthandItem>),
     FontStyle(RustOwnedFontStyle),
     FontVariantLonghand(RustOwnedFontVariantLonghand),
     KeywordList(RustOwnedKeywordList),
