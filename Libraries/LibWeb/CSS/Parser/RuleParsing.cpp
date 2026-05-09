@@ -603,12 +603,14 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
     }
 
     if (initial_value_maybe) {
-        auto serialized_initial_value = serialize_component_values_for_reparsing(initial_value_maybe->tokenize());
+        if (!initial_value_maybe->is_unresolved())
+            return {};
+        auto const& initial_value_component_values = initial_value_maybe->as_unresolved().values();
+        auto serialized_initial_value = serialize_component_values_for_reparsing(initial_value_component_values);
         if (!RustComponentValueParser::syntax_matches(serialized_initial_value, maybe_syntax->to_string(), LimitSingleComponentIdentToCustomIdent::Yes))
             return {};
 
-        auto initial_value_tokens = initial_value_maybe->tokenize();
-        auto parsed_initial_value = CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_tokens, *maybe_syntax);
+        auto parsed_initial_value = CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_component_values, *maybe_syntax);
         if (maybe_syntax->type() != CSS::Parser::SyntaxNode::NodeType::Universal) {
             if (parsed_initial_value->type() == CSS::StyleValue::Type::Unresolved || !parsed_initial_value->is_computationally_independent())
                 return {};
