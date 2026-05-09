@@ -927,28 +927,6 @@ DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rul
     return metadata;
 }
 
-Optional<Vector<String>> RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
-{
-    Vector<String> sources;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_descriptor_sources(
-        descriptor_value_type_to_ffi(value_type),
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &sources,
-        [](void* raw_sources, u8 const* source_ptr, size_t source_len) {
-            auto& sources = *static_cast<Vector<String>*>(raw_sources);
-            sources.append(string_from_ffi_bytes(source_ptr, source_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return sources;
-}
-
 Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
 {
     Optional<DescriptorResult> result;
