@@ -2443,7 +2443,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto materialize_rust_nested_length = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_length_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(property_id, ValueType::Length, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (range.min >= 0)
                         return parse_rust_source_as_non_negative_length(value.source_or_unit);
@@ -2459,20 +2461,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return LengthStyleValue::create(length);
             };
-            auto materialize_rust_nested_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_length = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                return materialize_rust_nested_length_for_property(rust_style_value->property_id, value, range);
+            };
+            auto materialize_rust_nested_length_percentage_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(property_id, ValueType::LengthPercentage, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (range.min >= 0)
                         return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
                     return parse_rust_source_as_length_percentage(value.source_or_unit);
                 }
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Length)
-                    return materialize_rust_nested_length(value, range);
+                    return materialize_rust_nested_length_for_property(property_id, value, range);
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
                     if (!range.contains(*value.numeric_value))
                         return nullptr;
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 }
                 return nullptr;
+            };
+            auto materialize_rust_nested_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                return materialize_rust_nested_length_percentage_for_property(rust_style_value->property_id, value, range);
             };
             auto materialize_rust_position_edge = [](RustComponentValueParser::RustPositionEdge edge) -> Optional<PositionEdge> {
                 switch (edge) {
@@ -2491,20 +2501,20 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_position_component = [&](RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<StyleValue const> {
+            auto materialize_rust_position_component = [&](PropertyID property_id, RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<StyleValue const> {
                 RefPtr<StyleValue const> offset;
                 if (component.offset.has_value()) {
-                    offset = materialize_rust_nested_length_percentage(*component.offset, infinite_range);
+                    offset = materialize_rust_nested_length_percentage_for_property(property_id, *component.offset, infinite_range);
                     if (!offset)
                         return nullptr;
                 }
                 return EdgeStyleValue::create(materialize_rust_position_edge(component.edge), offset);
             };
-            auto materialize_rust_position = [&](RustComponentValueParser::RustPosition const& position) -> RefPtr<StyleValue const> {
-                auto x = materialize_rust_position_component(position.x);
+            auto materialize_rust_position = [&](PropertyID property_id, RustComponentValueParser::RustPosition const& position) -> RefPtr<StyleValue const> {
+                auto x = materialize_rust_position_component(property_id, position.x);
                 if (!x)
                     return nullptr;
-                auto y = materialize_rust_position_component(position.y);
+                auto y = materialize_rust_position_component(property_id, position.y);
                 if (!y)
                     return nullptr;
                 return PositionStyleValue::create(x->as_edge(), y->as_edge());
@@ -2594,14 +2604,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return materialize_rust_nested_length_percentage(value, infinite_range);
             };
-            auto materialize_rust_nested_background_size_component = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_background_size_component = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
                     auto maybe_keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
                     if (!maybe_keyword.has_value() || *maybe_keyword != Keyword::Auto)
                         return nullptr;
                     return KeywordStyleValue::create(Keyword::Auto);
                 }
-                return materialize_rust_nested_length_percentage(value, non_negative_range);
+                return materialize_rust_nested_length_percentage_for_property(property_id, value, non_negative_range);
             };
             auto materialize_rust_fit_content = [&]() -> RefPtr<StyleValue const> {
                 switch (rust_style_value->fit_content_kind) {
@@ -3215,9 +3225,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         if (!background_size.width.has_value())
                             break;
-                        auto width = materialize_rust_nested_background_size_component(*background_size.width);
+                        auto width = materialize_rust_nested_background_size_component(rust_style_value->property_id, *background_size.width);
                         auto height = background_size.height.has_value()
-                            ? materialize_rust_nested_background_size_component(*background_size.height)
+                            ? materialize_rust_nested_background_size_component(rust_style_value->property_id, *background_size.height)
                             : KeywordStyleValue::create(Keyword::Auto);
                         if (!width || !height)
                             break;
@@ -4718,7 +4728,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(sub_properties), move(values)) };
             }
             case FFI::CssStyleValueKind::LayerShorthand: {
-                auto materialize_single_background_size = [&](RustComponentValueParser::RustBackgroundSize const& background_size) -> RefPtr<StyleValue const> {
+                auto materialize_single_background_size = [&](PropertyID property_id, RustComponentValueParser::RustBackgroundSize const& background_size) -> RefPtr<StyleValue const> {
                     if (background_size.keyword.has_value()) {
                         if (!first_is_one_of(*background_size.keyword, Keyword::Cover, Keyword::Contain))
                             return nullptr;
@@ -4727,9 +4737,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                     if (!background_size.width.has_value())
                         return nullptr;
-                    auto width = materialize_rust_nested_background_size_component(*background_size.width);
+                    auto width = materialize_rust_nested_background_size_component(property_id, *background_size.width);
                     auto height = background_size.height.has_value()
-                        ? materialize_rust_nested_background_size_component(*background_size.height)
+                        ? materialize_rust_nested_background_size_component(property_id, *background_size.height)
                         : KeywordStyleValue::create(Keyword::Auto);
                     if (!width || !height)
                         return nullptr;
@@ -4766,7 +4776,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!item.background_sizes.is_empty()) {
                         if (item.background_sizes.size() != 1)
                             return nullptr;
-                        return materialize_single_background_size(item.background_sizes[0]);
+                        return materialize_single_background_size(item.property_id, item.background_sizes[0]);
                     }
 
                     if (!item.repeat_x_values.is_empty()) {
@@ -4779,7 +4789,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
 
                     if (item.position_value_type.has_value() && item.positions.size() == 1) {
-                        if (auto position = materialize_rust_position(item.positions[0]))
+                        if (auto position = materialize_rust_position(item.property_id, item.positions[0]))
                             return position.release_nonnull();
                     }
 
@@ -4907,7 +4917,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                 is_valid = false;
                                 break;
                             }
-                            auto position = materialize_rust_position(item.positions[0]);
+                            auto position = materialize_rust_position(item.property_id, item.positions[0]);
                             if (!position) {
                                 is_valid = false;
                                 break;
@@ -5605,7 +5615,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         StyleValueVector values;
                         values.ensure_capacity(rust_style_value->position_components.size());
                         for (auto const& component : rust_style_value->position_components) {
-                            auto value = materialize_rust_position_component(component);
+                            auto value = materialize_rust_position_component(rust_style_value->property_id, component);
                             if (!value)
                                 break;
                             values.append(value.release_nonnull());
@@ -5623,10 +5633,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         background_position_y_values.ensure_capacity(rust_style_value->positions.size());
 
                         for (auto const& position : rust_style_value->positions) {
-                            auto x = materialize_rust_position_component(position.x);
+                            auto x = materialize_rust_position_component(rust_style_value->property_id, position.x);
                             if (!x)
                                 break;
-                            auto y = materialize_rust_position_component(position.y);
+                            auto y = materialize_rust_position_component(rust_style_value->property_id, position.y);
                             if (!y)
                                 break;
 
@@ -5645,7 +5655,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     } else if (*rust_style_value->value_type == ValueType::Position && rust_style_value->property_id != PropertyID::MaskPosition) {
                         if (rust_style_value->positions.size() == 1) {
-                            if (auto value = materialize_rust_position(rust_style_value->positions[0])) {
+                            if (auto value = materialize_rust_position(rust_style_value->property_id, rust_style_value->positions[0])) {
                                 discard_rust_owned_property_value_tokens();
                                 generated_transaction.commit();
                                 return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
@@ -5655,7 +5665,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         StyleValueVector values;
                         values.ensure_capacity(rust_style_value->positions.size());
                         for (auto const& position : rust_style_value->positions) {
-                            auto value = materialize_rust_position(position);
+                            auto value = materialize_rust_position(rust_style_value->property_id, position);
                             if (!value)
                                 break;
 

@@ -1463,6 +1463,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(!style_value->layer_shorthand_items.is_empty());
                 auto& item = style_value->layer_shorthand_items.last();
                 VERIFY(item.property_id == static_cast<PropertyID>(property_id));
+                item.last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 if (kind == FFI::CssStyleValueKind::Keyword) {
                     auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1521,12 +1522,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         item.background_sizes.append({
                             .width = nested_primitive_value_from_callback_payload(),
                         });
+                        item.last_calculation_node_target = RustCalculationNodeTarget::BackgroundSizeWidth;
                     } else {
                         VERIFY(color_red == Height);
                         VERIFY(!item.background_sizes.is_empty());
                         VERIFY(item.background_sizes.last().width.has_value());
                         VERIFY(!item.background_sizes.last().keyword.has_value());
                         item.background_sizes.last().height = nested_primitive_value_from_callback_payload();
+                        item.last_calculation_node_target = RustCalculationNodeTarget::BackgroundSizeHeight;
                     }
                     return;
                 }
@@ -1559,9 +1562,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     } else if (color_red == PositionX) {
                         VERIFY(!item.positions.is_empty());
                         item.positions.last().x = position_component_from_callback_payload();
+                        if (item.positions.last().x.offset.has_value())
+                            item.last_calculation_node_target = RustCalculationNodeTarget::PositionXOffset;
                     } else if (color_red == PositionY) {
                         VERIFY(!item.positions.is_empty());
                         item.positions.last().y = position_component_from_callback_payload();
+                        if (item.positions.last().y.offset.has_value())
+                            item.last_calculation_node_target = RustCalculationNodeTarget::PositionYOffset;
                     } else {
                         VERIFY(color_red == LonghandComponent);
                     }
@@ -3059,6 +3066,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Position);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 if (color_red == Header) {
                     auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
@@ -3070,12 +3078,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 } else if (color_red == PositionX) {
                     VERIFY(!style_value->positions.is_empty());
                     style_value->positions.last().x = position_component_from_callback_payload();
+                    if (style_value->positions.last().x.offset.has_value())
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::PositionXOffset;
                 } else if (color_red == PositionY) {
                     VERIFY(!style_value->positions.is_empty());
                     style_value->positions.last().y = position_component_from_callback_payload();
+                    if (style_value->positions.last().y.offset.has_value())
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::PositionYOffset;
                 } else {
                     VERIFY(color_red == LonghandComponent);
                     style_value->position_components.append(position_component_from_callback_payload());
+                    if (style_value->position_components.last().offset.has_value())
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::PositionComponentOffset;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::PositionAnchor) {
@@ -3101,6 +3115,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::BackgroundSize);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
                 enum : u8 {
                     Keyword,
                     Width,
@@ -3117,12 +3132,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->background_sizes.append({
                         .width = nested_primitive_value_from_callback_payload(),
                     });
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BackgroundSizeWidth;
                 } else {
                     VERIFY(color_red == Height);
                     VERIFY(!style_value->background_sizes.is_empty());
                     VERIFY(style_value->background_sizes.last().width.has_value());
                     VERIFY(!style_value->background_sizes.last().keyword.has_value());
                     style_value->background_sizes.last().height = nested_primitive_value_from_callback_payload();
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BackgroundSizeHeight;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::RepeatStyle) {
@@ -3405,6 +3422,70 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->flex_basis_calculation_node_events.append(move(event));
                     return;
                 case RustFlexCalculationComponent::None:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::BackgroundSize) {
+                VERIFY(!style_value->background_sizes.is_empty());
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::BackgroundSizeWidth:
+                    VERIFY(style_value->background_sizes.last().width.has_value());
+                    style_value->background_sizes.last().width->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BackgroundSizeHeight:
+                    VERIFY(style_value->background_sizes.last().height.has_value());
+                    style_value->background_sizes.last().height->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::Position) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::PositionXOffset:
+                    VERIFY(!style_value->positions.is_empty());
+                    VERIFY(style_value->positions.last().x.offset.has_value());
+                    style_value->positions.last().x.offset->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::PositionYOffset:
+                    VERIFY(!style_value->positions.is_empty());
+                    VERIFY(style_value->positions.last().y.offset.has_value());
+                    style_value->positions.last().y.offset->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::PositionComponentOffset:
+                    VERIFY(!style_value->position_components.is_empty());
+                    VERIFY(style_value->position_components.last().offset.has_value());
+                    style_value->position_components.last().offset->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::LayerShorthand) {
+                VERIFY(!style_value->layer_shorthand_items.is_empty());
+                auto& item = style_value->layer_shorthand_items.last();
+                switch (item.last_calculation_node_target) {
+                case RustCalculationNodeTarget::BackgroundSizeWidth:
+                    VERIFY(!item.background_sizes.is_empty());
+                    VERIFY(item.background_sizes.last().width.has_value());
+                    item.background_sizes.last().width->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BackgroundSizeHeight:
+                    VERIFY(!item.background_sizes.is_empty());
+                    VERIFY(item.background_sizes.last().height.has_value());
+                    item.background_sizes.last().height->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::PositionXOffset:
+                    VERIFY(!item.positions.is_empty());
+                    VERIFY(item.positions.last().x.offset.has_value());
+                    item.positions.last().x.offset->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::PositionYOffset:
+                    VERIFY(!item.positions.is_empty());
+                    VERIFY(item.positions.last().y.offset.has_value());
+                    item.positions.last().y.offset->calculation_node_events.append(move(event));
+                    return;
+                default:
                     break;
                 }
             }

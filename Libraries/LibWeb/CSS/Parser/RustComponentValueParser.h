@@ -237,6 +237,15 @@ public:
         Basis,
     };
 
+    enum class RustCalculationNodeTarget : u8 {
+        None,
+        BackgroundSizeWidth,
+        BackgroundSizeHeight,
+        PositionXOffset,
+        PositionYOffset,
+        PositionComponentOffset,
+    };
+
     enum class RustTreeCountingFunction : u8 {
         SiblingCount,
         SiblingIndex,
@@ -259,6 +268,7 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
+        Vector<RustCalculationNodeEvent> calculation_node_events;
     };
 
     struct FontStyle {
@@ -472,6 +482,7 @@ public:
         Optional<ValueType> position_value_type;
         Vector<u8> repeat_x_values;
         Vector<u8> repeat_y_values;
+        RustCalculationNodeTarget last_calculation_node_target { RustCalculationNodeTarget::None };
     };
 
     enum class RustFilterValueListEventKind : u8 {
@@ -797,6 +808,7 @@ public:
         Optional<URL> url;
         Vector<RustPosition> positions;
         Vector<RustPositionComponent> position_components;
+        RustCalculationNodeTarget last_calculation_node_target { RustCalculationNodeTarget::None };
         FFI::CssPositionAnchorValueKind position_anchor_kind { FFI::CssPositionAnchorValueKind::Invalid };
         FlyString position_anchor_name;
         FFI::CssPositionTryOrderValue position_try_order { FFI::CssPositionTryOrderValue::Invalid };
