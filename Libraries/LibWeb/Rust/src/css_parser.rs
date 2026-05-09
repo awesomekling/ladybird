@@ -84,6 +84,7 @@ pub(crate) use parser_arbitrary_substitutions::{
 pub(crate) use parser_descriptors::*;
 use parser_emitters::*;
 pub(crate) use parser_entrypoints::*;
+pub(crate) use parser_math::*;
 use parser_selectors::*;
 pub(crate) use parser_shared::serialize_component_values_for_reparsing;
 pub(crate) use parser_shared::strip_whitespace;

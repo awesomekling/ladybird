@@ -24,9 +24,12 @@ pub(super) fn parse_rust_owned_math_function(
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
 
+    let calculation = parse_rust_owned_calculation_function(function)?;
+
     Some(RustOwnedMathFunction {
         name: function.name.clone(),
         arguments: function.value.clone(),
+        calculation: Box::new(calculation),
         source,
         value_type,
     })

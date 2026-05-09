@@ -310,6 +310,7 @@ pub(crate) struct RustOwnedAnchorSizeFunction {
 pub(crate) struct RustOwnedMathFunction {
     pub(crate) name: String,
     pub(crate) arguments: Vec<ComponentValue>,
+    pub(crate) calculation: Box<RustOwnedCalculationNode>,
     pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
 }

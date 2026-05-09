@@ -6830,6 +6830,19 @@ fn rejects_invalid_rust_owned_calculations() {
 }
 
 #[test]
+fn rust_owned_math_functions_carry_calculation_trees() {
+    let Some(RustOwnedStyleValue {
+        value: RustOwnedStyleValueKind::MathFunction(RustOwnedMathFunction { calculation, .. }),
+        ..
+    }) = parse_rust_owned_style_value(&[PropertyId::MarginLeft], "calc(1px + 2px)")
+    else {
+        panic!("expected a math function");
+    };
+
+    assert_eq!(*calculation, parse_math_ast("calc(1px + 2px)").unwrap());
+}
+
+#[test]
 fn parses_preserved_tokens() {
     let values = parse("a, b");
 
