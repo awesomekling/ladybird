@@ -3039,6 +3039,27 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Border], "1px solid black"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Border,
+            value: RustOwnedStyleValueKind::Border(RustOwnedBorder {
+                width: Some(RustOwnedNestedPrimitiveValue::Length {
+                    value: 1.0,
+                    unit: "px".to_string(),
+                }),
+                style: Some(RustOwnedLineStyle::Solid),
+                color: Some(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                    alpha: 255,
+                    name: Some("black".to_string()),
+                }),
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BorderBlock], "currentcolor thick dashed"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BorderBlock,

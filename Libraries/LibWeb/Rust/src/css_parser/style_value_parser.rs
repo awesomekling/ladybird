@@ -135,6 +135,12 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
         let Some(property_id) = property_id_from_u16(*property_id) else {
             continue;
         };
+        // AD-HOC: `animation-iteration-count` is numeric and must not steal
+        // arbitrary idents from the `animation` shorthand's trailing
+        // `animation-name`.
+        if property_id == PropertyId::AnimationIterationCount {
+            continue;
+        }
         if is_coordinating_shorthand_item && property_parses_as_coordinating_shorthand_item(property_id) {
             continue;
         }
@@ -208,6 +214,9 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
             let Some(property_id) = property_id_from_u16(*property_id) else {
                 continue;
             };
+            if property_id == PropertyId::AnimationIterationCount {
+                continue;
+            }
             if !property_parses_as_coordinating_shorthand_item(property_id)
                 || !property_accepts_value_type(property_id, PropertyValueType::CustomIdent)
             {

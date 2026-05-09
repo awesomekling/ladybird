@@ -8534,6 +8534,7 @@ pub(super) fn component_value_parse_as_non_negative_number_percentage(component_
 
 pub(crate) fn parse_content_value(filtered_input: &[u8]) -> bool {
     parse_rust_owned_content_value(filtered_input).is_some()
+        || collect_substitution_function_presence(filtered_input).is_some_and(|presence| presence.0)
 }
 
 pub(super) fn parse_rust_owned_content_value(filtered_input: &[u8]) -> Option<RustOwnedContent> {

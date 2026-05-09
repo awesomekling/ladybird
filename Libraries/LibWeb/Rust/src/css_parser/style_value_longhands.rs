@@ -1623,8 +1623,7 @@ pub(super) fn rust_owned_border_shorthand_style_value_kind(
 ) -> Option<RustOwnedStyleValueKind> {
     // https://drafts.csswg.org/css-backgrounds-3/#propdef-border
     // <line-width> || <line-style> || <color>
-    let (_, _, color_property) = border_shorthand_component_properties(property_id)?;
-    let component_property_ids = [color_property as u16];
+    border_shorthand_component_properties(property_id)?;
 
     let source = filtered_input_to_string(filtered_input);
     let (mut input_parser, _) = parser_from_filtered_input(filtered_input);
@@ -1640,7 +1639,6 @@ pub(super) fn rust_owned_border_shorthand_style_value_kind(
         let start = parser.index;
         parser.index += 1;
 
-        let component_source = serialize_consumed_component_values(&parser, start, &source)?;
         let component_value = &parser.component_values[start];
         if width.is_none()
             && let Some(value) = rust_owned_border_width_from_component_value(component_value, &source)
@@ -1652,10 +1650,6 @@ pub(super) fn rust_owned_border_shorthand_style_value_kind(
             style = Some(value);
         } else if color.is_none()
             && let Some(value) = rust_owned_color_from_component_value(component_value, &source)
-            && matches!(
-                parse_rust_owned_style_value_for_property(&component_property_ids, component_source.as_bytes()),
-                RustOwnedStyleValueParseResult::Parsed(_)
-            )
         {
             color = Some(value);
         } else {

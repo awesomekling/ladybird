@@ -73,25 +73,26 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
                 filtered_input_string,
             )?;
 
-            let matched_property_id = property_id_from_u16(remaining_property_ids[0])?;
-            let parsed_style_value = parse_rust_owned_style_value_for_property_with_mode(
-                &[matched_property_id as u16],
-                serialized_value.as_bytes(),
-                true,
-                CssPrimitiveValueOptions::default(),
-            );
-            let style_value = match parsed_style_value {
-                RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
-                RustOwnedStyleValueParseResult::Invalid => RustOwnedStyleValue {
-                    property_id: matched_property_id,
-                    value: RustOwnedStyleValueKind::GuaranteedInvalid,
-                },
-            };
-            let matched_property_id = style_value.property_id as u16;
+            let mut style_value = None;
+            for property_id in &remaining_property_ids {
+                let Some(property_id) = property_id_from_u16(*property_id) else {
+                    continue;
+                };
+                if let RustOwnedStyleValueParseResult::Parsed(parsed_style_value) =
+                    parse_rust_owned_style_value_for_property_with_mode(
+                        &[property_id as u16],
+                        serialized_value.as_bytes(),
+                        true,
+                        CssPrimitiveValueOptions::default(),
+                    )
+                {
+                    style_value = Some(parsed_style_value);
+                    break;
+                }
+            }
 
-            if !remaining_property_ids.contains(&matched_property_id) {
-                return None;
-            };
+            let style_value = style_value?;
+            let matched_property_id = style_value.property_id as u16;
 
             remaining_property_ids.retain(|property_id| *property_id != matched_property_id);
             items.push(RustOwnedCoordinatingValueListShorthandItem {
