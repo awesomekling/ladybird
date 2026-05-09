@@ -149,12 +149,6 @@ public:
         Optional<String> color_name_or_source;
     };
 
-    struct CoordinatingValueListShorthandItem {
-        size_t layer_index { 0 };
-        PropertyID property_id;
-        String value;
-    };
-
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         PropertyID property_id;
@@ -598,6 +592,28 @@ public:
         RustNestedPrimitiveValue output;
         Optional<RustNestedPrimitiveValue> first_stop_length;
         Optional<RustNestedPrimitiveValue> second_stop_length;
+    };
+
+    struct CoordinatingValueListShorthandItem {
+        size_t layer_index { 0 };
+        PropertyID property_id;
+        String value;
+        Optional<Keyword> keyword;
+        Optional<FlyString> custom_ident;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> primitive_numeric_value;
+        String primitive_source_or_unit;
+        Optional<ValueType> primitive_value_type;
+        u8 easing_function_kind { 0 };
+        Vector<RustNestedPrimitiveValue> easing_function_values;
+        Vector<RustLinearEasingStop> linear_easing_stops;
+        StepPosition easing_function_step_position { StepPosition::End };
+        FFI::CssAnimationNameValueKind animation_name_kind { FFI::CssAnimationNameValueKind::Invalid };
+        Vector<FFI::CssAnimationNameItemKind> animation_name_item_kinds;
+        Vector<FlyString> animation_names;
+        Vector<FFI::CssTransitionBehaviorItemKind> transition_behaviors;
+        FFI::CssTransitionPropertyValueKind transition_property_kind { FFI::CssTransitionPropertyValueKind::Invalid };
+        Vector<FlyString> transition_properties;
     };
 
     struct RustStyleValue {

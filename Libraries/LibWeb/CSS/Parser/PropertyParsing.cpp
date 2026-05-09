@@ -1624,7 +1624,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto materialize_rust_easing_function = [&]() -> RefPtr<StyleValue const> {
+            auto materialize_rust_easing_function_values = [&](u8 easing_function_kind, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& easing_function_values, Vector<RustComponentValueParser::RustLinearEasingStop> const& linear_easing_stops, StepPosition easing_function_step_position) -> RefPtr<StyleValue const> {
                 auto materialize_easing_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                     if (!value.numeric_value.has_value())
                         return parse_rust_source_as_number_in_range(value.source_or_unit, range);
@@ -1647,13 +1647,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
                 };
 
-                switch (rust_style_value->easing_function_kind) {
+                switch (easing_function_kind) {
                 case 0:
-                    return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), rust_style_value->easing_function_step_position });
+                    return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), easing_function_step_position });
                 case 1: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "linear"sv });
                     Vector<EasingStyleValue::Linear::Stop> stops;
-                    for (auto const& stop : rust_style_value->linear_easing_stops) {
+                    for (auto const& stop : linear_easing_stops) {
                         auto output = materialize_easing_number(stop.output, infinite_range);
                         if (!output)
                             return nullptr;
@@ -1680,12 +1680,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case 2: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "cubic-bezier"sv });
-                    if (rust_style_value->easing_function_values.size() != 4)
+                    if (easing_function_values.size() != 4)
                         return nullptr;
-                    auto x1 = materialize_easing_number(rust_style_value->easing_function_values[0], { .min = 0, .max = 1 });
-                    auto y1 = materialize_easing_number(rust_style_value->easing_function_values[1], infinite_range);
-                    auto x2 = materialize_easing_number(rust_style_value->easing_function_values[2], { .min = 0, .max = 1 });
-                    auto y2 = materialize_easing_number(rust_style_value->easing_function_values[3], infinite_range);
+                    auto x1 = materialize_easing_number(easing_function_values[0], { .min = 0, .max = 1 });
+                    auto y1 = materialize_easing_number(easing_function_values[1], infinite_range);
+                    auto x2 = materialize_easing_number(easing_function_values[2], { .min = 0, .max = 1 });
+                    auto y2 = materialize_easing_number(easing_function_values[3], infinite_range);
                     if (!x1 || !y1 || !x2 || !y2)
                         return nullptr;
                     return EasingStyleValue::create(EasingStyleValue::CubicBezier {
@@ -1697,11 +1697,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case 3: {
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "steps"sv });
-                    if (rust_style_value->easing_function_values.size() != 1)
+                    if (easing_function_values.size() != 1)
                         return nullptr;
-                    auto position = rust_style_value->easing_function_step_position;
+                    auto position = easing_function_step_position;
                     auto min_intervals = position == StepPosition::JumpNone ? 2.0 : 1.0;
-                    auto intervals = materialize_easing_integer(rust_style_value->easing_function_values[0], NumericRange { .min = min_intervals, .max = AK::NumericLimits<i32>::max() });
+                    auto intervals = materialize_easing_integer(easing_function_values[0], NumericRange { .min = min_intervals, .max = AK::NumericLimits<i32>::max() });
                     if (!intervals)
                         return nullptr;
                     return EasingStyleValue::create(EasingStyleValue::Steps { intervals.release_nonnull(), position });
@@ -1709,6 +1709,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 default:
                     return nullptr;
                 }
+            };
+            auto materialize_rust_easing_function = [&]() -> RefPtr<StyleValue const> {
+                return materialize_rust_easing_function_values(rust_style_value->easing_function_kind, rust_style_value->easing_function_values, rust_style_value->linear_easing_stops, rust_style_value->easing_function_step_position);
             };
             auto parse_rust_source_as_image = [&](String const& source) -> RefPtr<AbstractImageStyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
@@ -4264,13 +4267,86 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (longhand_ids.is_empty())
                     break;
 
+                auto materialize_coordinating_value_list_item = [&](RustComponentValueParser::CoordinatingValueListShorthandItem const& item) -> RefPtr<StyleValue const> {
+                    if (item.keyword.has_value())
+                        return KeywordStyleValue::create(*item.keyword);
+
+                    if (item.custom_ident.has_value())
+                        return CustomIdentStyleValue::create(*item.custom_ident);
+
+                    if (item.primitive_value_type.has_value() && item.primitive_numeric_value.has_value()) {
+                        if (*item.primitive_value_type == ValueType::Time && item.primitive_kind == FFI::CssPrimitiveValueKind::Time) {
+                            auto time_unit = string_to_time_unit(item.primitive_source_or_unit);
+                            if (!time_unit.has_value())
+                                return nullptr;
+                            Time time { *item.primitive_numeric_value, time_unit.release_value() };
+                            auto metadata = RustComponentValueParser::property_numeric_metadata({ &item.property_id, 1 }, *item.primitive_value_type);
+                            if (!metadata.has_value() || !metadata->range.contains(time.to_seconds()))
+                                return nullptr;
+                            return TimeStyleValue::create(move(time));
+                        }
+
+                        if (*item.primitive_value_type == ValueType::Number && item.primitive_kind == FFI::CssPrimitiveValueKind::Number) {
+                            auto metadata = RustComponentValueParser::property_numeric_metadata({ &item.property_id, 1 }, *item.primitive_value_type);
+                            if (!metadata.has_value() || !metadata->range.contains(*item.primitive_numeric_value))
+                                return nullptr;
+                            return NumberStyleValue::create(*item.primitive_numeric_value);
+                        }
+                    }
+
+                    if (item.property_id == PropertyID::AnimationTimingFunction || item.property_id == PropertyID::TransitionTimingFunction) {
+                        if (auto easing = materialize_rust_easing_function_values(item.easing_function_kind, item.easing_function_values, item.linear_easing_stops, item.easing_function_step_position))
+                            return easing.release_nonnull();
+                    }
+
+                    if (item.property_id == PropertyID::AnimationName && item.animation_name_kind == FFI::CssAnimationNameValueKind::List) {
+                        VERIFY(item.animation_name_item_kinds.size() == item.animation_names.size());
+                        if (item.animation_names.size() != 1)
+                            return nullptr;
+                        switch (item.animation_name_item_kinds[0]) {
+                        case FFI::CssAnimationNameItemKind::None:
+                            return KeywordStyleValue::create(Keyword::None);
+                        case FFI::CssAnimationNameItemKind::CustomIdent:
+                            return CustomIdentStyleValue::create(item.animation_names[0]);
+                        case FFI::CssAnimationNameItemKind::String:
+                            return StringStyleValue::create(item.animation_names[0]);
+                        }
+                        VERIFY_NOT_REACHED();
+                    }
+
+                    if (item.property_id == PropertyID::TransitionBehavior && item.transition_behaviors.size() == 1) {
+                        switch (item.transition_behaviors[0]) {
+                        case FFI::CssTransitionBehaviorItemKind::Normal:
+                            return KeywordStyleValue::create(Keyword::Normal);
+                        case FFI::CssTransitionBehaviorItemKind::AllowDiscrete:
+                            return KeywordStyleValue::create(Keyword::AllowDiscrete);
+                        }
+                        VERIFY_NOT_REACHED();
+                    }
+
+                    if (item.property_id == PropertyID::TransitionProperty) {
+                        switch (item.transition_property_kind) {
+                        case FFI::CssTransitionPropertyValueKind::Invalid:
+                            break;
+                        case FFI::CssTransitionPropertyValueKind::None:
+                            return KeywordStyleValue::create(Keyword::None);
+                        case FFI::CssTransitionPropertyValueKind::List:
+                            if (item.transition_properties.size() == 1)
+                                return CustomIdentStyleValue::create(item.transition_properties[0]);
+                            break;
+                        }
+                    }
+
+                    return parse_rust_source_as_property(item.property_id, item.value);
+                };
+
                 Vector<HashMap<PropertyID, NonnullRefPtr<StyleValue const>>> parsed_layers;
                 bool is_valid = true;
                 for (auto const& item : rust_style_value->coordinating_value_list_shorthand_items) {
                     if (item.layer_index >= parsed_layers.size())
                         parsed_layers.resize(item.layer_index + 1);
 
-                    auto parsed_value = parse_rust_source_as_property(item.property_id, item.value);
+                    auto parsed_value = materialize_coordinating_value_list_item(item);
                     if (!parsed_value) {
                         is_valid = false;
                         break;

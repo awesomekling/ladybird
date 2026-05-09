@@ -1336,6 +1336,113 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             }
 
+            if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand && kind != FFI::CssStyleValueKind::CoordinatingValueListShorthand) {
+                VERIFY(!style_value->coordinating_value_list_shorthand_items.is_empty());
+                auto& item = style_value->coordinating_value_list_shorthand_items.last();
+                VERIFY(item.property_id == static_cast<PropertyID>(property_id));
+
+                if (kind == FFI::CssStyleValueKind::Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    item.keyword = keyword.release_value();
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::CustomIdent) {
+                    item.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
+                if (first_is_one_of(kind, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction)) {
+                    auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                    if (!value_type.has_value())
+                        return;
+                    item.primitive_kind = primitive_kind;
+                    if (has_numeric_value)
+                        item.primitive_numeric_value = numeric_value;
+                    item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                    item.primitive_value_type = value_type.release_value();
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::EasingFunction) {
+                    item.easing_function_kind = color_red;
+                    enum : u8 {
+                        Keyword,
+                        Linear,
+                        CubicBezier,
+                        Steps,
+                    };
+                    enum : u8 {
+                        LinearOutput,
+                        LinearFirstStopLength,
+                        LinearSecondStopLength,
+                    };
+                    if (color_red == Keyword) {
+                        auto keyword = StringView { value_ptr, value_len };
+                        if (keyword.equals_ignoring_ascii_case("step-start"sv))
+                            item.easing_function_step_position = StepPosition::Start;
+                        else if (keyword.equals_ignoring_ascii_case("step-end"sv))
+                            item.easing_function_step_position = StepPosition::End;
+                        else
+                            return;
+                    } else if (color_red == Linear) {
+                        if (color_green == LinearOutput) {
+                            item.linear_easing_stops.append({
+                                .output = nested_primitive_value_from_callback_payload(),
+                            });
+                        } else {
+                            VERIFY(!item.linear_easing_stops.is_empty());
+                            if (color_green == LinearFirstStopLength)
+                                item.linear_easing_stops.last().first_stop_length = nested_primitive_value_from_callback_payload();
+                            else {
+                                VERIFY(color_green == LinearSecondStopLength);
+                                item.linear_easing_stops.last().second_stop_length = nested_primitive_value_from_callback_payload();
+                            }
+                        }
+                    } else if (color_red == CubicBezier) {
+                        item.easing_function_values.append(nested_primitive_value_from_callback_payload());
+                    } else {
+                        VERIFY(color_red == Steps);
+                        item.easing_function_step_position = static_cast<StepPosition>(color_green);
+                        item.easing_function_values.append(nested_primitive_value_from_callback_payload());
+                    }
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::AnimationName) {
+                    item.animation_name_kind = static_cast<FFI::CssAnimationNameValueKind>(color_red);
+                    for (size_t offset = 0; offset < value_len;) {
+                        auto item_kind = static_cast<FFI::CssAnimationNameItemKind>(value_ptr[offset++]);
+                        auto name_start = offset;
+                        while (offset < value_len && value_ptr[offset] != 0)
+                            ++offset;
+                        item.animation_name_item_kinds.append(item_kind);
+                        item.animation_names.append(FlyString::from_utf8_without_validation({ value_ptr + name_start, offset - name_start }));
+                        if (offset < value_len)
+                            ++offset;
+                    }
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::TransitionBehavior) {
+                    item.transition_behaviors.ensure_capacity(value_len);
+                    for (size_t i = 0; i < value_len; ++i)
+                        item.transition_behaviors.unchecked_append(static_cast<FFI::CssTransitionBehaviorItemKind>(value_ptr[i]));
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::TransitionProperty) {
+                    item.transition_property_kind = static_cast<FFI::CssTransitionPropertyValueKind>(color_red);
+                    for (auto property : StringView { value_ptr, value_len }.split_view('\0'))
+                        item.transition_properties.append(FlyString::from_utf8_without_validation(property.bytes()));
+                    return;
+                }
+
+                return;
+            }
+
             if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::LayerShorthand && kind != FFI::CssStyleValueKind::LayerShorthand) {
                 VERIFY(!style_value->layer_shorthand_items.is_empty());
                 auto& item = style_value->layer_shorthand_items.last();
