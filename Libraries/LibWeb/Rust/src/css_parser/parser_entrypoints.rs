@@ -7514,9 +7514,9 @@ pub(super) fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Opt
             RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(image)),
             RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
                 kind: RustOwnedImageKind::ImageSet,
+                source: Some(filtered_input_to_string(filtered_input)),
                 url: None,
                 gradient: None,
-                source: filtered_input_to_string(filtered_input),
             })),
             _ => None,
         };

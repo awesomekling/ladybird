@@ -2988,7 +2988,11 @@ fn image_callback_payload(image: &RustOwnedImage) -> (u8, u8, &str) {
             &url.url,
         );
     }
-    (image.kind as u8, IMAGE_URL_FUNCTION_TYPE_NONE, &image.source)
+    (
+        image.kind as u8,
+        IMAGE_URL_FUNCTION_TYPE_NONE,
+        image.source.as_deref().unwrap_or(""),
+    )
 }
 
 fn url_callback_payload(url: &RustOwnedUrl) -> (u8, &str) {

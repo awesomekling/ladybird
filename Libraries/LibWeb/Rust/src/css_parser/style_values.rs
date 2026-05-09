@@ -345,7 +345,7 @@ pub(crate) enum RustOwnedCounterFunctionKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImage {
     pub(crate) kind: RustOwnedImageKind,
-    pub(crate) source: String,
+    pub(crate) source: Option<String>,
     pub(crate) url: Option<RustOwnedUrlPayload>,
     pub(crate) gradient: Option<RustOwnedGradient>,
 }

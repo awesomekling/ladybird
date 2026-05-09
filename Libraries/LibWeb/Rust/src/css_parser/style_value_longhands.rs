@@ -1945,9 +1945,9 @@ pub(super) fn consume_border_image_source(
         RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(image)),
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
+            source: Some(source),
             url: None,
             gradient: None,
-            source,
         })),
         _ => None,
     }
@@ -3501,12 +3501,9 @@ pub(super) fn rust_owned_image_style_value_kind(
     if component_value_parse_as_image_url(component_value) {
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Url,
+            source: None,
             url: rust_owned_url_payload_from_component_value(component_value),
             gradient: None,
-            source: serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?,
         }));
     }
 
@@ -3514,12 +3511,12 @@ pub(super) fn rust_owned_image_style_value_kind(
         let gradient = component_value_parse_as_image_gradient_value(component_value)?;
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
-            url: None,
-            gradient: Some(gradient),
-            source: serialize_component_values_for_reparsing(
+            source: Some(serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
-            )?,
+            )?),
+            url: None,
+            gradient: Some(gradient),
         }));
     }
 
@@ -3534,24 +3531,21 @@ pub(super) fn rust_owned_image_from_component_value(
     if component_value_parse_as_image_url(component_value) {
         return Some(RustOwnedImage {
             kind: RustOwnedImageKind::Url,
+            source: None,
             url: rust_owned_url_payload_from_component_value(component_value),
             gradient: None,
-            source: serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?,
         });
     }
 
     if component_value_parse_as_image_gradient(component_value) {
         return Some(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
-            url: None,
-            gradient: component_value_parse_as_image_gradient_value(component_value),
-            source: serialize_component_values_for_reparsing(
+            source: Some(serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
-            )?,
+            )?),
+            url: None,
+            gradient: component_value_parse_as_image_gradient_value(component_value),
         });
     }
 
@@ -3560,12 +3554,12 @@ pub(super) fn rust_owned_image_from_component_value(
     {
         return Some(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
-            url: None,
-            gradient: None,
-            source: serialize_component_values_for_reparsing(
+            source: Some(serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
-            )?,
+            )?),
+            url: None,
+            gradient: None,
         });
     }
 
@@ -3656,12 +3650,12 @@ pub(super) fn rust_owned_image_set_option(
         let source = component_values_string_value(std::slice::from_ref(image))?.to_string();
         RustOwnedImage {
             kind: RustOwnedImageKind::Url,
+            source: None,
             url: Some(RustOwnedUrlPayload {
                 function_type: CssUrlFunctionType::Url,
-                url: source.clone(),
+                url: source,
             }),
             gradient: None,
-            source,
         }
     } else if component_value_parse_as_image_set_image(image) || component_value_parse_as_image_set_gradient(image) {
         rust_owned_image_from_component_value(image, filtered_input_string)?

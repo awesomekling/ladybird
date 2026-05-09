@@ -2373,12 +2373,12 @@ fn parses_style_values_with_rust_owned_ast() {
                 position: Some(RustOwnedListStylePosition::Inside),
                 image: Some(RustOwnedListStyleImage::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
+                    source: None,
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
                     }),
                     gradient: None,
-                    source: "url(marker.png)".to_string(),
                 })),
                 list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
                     "square".to_string()
@@ -2749,12 +2749,12 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
                 items: vec![RustOwnedContentItem::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
+                    source: None,
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
                     }),
                     gradient: None,
-                    source: "url(marker.png)".to_string(),
                 })],
                 alt_text: vec![],
             }),
@@ -3258,12 +3258,12 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
                 source: Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
+                    source: None,
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "border.png".to_string(),
                     }),
                     gradient: None,
-                    source: "url(border.png)".to_string(),
                 })),
                 slice: Some(RustOwnedBorderImageSlice {
                     values: vec![
@@ -3350,12 +3350,12 @@ fn parses_style_values_with_rust_owned_ast() {
                 images: vec![RustOwnedCursorImage {
                     image: RustOwnedImage {
                         kind: RustOwnedImageKind::Url,
+                        source: None,
                         url: Some(RustOwnedUrlPayload {
                             function_type: CssUrlFunctionType::Url,
                             url: "cursor.png".to_string(),
                         }),
                         gradient: None,
-                        source: "url(cursor.png)".to_string(),
                     },
                     x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),
                     y: Some(RustOwnedNestedPrimitiveValue::Number(2.0)),
