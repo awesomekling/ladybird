@@ -352,7 +352,6 @@ pub(crate) struct RustOwnedImage {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedUrl {
-    pub(crate) source: String,
     pub(crate) url: Option<RustOwnedUrlPayload>,
 }
 

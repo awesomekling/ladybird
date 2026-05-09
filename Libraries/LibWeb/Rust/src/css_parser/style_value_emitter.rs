@@ -2995,7 +2995,7 @@ fn url_callback_payload(url: &RustOwnedUrl) -> (u8, &str) {
     if let Some(url) = url.url.as_ref() {
         return (image_url_function_type_callback_payload(url.function_type), &url.url);
     }
-    (IMAGE_URL_FUNCTION_TYPE_NONE, &url.source)
+    (IMAGE_URL_FUNCTION_TYPE_NONE, "")
 }
 
 fn callback_url_style_value<C>(callback: &mut C, property_id: u16, url: &RustOwnedUrl)

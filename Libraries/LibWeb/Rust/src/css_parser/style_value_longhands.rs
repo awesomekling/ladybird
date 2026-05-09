@@ -3605,10 +3605,7 @@ pub(super) fn rust_owned_url_from_source(source: &str) -> RustOwnedUrl {
     } else {
         None
     };
-    RustOwnedUrl {
-        source: source.to_string(),
-        url,
-    }
+    RustOwnedUrl { url }
 }
 
 pub(super) fn rust_owned_image_set_style_value_kind(

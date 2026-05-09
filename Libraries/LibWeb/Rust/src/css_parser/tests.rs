@@ -2272,7 +2272,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::Fill,
             value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
                 url: RustOwnedUrl {
-                    source: "url(#paint)".to_string(),
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "#paint".to_string(),
@@ -2295,7 +2294,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::Stroke,
             value: RustOwnedStyleValueKind::Paint(RustOwnedPaint::Url {
                 url: RustOwnedUrl {
-                    source: "url(#paint)".to_string(),
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "#paint".to_string(),
