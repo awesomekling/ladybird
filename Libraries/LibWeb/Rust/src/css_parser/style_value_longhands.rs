@@ -265,8 +265,8 @@ pub(super) fn rust_owned_font_style_style_value_kind(source: String) -> Option<R
             .iter()
             .filter(|component_value| !is_whitespace_component_value(component_value))
             .nth(1)?;
-        Some(serialize_component_values_for_reparsing(
-            std::slice::from_ref(angle_component_value),
+        Some(component_value_parse_as_nested_angle(
+            angle_component_value,
             filtered_input_string,
         )?)
     } else {

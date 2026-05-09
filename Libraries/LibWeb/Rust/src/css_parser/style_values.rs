@@ -521,7 +521,7 @@ pub(crate) struct RustOwnedRect {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontStyle {
     pub(crate) value: FontStyle,
-    pub(crate) angle: Option<String>,
+    pub(crate) angle: Option<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

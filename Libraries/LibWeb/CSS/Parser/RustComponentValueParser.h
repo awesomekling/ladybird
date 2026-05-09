@@ -147,11 +147,6 @@ public:
         String value;
     };
 
-    struct FontStyle {
-        FFI::CssFontStyleKind kind;
-        bool has_angle { false };
-    };
-
     struct OpenTypeTaggedValue {
         FlyString tag;
         FFI::CssOpenTypeTaggedValueKind value_kind;
@@ -233,6 +228,12 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
+    };
+
+    struct FontStyle {
+        FFI::CssFontStyleKind kind;
+        bool has_angle { false };
+        Optional<RustNestedPrimitiveValue> angle;
     };
 
     struct RustTransformationArgument {
@@ -657,7 +658,6 @@ public:
         FFI::CssFontLanguageOverrideKind font_language_override_kind { FFI::CssFontLanguageOverrideKind::Normal };
         Optional<FlyString> font_language_override;
         FontStyle font_style;
-        Optional<String> font_style_angle;
         FFI::CssOpenTypeSettingsKind open_type_settings_kind { FFI::CssOpenTypeSettingsKind::Normal };
         Vector<OpenTypeTaggedValue> open_type_tag_values;
         Vector<FontVariantAlternatesValue> font_variant_alternates;

@@ -3236,13 +3236,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::FontStyle: {
                 auto font_style_keyword = font_style_keyword_from_rust(rust_style_value->font_style.kind);
                 if (rust_style_value->font_style.has_angle) {
-                    if (!rust_style_value->font_style_angle.has_value())
+                    if (!rust_style_value->font_style.angle.has_value())
                         break;
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*rust_style_value->font_style_angle, "utf-8"sv);
-                    TokenStream angle_tokens { component_values };
-                    auto angle_value = parse_angle_value(angle_tokens, { .min = -90, .max = 90 });
-                    angle_tokens.discard_whitespace();
-                    if (!angle_value || angle_tokens.has_next_token())
+                    auto angle_value = materialize_rust_nested_angle(*rust_style_value->font_style.angle);
+                    if (!angle_value)
                         break;
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();

@@ -4949,7 +4949,10 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::FontStyle,
             value: RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle {
                 value: FontStyle::Oblique { has_angle: true },
-                angle: Some("10deg".to_string()),
+                angle: Some(RustOwnedNestedPrimitiveValue::Angle {
+                    value: 10.0,
+                    unit: "deg".to_string(),
+                }),
             }),
         })
     );

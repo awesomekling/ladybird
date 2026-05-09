@@ -199,21 +199,30 @@ where
                 );
             }
         }
-        RustOwnedStyleValueKind::FontStyle(value) => callback(
-            CssStyleValueKind::FontStyle,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            css_font_style_kind(value.value) as u8,
-            u8::from(value.angle.is_some()),
-            0,
-            0,
-            value.angle.as_ref().map_or(&[], |angle| angle.as_bytes()),
-            property_value_type_name(PropertyValueType::FontStyle),
-        ),
+        RustOwnedStyleValueKind::FontStyle(value) => {
+            let (primitive_kind, numeric_value, unit_or_source) = value.angle.as_ref().map_or(
+                (CssPrimitiveValueKind::Invalid, 0.0, ""),
+                nested_primitive_callback_payload,
+            );
+            callback(
+                CssStyleValueKind::FontStyle,
+                property_id,
+                primitive_kind,
+                value
+                    .angle
+                    .as_ref()
+                    .is_some_and(nested_primitive_callback_has_numeric_value),
+                numeric_value,
+                false,
+                0.0,
+                css_font_style_kind(value.value) as u8,
+                u8::from(value.angle.is_some()),
+                0,
+                0,
+                unit_or_source.as_bytes(),
+                property_value_type_name(PropertyValueType::FontStyle),
+            );
+        }
         RustOwnedStyleValueKind::AnchorNameOrScope(value) => {
             let name_bytes = null_separated_string_list_bytes(&value.names);
             callback(

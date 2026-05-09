@@ -1608,8 +1608,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .kind = static_cast<FFI::CssFontStyleKind>(color_red),
                     .has_angle = color_green != 0,
                 };
-                if (value_len > 0)
-                    value.font_style_angle = string_from_ffi_bytes(value_ptr, value_len);
+                if (value.font_style.has_angle)
+                    value.font_style.angle = nested_primitive_value_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::FontFeatureSettings || kind == FFI::CssStyleValueKind::FontVariationSettings) {
                 if (!style_value.has_value()) {
                     style_value = move(value);
