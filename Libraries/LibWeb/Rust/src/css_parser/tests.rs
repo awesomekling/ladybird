@@ -8426,6 +8426,8 @@ fn rejects_invalid_nonnegative_integer_symbol_pairs() {
     assert_eq!(parse_nonnegative_integer_symbol_pair("-1 \"I\""), None);
     assert_eq!(parse_nonnegative_integer_symbol_pair("inherit 1"), None);
     assert_eq!(parse_nonnegative_integer_symbol_pair("1 default"), None);
+    assert_eq!(parse_nonnegative_integer_symbol_pair("foo(1) \"I\""), None);
+    assert_eq!(parse_nonnegative_integer_symbol_pair("sibling-count() \"I\""), None);
 }
 
 #[test]
@@ -8648,6 +8650,8 @@ fn parses_rust_owned_length_descriptors() {
         Some("calc(1px + 2px)".to_string())
     );
     assert_eq!(parse_rust_owned_length_descriptor("1px 2px".as_bytes()), None);
+    assert_eq!(parse_rust_owned_length_descriptor("foo(1px)".as_bytes()), None);
+    assert_eq!(parse_rust_owned_length_descriptor("sibling-count()".as_bytes()), None);
 }
 
 #[test]
@@ -8673,6 +8677,14 @@ fn parses_rust_owned_positive_percentage_descriptors() {
         Some("calc(50% + 25%)".to_string())
     );
     assert_eq!(parse_rust_owned_positive_percentage_descriptor("-1%".as_bytes()), None);
+    assert_eq!(
+        parse_rust_owned_positive_percentage_descriptor("foo(1%)".as_bytes()),
+        None
+    );
+    assert_eq!(
+        parse_rust_owned_positive_percentage_descriptor("sibling-count()".as_bytes()),
+        None
+    );
 }
 
 #[test]
@@ -8730,6 +8742,11 @@ fn parses_rust_owned_page_size_descriptors() {
         })
     );
     assert_eq!(parse_rust_owned_page_size_descriptor("auto landscape".as_bytes()), None);
+    assert_eq!(parse_rust_owned_page_size_descriptor("foo(1px)".as_bytes()), None);
+    assert_eq!(
+        parse_rust_owned_page_size_descriptor("sibling-count()".as_bytes()),
+        None
+    );
 }
 
 #[test]
