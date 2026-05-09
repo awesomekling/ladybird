@@ -2209,7 +2209,17 @@ fn syntax_node_matches_component_values(
     parser.discard_whitespace();
     match syntax_node {
         SyntaxNode::Universal => {
-            if !parser.has_next_component_value() {
+            let component_values = strip_whitespace(parser.remaining_component_values());
+            // https://drafts.csswg.org/css-values-5/#parse-with-a-syntax
+            // Parse values according to syntax, with a * value treated as <declaration-value>?, and let parsed result be
+            // the result.
+            //
+            // https://drafts.csswg.org/css-syntax/#typedef-declaration-value
+            // The <declaration-value> production matches any sequence of one or more tokens, so long as the sequence does
+            // not contain <bad-string-token>, <bad-url-token>, unmatched <)-token>, <]-token>, or <}-token>, or top-level
+            // <semicolon-token> tokens or <delim-token> tokens with a value of "!". It represents the entirety of what a
+            // valid declaration can have as its value.
+            if !contains_only_declaration_value(component_values, Nested::No) {
                 return false;
             }
             parser.index = parser.component_values.len();

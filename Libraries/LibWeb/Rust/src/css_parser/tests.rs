@@ -6710,6 +6710,21 @@ fn matches_syntax(input: &str, syntax: &str) -> bool {
 }
 
 #[test]
+fn universal_syntax_matches_optional_declaration_value() {
+    assert!(matches_syntax("", "*"));
+    assert!(matches_syntax("  ", "*"));
+    assert!(matches_syntax("red", "*"));
+    assert!(matches_syntax("calc(1px + 2px)", "*"));
+    assert!(matches_syntax("(;)", "*"));
+    assert!(matches_syntax("foo(!)", "*"));
+
+    assert!(!matches_syntax(";", "*"));
+    assert!(!matches_syntax("red;", "*"));
+    assert!(!matches_syntax("!important", "*"));
+    assert!(!matches_syntax("]", "*"));
+}
+
+#[test]
 fn parses_preserved_tokens() {
     let values = parse("a, b");
 
