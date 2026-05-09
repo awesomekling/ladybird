@@ -283,6 +283,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::CaptionSide
             | PropertyId::CaretColor
             | PropertyId::Clear
+            | PropertyId::Clip
+            | PropertyId::ClipPath
             | PropertyId::ClipRule
             | PropertyId::ColorInterpolation
             | PropertyId::ColorScheme
@@ -365,6 +367,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ListStyle
             | PropertyId::ListStyleImage
             | PropertyId::ListStylePosition
+            | PropertyId::ListStyleType
             | PropertyId::MarginBlockEnd
             | PropertyId::MarginBlockStart
             | PropertyId::MarginBottom
@@ -598,6 +601,14 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::Clip => rust_owned_generated_property_specific_style_value_kind(
+            property_id,
+            filtered_input,
+            primitive_value_options,
+        ),
+        PropertyId::ClipPath => {
+            rust_owned_clip_path_style_value_kind(property_id, filtered_input, primitive_value_options)
+        }
         PropertyId::CornerBottomLeftShape
         | PropertyId::CornerBottomRightShape
         | PropertyId::CornerTopLeftShape
@@ -743,7 +754,7 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
         PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
-        PropertyId::BorderImageSource | PropertyId::ListStyleImage => {
+        PropertyId::BorderImageSource | PropertyId::ListStyleImage | PropertyId::ListStyleType => {
             rust_owned_generated_property_specific_style_value_kind(
                 property_id,
                 filtered_input,
@@ -1104,6 +1115,48 @@ fn rust_owned_generated_value_list_style_value_kind(
     Some(RustOwnedStyleValueKind::GeneratedValueList(
         RustOwnedGeneratedValueList { items },
     ))
+}
+
+fn rust_owned_clip_path_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+
+    for value_type in [PropertyValueType::BasicShape, PropertyValueType::Url] {
+        if !property_accepts_value_type(property_id, value_type) {
+            continue;
+        }
+
+        let value_type_matches = if value_type == PropertyValueType::Url {
+            parse_a_url_function(filtered_input, |_| {}, |_| {})
+        } else {
+            component_values_parse_as_property_value_type_with_options(
+                value_type,
+                filtered_input,
+                primitive_value_options,
+            )
+        };
+        if !value_type_matches {
+            continue;
+        }
+
+        return Some(
+            parse_rust_owned_generated_longhand_value_with_options(
+                property_id,
+                value_type,
+                filtered_input,
+                component_values,
+                primitive_value_options,
+            )
+            .value,
+        );
+    }
+
+    None
 }
 
 fn component_values_satisfy_property_numeric_range(

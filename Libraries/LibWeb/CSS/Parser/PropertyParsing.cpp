@@ -152,6 +152,8 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::CaptionSide:
     case PropertyID::CaretColor:
     case PropertyID::Clear:
+    case PropertyID::Clip:
+    case PropertyID::ClipPath:
     case PropertyID::ClipRule:
     case PropertyID::ColorInterpolation:
     case PropertyID::ColorScheme:
@@ -234,6 +236,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ListStyle:
     case PropertyID::ListStyleImage:
     case PropertyID::ListStylePosition:
+    case PropertyID::ListStyleType:
     case PropertyID::MarginBlockEnd:
     case PropertyID::MarginBlockStart:
     case PropertyID::MarginBottom:
