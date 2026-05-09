@@ -2865,30 +2865,6 @@ pub unsafe extern "C" fn rust_css_parse_counter_style(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_nonnegative_integer_symbol_pair(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    order_callback: unsafe extern "C" fn(ctx: *mut c_void, order: CssNonnegativeIntegerSymbolPairOrder),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_a_nonnegative_integer_symbol_pair(input, |order| {
-                order_callback(ctx, order);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
     input: *const u8,

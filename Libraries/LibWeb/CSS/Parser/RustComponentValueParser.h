@@ -935,7 +935,6 @@ public:
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
-    static Optional<FFI::CssNonnegativeIntegerSymbolPairOrder> parse_a_nonnegative_integer_symbol_pair(StringView input, StringView encoding);
     static Optional<DescriptorResult> parse_descriptor_result(DescriptorMetadata::ValueType, StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
