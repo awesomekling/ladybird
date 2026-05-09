@@ -1136,9 +1136,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 options.ensure_capacity(rust_style_value->image_set_options.size());
                 for (auto const& option : rust_style_value->image_set_options) {
                     RefPtr<AbstractImageStyleValue const> image;
-                    if (option.image_is_string) {
-                        image = ImageStyleValue::create(URL { option.image_source });
-                    } else if (option.image_url.has_value()) {
+                    if (option.image_kind == RustComponentValueParser::RustImageKind::Url && option.image_url.has_value()) {
                         image = ImageStyleValue::create(*option.image_url);
                     } else {
                         image = parse_rust_source_as_image(option.image_source);

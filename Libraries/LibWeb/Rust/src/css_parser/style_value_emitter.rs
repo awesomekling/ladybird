@@ -3127,17 +3127,7 @@ where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     for option in &image_set.options {
-        let url = image_set_option_url_payload(option);
-        let (url_function_type, image_source) = if option.image_is_string {
-            (IMAGE_URL_FUNCTION_TYPE_URL, option.image_source.as_str())
-        } else if let Some(url) = &url {
-            (
-                image_url_function_type_callback_payload(url.function_type),
-                url.url.as_str(),
-            )
-        } else {
-            (IMAGE_URL_FUNCTION_TYPE_NONE, option.image_source.as_str())
-        };
+        let (_, url_function_type, image_source) = image_callback_payload(&option.image);
         let metadata = image_set_option_metadata(option);
         callback(
             CssStyleValueKind::Image,
@@ -3148,7 +3138,7 @@ where
             false,
             0.0,
             RustOwnedImageKind::ImageSet as u8,
-            u8::from(option.image_is_string),
+            option.image.kind as u8,
             0,
             url_function_type,
             image_source.as_bytes(),
@@ -3163,16 +3153,6 @@ fn image_set_option_metadata(option: &RustOwnedImageSetOption) -> String {
         option.resolution.as_deref().unwrap_or(""),
         option.mime_type.as_deref().unwrap_or("")
     )
-}
-
-fn image_set_option_url_payload(option: &RustOwnedImageSetOption) -> Option<RustOwnedUrlPayload> {
-    if option.image_is_string {
-        return Some(RustOwnedUrlPayload {
-            function_type: CssUrlFunctionType::Url,
-            url: option.image_source.clone(),
-        });
-    }
-    rust_owned_url_from_source(&option.image_source).url
 }
 
 fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)

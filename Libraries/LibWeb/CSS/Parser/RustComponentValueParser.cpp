@@ -1228,7 +1228,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         }
                     }
                     style_value->image_set_options.append({
-                        .image_is_string = color_green != 0,
+                        .image_kind = static_cast<RustImageKind>(color_green),
                         .image_source = string_from_ffi_bytes(value_ptr, value_len),
                         .image_url = image_url_from_callback_payload(),
                         .resolution = move(resolution),

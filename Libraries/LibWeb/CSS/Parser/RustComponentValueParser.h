@@ -387,7 +387,7 @@ public:
     };
 
     struct RustImageSetOption {
-        bool image_is_string { false };
+        RustImageKind image_kind { RustImageKind::Url };
         String image_source;
         Optional<URL> image_url;
         Optional<String> resolution;

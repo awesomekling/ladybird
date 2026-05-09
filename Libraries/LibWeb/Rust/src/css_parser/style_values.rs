@@ -438,8 +438,7 @@ pub(crate) struct RustOwnedImageSet {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedImageSetOption {
-    pub(crate) image_is_string: bool,
-    pub(crate) image_source: String,
+    pub(crate) image: RustOwnedImage,
     pub(crate) resolution: Option<String>,
     pub(crate) mime_type: Option<String>,
 }
