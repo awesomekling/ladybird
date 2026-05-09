@@ -3294,13 +3294,13 @@ pub(super) fn parse_rust_owned_grid_track_placement_value(
             continue;
         }
 
-        if let Some(integer_source) =
-            consume_integer_math_function_component_value_source(&mut parser, &filtered_input_string)
+        if let Some(integer) =
+            consume_integer_math_function_component_value_payload(&mut parser, &filtered_input_string)
         {
             if parsed_integer.is_some() {
                 return None;
             }
-            parsed_integer = Some(RustOwnedNestedPrimitiveValue::Source(integer_source));
+            parsed_integer = Some(integer);
             continue;
         }
 
@@ -3396,30 +3396,12 @@ pub(super) fn consume_integer_component_value_payload(
     Some((integer, value))
 }
 
-pub(super) fn consume_integer_math_function_component_value(parser: &mut ComponentValueParser) -> bool {
-    parser.discard_whitespace();
-    let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
-        return false;
-    };
-
-    if !is_math_function_name(&function.name)
-        && !function.name.eq_ignore_ascii_case("sibling-index")
-        && !function.name.eq_ignore_ascii_case("sibling-count")
-    {
-        return false;
-    }
-
-    // AD-HOC: C++ still owns resolving math functions and tree counting functions here.
-    parser.index += 1;
-    true
-}
-
-pub(super) fn consume_integer_math_function_component_value_source(
+pub(super) fn consume_integer_math_function_component_value_payload(
     parser: &mut ComponentValueParser,
     filtered_input_string: &str,
-) -> Option<String> {
+) -> Option<RustOwnedNestedPrimitiveValue> {
     parser.discard_whitespace();
-    let Some(ComponentValue::Function(function)) = parser.next_component_value() else {
+    let Some(component_value @ ComponentValue::Function(function)) = parser.next_component_value() else {
         return None;
     };
 
@@ -3430,13 +3412,18 @@ pub(super) fn consume_integer_math_function_component_value_source(
         return None;
     }
 
-    let source = serialize_component_values_for_reparsing(
-        std::slice::from_ref(parser.next_component_value()?),
-        filtered_input_string,
-    )?;
-    // AD-HOC: C++ still owns resolving math functions and tree counting functions here.
+    let value = parse_rust_owned_math_function(
+        PropertyValueType::Integer,
+        std::slice::from_ref(component_value),
+        filtered_input_string.as_bytes(),
+    )
+    .map(RustOwnedNestedPrimitiveValue::MathFunction)
+    .or_else(|| {
+        parse_rust_owned_tree_counting_function(PropertyValueType::Integer, std::slice::from_ref(component_value))
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+    })?;
     parser.index += 1;
-    Some(source)
+    Some(value)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

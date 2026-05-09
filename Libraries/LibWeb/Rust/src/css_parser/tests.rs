@@ -2478,15 +2478,20 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::CornerEndEndShape], "superellipse(random(3, 1))"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::CornerEndEndShape,
             value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
-                value: RustOwnedNestedPrimitiveValue::Source("random(3, 1)".to_string()),
+                value: RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    name,
+                    source,
+                    value_type: PropertyValueType::Number,
+                    ..
+                }),
             }),
-        })
-    );
+        }) if name == "random" && source == "random(3, 1)"
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
         Some(RustOwnedStyleValue {
@@ -4163,6 +4168,21 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement::Span {
                 line_number: Some(RustOwnedNestedPrimitiveValue::Integer(2)),
                 name: Some("main".to_string()),
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span sibling-count()"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::GridColumnStart,
+            value: RustOwnedStyleValueKind::GridTrackPlacement(RustOwnedGridTrackPlacement::Span {
+                line_number: Some(RustOwnedNestedPrimitiveValue::TreeCountingFunction(
+                    RustOwnedTreeCountingFunction {
+                        function: RustOwnedTreeCountingFunctionKind::SiblingCount,
+                        value_type: PropertyValueType::Integer,
+                    }
+                )),
+                name: None,
             }),
         })
     );

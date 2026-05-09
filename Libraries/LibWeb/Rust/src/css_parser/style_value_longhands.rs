@@ -1830,14 +1830,7 @@ pub(super) fn rust_owned_superellipse_style_value_kind(
             ..
         }) => RustOwnedNestedPrimitiveValue::Number(number.value()),
         ComponentValue::Function(_) => {
-            let source = serialize_component_values_for_reparsing(
-                std::slice::from_ref(*parameter_component_value),
-                filtered_input_string,
-            )?;
-            if !component_values_parse_as_property_value_type(PropertyValueType::Number, source.as_bytes()) {
-                return None;
-            }
-            RustOwnedNestedPrimitiveValue::Source(source)
+            component_value_parse_as_nested_number(parameter_component_value, filtered_input_string)?
         }
         _ => return None,
     };
