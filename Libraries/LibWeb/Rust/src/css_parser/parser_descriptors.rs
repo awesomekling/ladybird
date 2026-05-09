@@ -273,11 +273,23 @@ pub(crate) fn parse_rust_owned_font_src_list_descriptor(filtered_input: &[u8]) -
     let filtered_input = filtered_input_to_string(filtered_input);
 
     // https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing
+    // "If parsing a component value results in a parsing error or its format
+    // or tech are unsupported, do not add it to the list of supported sources."
+    //
+    // "If there are no supported entries at the end of this process, the value
+    // for the src descriptor is a parse error."
+    //
     // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
     let sources = split_component_values_on_comma(&component_values)
         .into_iter()
-        .map(|source| serialize_component_values_for_reparsing(strip_whitespace(source), &filtered_input))
-        .collect::<Option<Vec<_>>>()?;
+        .try_fold(Vec::new(), |mut sources, source| {
+            let source = strip_whitespace(source);
+            let mut parser = ComponentValueParser::new(source.to_vec());
+            if parser.parse_a_font_source().is_some() {
+                sources.push(serialize_component_values_for_reparsing(source, &filtered_input)?);
+            }
+            Some(sources)
+        })?;
 
     (!sources.is_empty()).then_some(sources)
 }

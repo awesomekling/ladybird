@@ -8305,8 +8305,21 @@ fn parses_rust_owned_font_src_list_descriptors() {
     );
     assert_eq!(
         parse_rust_owned_font_src_list_descriptor(", url(example.woff2)".as_bytes()),
-        Some(vec!["".to_string(), "url(example.woff2)".to_string()])
+        Some(vec!["url(example.woff2)".to_string()])
     );
+    assert_eq!(
+        parse_rust_owned_font_src_list_descriptor(
+            "url(example.woff2) format(woff2) tech(variations, color-COLRv1)".as_bytes()
+        ),
+        Some(vec![
+            "url(example.woff2) format(woff2) tech(variations, color-COLRv1)".to_string()
+        ])
+    );
+    assert_eq!(
+        parse_rust_owned_font_src_list_descriptor("url(example.woff2) tech(variations) format(woff2)".as_bytes()),
+        None
+    );
+    assert_eq!(parse_rust_owned_font_src_list_descriptor(",".as_bytes()), None);
 }
 
 #[test]
