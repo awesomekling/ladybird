@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -83,6 +84,24 @@ static RefPtr<StyleValue const> materialize_descriptor_integer_symbol_pair(RustC
         return nullptr;
 
     return StyleValueList::create({ integer, symbol.release_nonnull() }, StyleValueList::Separator::Space);
+}
+
+static RefPtr<StyleValue const> materialize_descriptor_font_weight_absolute(RustComponentValueParser::DescriptorResultItem const& item)
+{
+    switch (item.primitive_kind) {
+    case FFI::CssPrimitiveValueKind::Keyword: {
+        auto keyword = keyword_from_string(item.source);
+        if (!keyword.has_value())
+            return nullptr;
+        return KeywordStyleValue::create(keyword.value());
+    }
+    case FFI::CssPrimitiveValueKind::Number:
+        if (!item.has_numeric_value)
+            return nullptr;
+        return NumberStyleValue::create(item.numeric_value);
+    default:
+        return nullptr;
+    }
 }
 
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens)
@@ -534,13 +553,15 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     StyleValueVector weights;
                     for (auto const& item : weight_sources->items) {
-                        auto const& source = item.source;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
-                        auto weight = parse_font_weight_absolute_value(font_weight_absolute_tokens);
-                        font_weight_absolute_tokens.discard_whitespace();
-                        if (!weight || font_weight_absolute_tokens.has_next_token())
-                            return nullptr;
+                        auto weight = materialize_descriptor_font_weight_absolute(item);
+                        if (!weight) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
+                            weight = parse_font_weight_absolute_value(font_weight_absolute_tokens);
+                            font_weight_absolute_tokens.discard_whitespace();
+                            if (!weight || font_weight_absolute_tokens.has_next_token())
+                                return nullptr;
+                        }
                         weights.append(weight.release_nonnull());
                     }
 

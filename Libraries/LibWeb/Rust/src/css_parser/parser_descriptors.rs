@@ -339,7 +339,9 @@ pub(crate) fn parse_rust_owned_font_src_list_descriptor(filtered_input: &[u8]) -
     (!sources.is_empty()).then_some(sources)
 }
 
-pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedDescriptorPrimitiveValue>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let filtered_input = filtered_input_to_string(filtered_input);
@@ -351,14 +353,10 @@ pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_inp
     // <font-weight-absolute>{1,2}
     for _ in 0..2 {
         parser.discard_whitespace();
-        let start = parser.index;
-        if !parser.consume_font_weight_absolute_syntax() {
+        let Some(weight) = parser.consume_font_weight_absolute_value(&filtered_input) else {
             break;
-        }
-        weights.push(serialize_component_values_for_reparsing(
-            &parser.component_values[start..parser.index],
-            &filtered_input,
-        )?);
+        };
+        weights.push(weight);
     }
 
     parser.discard_whitespace();
@@ -670,6 +668,41 @@ impl ComponentValueParser {
         }
         self.index = saved_index;
         None
+    }
+
+    fn consume_font_weight_absolute_value(
+        &mut self,
+        filtered_input: &str,
+    ) -> Option<RustOwnedDescriptorPrimitiveValue> {
+        let start = self.index;
+        let component_value = self.next_component_value()?;
+        let component_values = std::slice::from_ref(component_value);
+        let syntax_kind =
+            component_values_parse_as_generated_value_type(ValueTypeId::FontWeightAbsolute, component_values);
+        if syntax_kind == CssValueTypeSyntaxKind::Invalid {
+            return None;
+        }
+
+        let style_value = generated_value_type_style_value(syntax_kind, component_values);
+        let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
+        let (primitive_kind, numeric_value, source_or_unit) = match style_value.kind {
+            GeneratedValueTypeStyleValueKind::Keyword => (
+                CssPrimitiveValueKind::Keyword,
+                None,
+                style_value.value.unwrap_or(&source).to_string(),
+            ),
+            GeneratedValueTypeStyleValueKind::Number => {
+                (CssPrimitiveValueKind::Number, style_value.numeric_value, source)
+            }
+            _ => (CssPrimitiveValueKind::Invalid, None, source),
+        };
+
+        self.index = start + 1;
+        Some(RustOwnedDescriptorPrimitiveValue {
+            primitive_kind,
+            numeric_value,
+            source_or_unit,
+        })
     }
 
     fn consume_symbol_source(&mut self, filtered_input: &str) -> Option<String> {

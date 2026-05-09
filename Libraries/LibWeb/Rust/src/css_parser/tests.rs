@@ -751,6 +751,22 @@ fn descriptor_integer_value(value: i32, source: &str) -> RustOwnedDescriptorPrim
     }
 }
 
+fn descriptor_number_value(value: f64, source: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::Number,
+        numeric_value: Some(value),
+        source_or_unit: source.to_string(),
+    }
+}
+
+fn descriptor_keyword_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::Keyword,
+        numeric_value: None,
+        source_or_unit: value.to_string(),
+    }
+}
+
 fn descriptor_math_integer_value(source: &str) -> RustOwnedDescriptorPrimitiveValue {
     RustOwnedDescriptorPrimitiveValue {
         primitive_kind: CssPrimitiveValueKind::Invalid,
@@ -8887,11 +8903,17 @@ fn parses_font_weight_absolute_pair_descriptors() {
 fn parses_rust_owned_font_weight_absolute_pair_descriptors() {
     assert_eq!(
         parse_rust_owned_font_weight_absolute_pair_descriptor("normal bold".as_bytes()),
-        Some(vec!["normal".to_string(), "bold".to_string()])
+        Some(vec![
+            descriptor_keyword_value("normal"),
+            descriptor_keyword_value("bold")
+        ])
     );
     assert_eq!(
         parse_rust_owned_font_weight_absolute_pair_descriptor("calc(100 + 100) 900".as_bytes()),
-        Some(vec!["calc(100 + 100)".to_string(), "900".to_string()])
+        Some(vec![
+            descriptor_math_integer_value("calc(100 + 100)"),
+            descriptor_number_value(900.0, "900")
+        ])
     );
     assert_eq!(
         parse_rust_owned_font_weight_absolute_pair_descriptor("100 400 900".as_bytes()),

@@ -339,6 +339,7 @@ where
         CssDescriptorValueType::FontSrcList => parse_rust_owned_font_src_list_descriptor(filtered_input),
         CssDescriptorValueType::FontWeightAbsolutePair => {
             parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input)
+                .map(|weights| weights.into_iter().map(|weight| weight.source_or_unit).collect())
         }
         CssDescriptorValueType::Length => parse_rust_owned_length_descriptor(filtered_input).map(|source| vec![source]),
         CssDescriptorValueType::PositivePercentage => {
@@ -618,11 +619,11 @@ where
             for weight in &weights {
                 source_callback(
                     default_order,
-                    weight,
+                    weight.source_or_unit(),
                     false,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
+                    weight.primitive_kind(),
+                    weight.has_numeric_value(),
+                    weight.numeric_value(),
                     0,
                     0,
                 );
