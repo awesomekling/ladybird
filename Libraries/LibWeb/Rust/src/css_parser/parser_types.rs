@@ -1858,6 +1858,7 @@ pub enum CssStyleValueKind {
     FontVariantNumeric,
     FontVariationSettings,
     FilterValueList,
+    KeywordList,
     BasicShape,
     Rect,
     AspectRatio,

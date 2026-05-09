@@ -945,6 +945,47 @@ pub(super) fn rust_owned_paint_order_style_value_kind(filtered_input: &[u8]) -> 
     Some(RustOwnedStyleValueKind::PaintOrder(RustOwnedPaintOrder { value }))
 }
 
+pub(super) fn rust_owned_align_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_align_content)
+}
+
+pub(super) fn rust_owned_justify_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_justify_content)
+}
+
+pub(super) fn rust_owned_align_items_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_align_items)
+}
+
+pub(super) fn rust_owned_justify_items_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_justify_items)
+}
+
+pub(super) fn rust_owned_align_self_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_align_self)
+}
+
+pub(super) fn rust_owned_justify_self_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    rust_owned_keyword_list_style_value_kind(filtered_input, component_values_parse_as_justify_self)
+}
+
+pub(super) fn rust_owned_keyword_list_style_value_kind(
+    filtered_input: &[u8],
+    parse_value: fn(&[ComponentValue]) -> bool,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = remove_whitespace_component_values(&component_values);
+
+    if !parse_value(&component_values) {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::KeywordList(RustOwnedKeywordList {
+        keywords: component_values_to_ident_keywords(&component_values)?,
+    }))
+}
+
 pub(super) fn rust_owned_place_content_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
     rust_owned_place_shorthand_style_value_kind(
         filtered_input,

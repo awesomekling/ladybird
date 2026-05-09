@@ -39,6 +39,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FilterValueList(RustOwnedFilterValueList),
     FontStyle(RustOwnedFontStyle),
     FontVariantLonghand(RustOwnedFontVariantLonghand),
+    KeywordList(RustOwnedKeywordList),
     PlaceContent(RustOwnedPlaceShorthand),
     PlaceItems(RustOwnedPlaceShorthand),
     PlaceSelf(RustOwnedPlaceShorthand),
@@ -876,6 +877,11 @@ pub(crate) const FLEX_BASIS_KIND_SOURCE: u8 = 7;
 pub(crate) struct RustOwnedPlaceShorthand {
     pub(crate) align_keywords: Vec<String>,
     pub(crate) justify_keywords: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedKeywordList {
+    pub(crate) keywords: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -59,6 +59,33 @@ namespace Web::CSS {
 
 GC_DEFINE_ALLOCATOR(ComputedProperties);
 
+static Keyword alignment_keyword_from_style_value(StyleValue const& value, Keyword fallback)
+{
+    // AD-HOC: Rust now preserves multi-keyword CSS Box Alignment values such as
+    // `safe center`, but the computed alignment enums still model the legacy
+    // single-keyword subset used by layout. Use the representable alignment
+    // keyword here and fall back to the property's initial keyword until the
+    // computed value model grows full overflow and baseline support.
+    if (value.is_keyword())
+        return value.to_keyword();
+
+    if (!value.is_value_list())
+        return fallback;
+
+    auto const& values = value.as_value_list().values();
+    for (auto i = values.size(); i > 0; --i) {
+        auto const& item = values[i - 1];
+        if (!item->is_keyword())
+            continue;
+        auto keyword = item->to_keyword();
+        if (first_is_one_of(keyword, Keyword::Safe, Keyword::Unsafe))
+            continue;
+        return keyword;
+    }
+
+    return fallback;
+}
+
 ComputedProperties::ComputedProperties() = default;
 
 ComputedProperties::~ComputedProperties() = default;
@@ -699,19 +726,28 @@ Clip ComputedProperties::clip() const
 JustifyContent ComputedProperties::justify_content() const
 {
     auto const& value = property(PropertyID::JustifyContent);
-    return keyword_to_justify_content(value.to_keyword()).release_value();
+    auto maybe_justify_content = keyword_to_justify_content(alignment_keyword_from_style_value(value, Keyword::Normal));
+    if (!maybe_justify_content.has_value())
+        return JustifyContent::Normal;
+    return maybe_justify_content.release_value();
 }
 
 JustifyItems ComputedProperties::justify_items() const
 {
     auto const& value = property(PropertyID::JustifyItems);
-    return keyword_to_justify_items(value.to_keyword()).release_value();
+    auto maybe_justify_items = keyword_to_justify_items(alignment_keyword_from_style_value(value, Keyword::Legacy));
+    if (!maybe_justify_items.has_value())
+        return JustifyItems::Legacy;
+    return maybe_justify_items.release_value();
 }
 
 JustifySelf ComputedProperties::justify_self() const
 {
     auto const& value = property(PropertyID::JustifySelf);
-    return keyword_to_justify_self(value.to_keyword()).release_value();
+    auto maybe_justify_self = keyword_to_justify_self(alignment_keyword_from_style_value(value, Keyword::Auto));
+    if (!maybe_justify_self.has_value())
+        return JustifySelf::Auto;
+    return maybe_justify_self.release_value();
 }
 
 Vector<NonnullRefPtr<TransformationStyleValue const>> ComputedProperties::transformations_for_style_value(StyleValue const& value)
@@ -827,19 +863,28 @@ Color ComputedProperties::accent_color(ColorResolutionContext const& color_resol
 AlignContent ComputedProperties::align_content() const
 {
     auto const& value = property(PropertyID::AlignContent);
-    return keyword_to_align_content(value.to_keyword()).release_value();
+    auto maybe_align_content = keyword_to_align_content(alignment_keyword_from_style_value(value, Keyword::Normal));
+    if (!maybe_align_content.has_value())
+        return AlignContent::Normal;
+    return maybe_align_content.release_value();
 }
 
 AlignItems ComputedProperties::align_items() const
 {
     auto const& value = property(PropertyID::AlignItems);
-    return keyword_to_align_items(value.to_keyword()).release_value();
+    auto maybe_align_items = keyword_to_align_items(alignment_keyword_from_style_value(value, Keyword::Normal));
+    if (!maybe_align_items.has_value())
+        return AlignItems::Normal;
+    return maybe_align_items.release_value();
 }
 
 AlignSelf ComputedProperties::align_self() const
 {
     auto const& value = property(PropertyID::AlignSelf);
-    return keyword_to_align_self(value.to_keyword()).release_value();
+    auto maybe_align_self = keyword_to_align_self(alignment_keyword_from_style_value(value, Keyword::Auto));
+    if (!maybe_align_self.has_value())
+        return AlignSelf::Auto;
+    return maybe_align_self.release_value();
 }
 
 Appearance ComputedProperties::appearance() const

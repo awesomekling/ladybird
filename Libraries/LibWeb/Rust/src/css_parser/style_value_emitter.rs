@@ -1131,6 +1131,9 @@ where
         RustOwnedStyleValueKind::FontVariantLonghand(value) => {
             callback_font_variant_longhand_style_value(callback, property_id, value);
         }
+        RustOwnedStyleValueKind::KeywordList(value) => {
+            callback_keyword_list_style_value(callback, property_id, value);
+        }
         RustOwnedStyleValueKind::Shorthand(value_list)
         | RustOwnedStyleValueKind::Tuple(value_list)
         | RustOwnedStyleValueKind::ValueList(value_list) => {
@@ -5009,6 +5012,29 @@ fn callback_place_shorthand_style_value<C>(
             false,
             0.0,
             1,
+            0,
+            0,
+            0,
+            keyword.as_bytes(),
+            "",
+        );
+    }
+}
+
+fn callback_keyword_list_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedKeywordList)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    for keyword in &value.keywords {
+        callback(
+            CssStyleValueKind::KeywordList,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            0,
             0,
             0,
             0,

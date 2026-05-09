@@ -222,6 +222,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
     matches!(
         property_id,
         PropertyId::AccentColor
+            | PropertyId::AlignContent
+            | PropertyId::AlignItems
+            | PropertyId::AlignSelf
             | PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationName
@@ -363,6 +366,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::InsetInlineStart
             | PropertyId::ImageRendering
             | PropertyId::Isolation
+            | PropertyId::JustifyContent
+            | PropertyId::JustifyItems
+            | PropertyId::JustifySelf
             | PropertyId::LetterSpacing
             | PropertyId::Left
             | PropertyId::ListStyle
@@ -784,6 +790,12 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_overflow_clip_margin_shorthand_style_value_kind(filtered_input)
         }
         PropertyId::PaintOrder => rust_owned_paint_order_style_value_kind(filtered_input),
+        PropertyId::AlignContent => rust_owned_align_content_style_value_kind(filtered_input),
+        PropertyId::JustifyContent => rust_owned_justify_content_style_value_kind(filtered_input),
+        PropertyId::AlignItems => rust_owned_align_items_style_value_kind(filtered_input),
+        PropertyId::JustifyItems => rust_owned_justify_items_style_value_kind(filtered_input),
+        PropertyId::AlignSelf => rust_owned_align_self_style_value_kind(filtered_input),
+        PropertyId::JustifySelf => rust_owned_justify_self_style_value_kind(filtered_input),
         PropertyId::PlaceContent => rust_owned_place_content_style_value_kind(filtered_input),
         PropertyId::PlaceItems => rust_owned_place_items_style_value_kind(filtered_input),
         PropertyId::PlaceSelf => rust_owned_place_self_style_value_kind(filtered_input),

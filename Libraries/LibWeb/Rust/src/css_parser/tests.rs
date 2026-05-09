@@ -5359,6 +5359,32 @@ fn parses_style_values_with_rust_owned_ast() {
             value_type: String::new(),
         })
     );
+    assert_eq!(
+        parse_style_value(&[PropertyId::AlignContent], "safe center"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::KeywordList,
+            property_id: PropertyId::AlignContent,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "center".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::JustifyItems], "legacy right"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::KeywordList,
+            property_id: PropertyId::JustifyItems,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "right".to_string(),
+            value_type: String::new(),
+        })
+    );
     assert_eq!(parse_style_value(&[PropertyId::Color], "10px"), None);
 }
 

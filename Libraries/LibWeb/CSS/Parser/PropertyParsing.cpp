@@ -91,6 +91,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
 {
     switch (property_id) {
     case PropertyID::AccentColor:
+    case PropertyID::AlignContent:
+    case PropertyID::AlignItems:
+    case PropertyID::AlignSelf:
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
     case PropertyID::AnimationDelay:
@@ -232,6 +235,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::InsetInlineStart:
     case PropertyID::ImageRendering:
     case PropertyID::Isolation:
+    case PropertyID::JustifyContent:
+    case PropertyID::JustifyItems:
+    case PropertyID::JustifySelf:
     case PropertyID::LetterSpacing:
     case PropertyID::Left:
     case PropertyID::ListStyle:
@@ -4187,6 +4193,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::Separator::Space) };
                 }
                 break;
+            case FFI::CssStyleValueKind::KeywordList: {
+                auto value = materialize_rust_keyword_list(rust_style_value->keyword_list);
+                if (!value)
+                    break;
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
+            }
             case FFI::CssStyleValueKind::PlaceContent:
                 if (!rust_style_value->place_align_keywords.is_empty() && !rust_style_value->place_justify_keywords.is_empty()) {
                     auto align_content = materialize_rust_keyword_list(rust_style_value->place_align_keywords);
