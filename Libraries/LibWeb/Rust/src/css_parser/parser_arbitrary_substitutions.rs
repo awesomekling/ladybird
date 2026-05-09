@@ -318,6 +318,10 @@ mod tests {
             Some((true, false, false, false, false))
         );
         assert_eq!(
+            collect_substitution_function_presence(b"  attr(foo)     attr(bar) attr(baz)  "),
+            Some((true, false, false, false, false))
+        );
+        assert_eq!(
             collect_substitution_function_presence(b"attr(data-foo number)"),
             Some((true, false, false, false, false))
         );

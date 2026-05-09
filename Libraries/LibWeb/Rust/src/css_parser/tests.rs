@@ -10340,6 +10340,8 @@ fn parses_content_values() {
     assert!(parse_content("url(\"picture.svg\") \"hello\""));
     assert!(parse_content("open-quote / \"alt text\""));
     assert!(parse_content("counter(counter-name) / \"alt\" counter(other)"));
+    assert!(parse_content("attr(foo) attr(bar) attr(baz)"));
+    assert!(parse_content("  attr(foo)     attr(bar) attr(baz)  "));
 }
 
 #[test]

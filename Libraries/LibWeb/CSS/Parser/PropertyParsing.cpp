@@ -1653,6 +1653,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
+            auto parse_rust_source_as_unresolved = [&](String const& source) -> RefPtr<StyleValue const> {
+                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                SubstitutionFunctionsPresence substitution_presence {};
+                if (Parser::collect_arbitrary_substitution_function_presence(component_values, substitution_presence).is_error()
+                    || !substitution_presence.has_any()) {
+                    return nullptr;
+                }
+                return UnresolvedStyleValue::create(move(component_values), substitution_presence, source);
+            };
             auto parse_rust_source_as_non_negative_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
@@ -1704,7 +1713,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
-                    return nullptr;
+                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
@@ -1713,7 +1722,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto value = parse_length_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
-                    return nullptr;
+                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_source_as_non_negative_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
@@ -1722,7 +1731,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
-                    return nullptr;
+                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_source_as_non_negative_length = [&](String const& source) -> RefPtr<StyleValue const> {
@@ -1731,7 +1740,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto value = parse_length_value(value_tokens, non_negative_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
-                    return nullptr;
+                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_source_as_border_image_outset = [&](String const& source) -> RefPtr<StyleValue const> {
@@ -5674,22 +5683,21 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
 
     SubstitutionFunctionsPresence substitution_presence;
     {
-        // NB: This transaction is intentionally never committed. This loop just examines the tokens and doesn't want
-        //     to permanently consume anything.
-        auto transaction = tokens.begin_transaction();
-        while (tokens.has_next_token()) {
-            auto const& token = tokens.consume_a_token();
-
+        Vector<ComponentValue> component_values;
+        component_values.ensure_capacity(tokens.remaining_token_count());
+        for (auto const& token : tokens.remaining_tokens())
+            component_values.append(token);
+        for (auto const& token : component_values) {
             if (token.is(Token::Type::Semicolon))
                 return ParseError::SyntaxError;
-
-            // https://drafts.csswg.org/css-values-5/#resolve-property
-            // If a property value contains one or more arbitrary substitution functions, and all of those functions are
-            // themselves syntactically valid according to their argument grammars, the entire value’s grammar must be
-            // assumed to be valid at parse time.
-            if (collect_arbitrary_substitution_function_presence(token, substitution_presence).is_error())
-                return ParseError::SyntaxError;
         }
+
+        // https://drafts.csswg.org/css-values-5/#resolve-property
+        // If a property value contains one or more arbitrary substitution functions, and all of those functions are
+        // themselves syntactically valid according to their argument grammars, the entire value’s grammar must be
+        // assumed to be valid at parse time.
+        if (collect_arbitrary_substitution_function_presence(component_values, substitution_presence).is_error())
+            return ParseError::SyntaxError;
     }
 
     auto parse_all_as = [](auto& tokens, auto&& callback) -> ParseErrorOr<NonnullRefPtr<StyleValue const>> {
@@ -5711,15 +5719,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     }
 
     if (property_id == PropertyID::Custom || substitution_presence.has_any()) {
-        return parse_all_as(tokens, [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-            if (tokens.is_empty())
-                return UnresolvedStyleValue::create({}, substitution_presence, move(original_source_text));
-
-            if (auto component_values = parse_declaration_value(tokens); component_values.has_value())
-                return UnresolvedStyleValue::create(component_values.release_value(), substitution_presence, move(original_source_text));
-
-            return nullptr;
-        });
+        Vector<ComponentValue> remaining_tokens { tokens.remaining_tokens() };
+        if (auto component_values = parse_declaration_value(tokens); component_values.has_value() && tokens.is_empty())
+            return UnresolvedStyleValue::create(component_values.release_value(), substitution_presence, move(original_source_text));
+        return UnresolvedStyleValue::create(move(remaining_tokens), substitution_presence, move(original_source_text));
     }
 
     tokens.discard_whitespace();
