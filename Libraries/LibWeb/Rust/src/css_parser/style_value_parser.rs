@@ -295,6 +295,86 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackgroundPosition => {
             rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
         }
+        PropertyId::OffsetAnchor => {
+            if component_values_parse_as_property_value_type_with_options(
+                PropertyValueType::Position,
+                filtered_input,
+                primitive_value_options,
+            ) {
+                Some(rust_owned_generated_longhand_style_value_kind(
+                    property_id,
+                    PropertyValueType::Position,
+                    filtered_input,
+                    primitive_value_options,
+                ))
+            } else {
+                None
+            }
+        }
+        PropertyId::OffsetDistance => {
+            if component_values_parse_as_property_value_type_with_options(
+                PropertyValueType::LengthPercentage,
+                filtered_input,
+                primitive_value_options,
+            ) {
+                Some(rust_owned_generated_longhand_style_value_kind(
+                    property_id,
+                    PropertyValueType::LengthPercentage,
+                    filtered_input,
+                    primitive_value_options,
+                ))
+            } else {
+                None
+            }
+        }
+        PropertyId::OffsetPath => {
+            if component_values_parse_as_property_value_type_with_options(
+                PropertyValueType::BasicShape,
+                filtered_input,
+                primitive_value_options,
+            ) {
+                Some(rust_owned_generated_longhand_style_value_kind(
+                    property_id,
+                    PropertyValueType::BasicShape,
+                    filtered_input,
+                    primitive_value_options,
+                ))
+            } else {
+                None
+            }
+        }
+        PropertyId::OffsetPosition => {
+            if component_values_parse_as_property_value_type_with_options(
+                PropertyValueType::Position,
+                filtered_input,
+                primitive_value_options,
+            ) {
+                Some(rust_owned_generated_longhand_style_value_kind(
+                    property_id,
+                    PropertyValueType::Position,
+                    filtered_input,
+                    primitive_value_options,
+                ))
+            } else {
+                None
+            }
+        }
+        PropertyId::OffsetRotate => {
+            if component_values_parse_as_property_value_type_with_options(
+                PropertyValueType::Angle,
+                filtered_input,
+                primitive_value_options,
+            ) {
+                Some(rust_owned_generated_longhand_style_value_kind(
+                    property_id,
+                    PropertyValueType::Angle,
+                    filtered_input,
+                    primitive_value_options,
+                ))
+            } else {
+                None
+            }
+        }
         PropertyId::BackgroundAttachment
         | PropertyId::BackgroundBlendMode
         | PropertyId::BackgroundClip
@@ -976,6 +1056,24 @@ fn rust_owned_clip_path_style_value_kind(
     }
 
     None
+}
+
+fn rust_owned_generated_longhand_style_value_kind(
+    property_id: PropertyId,
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> RustOwnedStyleValueKind {
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    parse_rust_owned_generated_longhand_value_with_options(
+        property_id,
+        value_type,
+        filtered_input,
+        &component_values,
+        primitive_value_options,
+    )
+    .value
 }
 
 fn component_values_satisfy_property_numeric_range(

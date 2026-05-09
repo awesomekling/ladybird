@@ -5393,6 +5393,71 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_style_value(&[PropertyId::OffsetDistance], "12px"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::OffsetDistance,
+            primitive_kind: CssPrimitiveValueKind::Length,
+            numeric_value: Some(12.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: "px".to_string(),
+            value_type: "LengthPercentage".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OffsetPosition], "auto"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::OffsetPosition,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "auto".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OffsetAnchor], "center"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Position,
+            property_id: PropertyId::OffsetAnchor,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: String::new(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OffsetRotate], "45deg"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::OffsetRotate,
+            primitive_kind: CssPrimitiveValueKind::Angle,
+            numeric_value: Some(45.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: "deg".to_string(),
+            value_type: "Angle".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OffsetPath], "path(\"M 1 1\")"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::BasicShape,
+            property_id: PropertyId::OffsetPath,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "M 1 1".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
         parse_style_value(&[PropertyId::TransitionTimingFunction], "linear(0, 1)"),
         Some(ParsedStyleValue {
             kind: CssStyleValueKind::GeneratedValueList,

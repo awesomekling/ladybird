@@ -3179,6 +3179,74 @@
     ],
     "percentages-resolve-to": "length"
   },
+  "offset-anchor": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "auto",
+    "requires-computation": "cascaded-value",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "position"
+    ],
+    "percentages-resolve-to": "length"
+  },
+  "offset-distance": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "0%",
+    "requires-computation": "cascaded-value",
+    "valid-types": [
+      "length-percentage"
+    ],
+    "percentages-resolve-to": "length"
+  },
+  "offset-path": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "none",
+    "requires-computation": "never",
+    "valid-identifiers": [
+      "border-box",
+      "content-box",
+      "fill-box",
+      "none",
+      "padding-box",
+      "stroke-box",
+      "view-box"
+    ],
+    "valid-types": [
+      "basic-shape"
+    ]
+  },
+  "offset-position": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "auto",
+    "requires-computation": "cascaded-value",
+    "valid-identifiers": [
+      "auto",
+      "normal"
+    ],
+    "valid-types": [
+      "position"
+    ],
+    "percentages-resolve-to": "length"
+  },
+  "offset-rotate": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "auto",
+    "requires-computation": "never",
+    "valid-identifiers": [
+      "auto",
+      "reverse"
+    ],
+    "valid-types": [
+      "angle"
+    ]
+  },
   "opacity": {
     "animation-type": "by-computed-value",
     "affects-layout": false,
