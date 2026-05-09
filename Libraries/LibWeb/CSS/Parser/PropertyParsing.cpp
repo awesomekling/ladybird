@@ -2455,24 +2455,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_color = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_color_value(value_tokens);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
-            auto materialize_rust_style_color = [&](RustComponentValueParser::RustStyleColor const& color, auto parse_source) -> RefPtr<StyleValue const> {
+            auto materialize_rust_style_color = [&](RustComponentValueParser::RustStyleColor const& color) -> RefPtr<StyleValue const> {
                 if (!color.is_simple) {
                     if (!color.source.has_value())
                         return nullptr;
-                    if (color.source_component_values.is_empty()) {
-                        // AD-HOC: Some transitional Rust result containers
-                        // still store only the serialized color source.
-                        return parse_source(*color.source);
-                    }
+                    if (color.source_component_values.is_empty())
+                        return nullptr;
                     TokenStream color_tokens { color.source_component_values };
                     auto value = parse_color_value(color_tokens);
                     color_tokens.discard_whitespace();
@@ -4448,9 +4436,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 RefPtr<StyleValue const> color;
                 if (rust_style_value->border_color.has_value()) {
-                    auto color_value = materialize_rust_style_color(*rust_style_value->border_color, [&](String const& source) {
-                        return parse_rust_source_as_property(color_property, source);
-                    });
+                    auto color_value = materialize_rust_style_color(*rust_style_value->border_color);
                     if (!color_value)
                         break;
                     color = make_single_value_shorthand(color_property, longhands_for_shorthand(color_property), color_value.release_nonnull());
@@ -4874,7 +4860,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                             RefPtr<StyleValue const> color;
                             if (event.drop_shadow_color.has_value()) {
-                                color = materialize_rust_style_color(*event.drop_shadow_color, parse_rust_source_as_color);
+                                color = materialize_rust_style_color(*event.drop_shadow_color);
                                 if (!color)
                                     break;
                             }
@@ -5084,8 +5070,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                 .name = item.color_is_simple ? item.color_name_or_source : Optional<String> {},
                                 .source = item.color_is_simple ? Optional<String> {} : item.color_name_or_source,
                                 .source_component_values = item.color_source_component_values,
-                            },
-                            parse_rust_source_as_color);
+                            });
                         if (color)
                             return color.release_nonnull();
                     }
@@ -5838,7 +5823,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, KeywordStyleValue::create(Keyword::None) };
                 }
                 if (rust_style_value->paint_color.has_value()) {
-                    auto color = materialize_rust_style_color(*rust_style_value->paint_color, parse_rust_source_as_color);
+                    auto color = materialize_rust_style_color(*rust_style_value->paint_color);
                     if (!color)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -5854,7 +5839,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                     RefPtr<StyleValue const> paint_fallback;
                     if (rust_style_value->paint_fallback_color.has_value()) {
-                        paint_fallback = materialize_rust_style_color(*rust_style_value->paint_fallback_color, parse_rust_source_as_color);
+                        paint_fallback = materialize_rust_style_color(*rust_style_value->paint_fallback_color);
                         if (!paint_fallback)
                             break;
                     }
@@ -6173,8 +6158,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->scrollbar_color_kind == 2) {
                     if (!rust_style_value->scrollbar_thumb_color.has_value() || !rust_style_value->scrollbar_track_color.has_value())
                         break;
-                    auto thumb_color = materialize_rust_style_color(*rust_style_value->scrollbar_thumb_color, parse_rust_source_as_color);
-                    auto track_color = materialize_rust_style_color(*rust_style_value->scrollbar_track_color, parse_rust_source_as_color);
+                    auto thumb_color = materialize_rust_style_color(*rust_style_value->scrollbar_thumb_color);
+                    auto track_color = materialize_rust_style_color(*rust_style_value->scrollbar_track_color);
                     if (!thumb_color || !track_color)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -6258,7 +6243,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     for (auto const& shadow : rust_style_value->shadows) {
                         RefPtr<StyleValue const> color;
                         if (shadow.color.has_value()) {
-                            color = materialize_rust_style_color(*shadow.color, parse_rust_source_as_color);
+                            color = materialize_rust_style_color(*shadow.color);
                             if (!color)
                                 break;
                         }
@@ -6313,9 +6298,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         ? KeywordStyleValue::create(text_decoration_style_keyword_from_rust(*rust_style_value->text_decoration_style))
                         : property_initial_value(PropertyID::TextDecorationStyle);
                     auto decoration_color = rust_style_value->text_decoration_color.has_value()
-                        ? materialize_rust_style_color(*rust_style_value->text_decoration_color, [&](String const& source) {
-                              return parse_rust_source_as_property(PropertyID::TextDecorationColor, source);
-                          })
+                        ? materialize_rust_style_color(*rust_style_value->text_decoration_color)
                         : property_initial_value(PropertyID::TextDecorationColor);
                     if (!decoration_line || !decoration_thickness || !decoration_style || !decoration_color)
                         break;
