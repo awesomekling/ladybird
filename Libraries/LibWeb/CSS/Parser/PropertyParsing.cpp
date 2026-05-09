@@ -3855,7 +3855,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         if (!item.color_name_or_source.has_value())
                             return nullptr;
-                        return parse_rust_source_as_property(item.property_id, *item.color_name_or_source);
+                        if (item.color_source_component_values.is_empty())
+                            return parse_rust_source_as_property(item.property_id, *item.color_name_or_source);
+                        TokenStream color_tokens { item.color_source_component_values };
+                        auto color = parse_color_value(color_tokens);
+                        color_tokens.discard_whitespace();
+                        if (!color || color_tokens.has_next_token())
+                            return nullptr;
+                        return wrap_single_value_shorthand_if_needed(item.property_id, color.release_nonnull());
                     }
 
                     if (item.primitive_value_type.has_value()) {
@@ -4828,6 +4835,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                 .alpha = item.color_alpha,
                                 .name = item.color_is_simple ? item.color_name_or_source : Optional<String> {},
                                 .source = item.color_is_simple ? Optional<String> {} : item.color_name_or_source,
+                                .source_component_values = item.color_source_component_values,
                             },
                             parse_rust_source_as_color);
                         if (color)

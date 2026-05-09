@@ -147,6 +147,7 @@ public:
         u8 color_blue { 0 };
         u8 color_alpha { 0 };
         Optional<String> color_name_or_source;
+        Vector<ComponentValue> color_source_component_values;
     };
 
     struct RustCalculationNodeEvent {
@@ -502,6 +503,7 @@ public:
         u8 color_blue { 0 };
         u8 color_alpha { 0 };
         Optional<String> color_name_or_source;
+        Vector<ComponentValue> color_source_component_values;
         Optional<RustImageKind> image_kind;
         Optional<String> image_source;
         Optional<URL> image_url;

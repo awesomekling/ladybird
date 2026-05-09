@@ -110,7 +110,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
-                    filtered_input,
+                    &item.source,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
@@ -158,7 +158,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
-                    filtered_input,
+                    &item.source,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
@@ -278,7 +278,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
-                    filtered_input,
+                    &item.source,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
@@ -307,7 +307,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
-                    filtered_input,
+                    &item.source,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
@@ -1575,7 +1575,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             let _ = value_list;
         }
         RustOwnedStyleValueKind::GuaranteedInvalid => {}
-        RustOwnedStyleValueKind::Color(color) => callback_color_style_value(callback, property_id, color),
+        RustOwnedStyleValueKind::Color(color) => callback_color_style_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            color,
+        ),
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::EasingFunction(value) => {
             callback_easing_function_style_value(callback, calculation_callback, property_id, value);
@@ -2241,9 +2250,15 @@ fn callback_rust_owned_color<C, S, E>(
     }
 }
 
-fn callback_color_style_value<C>(callback: &mut C, property_id: u16, color: &RustOwnedColor)
-where
+fn callback_color_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    color: &RustOwnedColor,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match color {
         RustOwnedColor::Simple {
@@ -2268,13 +2283,20 @@ where
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
-        RustOwnedColor::Function { source, .. } => callback_source_backed_value_type_kind_style_value(
-            callback,
-            CssStyleValueKind::ColorFunction,
-            property_id,
+        RustOwnedColor::Function {
             source,
-            PropertyValueType::Color,
-        ),
+            component_values,
+            ..
+        } => {
+            callback_source_backed_value_type_kind_style_value(
+                callback,
+                CssStyleValueKind::ColorFunction,
+                property_id,
+                source,
+                PropertyValueType::Color,
+            );
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR, component_values);
+        }
     }
 }
 

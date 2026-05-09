@@ -1195,6 +1195,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
     struct StyleValueParseContext {
         enum class SourceComponentValueTarget : u8 {
             None,
+            Discard,
             FlexBasis,
             StyleColor,
         };
@@ -1208,6 +1209,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         ComponentValueBuilder source_component_value_builder;
         SourceComponentValueTarget source_component_value_target { SourceComponentValueTarget::None };
         RustStyleColor* style_color_source_component_value_target { nullptr };
+        Vector<ComponentValue>* source_component_values_target { nullptr };
 
         void flush_source_component_values()
         {
@@ -1217,15 +1219,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             switch (source_component_value_target) {
             case SourceComponentValueTarget::None:
                 VERIFY_NOT_REACHED();
+            case SourceComponentValueTarget::Discard:
+                break;
             case SourceComponentValueTarget::FlexBasis:
                 VERIFY(style_value.has_value());
                 VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
                 style_value->flex_basis_source_component_values = move(source_component_value_builder.root_values);
                 break;
             case SourceComponentValueTarget::StyleColor:
-                VERIFY(style_color_source_component_value_target);
-                style_color_source_component_value_target->source_component_values = move(source_component_value_builder.root_values);
-                style_color_source_component_value_target = nullptr;
+                if (style_color_source_component_value_target) {
+                    style_color_source_component_value_target->source_component_values = move(source_component_value_builder.root_values);
+                    style_color_source_component_value_target = nullptr;
+                } else {
+                    VERIFY(source_component_values_target);
+                    *source_component_values_target = move(source_component_value_builder.root_values);
+                    source_component_values_target = nullptr;
+                }
                 break;
             }
             source_component_value_builder = {};
@@ -1243,8 +1252,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 source_component_value_target = SourceComponentValueTarget::FlexBasis;
                 return;
             case SourceComponentValueListStyleColor:
-                VERIFY(style_color_source_component_value_target);
-                source_component_value_target = SourceComponentValueTarget::StyleColor;
+                source_component_value_target = (style_color_source_component_value_target || source_component_values_target)
+                    ? SourceComponentValueTarget::StyleColor
+                    : SourceComponentValueTarget::Discard;
                 return;
             default:
                 VERIFY_NOT_REACHED();
@@ -1298,6 +1308,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto note_style_color_source_component_target = [&](Optional<RustStyleColor>& color) {
                 if (color.has_value() && !color->is_simple)
                     context.style_color_source_component_value_target = &*color;
+            };
+            auto note_source_component_values_target = [&](Vector<ComponentValue>& component_values) {
+                context.source_component_values_target = &component_values;
             };
             auto image_url_from_callback_payload = [&]() -> Optional<URL> {
                 enum : u8 {
@@ -1358,6 +1371,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (kind == FFI::CssStyleValueKind::ColorFunction) {
                     item.has_color = true;
                     item.color_name_or_source = string_from_ffi_bytes(value_ptr, value_len);
+                    note_source_component_values_target(item.color_source_component_values);
                     return;
                 }
 
@@ -1562,6 +1576,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (kind == FFI::CssStyleValueKind::ColorFunction) {
                     item.has_color = true;
                     item.color_name_or_source = string_from_ffi_bytes(value_ptr, value_len);
+                    note_source_component_values_target(item.color_source_component_values);
                     return;
                 }
 
@@ -3875,6 +3890,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         [](void* raw_style_value, FFI::CssComponentValue const* component_value) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
             VERIFY(context.source_component_value_target != StyleValueParseContext::SourceComponentValueTarget::None);
+            if (context.source_component_value_target == StyleValueParseContext::SourceComponentValueTarget::Discard)
+                return;
             append_component_value_token(context.source_component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
