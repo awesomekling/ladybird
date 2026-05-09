@@ -4369,21 +4369,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto flex_grow = materialize_rust_nested_non_negative_number(*rust_style_value->flex_grow);
                     auto flex_shrink = materialize_rust_nested_non_negative_number(*rust_style_value->flex_shrink);
                     auto flex_basis = materialize_rust_flex_basis(*rust_style_value);
-                    if (!flex_grow
-                        && rust_style_value->flex_grow->primitive_kind == FFI::CssPrimitiveValueKind::Invalid
-                        && rust_style_value->flex_shrink->primitive_kind == FFI::CssPrimitiveValueKind::Number
-                        && rust_style_value->flex_shrink->numeric_value.has_value()
-                        && *rust_style_value->flex_shrink->numeric_value == 1
-                        && *rust_style_value->flex_basis_kind == RustComponentValueParser::RustFlexBasisKind::LengthPercentage
-                        && rust_style_value->flex_basis.has_value()
-                        && rust_style_value->flex_basis->primitive_kind == FFI::CssPrimitiveValueKind::Percentage
-                        && rust_style_value->flex_basis->numeric_value.has_value()
-                        && *rust_style_value->flex_basis->numeric_value == 0) {
-                        // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
-                        // https://github.com/w3c/csswg-drafts/issues/5742
-                        flex_grow = NumberStyleValue::create(1);
-                        flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, rust_style_value->flex_grow->source_or_unit);
-                    }
                     if (!flex_grow || !flex_shrink || !flex_basis)
                         break;
                     discard_rust_owned_property_value_tokens();
