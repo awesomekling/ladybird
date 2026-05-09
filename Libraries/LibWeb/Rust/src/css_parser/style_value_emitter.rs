@@ -316,6 +316,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     RustOwnedStyleValueKind::GridTrackSizeList(value) => {
                         callback_grid_track_size_list_style_value(
                             callback,
+                            calculation_callback,
                             &mut SourceComponentValueEmitter {
                                 filtered_input,
                                 list_callback: source_component_value_list_callback,
@@ -329,6 +330,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     RustOwnedStyleValueKind::GridAutoTrackSizes(value) => {
                         callback_grid_track_size_list_style_value(
                             callback,
+                            calculation_callback,
                             &mut SourceComponentValueEmitter {
                                 filtered_input,
                                 list_callback: source_component_value_list_callback,
@@ -1072,6 +1074,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::GridAutoTrackSizes(value) => {
             callback_grid_track_size_list_style_value(
                 callback,
+                calculation_callback,
                 &mut SourceComponentValueEmitter {
                     filtered_input,
                     list_callback: source_component_value_list_callback,
@@ -1096,6 +1099,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::GridTrackSizeList(value) => {
             callback_grid_track_size_list_style_value(
                 callback,
+                calculation_callback,
                 &mut SourceComponentValueEmitter {
                     filtered_input,
                     list_callback: source_component_value_list_callback,
@@ -3584,6 +3588,7 @@ const GRID_TRACK_SIZE_LIST_CALLBACK_MINMAX: u8 = 3;
 const GRID_TRACK_SIZE_LIST_CALLBACK_FIT_CONTENT: u8 = 4;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_BEGIN: u8 = 5;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_END: u8 = 6;
+const GRID_TRACK_SIZE_LIST_CALLBACK_SECONDARY_CALCULATION_TARGET: u8 = 7;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FILL: u8 = 0;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_AUTO_FIT: u8 = 1;
 const GRID_TRACK_SIZE_LIST_CALLBACK_REPEAT_FIXED: u8 = 2;
@@ -3647,14 +3652,16 @@ fn callback_grid_template_areas_style_value<C>(
     }
 }
 
-fn callback_grid_track_size_list_style_value<C, S, E>(
+fn callback_grid_track_size_list_style_value<C, D, S, E>(
     callback: &mut C,
+    calculation_callback: &mut D,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     value: &RustOwnedGridTrackSizeList,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -3675,19 +3682,28 @@ fn callback_grid_track_size_list_style_value<C, S, E>(
             "",
         ),
         RustOwnedGridTrackSizeList::List(items) => {
-            callback_grid_track_size_list_items(callback, source_component_value_emitter, kind, property_id, items);
+            callback_grid_track_size_list_items(
+                callback,
+                calculation_callback,
+                source_component_value_emitter,
+                kind,
+                property_id,
+                items,
+            );
         }
     }
 }
 
-fn callback_grid_track_size_list_items<C, S, E>(
+fn callback_grid_track_size_list_items<C, D, S, E>(
     callback: &mut C,
+    calculation_callback: &mut D,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     items: &[RustOwnedGridTrackSizeListItem],
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -3712,20 +3728,29 @@ fn callback_grid_track_size_list_items<C, S, E>(
                 );
             }
             RustOwnedGridTrackSizeListItem::Track(track) => {
-                callback_explicit_grid_track(callback, source_component_value_emitter, kind, property_id, track);
+                callback_explicit_grid_track(
+                    callback,
+                    calculation_callback,
+                    source_component_value_emitter,
+                    kind,
+                    property_id,
+                    track,
+                );
             }
         }
     }
 }
 
-fn callback_explicit_grid_track<C, S, E>(
+fn callback_explicit_grid_track<C, D, S, E>(
     callback: &mut C,
+    calculation_callback: &mut D,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     track: &RustOwnedExplicitGridTrack,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -3749,6 +3774,7 @@ fn callback_explicit_grid_track<C, S, E>(
                     payload.source_or_unit.as_bytes(),
                     "",
                 );
+                emit_grid_track_nested_primitive_calculation(calculation_callback, breadth);
             }
             RustOwnedGridTrackSize::MinMax { min, max } => {
                 let min_payload = grid_track_breadth_callback_payload(min);
@@ -3770,6 +3796,9 @@ fn callback_explicit_grid_track<C, S, E>(
                     min_payload.source_or_unit.as_bytes(),
                     max_payload.source_or_unit,
                 );
+                emit_grid_track_nested_primitive_calculation(calculation_callback, min);
+                callback_grid_track_secondary_calculation_target(callback, kind, property_id);
+                emit_grid_track_nested_primitive_calculation(calculation_callback, max);
             }
             RustOwnedGridTrackSize::FitContent(value) => {
                 let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
@@ -3789,6 +3818,7 @@ fn callback_explicit_grid_track<C, S, E>(
                     unit_or_source.as_bytes(),
                     "",
                 );
+                emit_grid_track_nested_primitive_calculation(calculation_callback, value);
             }
         },
         RustOwnedExplicitGridTrack::Repeat(repeat) => {
@@ -3825,8 +3855,12 @@ fn callback_explicit_grid_track<C, S, E>(
                 source_or_unit.as_bytes(),
                 "",
             );
+            if let Some(count) = count {
+                emit_grid_track_nested_primitive_calculation(calculation_callback, count);
+            }
             callback_grid_track_size_list_items(
                 callback,
+                calculation_callback,
                 source_component_value_emitter,
                 kind,
                 property_id,
@@ -3848,6 +3882,36 @@ fn callback_explicit_grid_track<C, S, E>(
                 "",
             );
         }
+    }
+}
+
+fn callback_grid_track_secondary_calculation_target<C>(callback: &mut C, kind: CssStyleValueKind, property_id: u16)
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    callback(
+        kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        GRID_TRACK_SIZE_LIST_CALLBACK_SECONDARY_CALCULATION_TARGET,
+        0,
+        0,
+        0,
+        &[],
+        "",
+    );
+}
+
+fn emit_grid_track_nested_primitive_calculation<D>(calculation_callback: &mut D, value: &RustOwnedNestedPrimitiveValue)
+where
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
+    if let RustOwnedNestedPrimitiveValue::MathFunction(value) = value {
+        emit_rust_owned_calculation_tree(&value.calculation, calculation_callback);
     }
 }
 

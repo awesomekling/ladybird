@@ -2224,10 +2224,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case PropertyID::GridAutoRows:
                 case PropertyID::GridTemplateColumns:
                 case PropertyID::GridTemplateRows:
+                    enum : u8 {
+                        SecondaryCalculationTarget = 7,
+                    };
+                    if (color_red == SecondaryCalculationTarget) {
+                        item.last_calculation_node_target = RustCalculationNodeTarget::GridTrackSecondaryValue;
+                        break;
+                    }
                     if (color_red == 0) {
                         item.grid_track_size_list_is_none = true;
                         break;
                     }
+                    item.last_calculation_node_target = RustCalculationNodeTarget::GridTrackValue;
                     item.grid_track_size_list_events.append(RustGridTrackSizeListEvent {
                         .kind = static_cast<RustGridTrackSizeListEventKind>(color_red),
                         .repeat_type = static_cast<RustGridRepeatType>(color_green),
@@ -3062,6 +3070,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                            FFI::CssStyleValueKind::GridTrackSizeList)) {
                 enum : u8 {
                     None,
+                    SecondaryCalculationTarget = 7,
                 };
 
                 if (!style_value.has_value())
@@ -3076,6 +3085,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 }
 
+                if (color_red == SecondaryCalculationTarget) {
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::GridTrackSecondaryValue;
+                    return;
+                }
+
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::GridTrackValue;
                 style_value->grid_track_size_list_events.append(RustGridTrackSizeListEvent {
                     .kind = static_cast<RustGridTrackSizeListEventKind>(color_red),
                     .repeat_type = static_cast<RustGridRepeatType>(color_green),
@@ -3863,6 +3878,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->linear_easing_stops.is_empty());
                     VERIFY(style_value->linear_easing_stops.last().second_stop_length.has_value());
                     style_value->linear_easing_stops.last().second_stop_length->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::GridTemplateShorthand) {
+                VERIFY(!style_value->grid_template_shorthand_items.is_empty());
+                auto& item = style_value->grid_template_shorthand_items.last();
+                VERIFY(!item.grid_track_size_list_events.is_empty());
+                switch (item.last_calculation_node_target) {
+                case RustCalculationNodeTarget::GridTrackValue:
+                    item.grid_track_size_list_events.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::GridTrackSecondaryValue:
+                    item.grid_track_size_list_events.last().secondary_value.calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::GridAutoTrackSizes, FFI::CssStyleValueKind::GridTrackSizeList)) {
+                VERIFY(!style_value->grid_track_size_list_events.is_empty());
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::GridTrackValue:
+                    style_value->grid_track_size_list_events.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::GridTrackSecondaryValue:
+                    style_value->grid_track_size_list_events.last().secondary_value.calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

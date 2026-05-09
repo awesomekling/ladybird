@@ -3349,7 +3349,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 case RustComponentValueParser::RustGridTrackBreadthKind::Flex: {
                     RefPtr<StyleValue const> flex_value;
-                    if (value.numeric_value.has_value()) {
+                    if (!value.calculation_node_events.is_empty()) {
+                        flex_value = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Flex, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No);
+                        if (!flex_value)
+                            return {};
+                    } else if (value.numeric_value.has_value()) {
                         if (value.primitive_kind != FFI::CssPrimitiveValueKind::Flex)
                             return {};
                         auto flex_unit = string_to_flex_unit(value.source_or_unit);
@@ -3366,12 +3370,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (!flex_value || value_tokens.has_next_token())
                             return {};
                     } else {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream value_tokens { component_values };
-                        flex_value = parse_flex_value(value_tokens, non_negative_range);
-                        value_tokens.discard_whitespace();
-                        if (!flex_value || value_tokens.has_next_token())
-                            return {};
+                        return {};
                     }
                     return GridSize { flex_value.release_nonnull() };
                 }

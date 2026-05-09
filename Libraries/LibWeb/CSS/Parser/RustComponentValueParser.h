@@ -279,6 +279,8 @@ public:
         LinearEasingOutput,
         LinearEasingFirstStopLength,
         LinearEasingSecondStopLength,
+        GridTrackValue,
+        GridTrackSecondaryValue,
     };
 
     enum class RustTreeCountingFunction : u8 {
@@ -471,6 +473,7 @@ public:
         PropertyID property_id;
         bool grid_track_size_list_is_none { false };
         Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
+        RustCalculationNodeTarget last_calculation_node_target { RustCalculationNodeTarget::None };
         bool grid_template_areas_is_none { false };
         Vector<String> grid_template_area_rows;
         Optional<u8> grid_auto_flow_axis;
