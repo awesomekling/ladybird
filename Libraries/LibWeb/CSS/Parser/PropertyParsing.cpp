@@ -3952,21 +3952,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 RefPtr<StyleValue const> line_height;
                 RefPtr<StyleValue const> font_families;
 
-                auto parse_value = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream value_tokens { component_values };
-                    auto value = parse_css_value_for_property(property_id, value_tokens);
-                    value_tokens.discard_whitespace();
-                    if (!value || value_tokens.has_next_token())
-                        return {};
-                    return value;
-                };
-
                 bool is_valid = true;
                 for (auto const& item : rust_style_value->font_shorthand_items) {
-                    auto value = item.value_component_values.is_empty()
-                        ? parse_value(item.property_id, item.value)
-                        : parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
+                    if (item.value_component_values.is_empty()) {
+                        is_valid = false;
+                        break;
+                    }
+                    auto value = parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                     if (!value) {
                         is_valid = false;
                         break;
@@ -4199,16 +4191,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         case FFI::CssOpenTypeTaggedValueKind::Value: {
                             VERIFY(tag_value.value.has_value());
-                            if (!tag_value.value_component_values.is_empty()) {
-                                value = parse_rust_component_values_as_integer_in_range(tag_value.value_component_values, non_negative_integer_range);
-                            } else {
-                                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
-                                TokenStream value_tokens { component_values };
-                                value = parse_integer_value(value_tokens, non_negative_integer_range);
-                                value_tokens.discard_whitespace();
-                                if (!value || value_tokens.has_next_token())
-                                    break;
-                            }
+                            if (tag_value.value_component_values.is_empty())
+                                break;
+                            value = parse_rust_component_values_as_integer_in_range(tag_value.value_component_values, non_negative_integer_range);
                             break;
                         }
                         }
@@ -4278,13 +4263,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         RefPtr<StyleValue const> number;
                         if (!tag_value.value_component_values.is_empty()) {
                             number = parse_rust_component_values_as_number(tag_value.value_component_values);
-                        } else {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            number = parse_number_value(value_tokens, infinite_range);
-                            value_tokens.discard_whitespace();
-                            if (!number || value_tokens.has_next_token())
-                                break;
                         }
                         if (!number)
                             break;
@@ -4708,9 +4686,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     }
 
-                    if (!item.value_component_values.is_empty())
-                        return parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
-                    return parse_rust_source_as_property(item.property_id, item.value);
+                    if (item.value_component_values.is_empty())
+                        return nullptr;
+                    return parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                 };
 
                 Vector<HashMap<PropertyID, NonnullRefPtr<StyleValue const>>> parsed_layers;
@@ -5137,9 +5115,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return position.release_nonnull();
                     }
 
-                    auto value = item.value_component_values.is_empty()
-                        ? parse_rust_source_as_property(item.property_id, item.value)
-                        : parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
+                    if (item.value_component_values.is_empty())
+                        return nullptr;
+                    auto value = parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                     if (!value)
                         return nullptr;
                     if (value->is_value_list() && value->as_value_list().size() == 1)
@@ -5556,9 +5534,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return wrap_single_value_shorthand_if_needed(property_id, SuperellipseStyleValue::create(parameter.release_nonnull()));
                     }
 
-                    if (!item.value_component_values.is_empty())
-                        return parse_rust_component_values_as_property(property_id, item.value, item.value_component_values);
-                    return parse_rust_source_as_property(property_id, item.value);
+                    if (item.value_component_values.is_empty())
+                        return nullptr;
+                    return parse_rust_component_values_as_property(property_id, item.value, item.value_component_values);
                 };
 
                 Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
