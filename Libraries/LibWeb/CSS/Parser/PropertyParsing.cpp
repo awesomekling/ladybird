@@ -159,6 +159,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ColorScheme:
     case PropertyID::Color:
     case PropertyID::ColumnCount:
+    case PropertyID::ColumnHeight:
     case PropertyID::ColumnSpan:
     case PropertyID::ColumnWidth:
     case PropertyID::Columns:
@@ -253,6 +254,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
+    case PropertyID::MaskType:
     case PropertyID::MathDepth:
     case PropertyID::MathShift:
     case PropertyID::MathStyle:

@@ -290,6 +290,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ColorScheme
             | PropertyId::Color
             | PropertyId::ColumnCount
+            | PropertyId::ColumnHeight
             | PropertyId::ColumnSpan
             | PropertyId::ColumnWidth
             | PropertyId::Columns
@@ -384,6 +385,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
+            | PropertyId::MaskType
             | PropertyId::MathDepth
             | PropertyId::MathShift
             | PropertyId::MathStyle
@@ -640,6 +642,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::BorderRightWidth
         | PropertyId::BorderTopWidth
         | PropertyId::ColumnGap
+        | PropertyId::ColumnHeight
         | PropertyId::ColumnWidth
         | PropertyId::Cx
         | PropertyId::Cy
