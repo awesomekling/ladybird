@@ -2445,7 +2445,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_length_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(property_id, ValueType::Length, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Length, value.calculation_node_events, range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (range.min >= 0)
                         return parse_rust_source_as_non_negative_length(value.source_or_unit);
@@ -2466,7 +2466,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_length_percentage_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(property_id, ValueType::LengthPercentage, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::LengthPercentage, value.calculation_node_events, range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (range.min >= 0)
                         return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
@@ -2825,7 +2825,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_non_negative_number_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Number, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
@@ -2842,9 +2842,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_non_negative_number_percentage_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty()) {
-                    if (auto number = materialize_rust_calculation_tree_values(property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No))
+                    if (auto number = materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Number, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No))
                         return number;
-                    return materialize_rust_calculation_tree_values(property_id, ValueType::Percentage, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Percentage, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No);
                 }
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_non_negative_number_percentage(value.source_or_unit);
