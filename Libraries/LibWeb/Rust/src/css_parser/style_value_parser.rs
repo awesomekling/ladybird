@@ -608,11 +608,11 @@ fn parse_rust_owned_property_specific_longhand_value(
                     PropertyId::AnimationName as u16,
                 ][..],
                 PropertyId::Transition => &[
+                    PropertyId::TransitionBehavior as u16,
                     PropertyId::TransitionProperty as u16,
                     PropertyId::TransitionDuration as u16,
                     PropertyId::TransitionTimingFunction as u16,
                     PropertyId::TransitionDelay as u16,
-                    PropertyId::TransitionBehavior as u16,
                 ][..],
                 _ => unreachable!(),
             };

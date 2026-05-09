@@ -3948,6 +3948,24 @@ fn parses_style_values_with_rust_owned_ast() {
         ]
     );
     let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Transition,
+        value: RustOwnedStyleValueKind::CoordinatingValueListShorthand(transition_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Transition], "allow-discrete display 200ms")
+    else {
+        panic!("Expected transition to parse as a coordinating value list shorthand");
+    };
+    assert_eq!(
+        transition_items
+            .iter()
+            .map(|item| (item.layer_index, item.style_value.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::TransitionBehavior, "allow-discrete"),
+            (0, PropertyId::TransitionProperty, "display"),
+            (0, PropertyId::TransitionDuration, "200ms"),
+        ]
+    );
+    let Some(RustOwnedStyleValue {
         property_id: PropertyId::Background,
         value: RustOwnedStyleValueKind::LayerShorthand(background_items),
     }) = parse_rust_owned_style_value(&[PropertyId::Background], "url(bg.png) center / cover no-repeat red")
