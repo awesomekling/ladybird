@@ -17,6 +17,7 @@ pub(crate) struct RustOwnedCounterStyleAdditiveTuple {
     pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
     pub(crate) source: String,
     pub(crate) integer: Option<i32>,
+    pub(crate) integer_calculation: Option<Box<RustOwnedCalculationNode>>,
     pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
 }
 
@@ -25,6 +26,7 @@ pub(crate) struct RustOwnedCounterStylePadDescriptor {
     pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
     pub(crate) source: String,
     pub(crate) integer: Option<i32>,
+    pub(crate) integer_calculation: Option<Box<RustOwnedCalculationNode>>,
     pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
 }
 
@@ -58,6 +60,7 @@ pub(crate) struct RustOwnedDescriptorPrimitiveValue {
     pub(crate) primitive_kind: CssPrimitiveValueKind,
     pub(crate) numeric_value: Option<f64>,
     pub(crate) source_or_unit: String,
+    pub(crate) calculation: Option<Box<RustOwnedCalculationNode>>,
 }
 
 impl RustOwnedDescriptorPrimitiveValue {
@@ -83,7 +86,14 @@ pub(crate) struct RustOwnedNonnegativeIntegerSymbolPair {
     pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
     pub(crate) source: String,
     pub(crate) integer: Option<i32>,
+    pub(crate) integer_calculation: Option<Box<RustOwnedCalculationNode>>,
     pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RustOwnedDescriptorInteger {
+    value: Option<i32>,
+    calculation: Option<Box<RustOwnedCalculationNode>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -201,6 +211,7 @@ pub(crate) fn parse_rust_owned_counter_style_additive_symbols_descriptor(
             order: pair.order,
             source: pair.source,
             integer: pair.integer,
+            integer_calculation: pair.integer_calculation,
             symbol: pair.symbol,
         });
 
@@ -246,13 +257,15 @@ pub(crate) fn parse_rust_owned_counter_style_system_descriptor(
         let first_symbol = if let Some(first_symbol) = parser.consume_integer_value() {
             Some(RustOwnedDescriptorPrimitiveValue {
                 primitive_kind: first_symbol
+                    .value
                     .map(|_| CssPrimitiveValueKind::Integer)
                     .unwrap_or(CssPrimitiveValueKind::Invalid),
-                numeric_value: first_symbol.map(f64::from),
+                numeric_value: first_symbol.value.map(f64::from),
                 source_or_unit: serialize_component_values_for_reparsing(
                     &parser.component_values[(parser.index - 1)..parser.index],
                     &filtered_input,
                 )?,
+                calculation: first_symbol.calculation,
             })
         } else {
             None
@@ -292,6 +305,7 @@ pub(crate) fn parse_rust_owned_counter_style_pad_descriptor(
         order: pair.order,
         source: pair.source,
         integer: pair.integer,
+        integer_calculation: pair.integer_calculation,
         symbol: pair.symbol,
     })
 }
@@ -387,15 +401,23 @@ pub(crate) fn parse_rust_owned_length_descriptor_value(
     };
 
     let value = component_value_parse_as_nested_length(component_value, &filtered_input)?;
-    let (primitive_kind, numeric_value, source_or_unit) = match value {
-        RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, Some(value), unit),
-        RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
+    let (primitive_kind, numeric_value, source_or_unit, calculation) = match value {
+        RustOwnedNestedPrimitiveValue::Length { value, unit } => {
+            (CssPrimitiveValueKind::Length, Some(value), unit, None)
+        }
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => (
+            CssPrimitiveValueKind::Invalid,
+            None,
+            value.source,
+            Some(value.calculation),
+        ),
         _ => return None,
     };
     Some(RustOwnedDescriptorPrimitiveValue {
         primitive_kind,
         numeric_value,
         source_or_unit,
+        calculation,
     })
 }
 
@@ -422,19 +444,26 @@ pub(crate) fn parse_rust_owned_positive_percentage_descriptor_value(
     }
 
     let value = component_value_parse_as_nested_length_percentage(component_value, &filtered_input)?;
-    let (primitive_kind, numeric_value, source_or_unit) = match value {
+    let (primitive_kind, numeric_value, source_or_unit, calculation) = match value {
         RustOwnedNestedPrimitiveValue::Percentage(value) => (
             CssPrimitiveValueKind::Percentage,
             Some(value),
             serialize_component_values_for_reparsing(component_values, &filtered_input)?,
+            None,
         ),
-        RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => (
+            CssPrimitiveValueKind::Invalid,
+            None,
+            value.source,
+            Some(value.calculation),
+        ),
         _ => return None,
     };
     Some(RustOwnedDescriptorPrimitiveValue {
         primitive_kind,
         numeric_value,
         source_or_unit,
+        calculation,
     })
 }
 
@@ -463,15 +492,23 @@ pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Op
         }
         let component_value = &parser.component_values[start];
         let value = component_value_parse_as_nested_length(component_value, &filtered_input)?;
-        let (primitive_kind, numeric_value, source_or_unit) = match value {
-            RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, Some(value), unit),
-            RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
+        let (primitive_kind, numeric_value, source_or_unit, calculation) = match value {
+            RustOwnedNestedPrimitiveValue::Length { value, unit } => {
+                (CssPrimitiveValueKind::Length, Some(value), unit, None)
+            }
+            RustOwnedNestedPrimitiveValue::MathFunction(value) => (
+                CssPrimitiveValueKind::Invalid,
+                None,
+                value.source,
+                Some(value.calculation),
+            ),
             _ => return None,
         };
         lengths.push(RustOwnedDescriptorPrimitiveValue {
             primitive_kind,
             numeric_value,
             source_or_unit,
+            calculation,
         });
     }
     parser.discard_whitespace();
@@ -535,7 +572,7 @@ where
 }
 
 impl ComponentValueParser {
-    fn consume_nonnegative_integer_value(&mut self) -> Option<Option<i32>> {
+    fn consume_nonnegative_integer_value(&mut self) -> Option<RustOwnedDescriptorInteger> {
         let component_value = self.next_component_value()?;
 
         let integer = match component_value {
@@ -543,11 +580,15 @@ impl ComponentValueParser {
                 token_type: TokenType::Number { number },
                 ..
             }) if number_is_integer(*number) && number.value() >= 0.0 && number.value() <= i32::MAX as f64 => {
-                Some(number.value() as i32)
+                RustOwnedDescriptorInteger {
+                    value: Some(number.value() as i32),
+                    calculation: None,
+                }
             }
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing and range-checking math functions still happens in C++.
-            ComponentValue::Function(function) if is_math_function_name(&function.name) => None,
+            ComponentValue::Function(function) if is_math_function_name(&function.name) => RustOwnedDescriptorInteger {
+                value: None,
+                calculation: Some(Box::new(parse_rust_owned_calculation_function(function)?)),
+            },
             _ => return None,
         };
 
@@ -555,7 +596,7 @@ impl ComponentValueParser {
         Some(integer)
     }
 
-    fn consume_integer_value(&mut self) -> Option<Option<i32>> {
+    fn consume_integer_value(&mut self) -> Option<RustOwnedDescriptorInteger> {
         let component_value = self.next_component_value()?;
 
         let integer = match component_value {
@@ -566,11 +607,15 @@ impl ComponentValueParser {
                 && number.value() >= i32::MIN as f64
                 && number.value() <= i32::MAX as f64 =>
             {
-                Some(number.value() as i32)
+                RustOwnedDescriptorInteger {
+                    value: Some(number.value() as i32),
+                    calculation: None,
+                }
             }
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing math functions still happens in C++.
-            ComponentValue::Function(function) if is_math_function_name(&function.name) => None,
+            ComponentValue::Function(function) if is_math_function_name(&function.name) => RustOwnedDescriptorInteger {
+                value: None,
+                calculation: Some(Box::new(parse_rust_owned_calculation_function(function)?)),
+            },
             _ => return None,
         };
 
@@ -603,6 +648,7 @@ impl ComponentValueParser {
             primitive_kind,
             numeric_value: None,
             source_or_unit,
+            calculation: None,
         })
     }
 
@@ -622,7 +668,8 @@ impl ComponentValueParser {
                         &self.component_values[saved_index..self.index],
                         filtered_input,
                     )?,
-                    integer,
+                    integer: integer.value,
+                    integer_calculation: integer.calculation,
                     symbol,
                 });
             }
@@ -638,7 +685,8 @@ impl ComponentValueParser {
                         &self.component_values[saved_index..self.index],
                         filtered_input,
                     )?,
-                    integer,
+                    integer: integer.value,
+                    integer_calculation: integer.calculation,
                     symbol,
                 });
             }
@@ -662,6 +710,12 @@ impl ComponentValueParser {
 
         let style_value = generated_value_type_style_value(syntax_kind, component_values);
         let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
+        let calculation = match component_value {
+            ComponentValue::Function(function) if is_math_function_name(&function.name) => {
+                Some(Box::new(parse_rust_owned_calculation_function(function)?))
+            }
+            _ => None,
+        };
         let (primitive_kind, numeric_value, source_or_unit) = match style_value.kind {
             GeneratedValueTypeStyleValueKind::Keyword => (
                 CssPrimitiveValueKind::Keyword,
@@ -679,6 +733,7 @@ impl ComponentValueParser {
             primitive_kind,
             numeric_value,
             source_or_unit,
+            calculation,
         })
     }
 
@@ -692,6 +747,7 @@ impl ComponentValueParser {
                 primitive_kind: CssPrimitiveValueKind::Keyword,
                 numeric_value: None,
                 source_or_unit: "infinite".to_string(),
+                calculation: None,
             });
         }
 
@@ -700,10 +756,12 @@ impl ComponentValueParser {
             serialize_component_values_for_reparsing(&self.component_values[start..self.index], filtered_input)?;
         Some(RustOwnedDescriptorPrimitiveValue {
             primitive_kind: integer
+                .value
                 .map(|_| CssPrimitiveValueKind::Integer)
                 .unwrap_or(CssPrimitiveValueKind::Invalid),
-            numeric_value: integer.map(f64::from),
+            numeric_value: integer.value.map(f64::from),
             source_or_unit: source,
+            calculation: integer.calculation,
         })
     }
 

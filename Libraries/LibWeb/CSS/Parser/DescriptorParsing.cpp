@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleSystemStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FontSourceStyleValue.h>
@@ -25,6 +26,325 @@
 
 namespace Web::CSS::Parser {
 
+static RefPtr<CalculatedStyleValue const> materialize_descriptor_calculation_tree(RustComponentValueParser::DescriptorResultItem const& item, ValueType value_type, NumericRange range)
+{
+    if (item.calculation_node_events.is_empty())
+        return nullptr;
+
+    CalculationContext calculation_context {
+        .resolve_numbers_as_integers = value_type == ValueType::Integer,
+    };
+
+    switch (value_type) {
+    case ValueType::Integer:
+        calculation_context.accepted_ranges_by_type.set(ValueType::Integer, range);
+        break;
+    case ValueType::Number:
+        calculation_context.accepted_ranges_by_type.set(ValueType::Number, range);
+        break;
+    case ValueType::Length:
+        calculation_context.accepted_ranges_by_type.set(ValueType::Length, range);
+        break;
+    case ValueType::Percentage:
+        calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, range);
+        break;
+    default:
+        return nullptr;
+    }
+
+    Vector<NonnullRefPtr<CalculationNode const>> stack;
+    bool saw_percentage_leaf = false;
+
+    auto pop_children = [&](u32 child_count) -> Optional<Vector<NonnullRefPtr<CalculationNode const>>> {
+        if (child_count > stack.size())
+            return {};
+
+        Vector<NonnullRefPtr<CalculationNode const>> reversed_children;
+        reversed_children.ensure_capacity(child_count);
+        for (u32 i = 0; i < child_count; ++i)
+            reversed_children.append(stack.take_last());
+
+        Vector<NonnullRefPtr<CalculationNode const>> children;
+        children.ensure_capacity(child_count);
+        for (auto i = reversed_children.size(); i > 0; --i)
+            children.append(reversed_children[i - 1]);
+        return children;
+    };
+
+    auto numeric_node_from_event = [&](RustComponentValueParser::RustCalculationNodeEvent const& event) -> RefPtr<CalculationNode const> {
+        if (!event.numeric_value.has_value())
+            return nullptr;
+
+        switch (event.primitive_kind) {
+        case FFI::CssPrimitiveValueKind::Number:
+            return NumericCalculationNode::create(Number { Number::Type::Number, *event.numeric_value }, calculation_context);
+        case FFI::CssPrimitiveValueKind::Keyword: {
+            auto maybe_keyword = keyword_from_string(event.metadata);
+            if (!maybe_keyword.has_value())
+                return nullptr;
+            return NumericCalculationNode::from_keyword(*maybe_keyword, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Percentage:
+            saw_percentage_leaf = true;
+            return NumericCalculationNode::create(Percentage { *event.numeric_value }, calculation_context);
+        case FFI::CssPrimitiveValueKind::Angle: {
+            auto unit = string_to_angle_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Angle { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Flex: {
+            auto unit = string_to_flex_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Flex { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Frequency: {
+            auto unit = string_to_frequency_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Frequency { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Length: {
+            auto unit = string_to_length_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Length { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Resolution: {
+            auto unit = string_to_resolution_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Resolution { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        case FFI::CssPrimitiveValueKind::Time: {
+            auto unit = string_to_time_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Time { *event.numeric_value, unit.release_value() }, calculation_context);
+        }
+        default:
+            return nullptr;
+        }
+    };
+
+    auto matches_number = [&](CalculationNode const& node) {
+        auto const& numeric_type = node.numeric_type();
+        return numeric_type.has_value() && numeric_type->matches_number(calculation_context.percentages_resolve_as);
+    };
+    auto matches_sign_argument = [&](CalculationNode const& node) {
+        auto const& numeric_type = node.numeric_type();
+        return numeric_type.has_value()
+            && (numeric_type->matches_number(calculation_context.percentages_resolve_as)
+                || numeric_type->matches_dimension()
+                || numeric_type->matches_percentage());
+    };
+    auto have_consistent_types = [](CalculationNode const& left, CalculationNode const& right) {
+        auto const& left_numeric_type = left.numeric_type();
+        auto const& right_numeric_type = right.numeric_type();
+        return left_numeric_type.has_value()
+            && right_numeric_type.has_value()
+            && left_numeric_type->consistent_type(*right_numeric_type).has_value();
+    };
+    auto append_round_node = [&](Vector<NonnullRefPtr<CalculationNode const>> const& children, RoundingStrategy strategy) -> bool {
+        if (children.size() != 2)
+            return false;
+        if (!matches_sign_argument(*children.at(0)) || !matches_sign_argument(*children.at(1)))
+            return false;
+        if (!have_consistent_types(*children.at(0), *children.at(1)))
+            return false;
+
+        stack.append(RoundCalculationNode::create(strategy, children.at(0), children.at(1)));
+        return true;
+    };
+
+    for (auto const& event : item.calculation_node_events) {
+        switch (event.kind) {
+        case FFI::CssCalculationNodeKind::Numeric: {
+            auto numeric_node = numeric_node_from_event(event);
+            if (!numeric_node)
+                return nullptr;
+            stack.append(numeric_node.release_nonnull());
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Sum: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(SumCalculationNode::create(children.release_value()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Product: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(ProductCalculationNode::create(children.release_value()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Negate: {
+            auto children = pop_children(1);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(NegateCalculationNode::create(children->first()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Invert: {
+            auto children = pop_children(1);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(InvertCalculationNode::create(children->first()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Function: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+
+            if (event.metadata.equals_ignoring_ascii_case("min"sv)) {
+                stack.append(MinCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("max"sv)) {
+                stack.append(MaxCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("hypot"sv)) {
+                stack.append(HypotCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("clamp"sv) && children->size() == 3) {
+                stack.append(ClampCalculationNode::create(children->at(0), children->at(1), children->at(2)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("abs"sv) && children->size() == 1) {
+                stack.append(AbsCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sign"sv) && children->size() == 1) {
+                if (!matches_sign_argument(*children->first()))
+                    return nullptr;
+                stack.append(SignCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sqrt"sv) && children->size() == 1) {
+                stack.append(SqrtCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sin"sv) && children->size() == 1) {
+                stack.append(SinCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("cos"sv) && children->size() == 1) {
+                stack.append(CosCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("tan"sv) && children->size() == 1) {
+                stack.append(TanCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("asin"sv) && children->size() == 1) {
+                stack.append(AsinCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("acos"sv) && children->size() == 1) {
+                stack.append(AcosCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("atan"sv) && children->size() == 1) {
+                stack.append(AtanCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("atan2"sv) && children->size() == 2) {
+                stack.append(Atan2CalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("pow"sv) && children->size() == 2) {
+                if (!matches_number(*children->at(0)) || !matches_number(*children->at(1)) || !have_consistent_types(*children->at(0), *children->at(1)))
+                    return nullptr;
+                stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("log"sv) && (children->size() == 1 || children->size() == 2)) {
+                auto value = children->at(0);
+                auto base = children->size() == 2
+                    ? children->at(1)
+                    : NumericCalculationNode::from_keyword(Keyword::E, calculation_context).release_nonnull();
+                if (!matches_number(*value) || !matches_number(*base) || !have_consistent_types(*value, *base))
+                    return nullptr;
+                stack.append(LogCalculationNode::create(value, base));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
+                if (!matches_number(*children->first()))
+                    return nullptr;
+                stack.append(ExpCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round nearest"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Nearest))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round up"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Up))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round down"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Down))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round to-zero"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::ToZero))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("mod"sv) && children->size() == 2) {
+                stack.append(ModCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("rem"sv) && children->size() == 2) {
+                stack.append(RemCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            return nullptr;
+        }
+        case FFI::CssCalculationNodeKind::TreeCountingFunction:
+            return nullptr;
+        }
+    }
+
+    if (stack.size() != 1)
+        return nullptr;
+
+    auto calculation_tree = simplify_a_calculation_tree(*stack.first(), calculation_context, CalculationResolutionContext {});
+    auto calculation_type = calculation_tree->numeric_type();
+    if (!calculation_type.has_value())
+        return nullptr;
+
+    auto calculated_value = CalculatedStyleValue::create(calculation_tree, calculation_type.release_value(), calculation_context);
+    switch (value_type) {
+    case ValueType::Integer:
+    case ValueType::Number:
+        if (saw_percentage_leaf || !calculated_value->resolves_to_number())
+            return nullptr;
+        break;
+    case ValueType::Length:
+        if (!calculated_value->resolves_to_length())
+            return nullptr;
+        break;
+    case ValueType::Percentage:
+        if (!calculated_value->resolves_to_percentage())
+            return nullptr;
+        break;
+    default:
+        return nullptr;
+    }
+
+    return calculated_value;
+}
+
 static RefPtr<StyleValue const> materialize_descriptor_symbol(RustComponentValueParser::DescriptorResultItem const& item)
 {
     switch (item.primitive_kind) {
@@ -37,53 +357,27 @@ static RefPtr<StyleValue const> materialize_descriptor_symbol(RustComponentValue
     }
 }
 
-RefPtr<StyleValue const> Parser::materialize_nonnegative_integer_symbol_pair(ReadonlySpan<ComponentValue const> component_values, FFI::CssNonnegativeIntegerSymbolPairOrder order)
-{
-    auto pair_component_values = Vector<ComponentValue> { component_values };
-    TokenStream<ComponentValue> pair_tokens { pair_component_values };
-
-    RefPtr<StyleValue const> integer;
-    RefPtr<StyleValue const> symbol;
-
-    pair_tokens.discard_whitespace();
-    switch (order) {
-    case FFI::CssNonnegativeIntegerSymbolPairOrder::IntegerFirst:
-        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-        pair_tokens.discard_whitespace();
-        symbol = parse_symbol_value(pair_tokens);
-        break;
-    case FFI::CssNonnegativeIntegerSymbolPairOrder::SymbolFirst:
-        symbol = parse_symbol_value(pair_tokens);
-        pair_tokens.discard_whitespace();
-        integer = parse_integer_value(pair_tokens, non_negative_integer_range);
-        break;
-    }
-
-    if (!integer || !symbol)
-        return nullptr;
-
-    pair_tokens.discard_whitespace();
-    if (pair_tokens.has_next_token())
-        return nullptr;
-
-    return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
-}
-
 static RefPtr<StyleValue const> materialize_descriptor_integer_symbol_pair(RustComponentValueParser::DescriptorResultItem const& item)
 {
     if (item.primitive_kind != FFI::CssPrimitiveValueKind::String && item.primitive_kind != FFI::CssPrimitiveValueKind::CustomIdent)
         return nullptr;
-    if (!item.has_numeric_value)
-        return nullptr;
-    if (item.numeric_value < 0 || item.numeric_value > NumericLimits<i32>::max())
+
+    RefPtr<StyleValue const> integer;
+    if (item.has_numeric_value) {
+        if (item.numeric_value < 0 || item.numeric_value > NumericLimits<i32>::max())
+            return nullptr;
+        integer = IntegerStyleValue::create(static_cast<i32>(item.numeric_value));
+    } else {
+        integer = materialize_descriptor_calculation_tree(item, ValueType::Integer, non_negative_integer_range);
+    }
+    if (!integer)
         return nullptr;
 
-    auto integer = IntegerStyleValue::create(static_cast<i32>(item.numeric_value));
     auto symbol = materialize_descriptor_symbol(item);
     if (!symbol)
         return nullptr;
 
-    return StyleValueList::create({ integer, symbol.release_nonnull() }, StyleValueList::Separator::Space);
+    return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
 }
 
 static RefPtr<StyleValue const> materialize_descriptor_font_weight_absolute(RustComponentValueParser::DescriptorResultItem const& item)
@@ -99,6 +393,8 @@ static RefPtr<StyleValue const> materialize_descriptor_font_weight_absolute(Rust
         if (!item.has_numeric_value)
             return nullptr;
         return NumberStyleValue::create(item.numeric_value);
+    case FFI::CssPrimitiveValueKind::Invalid:
+        return materialize_descriptor_calculation_tree(item, ValueType::Number, infinite_range);
     default:
         return nullptr;
     }
@@ -119,6 +415,8 @@ static RefPtr<StyleValue const> materialize_descriptor_counter_style_range_bound
         if (item.numeric_value < NumericLimits<i32>::min() || item.numeric_value > NumericLimits<i32>::max())
             return nullptr;
         return IntegerStyleValue::create(static_cast<i32>(item.numeric_value));
+    case FFI::CssPrimitiveValueKind::Invalid:
+        return materialize_descriptor_calculation_tree(item, ValueType::Integer, infinite_integer_range);
     default:
         return nullptr;
     }
@@ -211,10 +509,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     StyleValueVector additive_tuples;
                     for (auto const& tuple : additive_symbols->items) {
                         auto additive_tuple = materialize_descriptor_integer_symbol_pair(tuple);
-                        if (!additive_tuple) {
-                            auto tuple_component_values = RustComponentValueParser::parse_a_list_of_component_values(tuple.source.bytes_as_string_view(), "utf-8"sv);
-                            additive_tuple = materialize_nonnegative_integer_symbol_pair(tuple_component_values, tuple.order);
-                        }
                         if (!additive_tuple)
                             return nullptr;
 
@@ -285,13 +579,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         if (system_item.primitive_kind == FFI::CssPrimitiveValueKind::Integer && system_item.has_numeric_value)
                             return CounterStyleSystemStyleValue::create_fixed(IntegerStyleValue::create(static_cast<i32>(system_item.numeric_value)));
 
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system_item.source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> system_tokens { component_values };
-                        auto integer_value = parse_integer_value(system_tokens, infinite_integer_range);
+                        auto integer_value = materialize_descriptor_calculation_tree(system_item, ValueType::Integer, infinite_integer_range);
                         if (!integer_value)
-                            return nullptr;
-                        system_tokens.discard_whitespace();
-                        if (system_tokens.has_next_token())
                             return nullptr;
                         return CounterStyleSystemStyleValue::create_fixed(integer_value);
                     }
@@ -366,11 +655,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return nullptr;
 
                     auto pair = materialize_descriptor_integer_symbol_pair(pad->items.first());
-                    if (pair)
-                        return pair.release_nonnull();
-
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(pad->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    return materialize_nonnegative_integer_symbol_pair(component_values, pad->items.first().order);
+                    if (!pair)
+                        return nullptr;
+                    return pair.release_nonnull();
                 }
                 case DescriptorMetadata::ValueType::CounterStyleRange: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
@@ -392,25 +679,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return nullptr;
 
                     auto const parse_value = [&](RustComponentValueParser::DescriptorResultItem const& item) -> RefPtr<StyleValue const> {
-                        if (auto value = materialize_descriptor_counter_style_range_bound(item))
-                            return value;
-
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> range_tokens { component_values };
-                        range_tokens.discard_whitespace();
-                        RefPtr<StyleValue const> value;
-                        if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
-                            value = keyword_value;
-                        else if (auto integer_value = parse_integer_value(range_tokens, infinite_integer_range); integer_value)
-                            value = integer_value;
-
-                        if (!value)
-                            return nullptr;
-
-                        range_tokens.discard_whitespace();
-                        if (range_tokens.has_next_token())
-                            return nullptr;
-                        return value;
+                        return materialize_descriptor_counter_style_range_bound(item);
                     };
 
                     auto const resolve_value = [&](StyleValue const& value, i32 infinite_value) -> Optional<i32> {
@@ -579,14 +848,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     StyleValueVector weights;
                     for (auto const& item : weight_sources->items) {
                         auto weight = materialize_descriptor_font_weight_absolute(item);
-                        if (!weight) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
-                            weight = parse_font_weight_absolute_value(font_weight_absolute_tokens);
-                            font_weight_absolute_tokens.discard_whitespace();
-                            if (!weight || font_weight_absolute_tokens.has_next_token())
-                                return nullptr;
-                        }
+                        if (!weight)
+                            return nullptr;
                         weights.append(weight.release_nonnull());
                     }
 
@@ -612,13 +875,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return LengthStyleValue::create(Length(length_source.numeric_value, *length_unit));
                     }
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_source.source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> length_tokens { component_values };
-                    auto length = parse_length_value(length_tokens, infinite_range);
+                    auto length = materialize_descriptor_calculation_tree(length_source, ValueType::Length, infinite_range);
                     if (!length)
-                        return nullptr;
-                    length_tokens.discard_whitespace();
-                    if (length_tokens.has_next_token())
                         return nullptr;
                     return length.release_nonnull();
                 }
@@ -677,13 +935,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                                 return LengthStyleValue::create(Length(first_source.numeric_value, *length_unit));
                             }
 
-                            auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(first_source.source.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream<ComponentValue> first_tokens { first_component_values };
-                            auto first_length = parse_length_value(first_tokens, non_negative_range);
-                            first_tokens.discard_whitespace();
-                            if (!first_length || first_tokens.has_next_token())
-                                return nullptr;
-                            return first_length.release_nonnull();
+                            return materialize_descriptor_calculation_tree(first_source, ValueType::Length, non_negative_range);
                         }();
                         if (!first_length)
                             return nullptr;
@@ -698,13 +950,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                                     return LengthStyleValue::create(Length(second_source.numeric_value, *length_unit));
                                 }
 
-                                auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(second_source.source.bytes_as_string_view(), "utf-8"sv);
-                                TokenStream<ComponentValue> second_tokens { second_component_values };
-                                auto second_length = parse_length_value(second_tokens, non_negative_range);
-                                second_tokens.discard_whitespace();
-                                if (!second_length || second_tokens.has_next_token())
-                                    return nullptr;
-                                return second_length.release_nonnull();
+                                return materialize_descriptor_calculation_tree(second_source, ValueType::Length, non_negative_range);
                             }();
                             if (!second_length)
                                 return nullptr;
@@ -800,22 +1046,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (percentage_source.primitive_kind == FFI::CssPrimitiveValueKind::Percentage && percentage_source.has_numeric_value)
                         return PercentageStyleValue::create(Percentage(percentage_source.numeric_value));
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_source.source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> percentage_tokens { component_values };
-                    if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
-                        percentage_tokens.discard_whitespace();
-                        if (percentage_tokens.has_next_token())
-                            return nullptr;
-                        if (percentage_value->is_percentage())
-                            return percentage_value.release_nonnull();
-                        if (percentage_value->is_calculated()) {
-                            auto percentage = percentage_value->as_calculated().resolve_percentage({});
-                            if (percentage.has_value() && percentage->value() >= 0)
-                                return PercentageStyleValue::create(Percentage(percentage.release_value()));
-                            return nullptr;
-                        }
-                    }
-                    return nullptr;
+                    return materialize_descriptor_calculation_tree(percentage_source, ValueType::Percentage, non_negative_range);
                 }
                 case DescriptorMetadata::ValueType::String: {
                     // https://drafts.csswg.org/css-values-4/#strings

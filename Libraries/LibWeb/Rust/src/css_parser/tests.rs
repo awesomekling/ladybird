@@ -729,6 +729,9 @@ fn ignore_font_source_callback(_: CssFontSourceKind, _: Option<&str>, _: bool) {
 
 fn ignore_format_callback(_: &str) {}
 
+fn ignore_calculation_callback(_: CssCalculationNodeKind, _: CssPrimitiveValueKind, _: bool, _: f64, _: u32, _: &[u8]) {
+}
+
 fn parse_descriptor_result_value(
     input: &str,
     value_type: CssDescriptorValueType,
@@ -743,6 +746,7 @@ fn parse_descriptor_result_value(
             source_callback: |_, source: &str, is_string, _, _, _, _, _| {
                 items.push((source.to_string(), is_string));
             },
+            calculation_callback: ignore_calculation_callback,
             font_source_callback: ignore_font_source_callback,
             url_callback: |_| {},
             modifier_callback: |_| {},
@@ -759,6 +763,7 @@ fn descriptor_string_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
         primitive_kind: CssPrimitiveValueKind::String,
         numeric_value: None,
         source_or_unit: value.to_string(),
+        calculation: None,
     }
 }
 
@@ -767,6 +772,7 @@ fn descriptor_custom_ident_value(value: &str) -> RustOwnedDescriptorPrimitiveVal
         primitive_kind: CssPrimitiveValueKind::CustomIdent,
         numeric_value: None,
         source_or_unit: value.to_string(),
+        calculation: None,
     }
 }
 
@@ -775,6 +781,7 @@ fn descriptor_integer_value(value: i32, source: &str) -> RustOwnedDescriptorPrim
         primitive_kind: CssPrimitiveValueKind::Integer,
         numeric_value: Some(f64::from(value)),
         source_or_unit: source.to_string(),
+        calculation: None,
     }
 }
 
@@ -783,6 +790,7 @@ fn descriptor_number_value(value: f64, source: &str) -> RustOwnedDescriptorPrimi
         primitive_kind: CssPrimitiveValueKind::Number,
         numeric_value: Some(value),
         source_or_unit: source.to_string(),
+        calculation: None,
     }
 }
 
@@ -791,6 +799,7 @@ fn descriptor_keyword_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
         primitive_kind: CssPrimitiveValueKind::Keyword,
         numeric_value: None,
         source_or_unit: value.to_string(),
+        calculation: None,
     }
 }
 
@@ -799,6 +808,7 @@ fn descriptor_math_value(source: &str) -> RustOwnedDescriptorPrimitiveValue {
         primitive_kind: CssPrimitiveValueKind::Invalid,
         numeric_value: None,
         source_or_unit: source.to_string(),
+        calculation: parse_math_ast(source).map(Box::new),
     }
 }
 
@@ -807,6 +817,7 @@ fn descriptor_math_integer_value(source: &str) -> RustOwnedDescriptorPrimitiveVa
         primitive_kind: CssPrimitiveValueKind::Invalid,
         numeric_value: None,
         source_or_unit: source.to_string(),
+        calculation: parse_math_ast(source).map(Box::new),
     }
 }
 
@@ -9019,11 +9030,13 @@ fn parses_rust_owned_page_size_descriptors() {
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(8.5),
                 source_or_unit: "in".to_string(),
+                calculation: None,
             },
             RustOwnedDescriptorPrimitiveValue {
                 primitive_kind: CssPrimitiveValueKind::Length,
                 numeric_value: Some(11.0),
                 source_or_unit: "in".to_string(),
+                calculation: None,
             },
         ]))
     );
@@ -9156,12 +9169,14 @@ fn parses_rust_owned_counter_style_additive_symbols_descriptors() {
                 order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
                 source: "2 \"II\"".to_string(),
                 integer: Some(2),
+                integer_calculation: None,
                 symbol: descriptor_string_value("II"),
             },
             RustOwnedCounterStyleAdditiveTuple {
                 order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
                 source: "\"I\" 1".to_string(),
                 integer: Some(1),
+                integer_calculation: None,
                 symbol: descriptor_string_value("I"),
             },
         ])
@@ -9176,6 +9191,7 @@ fn parses_rust_owned_counter_style_pad_descriptors() {
             order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
             source: "2 \"0\"".to_string(),
             integer: Some(2),
+            integer_calculation: None,
             symbol: descriptor_string_value("0"),
         })
     );
@@ -9185,6 +9201,7 @@ fn parses_rust_owned_counter_style_pad_descriptors() {
             order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
             source: "\"0\" 2".to_string(),
             integer: Some(2),
+            integer_calculation: None,
             symbol: descriptor_string_value("0"),
         })
     );

@@ -961,6 +961,18 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
                 .page_size_orientation = page_size_orientation,
             });
         },
+        [](void* raw_result, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            result->items.last().calculation_node_events.append(RustCalculationNodeEvent {
+                .kind = kind,
+                .primitive_kind = primitive_kind,
+                .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
+                .child_count = child_count,
+                .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
+            });
+        },
         [](void* raw_result, FFI::CssFontSourceKind kind, u8 const* family_name_ptr, size_t family_name_len, bool family_name_is_string) {
             auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
             VERIFY(result.has_value());

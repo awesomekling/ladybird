@@ -498,6 +498,16 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
         page_size_keyword: u8,
         page_size_orientation: u8,
     ),
+    calculation_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCalculationNodeKind,
+        primitive_kind: CssPrimitiveValueKind,
+        has_numeric_value: bool,
+        numeric_value: f64,
+        child_count: u32,
+        metadata_ptr: *const u8,
+        metadata_len: usize,
+    ),
     font_source_callback: unsafe extern "C" fn(
         ctx: *mut c_void,
         kind: CssFontSourceKind,
@@ -540,6 +550,23 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
                             numeric_value,
                             page_size_keyword,
                             page_size_orientation,
+                        );
+                    },
+                    calculation_callback: |kind,
+                                           primitive_kind,
+                                           has_numeric_value,
+                                           numeric_value,
+                                           child_count,
+                                           metadata: &[u8]| {
+                        calculation_callback(
+                            ctx,
+                            kind,
+                            primitive_kind,
+                            has_numeric_value,
+                            numeric_value,
+                            child_count,
+                            metadata.as_ptr(),
+                            metadata.len(),
                         );
                     },
                     font_source_callback: |kind, family_name: Option<&str>, family_name_is_string| {

@@ -2685,9 +2685,7 @@ impl ComponentValueParser {
                 token_type: TokenType::Number { number },
                 ..
             }) => number_is_integer(*number) && number.value() >= 0.0,
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing and range-checking math functions still happens in C++.
-            ComponentValue::Function(_) => true,
+            ComponentValue::Function(function) => parse_rust_owned_calculation_function(function).is_some(),
             _ => false,
         };
 

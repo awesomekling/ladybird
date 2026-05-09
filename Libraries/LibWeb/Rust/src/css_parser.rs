@@ -326,9 +326,10 @@ where
     })
 }
 
-pub(crate) struct DescriptorResultCallbacks<K, S, F, U, M, O, T> {
+pub(crate) struct DescriptorResultCallbacks<K, S, C, F, U, M, O, T> {
     pub(crate) kind_callback: K,
     pub(crate) source_callback: S,
+    pub(crate) calculation_callback: C,
     pub(crate) font_source_callback: F,
     pub(crate) url_callback: U,
     pub(crate) modifier_callback: M,
@@ -336,14 +337,15 @@ pub(crate) struct DescriptorResultCallbacks<K, S, F, U, M, O, T> {
     pub(crate) tech_callback: T,
 }
 
-pub(crate) fn parse_descriptor_result<K, S, F, U, M, O, T>(
+pub(crate) fn parse_descriptor_result<K, S, C, F, U, M, O, T>(
     value_type: CssDescriptorValueType,
     filtered_input: &[u8],
-    mut callbacks: DescriptorResultCallbacks<K, S, F, U, M, O, T>,
+    mut callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T>,
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
     S: for<'a> FnMut(CssNonnegativeIntegerSymbolPairOrder, &'a str, bool, CssPrimitiveValueKind, bool, f64, u8, u8),
+    C: for<'a> FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &'a [u8]),
     F: for<'a> FnMut(CssFontSourceKind, Option<&'a str>, bool),
     U: FnMut(CssUrlFunction),
     M: FnMut(CssUrlModifier),
@@ -362,11 +364,7 @@ where
             for tuple in &tuples {
                 (callbacks.source_callback)(
                     tuple.order,
-                    if tuple.integer.is_some() {
-                        tuple.symbol.source_or_unit()
-                    } else {
-                        &tuple.source
-                    },
+                    tuple.symbol.source_or_unit(),
                     false,
                     tuple.symbol.primitive_kind(),
                     tuple.integer.is_some(),
@@ -374,6 +372,9 @@ where
                     0,
                     0,
                 );
+                if let Some(calculation) = &tuple.integer_calculation {
+                    emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+                }
             }
         }
         CssDescriptorValueType::CounterStyleNegative => {
@@ -429,6 +430,9 @@ where
                             0,
                             0,
                         );
+                        if let Some(calculation) = &first_symbol.calculation {
+                            emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+                        }
                     } else {
                         (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemFixed);
                     }
@@ -456,11 +460,7 @@ where
             (callbacks.kind_callback)(CssDescriptorResultKind::CounterStylePad);
             (callbacks.source_callback)(
                 pad.order,
-                if pad.integer.is_some() {
-                    pad.symbol.source_or_unit()
-                } else {
-                    &pad.source
-                },
+                pad.symbol.source_or_unit(),
                 false,
                 pad.symbol.primitive_kind(),
                 pad.integer.is_some(),
@@ -468,6 +468,9 @@ where
                 0,
                 0,
             );
+            if let Some(calculation) = &pad.integer_calculation {
+                emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+            }
         }
         CssDescriptorValueType::CounterStyleRange => {
             let Some(range) = parse_rust_owned_counter_style_range_descriptor(filtered_input) else {
@@ -491,6 +494,9 @@ where
                             0,
                             0,
                         );
+                        if let Some(calculation) = &bound.calculation {
+                            emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+                        }
                     }
                 }
             }
@@ -635,6 +641,9 @@ where
                     0,
                     0,
                 );
+                if let Some(calculation) = &weight.calculation {
+                    emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+                }
             }
         }
         CssDescriptorValueType::Length => {
@@ -653,6 +662,9 @@ where
                 0,
                 0,
             );
+            if let Some(calculation) = &value.calculation {
+                emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+            }
         }
         CssDescriptorValueType::PageSize => {
             let Some(page_size) = parse_rust_owned_page_size_descriptor(filtered_input) else {
@@ -676,6 +688,9 @@ where
                             0,
                             0,
                         );
+                        if let Some(calculation) = &length.calculation {
+                            emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+                        }
                     }
                 }
                 RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {
@@ -723,6 +738,9 @@ where
                 0,
                 0,
             );
+            if let Some(calculation) = &value.calculation {
+                emit_rust_owned_calculation_tree(calculation, &mut callbacks.calculation_callback);
+            }
         }
         CssDescriptorValueType::String => {
             let Some(source) = parse_rust_owned_string_descriptor(filtered_input) else {

@@ -300,7 +300,6 @@ private:
 
     ParseErrorOr<NonnullRefPtr<StyleValue const>> parse_css_value(PropertyID, TokenStream<ComponentValue>&, Optional<String> original_source_text = {});
     ParseErrorOr<NonnullRefPtr<StyleValue const>> parse_descriptor_value(AtRuleID, DescriptorNameAndID const&, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> materialize_nonnegative_integer_symbol_pair(ReadonlySpan<ComponentValue const>, FFI::CssNonnegativeIntegerSymbolPairOrder);
     RefPtr<StyleValue const> parse_css_value_for_property(PropertyID, TokenStream<ComponentValue>&);
     struct PropertyAndValue {
         PropertyID property;
