@@ -410,11 +410,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!rust_style_value->value_type.has_value() || rust_style_value->calculation_node_events.is_empty())
                     return nullptr;
 
-                // AD-HOC: Rust calculation events are available, but this
-                // materializer is not yet equivalent to the existing
-                // property-aware numeric parser for all calculation contexts.
-                return nullptr;
-
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
                 if (!metadata.has_value()) {
                     if (*rust_style_value->value_type != ValueType::OpacityValue)
@@ -442,33 +437,37 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
                     break;
                 case ValueType::Angle:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Angle, metadata->range);
+                    break;
                 case ValueType::AnglePercentage:
-                    if (metadata->percentages_resolve_to_value_type)
-                        calculation_context.percentages_resolve_as = ValueType::Angle;
+                    calculation_context.percentages_resolve_as = ValueType::Angle;
                     calculation_context.accepted_ranges_by_type.set(ValueType::Angle, metadata->range);
                     break;
                 case ValueType::Flex:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Flex, metadata->range);
                     break;
                 case ValueType::Frequency:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
+                    break;
                 case ValueType::FrequencyPercentage:
-                    if (metadata->percentages_resolve_to_value_type)
-                        calculation_context.percentages_resolve_as = ValueType::Frequency;
+                    calculation_context.percentages_resolve_as = ValueType::Frequency;
                     calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
                     break;
                 case ValueType::Length:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
+                    break;
                 case ValueType::LengthPercentage:
-                    if (metadata->percentages_resolve_to_value_type)
-                        calculation_context.percentages_resolve_as = ValueType::Length;
+                    calculation_context.percentages_resolve_as = ValueType::Length;
                     calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
                     break;
                 case ValueType::Resolution:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Resolution, metadata->range);
                     break;
                 case ValueType::Time:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Time, metadata->range);
+                    break;
                 case ValueType::TimePercentage:
-                    if (metadata->percentages_resolve_to_value_type)
-                        calculation_context.percentages_resolve_as = ValueType::Time;
+                    calculation_context.percentages_resolve_as = ValueType::Time;
                     calculation_context.accepted_ranges_by_type.set(ValueType::Time, metadata->range);
                     break;
                 default:
