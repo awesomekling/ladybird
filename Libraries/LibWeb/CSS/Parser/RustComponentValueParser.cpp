@@ -1645,7 +1645,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 style_value->grid_placement_shorthand_items.append(GridPlacementShorthandItem {
                     .property_id = static_cast<PropertyID>(property_id),
-                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                    .value = RustGridTrackPlacement {
+                        .kind = static_cast<RustGridTrackPlacementKind>(color_blue),
+                        .line_number = has_numeric_value || value_len != 0
+                            ? Optional<RustNestedPrimitiveValue> { nested_primitive_value_from_callback_payload() }
+                            : Optional<RustNestedPrimitiveValue> {},
+                        .name = value_type_len == 0 ? Optional<String> {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                    },
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::GridTemplateShorthand) {

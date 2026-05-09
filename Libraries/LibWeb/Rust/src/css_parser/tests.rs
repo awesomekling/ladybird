@@ -4193,11 +4193,17 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GridPlacementShorthand(vec![
                 RustOwnedGridPlacementShorthandItem {
                     property_id: PropertyId::GridColumnStart,
-                    source: "main".to_string(),
+                    value: RustOwnedGridTrackPlacement::Line {
+                        line_number: None,
+                        name: Some("main".to_string()),
+                    },
                 },
                 RustOwnedGridPlacementShorthandItem {
                     property_id: PropertyId::GridColumnEnd,
-                    source: "span 2".to_string(),
+                    value: RustOwnedGridTrackPlacement::Span {
+                        line_number: Some(RustOwnedNestedPrimitiveValue::Integer(2)),
+                        name: None,
+                    },
                 },
             ]),
         })

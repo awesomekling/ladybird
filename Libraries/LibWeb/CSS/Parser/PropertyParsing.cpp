@@ -4469,11 +4469,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 bool is_valid = true;
                 for (auto const& item : rust_style_value->grid_placement_shorthand_items) {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream placement_tokens { component_values };
-                    auto value = parse_css_value_for_property(item.property_id, placement_tokens);
-                    placement_tokens.discard_whitespace();
-                    if (!value || placement_tokens.has_next_token()) {
+                    auto value = materialize_rust_grid_track_placement(item.value);
+                    if (!value) {
                         is_valid = false;
                         break;
                     }

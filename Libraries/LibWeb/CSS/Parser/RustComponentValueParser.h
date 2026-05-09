@@ -133,7 +133,6 @@ public:
         String value;
     };
 
-    using GridPlacementShorthandItem = FontShorthandItem;
     using GridTemplateShorthandItem = FontShorthandItem;
     using ComponentShorthandItem = FontShorthandItem;
 
@@ -358,6 +357,11 @@ public:
         RustGridTrackPlacementKind kind { RustGridTrackPlacementKind::Auto };
         Optional<RustNestedPrimitiveValue> line_number;
         Optional<String> name;
+    };
+
+    struct GridPlacementShorthandItem {
+        PropertyID property_id;
+        RustGridTrackPlacement value;
     };
 
     enum class RustGridTrackSizeListEventKind : u8 {

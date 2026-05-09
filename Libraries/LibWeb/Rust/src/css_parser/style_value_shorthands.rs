@@ -403,10 +403,50 @@ where
     };
 
     for item in items {
-        callback(item.property_id as u16, &item.source);
+        callback(
+            item.property_id as u16,
+            &serialize_rust_owned_grid_track_placement(&item.value),
+        );
     }
 
     true
+}
+
+fn serialize_rust_owned_grid_track_placement(value: &RustOwnedGridTrackPlacement) -> String {
+    let serialize_line_number = |line_number: &RustOwnedNestedPrimitiveValue| match line_number {
+        RustOwnedNestedPrimitiveValue::Integer(value) => value.to_string(),
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => value.source.clone(),
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => match value.function {
+            RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()".to_string(),
+            RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()".to_string(),
+        },
+        RustOwnedNestedPrimitiveValue::Source(source) => source.clone(),
+        _ => unreachable!("grid track placement line numbers are integer-like values"),
+    };
+
+    match value {
+        RustOwnedGridTrackPlacement::Auto => "auto".to_string(),
+        RustOwnedGridTrackPlacement::Line { line_number, name } => {
+            let mut components = Vec::new();
+            if let Some(line_number) = line_number {
+                components.push(serialize_line_number(line_number));
+            }
+            if let Some(name) = name {
+                components.push(name.clone());
+            }
+            components.join(" ")
+        }
+        RustOwnedGridTrackPlacement::Span { line_number, name } => {
+            let mut components = vec!["span".to_string()];
+            if let Some(line_number) = line_number {
+                components.push(serialize_line_number(line_number));
+            }
+            if let Some(name) = name {
+                components.push(name.clone());
+            }
+            components.join(" ")
+        }
+    }
 }
 
 pub(super) fn parse_rust_owned_grid_placement_shorthand(
@@ -440,23 +480,22 @@ fn parse_rust_owned_grid_track_placement_shorthand(
     };
     let start_placement = parse_rust_owned_grid_track_placement_value(start_source.as_bytes())?;
 
-    let end_source = if let Some(end_source) = parts.get(1) {
-        parse_rust_owned_grid_track_placement_value(end_source.as_bytes())?;
-        end_source.clone()
+    let end_placement = if let Some(end_source) = parts.get(1) {
+        parse_rust_owned_grid_track_placement_value(end_source.as_bytes())?
     } else if grid_track_placement_is_custom_ident(&start_placement) {
-        start_source.clone()
+        start_placement.clone()
     } else {
-        "auto".to_string()
+        RustOwnedGridTrackPlacement::Auto
     };
 
     Some(vec![
         RustOwnedGridPlacementShorthandItem {
             property_id: start_property,
-            source: start_source.clone(),
+            value: start_placement,
         },
         RustOwnedGridPlacementShorthandItem {
             property_id: end_property,
-            source: end_source,
+            value: end_placement,
         },
     ])
 }
@@ -476,66 +515,60 @@ fn parse_rust_owned_grid_area_shorthand(filtered_input: &[u8]) -> Option<Vec<Rus
     } else {
         None
     };
-    if let Some(source) = parts.get(2) {
-        parse_rust_owned_grid_track_placement_value(source.as_bytes())?;
-    }
-    if let Some(source) = parts.get(3) {
-        parse_rust_owned_grid_track_placement_value(source.as_bytes())?;
-    }
-
     // https://www.w3.org/TR/css-grid-2/#placement-shorthands
     // If grid-column-start is omitted, if grid-row-start is a <custom-ident>,
     // all four longhands are set to that value. Otherwise, it is set to auto.
-    let column_start_source = parts.get(1).cloned().unwrap_or_else(|| {
+    let column_start = column_start.unwrap_or_else(|| {
         if grid_track_placement_is_custom_ident(&row_start) {
-            parts[0].clone()
+            row_start.clone()
         } else {
-            "auto".to_string()
+            RustOwnedGridTrackPlacement::Auto
         }
     });
 
     // https://www.w3.org/TR/css-grid-2/#placement-shorthands
     // If grid-row-end is omitted, if grid-row-start is a <custom-ident>,
     // grid-row-end is set to that <custom-ident>; otherwise, it is set to auto.
-    let row_end_source = parts.get(2).cloned().unwrap_or_else(|| {
+    let row_end = if let Some(source) = parts.get(2) {
+        parse_rust_owned_grid_track_placement_value(source.as_bytes())?
+    } else {
         if grid_track_placement_is_custom_ident(&row_start) {
-            parts[0].clone()
+            row_start.clone()
         } else {
-            "auto".to_string()
+            RustOwnedGridTrackPlacement::Auto
         }
-    });
+    };
 
     // https://www.w3.org/TR/css-grid-2/#placement-shorthands
     // If grid-column-end is omitted, if grid-column-start is a <custom-ident>,
     // grid-column-end is set to that <custom-ident>; otherwise, it is set to auto.
-    let column_end_source = parts.get(3).cloned().unwrap_or_else(|| {
-        let column_start_is_custom_ident = column_start
-            .as_ref()
-            .map(grid_track_placement_is_custom_ident)
-            .unwrap_or_else(|| grid_track_placement_is_custom_ident(&row_start));
+    let column_end = if let Some(source) = parts.get(3) {
+        parse_rust_owned_grid_track_placement_value(source.as_bytes())?
+    } else {
+        let column_start_is_custom_ident = grid_track_placement_is_custom_ident(&column_start);
         if column_start_is_custom_ident {
-            column_start_source.clone()
+            column_start.clone()
         } else {
-            "auto".to_string()
+            RustOwnedGridTrackPlacement::Auto
         }
-    });
+    };
 
     Some(vec![
         RustOwnedGridPlacementShorthandItem {
             property_id: PropertyId::GridRowStart,
-            source: parts[0].clone(),
+            value: row_start,
         },
         RustOwnedGridPlacementShorthandItem {
             property_id: PropertyId::GridColumnStart,
-            source: column_start_source,
+            value: column_start,
         },
         RustOwnedGridPlacementShorthandItem {
             property_id: PropertyId::GridRowEnd,
-            source: row_end_source,
+            value: row_end,
         },
         RustOwnedGridPlacementShorthandItem {
             property_id: PropertyId::GridColumnEnd,
-            source: column_end_source,
+            value: column_end,
         },
     ])
 }

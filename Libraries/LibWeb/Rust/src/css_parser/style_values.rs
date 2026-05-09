@@ -272,7 +272,7 @@ pub(crate) struct RustOwnedComponentShorthandItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridPlacementShorthandItem {
     pub(crate) property_id: PropertyId,
-    pub(crate) source: String,
+    pub(crate) value: RustOwnedGridTrackPlacement,
 }
 
 #[derive(Clone, Debug, PartialEq)]

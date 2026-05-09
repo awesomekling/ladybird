@@ -104,20 +104,11 @@ where
         RustOwnedStyleValueKind::GridPlacementShorthand(items) => {
             let shorthand_property_id = property_id;
             for item in items {
-                callback(
-                    CssStyleValueKind::GridPlacementShorthand,
+                callback_grid_placement_shorthand_item(
+                    callback,
+                    shorthand_property_id,
                     item.property_id as u16,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    (shorthand_property_id & 0xff) as u8,
-                    (shorthand_property_id >> 8) as u8,
-                    0,
-                    0,
-                    item.source.as_bytes(),
-                    "",
+                    &item.value,
                 );
             }
         }
@@ -2918,6 +2909,48 @@ where
         kind,
         0,
         0,
+        0,
+        source_or_unit.as_bytes(),
+        name.unwrap_or(""),
+    );
+}
+
+fn callback_grid_placement_shorthand_item<C>(
+    callback: &mut C,
+    shorthand_property_id: u16,
+    property_id: u16,
+    value: &RustOwnedGridTrackPlacement,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let (kind, line_number, name) = match value {
+        RustOwnedGridTrackPlacement::Auto => (GRID_TRACK_PLACEMENT_CALLBACK_AUTO, None, None),
+        RustOwnedGridTrackPlacement::Line { line_number, name } => (
+            GRID_TRACK_PLACEMENT_CALLBACK_LINE,
+            line_number.as_ref(),
+            name.as_deref(),
+        ),
+        RustOwnedGridTrackPlacement::Span { line_number, name } => (
+            GRID_TRACK_PLACEMENT_CALLBACK_SPAN,
+            line_number.as_ref(),
+            name.as_deref(),
+        ),
+    };
+    let (primitive_kind, numeric_value, source_or_unit) = line_number
+        .map(nested_primitive_callback_payload)
+        .unwrap_or((CssPrimitiveValueKind::Invalid, 0.0, ""));
+
+    callback(
+        CssStyleValueKind::GridPlacementShorthand,
+        property_id,
+        primitive_kind,
+        line_number.is_some() && primitive_kind != CssPrimitiveValueKind::Invalid,
+        numeric_value,
+        false,
+        0.0,
+        (shorthand_property_id & 0xff) as u8,
+        (shorthand_property_id >> 8) as u8,
+        kind,
         0,
         source_or_unit.as_bytes(),
         name.unwrap_or(""),
