@@ -1200,6 +1200,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             Image,
             ImageSetResolution,
             NestedPrimitive,
+            OpenTypeTagValue,
             ShorthandItem,
             StyleColor,
         };
@@ -1211,6 +1212,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListImageSetResolution = 4,
             SourceComponentValueListNestedPrimitive = 5,
             SourceComponentValueListShorthandItem = 6,
+            SourceComponentValueListOpenTypeTagValue = 7,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1249,6 +1251,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 break;
             case SourceComponentValueTarget::NestedPrimitive:
                 pending_nested_primitive_source_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::OpenTypeTagValue:
+                VERIFY(style_value.has_value());
+                VERIFY(!style_value->open_type_tag_values.is_empty());
+                style_value->open_type_tag_values.last().value_component_values = move(source_component_value_builder.root_values);
                 break;
             case SourceComponentValueTarget::ShorthandItem:
                 VERIFY(style_value.has_value());
@@ -1320,6 +1327,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             case SourceComponentValueListShorthandItem:
                 source_component_value_target = SourceComponentValueTarget::ShorthandItem;
+                return;
+            case SourceComponentValueListOpenTypeTagValue:
+                source_component_value_target = SourceComponentValueTarget::OpenTypeTagValue;
                 return;
             default:
                 VERIFY_NOT_REACHED();

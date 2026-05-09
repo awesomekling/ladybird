@@ -409,6 +409,7 @@ pub(crate) struct OpenTypeTaggedValue {
     pub(crate) tag: String,
     pub(crate) value_kind: CssOpenTypeTaggedValueKind,
     pub(crate) value: Option<String>,
+    pub(crate) value_component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

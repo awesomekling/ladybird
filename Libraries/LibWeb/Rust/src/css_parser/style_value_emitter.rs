@@ -14,6 +14,7 @@ const SOURCE_COMPONENT_VALUE_LIST_IMAGE: u8 = 3;
 const SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION: u8 = 4;
 const SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE: u8 = 5;
 const SOURCE_COMPONENT_VALUE_LIST_SHORTHAND_ITEM: u8 = 6;
+const SOURCE_COMPONENT_VALUE_LIST_OPEN_TYPE_TAG_VALUE: u8 = 7;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -1933,7 +1934,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             }
         }
         RustOwnedStyleValueKind::OpenTypeSettings(value) => {
-            callback_open_type_settings_style_value(callback, property_id, value);
+            callback_open_type_settings_style_value(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::FontLanguageOverride(value) => callback(
             CssStyleValueKind::FontLanguageOverride,
@@ -2267,12 +2277,15 @@ fn callback_style_value_type<C>(
     );
 }
 
-fn callback_open_type_settings_style_value<C>(
+fn callback_open_type_settings_style_value<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedOpenTypeSettingsStyleValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let kind = match value.kind {
         RustOwnedOpenTypeSettingsStyleValueKind::FontFeatureSettings => CssStyleValueKind::FontFeatureSettings,
@@ -2314,6 +2327,12 @@ fn callback_open_type_settings_style_value<C>(
             &tag_and_value,
             "",
         );
+        if !tag_value.value_component_values.is_empty() {
+            source_component_value_emitter.emit(
+                SOURCE_COMPONENT_VALUE_LIST_OPEN_TYPE_TAG_VALUE,
+                &tag_value.value_component_values,
+            );
+        }
     }
 }
 

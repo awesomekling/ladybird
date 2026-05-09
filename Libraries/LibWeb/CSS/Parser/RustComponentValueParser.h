@@ -179,6 +179,7 @@ public:
         FlyString tag;
         FFI::CssOpenTypeTaggedValueKind value_kind;
         Optional<String> value;
+        Vector<ComponentValue> value_component_values;
     };
 
     enum class RustShadowPlacement : u8 {

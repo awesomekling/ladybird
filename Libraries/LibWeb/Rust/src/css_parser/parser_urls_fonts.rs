@@ -300,6 +300,7 @@ pub(super) fn parse_feature_tag_value(
             tag,
             value_kind: CssOpenTypeTaggedValueKind::Implicit,
             value: None,
+            value_component_values: vec![],
         });
     }
 
@@ -327,15 +328,18 @@ pub(super) fn parse_feature_tag_value(
                 tag,
                 value_kind,
                 value: None,
+                value_component_values: vec![],
             });
         }
     }
 
-    let value = serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input)?;
+    let value_component_values = parser.remaining_component_values().to_vec();
+    let value = serialize_component_values_for_reparsing(&value_component_values, filtered_input)?;
     Some(OpenTypeTaggedValue {
         tag,
         value_kind: CssOpenTypeTaggedValueKind::Value,
         value: Some(value),
+        value_component_values,
     })
 }
 
@@ -353,11 +357,13 @@ pub(super) fn parse_variation_tag_value(
         return None;
     }
 
-    let value = serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input)?;
+    let value_component_values = parser.remaining_component_values().to_vec();
+    let value = serialize_component_values_for_reparsing(&value_component_values, filtered_input)?;
     Some(OpenTypeTaggedValue {
         tag,
         value_kind: CssOpenTypeTaggedValueKind::Value,
         value: Some(value),
+        value_component_values,
     })
 }
 

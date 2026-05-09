@@ -190,6 +190,43 @@ fn parse(input: &str) -> Vec<ComponentValue> {
     parse_with(input, Parser::parse_a_list_of_component_values)
 }
 
+fn open_type_value_component_values(input: &str, tag: &str) -> Vec<ComponentValue> {
+    let mut parser = ComponentValueParser::new(parse(input));
+    loop {
+        parser.discard_whitespace();
+        let Some(component_value) = parser.consume_the_next_component_value() else {
+            return vec![];
+        };
+        let is_matching_tag = matches!(
+            component_value,
+            ComponentValue::PreservedToken(crate::css_tokenizer::Token {
+                token_type: TokenType::String { value },
+                ..
+            }) if value == tag
+        );
+        parser.discard_whitespace();
+        if is_matching_tag {
+            let mut values = Vec::new();
+            while let Some(component_value) = parser.next_component_value() {
+                if matches!(
+                    component_value,
+                    ComponentValue::PreservedToken(crate::css_tokenizer::Token {
+                        token_type: TokenType::Comma,
+                        ..
+                    })
+                ) {
+                    break;
+                }
+                values.push(parser.consume_the_next_component_value().unwrap());
+            }
+            return values;
+        }
+        while parser.has_next_component_value() && !parser.consume_a_comma() {
+            parser.consume_the_next_component_value();
+        }
+    }
+}
+
 fn parse_math_ast(input: &str) -> Option<RustOwnedCalculationNode> {
     let component_values = parse(input);
     let [ComponentValue::Function(function)] = component_values.as_slice() else {
@@ -2871,6 +2908,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         tag: "kern".to_string(),
                         value_kind: CssOpenTypeTaggedValueKind::On,
                         value: None,
+                        value_component_values: vec![],
                     }],
                 },
             }),
@@ -2912,6 +2950,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         tag: "wght".to_string(),
                         value_kind: CssOpenTypeTaggedValueKind::Value,
                         value: Some("700".to_string()),
+                        value_component_values: open_type_value_component_values("\"wght\" 700", "wght"),
                     }],
                 },
             }),
@@ -8357,22 +8396,26 @@ fn parses_font_feature_settings() {
                 OpenTypeTaggedValue {
                     tag: "dlig".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::Value,
-                    value: Some("1".to_string())
+                    value: Some("1".to_string()),
+                    value_component_values: open_type_value_component_values("\"dlig\" 1", "dlig"),
                 },
                 OpenTypeTaggedValue {
                     tag: "smcp".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::On,
-                    value: None
+                    value: None,
+                    value_component_values: vec![],
                 },
                 OpenTypeTaggedValue {
                     tag: "liga".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::Off,
-                    value: None
+                    value: None,
+                    value_component_values: vec![],
                 },
                 OpenTypeTaggedValue {
                     tag: "c2sc".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::Implicit,
-                    value: None
+                    value: None,
+                    value_component_values: vec![],
                 },
             ],
         ))
@@ -8401,12 +8444,20 @@ fn parses_font_variation_settings() {
                 OpenTypeTaggedValue {
                     tag: "wght".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::Value,
-                    value: Some("700".to_string())
+                    value: Some("700".to_string()),
+                    value_component_values: open_type_value_component_values(
+                        "\"wght\" 700, \"XHGT\" calc(0.4 + 0.3)",
+                        "wght",
+                    ),
                 },
                 OpenTypeTaggedValue {
                     tag: "XHGT".to_string(),
                     value_kind: CssOpenTypeTaggedValueKind::Value,
-                    value: Some("calc(0.4 + 0.3)".to_string())
+                    value: Some("calc(0.4 + 0.3)".to_string()),
+                    value_component_values: open_type_value_component_values(
+                        "\"wght\" 700, \"XHGT\" calc(0.4 + 0.3)",
+                        "XHGT",
+                    ),
                 },
             ],
         ))

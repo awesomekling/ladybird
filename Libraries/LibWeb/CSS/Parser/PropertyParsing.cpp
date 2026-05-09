@@ -4192,12 +4192,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         case FFI::CssOpenTypeTaggedValueKind::Value: {
                             VERIFY(tag_value.value.has_value());
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            value = parse_integer_value(value_tokens, non_negative_integer_range);
-                            value_tokens.discard_whitespace();
-                            if (!value || value_tokens.has_next_token())
-                                break;
+                            if (!tag_value.value_component_values.is_empty()) {
+                                value = parse_rust_component_values_as_integer_in_range(tag_value.value_component_values, non_negative_integer_range);
+                            } else {
+                                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+                                TokenStream value_tokens { component_values };
+                                value = parse_integer_value(value_tokens, non_negative_integer_range);
+                                value_tokens.discard_whitespace();
+                                if (!value || value_tokens.has_next_token())
+                                    break;
+                            }
                             break;
                         }
                         }
@@ -4264,11 +4268,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (tag_value.value_kind != FFI::CssOpenTypeTaggedValueKind::Value || !tag_value.value.has_value())
                             break;
 
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
-                        TokenStream value_tokens { component_values };
-                        auto number = parse_number_value(value_tokens, infinite_range);
-                        value_tokens.discard_whitespace();
-                        if (!number || value_tokens.has_next_token())
+                        RefPtr<StyleValue const> number;
+                        if (!tag_value.value_component_values.is_empty()) {
+                            number = parse_rust_component_values_as_number(tag_value.value_component_values);
+                        } else {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*tag_value.value, "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            number = parse_number_value(value_tokens, infinite_range);
+                            value_tokens.discard_whitespace();
+                            if (!number || value_tokens.has_next_token())
+                                break;
+                        }
+                        if (!number)
                             break;
 
                         axis_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontVariationSettings, tag_value.tag, number.release_nonnull()));
