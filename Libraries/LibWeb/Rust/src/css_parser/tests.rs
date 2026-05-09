@@ -9068,6 +9068,38 @@ fn parses_image_set_values() {
         parse_image_set("image-set(linear-gradient(black, white) 1x)"),
         CssImageSetValueKind::Valid
     );
+    assert_eq!(
+        parse_image_set("image-set(linear-gradient(to bottom in oklab, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(-webkit-repeating-linear-gradient(top, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(radial-gradient(circle 1px at center, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(radial-gradient(black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(radial-gradient(at right center in lch longer hue, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(radial-gradient(200px 100px ellipse at 25% 50%, yellow, #009966, purple) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(conic-gradient(from 45deg at center, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
+    assert_eq!(
+        parse_image_set("image-set(conic-gradient(in oklch longer hue at left 10px top 50em, black, white) 1x)"),
+        CssImageSetValueKind::Valid
+    );
 }
 
 #[test]
@@ -9094,6 +9126,22 @@ fn rejects_invalid_image_set_values() {
     );
     assert_eq!(
         parse_image_set("image-set(image-set(url(example.png)) 2x)"),
+        CssImageSetValueKind::Invalid
+    );
+    assert_eq!(
+        parse_image_set("image-set(linear-gradient(to left right, black, white) 1x)"),
+        CssImageSetValueKind::Invalid
+    );
+    assert_eq!(
+        parse_image_set("image-set(linear-gradient(50%, black, white) 1x)"),
+        CssImageSetValueKind::Invalid
+    );
+    assert_eq!(
+        parse_image_set("image-set(radial-gradient(circle 1px 2px, black, white) 1x)"),
+        CssImageSetValueKind::Invalid
+    );
+    assert_eq!(
+        parse_image_set("image-set(conic-gradient(from 10%, black, white) 1x)"),
         CssImageSetValueKind::Invalid
     );
 }

@@ -5155,20 +5155,470 @@ pub(super) fn component_value_parse_as_image_set_gradient(component_value: &Comp
         return false;
     };
 
-    // AD-HOC: Gradient materialization still happens in C++.
-    // Rust accepts the gradient function shapes here only after C++ has
-    // materialized an image-set value for the same consumed token slice.
+    parse_gradient_function(function)
+}
+
+fn parse_gradient_function(function: &Function) -> bool {
+    let name = function.name.to_ascii_lowercase();
+    let (name, is_webkit_prefixed) = name
+        .strip_prefix("-webkit-")
+        .map(|name| (name, true))
+        .unwrap_or((&name, false));
+    let name = name.strip_prefix("repeating-").unwrap_or(name);
+
+    match name {
+        "linear-gradient" => parse_linear_gradient_function(function, is_webkit_prefixed),
+        "radial-gradient" if !is_webkit_prefixed => parse_radial_gradient_function(function),
+        "conic-gradient" if !is_webkit_prefixed => parse_conic_gradient_function(function),
+        _ => false,
+    }
+}
+
+fn parse_linear_gradient_function(function: &Function, is_webkit_prefixed: bool) -> bool {
+    // https://drafts.csswg.org/css-images-4/#typedef-linear-gradient-syntax
+    // <linear-gradient-syntax> = [ [ <angle> | <zero> | to <side-or-corner> ] || <color-interpolation-method> ]? , <color-stop-list>
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() {
+        return false;
+    }
+
+    if parse_linear_color_stop_list(&groups) {
+        return true;
+    }
+
+    groups.len() > 1
+        && component_values_parse_as_linear_gradient_header(groups[0], is_webkit_prefixed)
+        && parse_linear_color_stop_list(&groups[1..])
+}
+
+fn parse_conic_gradient_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-images-4/#typedef-conic-gradient-syntax
+    // conic-gradient( [ [ [ from [ <angle> | <zero> ] ]? [ at <position> ]? ] || <color-interpolation-method> ]? , <angular-color-stop-list> )
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() {
+        return false;
+    }
+
+    if parse_angular_color_stop_list(&groups) {
+        return true;
+    }
+
+    groups.len() > 1
+        && component_values_parse_as_conic_gradient_header(groups[0])
+        && parse_angular_color_stop_list(&groups[1..])
+}
+
+fn parse_radial_gradient_function(function: &Function) -> bool {
+    // https://drafts.csswg.org/css-images-4/#typedef-radial-gradient-syntax
+    // <radial-gradient-syntax> = [ [ [ <radial-shape> || <radial-size> ]? [ at <position> ]? ] || <color-interpolation-method> ]? , <color-stop-list>
+    let groups = split_component_values_on_comma(&function.value);
+    if groups.is_empty() {
+        return false;
+    }
+
+    if parse_linear_color_stop_list(&groups) {
+        return true;
+    }
+
+    groups.len() > 1
+        && component_values_parse_as_radial_gradient_header(groups[0])
+        && parse_linear_color_stop_list(&groups[1..])
+}
+
+fn parse_linear_color_stop_list(groups: &[&[ComponentValue]]) -> bool {
+    // https://drafts.csswg.org/css-images-4/#color-stop-syntax
+    // <color-stop-list> = <linear-color-stop> , [ <linear-color-hint>? , <linear-color-stop> ]#
+    parse_color_stop_list(groups, component_value_parse_as_length_percentage)
+}
+
+fn parse_angular_color_stop_list(groups: &[&[ComponentValue]]) -> bool {
+    // https://drafts.csswg.org/css-images-4/#color-stop-syntax
+    // <angular-color-stop-list> = <angular-color-stop> , [ <angular-color-hint>? , <angular-color-stop> ]#
+    parse_color_stop_list(groups, component_value_parse_as_angle_percentage_or_zero)
+}
+
+fn parse_color_stop_list(groups: &[&[ComponentValue]], parse_position: fn(&ComponentValue) -> bool) -> bool {
+    if groups.is_empty() || !component_values_parse_as_color_stop(groups[0], parse_position) {
+        return false;
+    }
+
+    let mut index = 1;
+    while index < groups.len() {
+        if component_values_parse_as_color_stop(groups[index], parse_position) {
+            index += 1;
+            continue;
+        }
+
+        if index + 1 < groups.len()
+            && component_values_parse_as_color_hint(groups[index], parse_position)
+            && component_values_parse_as_color_stop(groups[index + 1], parse_position)
+        {
+            index += 2;
+            continue;
+        }
+
+        return false;
+    }
+
+    true
+}
+
+fn component_values_parse_as_color_hint(
+    component_values: &[ComponentValue],
+    parse_position: fn(&ComponentValue) -> bool,
+) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let component_values = component_values.as_slice();
+    matches!(component_values, [position] if parse_position(position))
+}
+
+fn component_values_parse_as_color_stop(
+    component_values: &[ComponentValue],
+    parse_position: fn(&ComponentValue) -> bool,
+) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let component_values = component_values.as_slice();
+    let Some(first) = component_values.first() else {
+        return false;
+    };
+
+    if parse_position(first) {
+        return matches!(component_values, [_, color] if component_value_parse_as_color_value(color));
+    }
+
+    if !component_value_parse_as_color_value(first) {
+        return false;
+    }
+
+    component_values[1..].len() <= 2 && component_values[1..].iter().all(parse_position)
+}
+
+fn component_value_parse_as_angle_percentage_or_zero(component_value: &ComponentValue) -> bool {
     matches!(
-        function.name.to_ascii_lowercase().as_str(),
-        "linear-gradient"
-            | "-webkit-linear-gradient"
-            | "repeating-linear-gradient"
-            | "-webkit-repeating-linear-gradient"
-            | "radial-gradient"
-            | "repeating-radial-gradient"
-            | "conic-gradient"
-            | "repeating-conic-gradient"
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        })
+    ) || component_value_parse_as_angle_or_zero(component_value)
+}
+
+fn component_value_parse_as_angle_or_zero(component_value: &ComponentValue) -> bool {
+    match component_value {
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        _ => component_value_parse_as_angle(component_value),
+    }
+}
+
+fn component_values_parse_as_linear_gradient_header(
+    component_values: &[ComponentValue],
+    is_webkit_prefixed: bool,
+) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let component_values = component_values.as_slice();
+    if component_values.is_empty() {
+        return false;
+    }
+
+    component_values_parse_as_linear_gradient_direction(component_values, is_webkit_prefixed)
+        || component_values_parse_as_color_interpolation_method(component_values)
+        || component_values_parse_as_linear_gradient_header_pair(
+            component_values,
+            |component_values| {
+                component_values_parse_as_linear_gradient_direction(component_values, is_webkit_prefixed)
+            },
+            component_values_parse_as_color_interpolation_method,
+        )
+        || component_values_parse_as_linear_gradient_header_pair(
+            component_values,
+            component_values_parse_as_color_interpolation_method,
+            |component_values| {
+                component_values_parse_as_linear_gradient_direction(component_values, is_webkit_prefixed)
+            },
+        )
+}
+
+fn component_values_parse_as_linear_gradient_header_pair(
+    component_values: &[ComponentValue],
+    parse_a: impl Fn(&[ComponentValue]) -> bool,
+    parse_b: impl Fn(&[ComponentValue]) -> bool,
+) -> bool {
+    (1..component_values.len()).any(|split| parse_a(&component_values[..split]) && parse_b(&component_values[split..]))
+}
+
+fn component_values_parse_as_linear_gradient_direction(
+    component_values: &[ComponentValue],
+    is_webkit_prefixed: bool,
+) -> bool {
+    let component_values = remove_whitespace_component_values(component_values);
+    let component_values = component_values.as_slice();
+    if matches!(component_values, [component_value] if component_value_parse_as_angle_or_zero(component_value)) {
+        return true;
+    }
+
+    let sides = if is_webkit_prefixed {
+        component_values
+    } else {
+        let [to, sides @ ..] = component_values else {
+            return false;
+        };
+        if !component_value_is_ident(Some(to), "to") {
+            return false;
+        }
+        sides
+    };
+
+    matches!(sides, [side] if component_value_parse_as_gradient_side(side).is_some())
+        || matches!(sides, [side_a, side_b] if gradient_sides_form_corner(side_a, side_b))
+}
+
+fn component_value_parse_as_gradient_side(component_value: &ComponentValue) -> Option<GradientSide> {
+    let ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    }) = component_value
+    else {
+        return None;
+    };
+
+    if value.eq_ignore_ascii_case("top") {
+        return Some(GradientSide::Top);
+    }
+    if value.eq_ignore_ascii_case("bottom") {
+        return Some(GradientSide::Bottom);
+    }
+    if value.eq_ignore_ascii_case("left") {
+        return Some(GradientSide::Left);
+    }
+    if value.eq_ignore_ascii_case("right") {
+        return Some(GradientSide::Right);
+    }
+    None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GradientSide {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+fn gradient_sides_form_corner(side_a: &ComponentValue, side_b: &ComponentValue) -> bool {
+    matches!(
+        (
+            component_value_parse_as_gradient_side(side_a),
+            component_value_parse_as_gradient_side(side_b),
+        ),
+        (
+            Some(GradientSide::Top | GradientSide::Bottom),
+            Some(GradientSide::Left | GradientSide::Right)
+        ) | (
+            Some(GradientSide::Left | GradientSide::Right),
+            Some(GradientSide::Top | GradientSide::Bottom)
+        )
     )
+}
+
+fn component_values_parse_as_conic_gradient_header(component_values: &[ComponentValue]) -> bool {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let mut has_from_angle = false;
+    let mut has_at_position = false;
+    let mut has_interpolation_method = false;
+
+    while parser.has_next_component_value() {
+        if parser.consume_ident_matching("from") {
+            if has_from_angle || has_at_position || !consume_angle_or_zero(&mut parser) {
+                return false;
+            }
+            has_from_angle = true;
+            continue;
+        }
+
+        if parser.consume_ident_matching("at") {
+            if has_at_position || !consume_position_until_color_interpolation_method(&mut parser) {
+                return false;
+            }
+            has_at_position = true;
+            continue;
+        }
+
+        if !has_interpolation_method && consume_color_interpolation_method(&mut parser) {
+            has_interpolation_method = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    has_from_angle || has_at_position || has_interpolation_method
+}
+
+fn component_values_parse_as_radial_gradient_header(component_values: &[ComponentValue]) -> bool {
+    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let mut shape = None;
+    let mut radial_size_component_count = 0;
+    let mut first_radial_size_component_is_extent = false;
+    let mut has_at_position = false;
+    let mut has_interpolation_method = false;
+
+    if consume_color_interpolation_method(&mut parser) {
+        has_interpolation_method = true;
+    }
+
+    for _ in 0..2 {
+        if shape.is_none()
+            && let Some(parsed_shape) = consume_radial_gradient_shape(&mut parser)
+        {
+            shape = Some(parsed_shape);
+            continue;
+        }
+
+        if radial_size_component_count < 2
+            && let Some(component_is_extent) = consume_radial_gradient_size_component(&mut parser)
+        {
+            if radial_size_component_count == 0 {
+                first_radial_size_component_is_extent = component_is_extent;
+            }
+            radial_size_component_count += 1;
+            continue;
+        }
+
+        break;
+    }
+
+    if shape.is_none()
+        && let Some(parsed_shape) = consume_radial_gradient_shape(&mut parser)
+    {
+        shape = Some(parsed_shape);
+    }
+
+    if shape.is_some()
+        && radial_size_component_count == 1
+        && let Some(_) = consume_radial_gradient_size_component(&mut parser)
+    {
+        radial_size_component_count += 1;
+    }
+
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("at") {
+        if !consume_position_until_color_interpolation_method(&mut parser) {
+            return false;
+        }
+        has_at_position = true;
+    }
+
+    if !has_interpolation_method && consume_color_interpolation_method(&mut parser) {
+        has_interpolation_method = true;
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return false;
+    }
+
+    (shape.is_some() || radial_size_component_count > 0 || has_at_position || has_interpolation_method)
+        && radial_gradient_shape_and_size_match(
+            shape,
+            radial_size_component_count,
+            first_radial_size_component_is_extent,
+        )
+}
+
+fn radial_gradient_shape_and_size_match(
+    shape: Option<RadialGradientShape>,
+    radial_size_component_count: usize,
+    first_radial_size_component_is_extent: bool,
+) -> bool {
+    match shape {
+        Some(RadialGradientShape::Circle) => radial_size_component_count <= 1,
+        Some(RadialGradientShape::Ellipse) => {
+            radial_size_component_count == 0
+                || radial_size_component_count == 2
+                || first_radial_size_component_is_extent
+        }
+        None => true,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RadialGradientShape {
+    Circle,
+    Ellipse,
+}
+
+fn consume_radial_gradient_shape(parser: &mut ComponentValueParser) -> Option<RadialGradientShape> {
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("circle") {
+        return Some(RadialGradientShape::Circle);
+    }
+    if parser.consume_ident_matching("ellipse") {
+        return Some(RadialGradientShape::Ellipse);
+    }
+    None
+}
+
+fn consume_radial_gradient_size_component(parser: &mut ComponentValueParser) -> Option<bool> {
+    // https://drafts.csswg.org/css-images-4/#radial-size
+    // <radial-size> = <radial-extent>{1,2} | <length-percentage [0,∞]>{1,2}
+    // <radial-extent> = closest-corner | closest-side | farthest-corner | farthest-side
+    // AD-HOC: This accepts mixed <radial-extent> and <length-percentage> pairs for compatibility.
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+
+    if component_value_parse_as_radial_extent(component_value).is_some() {
+        parser.index += 1;
+        return Some(true);
+    }
+
+    if component_value_parse_as_non_negative_length_percentage(component_value) {
+        parser.index += 1;
+        return Some(false);
+    }
+
+    None
+}
+
+fn consume_angle_or_zero(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    if !component_value_parse_as_angle_or_zero(component_value) {
+        return false;
+    }
+    parser.index += 1;
+    true
+}
+
+fn consume_color_interpolation_method(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let remaining = parser.remaining_component_values();
+    for length in (1..=remaining.len()).rev() {
+        if component_values_parse_as_color_interpolation_method(&remaining[..length]) {
+            parser.index += length;
+            return true;
+        }
+    }
+    false
+}
+
+fn consume_position_until_color_interpolation_method(parser: &mut ComponentValueParser) -> bool {
+    parser.discard_whitespace();
+    let remaining = parser.remaining_component_values();
+    for length in (1..=remaining.len()).rev() {
+        if component_values_parse_as_position(&remaining[..length], false) {
+            parser.index += length;
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) fn component_value_parse_as_image_set_type(component_value: &ComponentValue) -> bool {
