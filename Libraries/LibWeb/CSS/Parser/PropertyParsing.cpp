@@ -789,8 +789,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
                             break;
                         }
-                        if (event.metadata.equals_ignoring_ascii_case("log"sv) && children->size() == 2) {
-                            stack.append(LogCalculationNode::create(children->at(0), children->at(1)));
+                        if (event.metadata.equals_ignoring_ascii_case("log"sv) && (children->size() == 1 || children->size() == 2)) {
+                            auto value = children->at(0);
+                            auto base = children->size() == 2
+                                ? children->at(1)
+                                : NumericCalculationNode::from_keyword(Keyword::E, calculation_context).release_nonnull();
+                            if (!matches_number(*value) || !matches_number(*base) || !have_consistent_types(*value, *base))
+                                return nullptr;
+                            stack.append(LogCalculationNode::create(value, base));
                             break;
                         }
                         if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
