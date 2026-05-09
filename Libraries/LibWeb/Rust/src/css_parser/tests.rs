@@ -3102,7 +3102,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     height: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                         name,
                         source,
-                        value_type: PropertyValueType::Number,
+                        value_type: PropertyValueType::Length,
                         ..
                     })),
                 } if *value == 2.0 && name == "calc" && source == "calc(3px + 4%)"
@@ -3862,7 +3862,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                             name,
                             source,
-                            value_type: PropertyValueType::Number,
+                            value_type: PropertyValueType::Length,
                             ..
                         })),
                         ..
@@ -3871,7 +3871,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                             name: name_y,
                             source: source_y,
-                            value_type: PropertyValueType::Number,
+                            value_type: PropertyValueType::Length,
                             ..
                         })),
                         ..
@@ -3885,7 +3885,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                             name,
                             source,
-                            value_type: PropertyValueType::Number,
+                            value_type: PropertyValueType::Length,
                             ..
                         })),
                         ..
@@ -3894,7 +3894,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                             name: name_y,
                             source: source_y,
-                            value_type: PropertyValueType::Number,
+                            value_type: PropertyValueType::Length,
                             ..
                         })),
                         ..
@@ -4411,7 +4411,7 @@ fn parses_style_values_with_rust_owned_ast() {
                 RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                     name,
                     source,
-                    value_type: PropertyValueType::Number,
+                    value_type: PropertyValueType::LengthPercentage,
                     ..
                 }) if name == "calc" && source == "calc(4%)"
             )
@@ -9559,7 +9559,7 @@ fn parses_view_timeline_inset_values() {
                 RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
                     name,
                     source,
-                    value_type: PropertyValueType::Number,
+                    value_type: PropertyValueType::Length,
                     ..
                 }) if name == "calc" && source == "calc(1px + 2px)"
             )

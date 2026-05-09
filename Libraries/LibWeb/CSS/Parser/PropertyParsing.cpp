@@ -2815,7 +2815,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         value = materialize_rust_nested_length(argument.value, infinite_range);
                         break;
                     case TransformFunctionParameterType::LengthNone:
-                        if (!argument.value.numeric_value.has_value() && argument.value.source_or_unit.equals_ignoring_ascii_case("none"sv))
+                        if (argument.value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword && argument.value.source_or_unit.equals_ignoring_ascii_case("none"sv))
                             value = KeywordStyleValue::create(Keyword::None);
                         else
                             value = materialize_rust_nested_length(argument.value, infinite_range);

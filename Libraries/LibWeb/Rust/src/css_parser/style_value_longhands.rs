@@ -2797,9 +2797,10 @@ pub(super) fn rust_owned_border_spacing_style_value_kind(
         {
             return None;
         }
-        values.push(RustOwnedNestedPrimitiveValue::Source(
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?,
-        ));
+        values.push(RustOwnedNestedPrimitiveValue::Length {
+            value: number.value(),
+            unit: "px".to_string(),
+        });
     }
 
     Some(RustOwnedStyleValueKind::BorderSpacing(RustOwnedBorderSpacing {

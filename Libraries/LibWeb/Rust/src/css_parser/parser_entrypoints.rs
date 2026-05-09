@@ -2548,11 +2548,7 @@ pub(super) fn component_value_parse_as_nested_transform_function_argument(
         }
         TransformFunctionParameterType::LengthNone => {
             if component_value_ref_is_ident(component_value, "none") {
-                return serialize_component_values_for_reparsing(
-                    std::slice::from_ref(component_value),
-                    filtered_input_string,
-                )
-                .map(RustOwnedNestedPrimitiveValue::Source);
+                return Some(RustOwnedNestedPrimitiveValue::Keyword("none".to_string()));
             }
             component_value_parse_as_nested_length(component_value, filtered_input_string)
         }
@@ -8239,13 +8235,13 @@ pub(super) fn component_value_parse_as_nested_length(
             unit: "px".to_string(),
         }),
         ComponentValue::Function(_) => parse_rust_owned_math_function(
-            PropertyValueType::Number,
+            PropertyValueType::Length,
             std::slice::from_ref(component_value),
             source.as_bytes(),
         )
         .map(RustOwnedNestedPrimitiveValue::MathFunction)
         .or_else(|| {
-            parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
+            parse_rust_owned_tree_counting_function(PropertyValueType::Length, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
         .or_else(|| {
@@ -8413,14 +8409,17 @@ pub(super) fn component_value_parse_as_nested_dasharray_value(
             ..
         }) if number.value() >= 0.0 => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
         ComponentValue::Function(_) => parse_rust_owned_math_function(
-            PropertyValueType::Number,
+            PropertyValueType::LengthPercentage,
             std::slice::from_ref(component_value),
             source.as_bytes(),
         )
         .map(RustOwnedNestedPrimitiveValue::MathFunction)
         .or_else(|| {
-            parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
-                .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::LengthPercentage,
+                std::slice::from_ref(component_value),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
         .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
