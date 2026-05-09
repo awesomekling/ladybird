@@ -432,17 +432,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     StyleValueVector valid_sources;
                     for (auto const& item : source_lists->items) {
-                        auto const& source_list = item.source;
                         // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
                         // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
-                        auto font_source = RustComponentValueParser::parse_a_font_source(source_list.bytes_as_string_view(), "utf-8"sv);
+                        auto font_source = RustComponentValueParser::parse_a_font_source(item.source.bytes_as_string_view(), "utf-8"sv);
                         if (!font_source.has_value())
                             continue;
 
                         if (font_source->format.has_value() && !font_format_is_supported(*font_source->format)) {
                             ErrorReporter::the().report(InvalidValueError {
                                 .value_type = "<font-src>"_fly_string,
-                                .value_string = source_list,
+                                .value_string = item.source,
                                 .description = MUST(String::formatted("format({}) is not supported.", *font_source->format)),
                             });
                             continue;
@@ -455,7 +454,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                             ErrorReporter::the().report(InvalidValueError {
                                 .value_type = "<font-src>"_fly_string,
-                                .value_string = source_list,
+                                .value_string = item.source,
                                 .description = MUST(String::formatted("tech({}) is not supported.", to_string(font_tech))),
                             });
                             supports_all_tech = false;
