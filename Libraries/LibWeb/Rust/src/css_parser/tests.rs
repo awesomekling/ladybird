@@ -16,32 +16,32 @@ use super::{
     CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
     CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis,
     CssGridAutoFlowDense, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind,
-    CssImageSetValueKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
-    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSizeKeyword,
-    CssPageSizeOrientation, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
-    CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
-    CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
-    CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind, CssRepeatStyleRepetition,
-    CssRepeatStyleValueKind, CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue,
-    CssScrollFunctionValueKind, CssScrollbarGutterValueKind, CssSelectorEventKind, CssSimpleSelectorKind,
-    CssStyleValueKind, CssSupportsFeatureKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
-    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
-    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
-    CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-    CssTransitionPropertyValueKind, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
-    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-    CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, FamilyName, FontFamilyValue,
-    FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue,
-    FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier,
-    MediaQuerySyntax, MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge,
-    PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction,
-    RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem,
-    RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape,
-    RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorder,
-    RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList, RustOwnedBorderImageRepeat,
-    RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
+    CssImageSetValueKind, CssMediaFeatureValueKind, CssMediaFeatureValuePayloadKind, CssMediaFeatureValueSyntaxKind,
+    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
+    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSizeKeyword, CssPageSizeOrientation,
+    CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind,
+    CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
+    CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue,
+    CssRatioValueKind, CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
+    CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+    CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind,
+    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+    CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType,
+    CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
+    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
+    FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
+    MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+    OpenTypeTaggedValue, Parser, PositionEdge, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+    RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName,
+    RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList,
+    RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
+    RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
+    RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
     RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
     RustOwnedColumns, RustOwnedComponentShorthandItem, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
     RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
@@ -251,6 +251,44 @@ fn parse_media_test(input: &str) -> (Vec<CssBooleanExpressionEventKind>, usize) 
         |_| {},
     );
     (events, media_feature_count)
+}
+
+fn parse_media_test_values(
+    input: &str,
+) -> Vec<(
+    CssMediaFeatureValueKind,
+    CssMediaFeatureValueSyntaxKind,
+    CssMediaFeatureValuePayloadKind,
+    f64,
+    f64,
+    String,
+)> {
+    let mut values = Vec::new();
+    parse_a_media_test(
+        input.as_bytes(),
+        |_| {},
+        |_| {},
+        |value| {
+            let unit_or_ident = if value.unit_or_ident_ptr.is_null() {
+                String::new()
+            } else {
+                // SAFETY: The Rust parser calls this callback synchronously while the source string
+                // backing the FFI slice is still alive.
+                let slice = unsafe { std::slice::from_raw_parts(value.unit_or_ident_ptr, value.unit_or_ident_len) };
+                std::str::from_utf8(slice).unwrap().to_string()
+            };
+            values.push((
+                value.kind,
+                value.syntax_kind,
+                value.payload_kind,
+                value.numeric_value,
+                value.secondary_numeric_value,
+                unit_or_ident,
+            ));
+        },
+        |_| {},
+    );
+    values
 }
 
 fn parse_if_condition(input: &str) -> Vec<CssBooleanExpressionEventKind> {
@@ -7020,6 +7058,95 @@ fn parses_media_feature_value_syntax_nodes() {
     assert_eq!(
         component_values_parse_as_mf_value_syntax(MediaFeatureId::Resolution, &parse("calc(96dpi)")),
         MediaFeatureValueSyntaxKind::Resolution
+    );
+}
+
+#[test]
+fn emits_typed_media_feature_value_payloads() {
+    assert_eq!(
+        parse_media_test_values("(hover: hover)"),
+        vec![(
+            CssMediaFeatureValueKind::Value,
+            CssMediaFeatureValueSyntaxKind::Ident,
+            CssMediaFeatureValuePayloadKind::Ident,
+            0.0,
+            0.0,
+            "hover".to_string(),
+        )]
+    );
+    assert_eq!(
+        parse_media_test_values("(color: 8)"),
+        vec![(
+            CssMediaFeatureValueKind::Value,
+            CssMediaFeatureValueSyntaxKind::Integer,
+            CssMediaFeatureValuePayloadKind::Integer,
+            8.0,
+            0.0,
+            String::new(),
+        )]
+    );
+    assert_eq!(
+        parse_media_test_values("(width: 0)"),
+        vec![(
+            CssMediaFeatureValueKind::Value,
+            CssMediaFeatureValueSyntaxKind::Length,
+            CssMediaFeatureValuePayloadKind::Length,
+            0.0,
+            0.0,
+            "px".to_string(),
+        )]
+    );
+    assert_eq!(
+        parse_media_test_values("(16/9 < aspect-ratio < 2)"),
+        vec![
+            (
+                CssMediaFeatureValueKind::LeftValue,
+                CssMediaFeatureValueSyntaxKind::Ratio,
+                CssMediaFeatureValuePayloadKind::Ratio,
+                16.0,
+                9.0,
+                String::new(),
+            ),
+            (
+                CssMediaFeatureValueKind::LeftValue,
+                CssMediaFeatureValueSyntaxKind::Ratio,
+                CssMediaFeatureValuePayloadKind::Ratio,
+                16.0,
+                9.0,
+                String::new(),
+            ),
+            (
+                CssMediaFeatureValueKind::LeftValue,
+                CssMediaFeatureValueSyntaxKind::Ratio,
+                CssMediaFeatureValuePayloadKind::Ratio,
+                16.0,
+                9.0,
+                String::new(),
+            ),
+            (
+                CssMediaFeatureValueKind::RightValue,
+                CssMediaFeatureValueSyntaxKind::Ratio,
+                CssMediaFeatureValuePayloadKind::Ratio,
+                2.0,
+                1.0,
+                String::new(),
+            ),
+        ]
+    );
+    assert_eq!(
+        parse_media_test_values("(resolution: 96dpi)"),
+        vec![(
+            CssMediaFeatureValueKind::Value,
+            CssMediaFeatureValueSyntaxKind::Resolution,
+            CssMediaFeatureValuePayloadKind::Resolution,
+            96.0,
+            0.0,
+            "dpi".to_string(),
+        )]
+    );
+    assert_eq!(
+        parse_media_test_values("(width: calc(100px))")[0].2,
+        CssMediaFeatureValuePayloadKind::None
     );
 }
 

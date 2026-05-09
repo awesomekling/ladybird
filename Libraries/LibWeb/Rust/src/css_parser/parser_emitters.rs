@@ -567,15 +567,183 @@ pub(super) fn emit_media_feature_value<C>(
 ) where
     C: FnMut(CssMediaFeatureValue),
 {
+    let payload = css_media_feature_value_payload(syntax_kind, component_values);
     for component_value in component_values {
         emit_component_value(component_value, filtered_input, &mut |component_value| {
             callback(CssMediaFeatureValue {
                 kind,
                 syntax_kind,
+                payload_kind: payload.kind,
+                numeric_value: payload.numeric_value,
+                secondary_numeric_value: payload.secondary_numeric_value,
+                unit_or_ident_ptr: payload.unit_or_ident.map_or(std::ptr::null(), str::as_ptr),
+                unit_or_ident_len: payload.unit_or_ident.map_or(0, str::len),
                 component_value,
             });
         });
     }
+}
+
+struct CssMediaFeatureValuePayload<'a> {
+    kind: CssMediaFeatureValuePayloadKind,
+    numeric_value: f64,
+    secondary_numeric_value: f64,
+    unit_or_ident: Option<&'a str>,
+}
+
+impl Default for CssMediaFeatureValuePayload<'_> {
+    fn default() -> Self {
+        Self {
+            kind: CssMediaFeatureValuePayloadKind::None,
+            numeric_value: 0.0,
+            secondary_numeric_value: 0.0,
+            unit_or_ident: None,
+        }
+    }
+}
+
+fn css_media_feature_value_payload(
+    syntax_kind: CssMediaFeatureValueSyntaxKind,
+    component_values: &[ComponentValue],
+) -> CssMediaFeatureValuePayload<'_> {
+    let component_values = strip_whitespace(component_values);
+    match syntax_kind {
+        CssMediaFeatureValueSyntaxKind::Ident => {
+            let [
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                }),
+            ] = component_values
+            else {
+                return CssMediaFeatureValuePayload::default();
+            };
+
+            CssMediaFeatureValuePayload {
+                kind: CssMediaFeatureValuePayloadKind::Ident,
+                unit_or_ident: Some(value),
+                ..Default::default()
+            }
+        }
+        CssMediaFeatureValueSyntaxKind::Boolean | CssMediaFeatureValueSyntaxKind::Integer => {
+            let [
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Number { number },
+                    ..
+                }),
+            ] = component_values
+            else {
+                return CssMediaFeatureValuePayload::default();
+            };
+            if !number_is_integer(*number) || number.value() < i32::MIN as f64 || number.value() > i32::MAX as f64 {
+                return CssMediaFeatureValuePayload::default();
+            }
+
+            CssMediaFeatureValuePayload {
+                kind: CssMediaFeatureValuePayloadKind::Integer,
+                numeric_value: number.value(),
+                ..Default::default()
+            }
+        }
+        CssMediaFeatureValueSyntaxKind::Length => {
+            let [component_value] = component_values else {
+                return CssMediaFeatureValuePayload::default();
+            };
+
+            match component_value {
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Dimension { number, unit },
+                    ..
+                }) if matches!(dimension_for_unit(unit), Some(DimensionType::Length)) => CssMediaFeatureValuePayload {
+                    kind: CssMediaFeatureValuePayloadKind::Length,
+                    numeric_value: number.value(),
+                    unit_or_ident: Some(unit),
+                    ..Default::default()
+                },
+                // https://drafts.csswg.org/css-values-4/#zero-value
+                // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Number { number },
+                    ..
+                }) if number.value() == 0.0 => CssMediaFeatureValuePayload {
+                    kind: CssMediaFeatureValuePayloadKind::Length,
+                    numeric_value: 0.0,
+                    unit_or_ident: Some("px"),
+                    ..Default::default()
+                },
+                _ => CssMediaFeatureValuePayload::default(),
+            }
+        }
+        CssMediaFeatureValueSyntaxKind::Ratio => {
+            let Some((numerator, denominator)) = media_feature_ratio_value(component_values) else {
+                return CssMediaFeatureValuePayload::default();
+            };
+
+            CssMediaFeatureValuePayload {
+                kind: CssMediaFeatureValuePayloadKind::Ratio,
+                numeric_value: numerator,
+                secondary_numeric_value: denominator,
+                ..Default::default()
+            }
+        }
+        CssMediaFeatureValueSyntaxKind::Resolution => {
+            let [
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Dimension { number, unit },
+                    ..
+                }),
+            ] = component_values
+            else {
+                return CssMediaFeatureValuePayload::default();
+            };
+            if number.value() < 0.0 || !matches!(dimension_for_unit(unit), Some(DimensionType::Resolution)) {
+                return CssMediaFeatureValuePayload::default();
+            }
+
+            CssMediaFeatureValuePayload {
+                kind: CssMediaFeatureValuePayloadKind::Resolution,
+                numeric_value: number.value(),
+                unit_or_ident: Some(unit),
+                ..Default::default()
+            }
+        }
+        CssMediaFeatureValueSyntaxKind::Unknown | CssMediaFeatureValueSyntaxKind::Invalid => {
+            CssMediaFeatureValuePayload::default()
+        }
+    }
+}
+
+fn media_feature_ratio_value(component_values: &[ComponentValue]) -> Option<(f64, f64)> {
+    let [numerator] = component_values else {
+        return media_feature_ratio_with_denominator_value(component_values);
+    };
+    Some((component_value_non_negative_number_value(numerator)?, 1.0))
+}
+
+fn media_feature_ratio_with_denominator_value(component_values: &[ComponentValue]) -> Option<(f64, f64)> {
+    let (slash_index, _) = component_values.iter().enumerate().find(|(_, component_value)| {
+        matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Delim { value },
+                ..
+            }) if *value == '/' as u32
+        )
+    })?;
+
+    let numerator = strip_whitespace(&component_values[..slash_index]);
+    let denominator = strip_whitespace(&component_values[slash_index + 1..]);
+    let [numerator] = numerator else {
+        return None;
+    };
+    let [denominator] = denominator else {
+        return None;
+    };
+
+    Some((
+        component_value_non_negative_number_value(numerator)?,
+        component_value_non_negative_number_value(denominator)?,
+    ))
 }
 
 pub(super) fn emit_media_feature_values<C>(syntax: &MediaFeatureSyntax, filtered_input: &str, callback: &mut C)

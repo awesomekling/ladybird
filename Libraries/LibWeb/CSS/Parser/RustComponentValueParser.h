@@ -39,13 +39,16 @@ namespace Web::CSS::Parser {
 class WEB_API RustComponentValueParser {
 public:
     struct MediaFeatureTest {
+        struct Value {
+            FFI::CssMediaFeatureValueSyntaxKind syntax_kind { FFI::CssMediaFeatureValueSyntaxKind::Invalid };
+            Optional<MediaFeatureValue> parsed_value;
+            Vector<ComponentValue> component_values;
+        };
+
         FFI::CssMediaFeature feature;
-        FFI::CssMediaFeatureValueSyntaxKind value_syntax_kind;
-        FFI::CssMediaFeatureValueSyntaxKind left_value_syntax_kind;
-        FFI::CssMediaFeatureValueSyntaxKind right_value_syntax_kind;
-        Vector<ComponentValue> value;
-        Vector<ComponentValue> left_value;
-        Vector<ComponentValue> right_value;
+        Value value;
+        Value left_value;
+        Value right_value;
     };
 
     struct MediaQuerySyntax {

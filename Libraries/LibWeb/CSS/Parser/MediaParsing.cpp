@@ -87,12 +87,18 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         return MediaFeatureValue(MediaFeatureValue::Type::Unknown, UnresolvedStyleValue::create(move(unknown_tokens), {}));
     };
 
-    auto materialize_rust_media_feature_value = [this, &materialize_unknown_media_feature_value](FFI::CssMediaFeatureValueSyntaxKind syntax_kind, Vector<ComponentValue>& component_values) -> Optional<MediaFeatureValue> {
+    auto materialize_rust_media_feature_value = [this, &materialize_unknown_media_feature_value](RustComponentValueParser::MediaFeatureTest::Value& rust_value) -> Optional<MediaFeatureValue> {
+        auto syntax_kind = rust_value.syntax_kind;
+        auto& component_values = rust_value.component_values;
+
         if (syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Invalid)
             return {};
 
         if (syntax_kind == FFI::CssMediaFeatureValueSyntaxKind::Unknown)
             return materialize_unknown_media_feature_value(component_values);
+
+        if (rust_value.parsed_value.has_value())
+            return rust_value.parsed_value.release_value();
 
         TokenStream value_tokens { component_values };
         auto maybe_value = [&]() -> Optional<MediaFeatureValue> {
@@ -183,7 +189,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Plain) {
         auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
 
@@ -200,7 +206,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeNameFirst) {
         auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
         return MediaFeature::half_range(media_feature_id, media_feature_comparison_from_rust(media_feature_test.feature.comparison), maybe_value.release_value());
@@ -208,7 +214,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::HalfRangeValueFirst) {
         auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value_syntax_kind, media_feature_test.value);
+        auto maybe_value = materialize_rust_media_feature_value(media_feature_test.value);
         if (!maybe_value.has_value())
             return nullptr;
         return MediaFeature::half_range(maybe_value.release_value(), media_feature_comparison_from_rust(media_feature_test.feature.comparison), media_feature_id);
@@ -216,10 +222,10 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
 
     if (media_feature_test.feature.syntax_kind == FFI::CssMediaFeatureSyntaxKind::Range) {
         auto media_feature_id = media_feature_id_from_rust(media_feature_test.feature);
-        auto maybe_left_value = materialize_rust_media_feature_value(media_feature_test.left_value_syntax_kind, media_feature_test.left_value);
+        auto maybe_left_value = materialize_rust_media_feature_value(media_feature_test.left_value);
         if (!maybe_left_value.has_value())
             return nullptr;
-        auto maybe_right_value = materialize_rust_media_feature_value(media_feature_test.right_value_syntax_kind, media_feature_test.right_value);
+        auto maybe_right_value = materialize_rust_media_feature_value(media_feature_test.right_value);
         if (!maybe_right_value.has_value())
             return nullptr;
 

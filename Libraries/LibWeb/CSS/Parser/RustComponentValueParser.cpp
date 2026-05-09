@@ -8,11 +8,20 @@
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/CSS/CharacterTypes.h>
 #include <LibWeb/CSS/Enums.h>
+#include <LibWeb/CSS/Keyword.h>
+#include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/PropertyName.h>
+#include <LibWeb/CSS/Ratio.h>
+#include <LibWeb/CSS/Resolution.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
+#include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
+#include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
@@ -3328,6 +3337,9 @@ struct RustMediaFeatureTestBuilder {
     Optional<FFI::CssMediaFeatureValueSyntaxKind> value_syntax_kind;
     Optional<FFI::CssMediaFeatureValueSyntaxKind> left_value_syntax_kind;
     Optional<FFI::CssMediaFeatureValueSyntaxKind> right_value_syntax_kind;
+    Optional<MediaFeatureValue> value;
+    Optional<MediaFeatureValue> left_value;
+    Optional<MediaFeatureValue> right_value;
     ComponentValueBuilder value_builder;
     ComponentValueBuilder left_value_builder;
     ComponentValueBuilder right_value_builder;
@@ -3339,12 +3351,21 @@ struct RustMediaFeatureTestBuilder {
         VERIFY(right_value_builder.stack.is_empty());
         return RustComponentValueParser::MediaFeatureTest {
             .feature = feature,
-            .value_syntax_kind = value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
-            .left_value_syntax_kind = left_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
-            .right_value_syntax_kind = right_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
-            .value = move(value_builder.root_values),
-            .left_value = move(left_value_builder.root_values),
-            .right_value = move(right_value_builder.root_values),
+            .value = {
+                .syntax_kind = value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
+                .parsed_value = move(value),
+                .component_values = move(value_builder.root_values),
+            },
+            .left_value = {
+                .syntax_kind = left_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
+                .parsed_value = move(left_value),
+                .component_values = move(left_value_builder.root_values),
+            },
+            .right_value = {
+                .syntax_kind = right_value_syntax_kind.value_or(FFI::CssMediaFeatureValueSyntaxKind::Invalid),
+                .parsed_value = move(right_value),
+                .component_values = move(right_value_builder.root_values),
+            },
         };
     }
 };
@@ -3356,6 +3377,39 @@ static void set_media_feature_value_syntax_kind(Optional<FFI::CssMediaFeatureVal
         return;
     }
     target = syntax_kind;
+}
+
+static Optional<MediaFeatureValue> media_feature_value_from_rust(FFI::CssMediaFeatureValue const& value)
+{
+    switch (value.payload_kind) {
+    case FFI::CssMediaFeatureValuePayloadKind::None:
+        return {};
+    case FFI::CssMediaFeatureValuePayloadKind::Ident: {
+        auto keyword = keyword_from_string({ value.unit_or_ident_ptr, value.unit_or_ident_len });
+        if (!keyword.has_value())
+            return {};
+        return MediaFeatureValue(MediaFeatureValue::Type::Ident, KeywordStyleValue::create(keyword.release_value()));
+    }
+    case FFI::CssMediaFeatureValuePayloadKind::Integer:
+        if (value.numeric_value < AK::NumericLimits<i32>::min() || value.numeric_value > AK::NumericLimits<i32>::max())
+            return {};
+        return MediaFeatureValue(MediaFeatureValue::Type::Integer, IntegerStyleValue::create(static_cast<i32>(value.numeric_value)));
+    case FFI::CssMediaFeatureValuePayloadKind::Length: {
+        auto length_unit = string_to_length_unit({ value.unit_or_ident_ptr, value.unit_or_ident_len });
+        if (!length_unit.has_value())
+            return {};
+        return MediaFeatureValue(MediaFeatureValue::Type::Length, LengthStyleValue::create(Length { value.numeric_value, length_unit.release_value() }));
+    }
+    case FFI::CssMediaFeatureValuePayloadKind::Ratio:
+        return MediaFeatureValue(MediaFeatureValue::Type::Ratio, RatioStyleValue::create(NumberStyleValue::create(value.numeric_value), NumberStyleValue::create(value.secondary_numeric_value)));
+    case FFI::CssMediaFeatureValuePayloadKind::Resolution: {
+        auto resolution_unit = string_to_resolution_unit({ value.unit_or_ident_ptr, value.unit_or_ident_len });
+        if (!resolution_unit.has_value())
+            return {};
+        return MediaFeatureValue(MediaFeatureValue::Type::Resolution, ResolutionStyleValue::create(Resolution { value.numeric_value, resolution_unit.release_value() }));
+    }
+    }
+    VERIFY_NOT_REACHED();
 }
 
 static Optional<MediaQuery::KnownMediaType> media_type_from_rust(FFI::CssMediaTypeKind media_type_kind)
@@ -3555,6 +3609,12 @@ static void append_boolean_expression_media_feature_value(RustBooleanExpressionB
 {
     VERIFY(builder.media_feature.has_value());
 
+    auto set_resolved_value = [&](Optional<MediaFeatureValue>& target) {
+        if (target.has_value())
+            return;
+        target = media_feature_value_from_rust(*media_feature_value);
+    };
+
     auto append_to_builder = [&](ComponentValueBuilder& component_value_builder) {
         append_component_value_token(component_value_builder, media_feature_value->component_value.kind, RustTokenizer::token_from_ffi(media_feature_value->component_value.token));
     };
@@ -3562,14 +3622,17 @@ static void append_boolean_expression_media_feature_value(RustBooleanExpressionB
     switch (media_feature_value->kind) {
     case FFI::CssMediaFeatureValueKind::Value:
         set_media_feature_value_syntax_kind(builder.media_feature->value_syntax_kind, media_feature_value->syntax_kind);
+        set_resolved_value(builder.media_feature->value);
         append_to_builder(builder.media_feature->value_builder);
         break;
     case FFI::CssMediaFeatureValueKind::LeftValue:
         set_media_feature_value_syntax_kind(builder.media_feature->left_value_syntax_kind, media_feature_value->syntax_kind);
+        set_resolved_value(builder.media_feature->left_value);
         append_to_builder(builder.media_feature->left_value_builder);
         break;
     case FFI::CssMediaFeatureValueKind::RightValue:
         set_media_feature_value_syntax_kind(builder.media_feature->right_value_syntax_kind, media_feature_value->syntax_kind);
+        set_resolved_value(builder.media_feature->right_value);
         append_to_builder(builder.media_feature->right_value_builder);
         break;
     }

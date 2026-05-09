@@ -1779,6 +1779,17 @@ pub enum CssMediaFeatureValueSyntaxKind {
     Invalid,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssMediaFeatureValuePayloadKind {
+    None,
+    Ident,
+    Integer,
+    Length,
+    Ratio,
+    Resolution,
+}
+
 #[repr(C)]
 pub struct CssMediaFeature {
     pub syntax_kind: CssMediaFeatureSyntaxKind,
@@ -1793,6 +1804,11 @@ pub struct CssMediaFeature {
 pub struct CssMediaFeatureValue {
     pub kind: CssMediaFeatureValueKind,
     pub syntax_kind: CssMediaFeatureValueSyntaxKind,
+    pub payload_kind: CssMediaFeatureValuePayloadKind,
+    pub numeric_value: f64,
+    pub secondary_numeric_value: f64,
+    pub unit_or_ident_ptr: *const u8,
+    pub unit_or_ident_len: usize,
     pub component_value: CssComponentValue,
 }
 
