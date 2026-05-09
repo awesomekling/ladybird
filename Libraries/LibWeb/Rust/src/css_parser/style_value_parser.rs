@@ -229,6 +229,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnimationTimingFunction
             | PropertyId::Appearance
             | PropertyId::AspectRatio
+            | PropertyId::BackgroundAttachment
+            | PropertyId::BackgroundBlendMode
+            | PropertyId::BackgroundClip
             | PropertyId::BlockSize
             | PropertyId::BackgroundRepeat
             | PropertyId::BackgroundPosition
@@ -237,6 +240,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundSize
             | PropertyId::BackgroundColor
             | PropertyId::BackgroundImage
+            | PropertyId::BackgroundOrigin
             | PropertyId::Border
             | PropertyId::BorderBlock
             | PropertyId::BorderImage
@@ -355,7 +359,11 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MarginLeft
             | PropertyId::MarginRight
             | PropertyId::MarginTop
+            | PropertyId::MaskClip
+            | PropertyId::MaskComposite
             | PropertyId::MaskImage
+            | PropertyId::MaskMode
+            | PropertyId::MaskOrigin
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
@@ -426,6 +434,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Scale
             | PropertyId::ScrollBehavior
             | PropertyId::ScrollTimeline
+            | PropertyId::ScrollTimelineAxis
             | PropertyId::ScrollTimelineName
             | PropertyId::ScrollbarColor
             | PropertyId::ScrollbarGutter
@@ -481,6 +490,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::UserSelect
             | PropertyId::VerticalAlign
             | PropertyId::ViewTimeline
+            | PropertyId::ViewTimelineAxis
             | PropertyId::ViewTimelineName
             | PropertyId::ViewTransitionName
             | PropertyId::Visibility
@@ -527,9 +537,18 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BackgroundPosition => {
             rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
         }
-        PropertyId::BackgroundImage | PropertyId::MaskImage => {
-            rust_owned_generated_value_list_style_value_kind(property_id, filtered_input)
-        }
+        PropertyId::BackgroundAttachment
+        | PropertyId::BackgroundBlendMode
+        | PropertyId::BackgroundClip
+        | PropertyId::BackgroundImage
+        | PropertyId::BackgroundOrigin
+        | PropertyId::MaskClip
+        | PropertyId::MaskComposite
+        | PropertyId::MaskImage
+        | PropertyId::MaskMode
+        | PropertyId::MaskOrigin
+        | PropertyId::ScrollTimelineAxis
+        | PropertyId::ViewTimelineAxis => rust_owned_generated_value_list_style_value_kind(property_id, filtered_input),
         PropertyId::BackgroundPositionX | PropertyId::BackgroundPositionY => {
             rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
         }
@@ -999,6 +1018,12 @@ fn rust_owned_generated_value_list_style_value_kind(
                     .iter()
                     .find(|value_type| property_accepts_value_type(property_id, **value_type))
                     .copied()
+                    // AD-HOC: Keyword-only generated list properties do not
+                    // have a PropertyValueType, but the FFI item still needs
+                    // a value type. C++ materialization handles keyword items
+                    // before consulting the value type, so this placeholder is
+                    // never used for parsing.
+                    .or(Some(PropertyValueType::CustomIdent))
             } else if property_accepts_value_type(property_id, PropertyValueType::EasingFunction) {
                 Some(PropertyValueType::EasingFunction)
             } else {

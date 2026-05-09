@@ -98,6 +98,9 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AnimationTimingFunction:
     case PropertyID::Appearance:
     case PropertyID::AspectRatio:
+    case PropertyID::BackgroundAttachment:
+    case PropertyID::BackgroundBlendMode:
+    case PropertyID::BackgroundClip:
     case PropertyID::BlockSize:
     case PropertyID::BackgroundPosition:
     case PropertyID::BackgroundPositionX:
@@ -106,6 +109,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BackgroundSize:
     case PropertyID::BackgroundColor:
     case PropertyID::BackgroundImage:
+    case PropertyID::BackgroundOrigin:
     case PropertyID::Border:
     case PropertyID::BorderBlock:
     case PropertyID::BorderImage:
@@ -224,7 +228,11 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MarginLeft:
     case PropertyID::MarginRight:
     case PropertyID::MarginTop:
+    case PropertyID::MaskClip:
+    case PropertyID::MaskComposite:
     case PropertyID::MaskImage:
+    case PropertyID::MaskMode:
+    case PropertyID::MaskOrigin:
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
@@ -295,6 +303,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Scale:
     case PropertyID::ScrollBehavior:
     case PropertyID::ScrollTimeline:
+    case PropertyID::ScrollTimelineAxis:
     case PropertyID::ScrollTimelineName:
     case PropertyID::ScrollbarColor:
     case PropertyID::ScrollbarGutter:
@@ -350,6 +359,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::UserSelect:
     case PropertyID::VerticalAlign:
     case PropertyID::ViewTimeline:
+    case PropertyID::ViewTimelineAxis:
     case PropertyID::ViewTimelineName:
     case PropertyID::ViewTransitionName:
     case PropertyID::Visibility:

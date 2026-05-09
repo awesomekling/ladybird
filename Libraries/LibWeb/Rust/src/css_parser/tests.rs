@@ -3856,6 +3856,42 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BackgroundAttachment], "fixed, local"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BackgroundAttachment,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "fixed".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "local".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::MaskComposite], "add, subtract"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::MaskComposite,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "add".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "subtract".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::TransitionDuration], "-1s"),
         None
     );
