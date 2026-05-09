@@ -261,6 +261,7 @@ pub(crate) struct RustOwnedLayerShorthandItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontShorthandItem {
     pub(crate) property_id: PropertyId,
+    pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
 }
 

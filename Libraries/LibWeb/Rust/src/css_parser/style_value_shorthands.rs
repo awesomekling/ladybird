@@ -1243,14 +1243,39 @@ where
             continue;
         }
 
+        let RustOwnedStyleValueParseResult::Parsed(style_value) =
+            parse_rust_owned_style_value_for_property_with_options(
+                &[property_id as u16],
+                candidate_source.as_bytes(),
+                CssPrimitiveValueOptions::default(),
+            )
+        else {
+            continue;
+        };
+
         parser.index = end;
         return Some(RustOwnedFontShorthandItem {
             property_id,
+            style_value,
             source: candidate_source,
         });
     }
 
     None
+}
+
+fn parse_rust_owned_font_shorthand_item_style_value(
+    property_id: PropertyId,
+    source: &str,
+) -> Option<RustOwnedStyleValue> {
+    match parse_rust_owned_style_value_for_property_with_options(
+        &[property_id as u16],
+        source.as_bytes(),
+        CssPrimitiveValueOptions::default(),
+    ) {
+        RustOwnedStyleValueParseResult::Parsed(style_value) => Some(style_value),
+        RustOwnedStyleValueParseResult::Invalid => None,
+    }
 }
 
 fn font_style_shorthand_candidate_is_oblique_function_without_angle(component_values: &[ComponentValue]) -> bool {
@@ -1328,10 +1353,18 @@ fn consume_font_size_line_height_and_family(
                     return Some(vec![
                         RustOwnedFontShorthandItem {
                             property_id: PropertyId::FontSize,
+                            style_value: parse_rust_owned_font_shorthand_item_style_value(
+                                PropertyId::FontSize,
+                                &font_size_source,
+                            )?,
                             source: font_size_source,
                         },
                         RustOwnedFontShorthandItem {
                             property_id: PropertyId::LineHeight,
+                            style_value: parse_rust_owned_font_shorthand_item_style_value(
+                                PropertyId::LineHeight,
+                                &line_height_source,
+                            )?,
                             source: line_height_source,
                         },
                         font_family,
@@ -1346,6 +1379,10 @@ fn consume_font_size_line_height_and_family(
             return Some(vec![
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontSize,
+                    style_value: parse_rust_owned_font_shorthand_item_style_value(
+                        PropertyId::FontSize,
+                        &font_size_source,
+                    )?,
                     source: font_size_source,
                 },
                 font_family,
@@ -1369,6 +1406,7 @@ fn consume_font_family_after(
 
     Some(RustOwnedFontShorthandItem {
         property_id: PropertyId::FontFamily,
+        style_value: parse_rust_owned_font_shorthand_item_style_value(PropertyId::FontFamily, &family_source)?,
         source: family_source,
     })
 }

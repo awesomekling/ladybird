@@ -2779,22 +2779,27 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::FontShorthand(vec![
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontStyle,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::FontStyle], "italic").unwrap(),
                     source: "italic".to_string(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontWeight,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::FontWeight], "bold").unwrap(),
                     source: "bold".to_string(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontSize,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::FontSize], "16px").unwrap(),
                     source: "16px".to_string(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::LineHeight,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::LineHeight], "1.5").unwrap(),
                     source: "1.5".to_string(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontFamily,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif").unwrap(),
                     source: "serif".to_string(),
                 },
             ]),
