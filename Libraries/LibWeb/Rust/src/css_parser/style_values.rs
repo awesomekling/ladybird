@@ -1273,7 +1273,6 @@ pub(crate) struct RustOwnedGeneratedValueList {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGeneratedValueListItem {
-    pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
 }
 

@@ -2766,7 +2766,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::BackgroundImage,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "image-set(url(example.png) 2x)".to_string(),
                     value_type: PropertyValueType::Image,
                 }],
             }),
@@ -2778,9 +2777,19 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::BackgroundImage,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "url(example.png)".to_string(),
                     value_type: PropertyValueType::Image,
                 }],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Top], "anchor(--target bottom, calc(1px + 2%))"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Top,
+            value: RustOwnedStyleValueKind::Anchor(RustOwnedAnchorFunction {
+                anchor_name: Some("--target".to_string()),
+                anchor_side: "bottom".to_string(),
+                fallback: Some("calc(1px + 2%)".to_string()),
             }),
         })
     );
@@ -2790,7 +2799,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::BackgroundImage,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "linear-gradient(black, white)".to_string(),
                     value_type: PropertyValueType::Image,
                 }],
             }),
@@ -2812,21 +2820,8 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::BackgroundImage,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
-                        .to_string(),
                     value_type: PropertyValueType::Image,
                 }],
-            }),
-        })
-    );
-    assert_eq!(
-        parse_rust_owned_style_value(&[PropertyId::Top], "anchor(--target bottom, calc(1px + 2%))"),
-        Some(RustOwnedStyleValue {
-            property_id: PropertyId::Top,
-            value: RustOwnedStyleValueKind::Anchor(RustOwnedAnchorFunction {
-                anchor_name: Some("--target".to_string()),
-                anchor_side: "bottom".to_string(),
-                fallback: Some("calc(1px + 2%)".to_string()),
             }),
         })
     );
@@ -3392,7 +3387,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::TransitionTimingFunction,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "linear(0, 1)".to_string(),
                     value_type: PropertyValueType::EasingFunction,
                 }],
             }),
@@ -3404,7 +3398,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::TransitionTimingFunction,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "cubic-bezier(0, 0, 1, 1)".to_string(),
                     value_type: PropertyValueType::EasingFunction,
                 }],
             }),
@@ -3416,7 +3409,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::TransitionTimingFunction,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "steps(2, jump-none)".to_string(),
                     value_type: PropertyValueType::EasingFunction,
                 }],
             }),
@@ -3533,7 +3525,6 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::AnimationTimeline,
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![RustOwnedGeneratedValueListItem {
-                    source: "scroll(root y)".to_string(),
                     value_type: PropertyValueType::ScrollFunction,
                 }],
             }),
@@ -4314,11 +4305,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "1s".to_string(),
                         value_type: PropertyValueType::Time,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "-200ms".to_string(),
                         value_type: PropertyValueType::Time,
                     },
                 ],
@@ -4332,11 +4321,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "auto".to_string(),
                         value_type: PropertyValueType::Time,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "250ms".to_string(),
                         value_type: PropertyValueType::Time,
                     },
                 ],
@@ -4350,11 +4337,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "normal".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "alternate-reverse".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                 ],
@@ -4368,11 +4353,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "infinite".to_string(),
                         value_type: PropertyValueType::Number,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "2".to_string(),
                         value_type: PropertyValueType::Number,
                     },
                 ],
@@ -4386,11 +4369,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "running".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "paused".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                 ],
@@ -4404,11 +4385,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "auto".to_string(),
                         value_type: PropertyValueType::DashedIdent,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "--track".to_string(),
                         value_type: PropertyValueType::DashedIdent,
                     },
                 ],
@@ -4422,11 +4401,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "ease".to_string(),
                         value_type: PropertyValueType::EasingFunction,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "ease-in".to_string(),
                         value_type: PropertyValueType::EasingFunction,
                     },
                 ],
@@ -4440,11 +4417,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "none".to_string(),
                         value_type: PropertyValueType::Image,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "url(example.png)".to_string(),
                         value_type: PropertyValueType::Image,
                     },
                 ],
@@ -4458,11 +4433,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "url(#mask)".to_string(),
                         value_type: PropertyValueType::Url,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "none".to_string(),
                         value_type: PropertyValueType::Image,
                     },
                 ],
@@ -4476,11 +4449,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "fixed".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "local".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                 ],
@@ -4494,11 +4465,9 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
                 items: vec![
                     RustOwnedGeneratedValueListItem {
-                        source: "add".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                     RustOwnedGeneratedValueListItem {
-                        source: "subtract".to_string(),
                         value_type: PropertyValueType::CustomIdent,
                     },
                 ],
@@ -5358,7 +5327,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "url(example.png)".to_string(),
+            value: String::new(),
             value_type: "Image".to_string(),
         })
     );
@@ -5371,7 +5340,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "linear-gradient(black, white)".to_string(),
+            value: String::new(),
             value_type: "Image".to_string(),
         })
     );
@@ -5384,7 +5353,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "image-set(url(example.png) 2x)".to_string(),
+            value: String::new(),
             value_type: "Image".to_string(),
         })
     );
@@ -5462,7 +5431,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "linear(0, 1)".to_string(),
+            value: String::new(),
             value_type: "EasingFunction".to_string(),
         })
     );
@@ -5514,7 +5483,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "scroll(root y)".to_string(),
+            value: String::new(),
             value_type: "ScrollFunction".to_string(),
         })
     );
@@ -5605,7 +5574,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "view(y 1px 2px)".to_string(),
+            value: String::new(),
             value_type: "ViewFunction".to_string(),
         })
     );
@@ -5861,7 +5830,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "250ms".to_string(),
+            value: String::new(),
             value_type: "Time".to_string(),
         })
     );

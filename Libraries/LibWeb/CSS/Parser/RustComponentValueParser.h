@@ -768,7 +768,6 @@ public:
         FFI::CssWillChangeValueKind will_change_kind { FFI::CssWillChangeValueKind::Invalid };
         Vector<FFI::CssWillChangeFeatureKind> will_change_feature_kinds;
         Vector<FlyString> will_change_features;
-        Vector<String> generated_value_list_sources;
         Vector<ValueType> generated_value_list_value_types;
     };
 

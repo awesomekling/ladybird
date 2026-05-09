@@ -1005,8 +1005,8 @@ fn rust_owned_generated_value_list_style_value_kind(
             break;
         }
 
+        let _ = source;
         items.push(RustOwnedGeneratedValueListItem {
-            source,
             value_type: matching_value_type?,
         });
     }

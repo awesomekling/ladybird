@@ -1269,7 +1269,7 @@ where
                     0,
                     0,
                     0,
-                    item.source.as_bytes(),
+                    &[],
                     property_value_type_name(item.value_type),
                 );
             }
