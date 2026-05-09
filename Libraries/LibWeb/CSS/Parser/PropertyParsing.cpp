@@ -5554,6 +5554,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         maybe_parsed_value = materialize_rust_ratio_value();
                     } else if (rust_style_value->kind == FFI::CssStyleValueKind::TreeCountingFunction && rust_style_value->tree_counting_function.has_value()) {
+                        if (!context_allows_tree_counting_functions())
+                            break;
                         tokens.discard_a_token();
                         maybe_parsed_value = TreeCountingFunctionStyleValue::create(
                             *rust_style_value->tree_counting_function == RustComponentValueParser::RustTreeCountingFunction::SiblingCount
