@@ -578,6 +578,24 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             || numeric_type->matches_dimension()
                             || numeric_type->matches_percentage());
                 };
+                auto have_consistent_types = [](CalculationNode const& left, CalculationNode const& right) {
+                    auto const& left_numeric_type = left.numeric_type();
+                    auto const& right_numeric_type = right.numeric_type();
+                    return left_numeric_type.has_value()
+                        && right_numeric_type.has_value()
+                        && left_numeric_type->consistent_type(*right_numeric_type).has_value();
+                };
+                auto append_round_node = [&](Vector<NonnullRefPtr<CalculationNode const>> const& children, RoundingStrategy strategy) -> bool {
+                    if (children.size() != 2)
+                        return false;
+                    if (!matches_sign_argument(*children.at(0)) || !matches_sign_argument(*children.at(1)))
+                        return false;
+                    if (!have_consistent_types(*children.at(0), *children.at(1)))
+                        return false;
+
+                    stack.append(RoundCalculationNode::create(strategy, children.at(0), children.at(1)));
+                    return true;
+                };
 
                 for (auto const& event : rust_style_value->calculation_node_events) {
                     switch (event.kind) {
@@ -701,6 +719,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             stack.append(ExpCalculationNode::create(children->first()));
                             break;
                         }
+                        if (event.metadata.equals_ignoring_ascii_case("round nearest"sv)) {
+                            if (!append_round_node(*children, RoundingStrategy::Nearest))
+                                return nullptr;
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("round up"sv)) {
+                            if (!append_round_node(*children, RoundingStrategy::Up))
+                                return nullptr;
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("round down"sv)) {
+                            if (!append_round_node(*children, RoundingStrategy::Down))
+                                return nullptr;
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("round to-zero"sv)) {
+                            if (!append_round_node(*children, RoundingStrategy::ToZero))
+                                return nullptr;
+                            break;
+                        }
                         if (event.metadata.equals_ignoring_ascii_case("mod"sv) && children->size() == 2) {
                             stack.append(ModCalculationNode::create(children->at(0), children->at(1)));
                             break;
@@ -711,8 +749,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         return nullptr;
                     }
-                    case FFI::CssCalculationNodeKind::TreeCountingFunction:
-                        return nullptr;
+                    case FFI::CssCalculationNodeKind::TreeCountingFunction: {
+                        if (!context_allows_tree_counting_functions())
+                            return nullptr;
+
+                        TreeCountingFunctionStyleValue::TreeCountingFunction function;
+                        if (event.metadata.equals_ignoring_ascii_case("sibling-count"sv)) {
+                            function = TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingCount;
+                        } else if (event.metadata.equals_ignoring_ascii_case("sibling-index"sv)) {
+                            function = TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingIndex;
+                        } else {
+                            return nullptr;
+                        }
+
+                        auto computed_type = *rust_style_value->value_type == ValueType::Integer
+                            ? TreeCountingFunctionStyleValue::ComputedType::Integer
+                            : TreeCountingFunctionStyleValue::ComputedType::Number;
+                        auto tree_counting_function = TreeCountingFunctionStyleValue::create(function, computed_type);
+                        stack.append(NonMathFunctionCalculationNode::create(*tree_counting_function, NumericType {}));
+                        break;
+                    }
                     }
                 }
 

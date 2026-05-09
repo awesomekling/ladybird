@@ -6828,6 +6828,7 @@ fn rejects_invalid_rust_owned_calculations() {
     assert_eq!(parse_math_ast("calc(1px +)"), None);
     assert_eq!(parse_math_ast("calc(1px ** 2)"), None);
     assert_eq!(parse_math_ast("calc(foo(1px))"), None);
+    assert_eq!(parse_math_ast("round(1px, 2px, 3px)"), None);
 }
 
 #[test]
@@ -6904,6 +6905,56 @@ fn emits_rust_owned_calculation_trees_in_postorder() {
                 0.0,
                 2,
                 String::new(),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn emits_rust_owned_round_calculations_with_strategy() {
+    let calculation = parse_math_ast("round(up, 10px, 3px)").unwrap();
+    let mut events = Vec::new();
+
+    emit_rust_owned_calculation_tree(
+        &calculation,
+        &mut |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+            events.push((
+                kind,
+                primitive_kind,
+                has_numeric_value,
+                numeric_value,
+                child_count,
+                String::from_utf8_lossy(metadata).to_string(),
+            ));
+        },
+    );
+
+    assert_eq!(
+        events,
+        vec![
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                10.0,
+                0,
+                "px".to_string(),
+            ),
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                3.0,
+                0,
+                "px".to_string(),
+            ),
+            (
+                CssCalculationNodeKind::Function,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                2,
+                "round up".to_string(),
             ),
         ]
     );

@@ -43,6 +43,10 @@ pub(crate) fn parse_rust_owned_calculation_function(function: &Function) -> Opti
         return parse_rust_owned_calculation(&function.value);
     }
 
+    if function.name.eq_ignore_ascii_case("round") {
+        return parse_rust_owned_round_function(function);
+    }
+
     let mut arguments = Vec::new();
     for argument in split_calculation_arguments(&function.value) {
         arguments.push(parse_rust_owned_calculation(argument)?);
@@ -52,6 +56,65 @@ pub(crate) fn parse_rust_owned_calculation_function(function: &Function) -> Opti
         name: function.name.clone(),
         arguments,
     })
+}
+
+fn parse_rust_owned_round_function(function: &Function) -> Option<RustOwnedCalculationNode> {
+    let arguments = split_calculation_arguments(&function.value);
+    if arguments.len() != 2 && arguments.len() != 3 {
+        return None;
+    }
+
+    let (strategy, calculation_arguments) = if arguments.len() == 3 {
+        (parse_rounding_strategy(arguments[0])?, &arguments[1..])
+    } else {
+        ("nearest", arguments.as_slice())
+    };
+
+    let mut calculations = Vec::new();
+    for argument in calculation_arguments {
+        calculations.push(parse_rust_owned_calculation(argument)?);
+    }
+
+    Some(RustOwnedCalculationNode::Function {
+        name: format!("round {strategy}"),
+        arguments: calculations,
+    })
+}
+
+fn parse_rounding_strategy(values: &[ComponentValue]) -> Option<&'static str> {
+    let mut values = values.iter().filter(|value| {
+        !matches!(
+            value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            })
+        )
+    });
+
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = values.next()
+    else {
+        return None;
+    };
+
+    if values.next().is_some() {
+        return None;
+    }
+
+    if value.eq_ignore_ascii_case("nearest") {
+        Some("nearest")
+    } else if value.eq_ignore_ascii_case("up") {
+        Some("up")
+    } else if value.eq_ignore_ascii_case("down") {
+        Some("down")
+    } else if value.eq_ignore_ascii_case("to-zero") {
+        Some("to-zero")
+    } else {
+        None
+    }
 }
 
 pub(crate) fn parse_rust_owned_calculation(values: &[ComponentValue]) -> Option<RustOwnedCalculationNode> {
