@@ -867,6 +867,7 @@ pub enum CssCropOrCrossKind {
 #[repr(C)]
 pub enum CssDescriptorResultKind {
     CounterStyleAdditiveSymbols,
+    CounterStyleNegative,
     CounterStyleSystemCyclic,
     CounterStyleSystemNumeric,
     CounterStyleSystemAlphabetic,
@@ -881,9 +882,19 @@ pub enum CssDescriptorResultKind {
     Crop,
     Cross,
     CropAndCross,
+    FamilyName,
+    FontSrcList,
+    FontWeightAbsolutePair,
+    Length,
+    OptionalDeclarationValue,
     PageSizeAuto,
     PageSizeLengths,
     PageSizeAndOrientation,
+    PositivePercentage,
+    String,
+    Symbol,
+    Symbols,
+    UnicodeRangeTokens,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

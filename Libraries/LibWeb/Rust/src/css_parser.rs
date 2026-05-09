@@ -168,6 +168,29 @@ pub(crate) struct FamilyName {
     pub(crate) is_string: bool,
 }
 
+fn serialize_family_name_source(name: &str, is_string: bool) -> String {
+    if !is_string {
+        return name.to_string();
+    }
+
+    let mut serialized = String::with_capacity(name.len() + 2);
+    serialized.push('"');
+    for character in name.chars() {
+        match character {
+            '\\' | '"' => {
+                serialized.push('\\');
+                serialized.push(character);
+            }
+            '\n' => serialized.push_str("\\a "),
+            '\r' => serialized.push_str("\\d "),
+            '\u{c}' => serialized.push_str("\\c "),
+            _ => serialized.push(character),
+        }
+    }
+    serialized.push('"');
+    serialized
+}
+
 pub(crate) fn parse_a_list_of_component_values<F>(filtered_input: &[u8], mut callback: F)
 where
     F: FnMut(CssComponentValue),
@@ -344,6 +367,16 @@ where
                 source_callback(tuple.order, &tuple.source);
             }
         }
+        CssDescriptorValueType::CounterStyleNegative => {
+            let Some(symbols) = parse_rust_owned_counter_style_negative_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::CounterStyleNegative);
+            for symbol in &symbols {
+                source_callback(default_order, symbol);
+            }
+        }
         CssDescriptorValueType::CounterStyleSystem => {
             let Some(system) = parse_rust_owned_counter_style_system_descriptor(filtered_input) else {
                 return false;
@@ -404,6 +437,24 @@ where
                 }
             }
         }
+        CssDescriptorValueType::Symbols => {
+            let Some(symbols) = parse_rust_owned_counter_style_symbols_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::Symbols);
+            for symbol in &symbols {
+                source_callback(default_order, symbol);
+            }
+        }
+        CssDescriptorValueType::Symbol => {
+            let Some(symbol) = parse_rust_owned_counter_style_symbol_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::Symbol);
+            source_callback(default_order, &symbol);
+        }
         CssDescriptorValueType::CropOrCross => {
             let mut kind = None;
             if !parse_crop_or_cross(filtered_input, |parsed_kind| kind = Some(parsed_kind)) {
@@ -416,6 +467,49 @@ where
                 Some(CssCropOrCrossKind::CropAndCross) => kind_callback(CssDescriptorResultKind::CropAndCross),
                 None => return false,
             }
+        }
+        CssDescriptorValueType::FamilyName => {
+            let mut family_name = None;
+            if !parse_a_family_name(filtered_input, |name, is_string| {
+                family_name = Some((name.to_string(), is_string));
+            }) {
+                return false;
+            }
+            let Some((family_name, is_string)) = family_name else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::FamilyName);
+            let family_name_source = serialize_family_name_source(&family_name, is_string);
+            source_callback(default_order, &family_name_source);
+        }
+        CssDescriptorValueType::FontSrcList => {
+            let Some(sources) = parse_rust_owned_font_src_list_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::FontSrcList);
+            for source in &sources {
+                source_callback(default_order, source);
+            }
+        }
+        CssDescriptorValueType::FontWeightAbsolutePair => {
+            let Some(weights) = parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::FontWeightAbsolutePair);
+            for weight in &weights {
+                source_callback(default_order, weight);
+            }
+        }
+        CssDescriptorValueType::Length => {
+            let Some(source) = parse_rust_owned_length_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::Length);
+            source_callback(default_order, &source);
         }
         CssDescriptorValueType::PageSize => {
             let Some(page_size) = parse_rust_owned_page_size_descriptor(filtered_input) else {
@@ -442,6 +536,22 @@ where
                     }
                 }
             }
+        }
+        CssDescriptorValueType::PositivePercentage => {
+            let Some(source) = parse_rust_owned_positive_percentage_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::PositivePercentage);
+            source_callback(default_order, &source);
+        }
+        CssDescriptorValueType::String => {
+            let Some(source) = parse_rust_owned_string_descriptor(filtered_input) else {
+                return false;
+            };
+
+            kind_callback(CssDescriptorResultKind::String);
+            source_callback(default_order, &source);
         }
         _ => return false,
     }

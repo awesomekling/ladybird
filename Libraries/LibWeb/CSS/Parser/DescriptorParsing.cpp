@@ -262,12 +262,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_negative = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::CounterStyleNegative, serialized_negative.bytes_as_string_view(), "utf-8"sv);
-                    if (!symbol_sources.has_value())
+                    auto negative = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleNegative, serialized_negative.bytes_as_string_view(), "utf-8"sv);
+                    if (!negative.has_value() || negative->kind != FFI::CssDescriptorResultKind::CounterStyleNegative)
                         return nullptr;
 
                     StyleValueVector symbols;
-                    for (auto const& source : *symbol_sources) {
+                    for (auto const& item : negative->items) {
+                        auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> symbol_tokens { component_values };
                         auto symbol = parse_symbol_value(symbol_tokens);
@@ -401,13 +402,17 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_family_name = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto family_name = RustComponentValueParser::parse_a_family_name(serialized_family_name.bytes_as_string_view(), "utf-8"sv);
-                    if (!family_name.has_value())
+                    auto family_name = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FamilyName, serialized_family_name.bytes_as_string_view(), "utf-8"sv);
+                    if (!family_name.has_value() || family_name->kind != FFI::CssDescriptorResultKind::FamilyName || family_name->items.size() != 1)
                         return nullptr;
 
-                    if (family_name->is_string)
-                        return StringStyleValue::create(family_name->name);
-                    return CustomIdentStyleValue::create(family_name->name);
+                    auto parsed_family_name = RustComponentValueParser::parse_a_family_name(family_name->items.first().source.bytes_as_string_view(), "utf-8"sv);
+                    if (!parsed_family_name.has_value())
+                        return nullptr;
+
+                    if (parsed_family_name->is_string)
+                        return StringStyleValue::create(parsed_family_name->name);
+                    return CustomIdentStyleValue::create(parsed_family_name->name);
                 }
                 case DescriptorMetadata::ValueType::FontSrcList: {
                     // "If a component value is parsed correctly and is of a font format or font tech that the UA
@@ -424,12 +429,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_font_src_list = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto source_lists = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::FontSrcList, serialized_font_src_list.bytes_as_string_view(), "utf-8"sv);
-                    if (!source_lists.has_value())
+                    auto source_lists = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FontSrcList, serialized_font_src_list.bytes_as_string_view(), "utf-8"sv);
+                    if (!source_lists.has_value() || source_lists->kind != FFI::CssDescriptorResultKind::FontSrcList)
                         return nullptr;
 
                     StyleValueVector valid_sources;
-                    for (auto const& source_list : *source_lists) {
+                    for (auto const& item : source_lists->items) {
+                        auto const& source_list = item.source;
                         // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
                         // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
                         auto font_source = RustComponentValueParser::parse_a_font_source(source_list.bytes_as_string_view(), "utf-8"sv);
@@ -484,12 +490,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_font_weight_absolute_pair = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto weight_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::FontWeightAbsolutePair, serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
-                    if (!weight_sources.has_value())
+                    auto weight_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FontWeightAbsolutePair, serialized_font_weight_absolute_pair.bytes_as_string_view(), "utf-8"sv);
+                    if (!weight_sources.has_value() || weight_sources->kind != FFI::CssDescriptorResultKind::FontWeightAbsolutePair)
                         return nullptr;
 
                     StyleValueVector weights;
-                    for (auto const& source : *weight_sources) {
+                    for (auto const& item : weight_sources->items) {
+                        auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> font_weight_absolute_tokens { component_values };
                         auto weight = parse_font_weight_absolute_value(font_weight_absolute_tokens);
@@ -509,12 +516,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_length = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto length_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Length, serialized_length.bytes_as_string_view(), "utf-8"sv);
-                    if (!length_sources.has_value())
+                    auto length_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Length, serialized_length.bytes_as_string_view(), "utf-8"sv);
+                    if (!length_sources.has_value() || length_sources->kind != FFI::CssDescriptorResultKind::Length || length_sources->items.size() != 1)
                         return nullptr;
-                    VERIFY(length_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_sources->first().bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> length_tokens { component_values };
 
                     auto length = parse_length_value(length_tokens, infinite_range);
@@ -643,12 +649,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_percentage = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto percentage_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::PositivePercentage, serialized_percentage.bytes_as_string_view(), "utf-8"sv);
-                    if (!percentage_sources.has_value())
+                    auto percentage_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::PositivePercentage, serialized_percentage.bytes_as_string_view(), "utf-8"sv);
+                    if (!percentage_sources.has_value() || percentage_sources->kind != FFI::CssDescriptorResultKind::PositivePercentage || percentage_sources->items.size() != 1)
                         return nullptr;
-                    VERIFY(percentage_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_sources->first().bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> percentage_tokens { component_values };
 
                     if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
@@ -678,12 +683,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_string = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto string_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::String, serialized_string.bytes_as_string_view(), "utf-8"sv);
-                    if (!string_sources.has_value())
+                    auto string_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::String, serialized_string.bytes_as_string_view(), "utf-8"sv);
+                    if (!string_sources.has_value() || string_sources->kind != FFI::CssDescriptorResultKind::String || string_sources->items.size() != 1)
                         return nullptr;
-                    VERIFY(string_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_sources->first().bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> string_tokens { component_values };
 
                     auto string = parse_string_value(string_tokens);
@@ -704,12 +708,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbol = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Symbol, serialized_symbol.bytes_as_string_view(), "utf-8"sv);
-                    if (!symbol_sources.has_value())
+                    auto symbol_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Symbol, serialized_symbol.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_sources.has_value() || symbol_sources->kind != FFI::CssDescriptorResultKind::Symbol || symbol_sources->items.size() != 1)
                         return nullptr;
-                    VERIFY(symbol_sources->size() == 1);
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->first().bytes_as_string_view(), "utf-8"sv);
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
                     TokenStream<ComponentValue> symbol_tokens { component_values };
 
                     auto symbol = parse_symbol_value(symbol_tokens);
@@ -730,12 +733,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         tokens.discard_a_token();
 
                     auto serialized_symbols = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                    auto symbol_sources = RustComponentValueParser::parse_descriptor_sources(DescriptorMetadata::ValueType::Symbols, serialized_symbols.bytes_as_string_view(), "utf-8"sv);
-                    if (!symbol_sources.has_value())
+                    auto symbol_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Symbols, serialized_symbols.bytes_as_string_view(), "utf-8"sv);
+                    if (!symbol_sources.has_value() || symbol_sources->kind != FFI::CssDescriptorResultKind::Symbols)
                         return nullptr;
 
                     StyleValueVector symbols;
-                    for (auto const& source : *symbol_sources) {
+                    for (auto const& item : symbol_sources->items) {
+                        auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> symbol_tokens { component_values };
                         symbol_tokens.discard_whitespace();
