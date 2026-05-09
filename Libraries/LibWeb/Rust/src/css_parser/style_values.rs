@@ -281,6 +281,7 @@ pub(crate) struct RustOwnedGridPlacementShorthandItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedGridTemplateShorthandItem {
     pub(crate) property_id: PropertyId,
+    pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
 }
 

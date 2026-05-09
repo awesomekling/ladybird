@@ -659,18 +659,29 @@ fn parse_rust_owned_grid_template_value(
             .is_some()
     {
         return Some(vec![
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridTemplateRows,
-                source: rows_source.clone(),
-            },
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridTemplateColumns,
-                source: columns_source.clone(),
-            },
+            grid_template_shorthand_item(PropertyId::GridTemplateRows, rows_source.clone())?,
+            grid_template_shorthand_item(PropertyId::GridTemplateColumns, columns_source.clone())?,
         ]);
     }
 
     parse_rust_owned_grid_template_areas_syntax(component_values, source)
+}
+
+fn grid_template_shorthand_item(property_id: PropertyId, source: String) -> Option<RustOwnedGridTemplateShorthandItem> {
+    let style_value = match parse_rust_owned_style_value_for_property_with_options(
+        &[property_id as u16],
+        source.as_bytes(),
+        CssPrimitiveValueOptions::default(),
+    ) {
+        RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
+        RustOwnedStyleValueParseResult::Invalid => return None,
+    };
+
+    Some(RustOwnedGridTemplateShorthandItem {
+        property_id,
+        style_value,
+        source,
+    })
 }
 
 fn parse_rust_owned_grid_value(
@@ -697,20 +708,11 @@ fn parse_rust_owned_grid_value(
             .is_some()
     {
         let mut items = vec![
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridAutoFlow,
-                source: grid_auto_flow_source,
-            },
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridTemplateColumns,
-                source: right_source.clone(),
-            },
+            grid_template_shorthand_item(PropertyId::GridAutoFlow, grid_auto_flow_source)?,
+            grid_template_shorthand_item(PropertyId::GridTemplateColumns, right_source.clone())?,
         ];
         if let Some(source) = grid_auto_rows_source {
-            items.push(RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridAutoRows,
-                source,
-            });
+            items.push(grid_template_shorthand_item(PropertyId::GridAutoRows, source)?);
         }
         return Some(items);
     }
@@ -720,20 +722,11 @@ fn parse_rust_owned_grid_value(
             parse_grid_auto_flow_prefix_with_optional_auto_track_sizes(right_source, CssGridAutoFlowAxis::Column)
     {
         let mut items = vec![
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridTemplateRows,
-                source: left_source.clone(),
-            },
-            RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridAutoFlow,
-                source: grid_auto_flow_source,
-            },
+            grid_template_shorthand_item(PropertyId::GridTemplateRows, left_source.clone())?,
+            grid_template_shorthand_item(PropertyId::GridAutoFlow, grid_auto_flow_source)?,
         ];
         if let Some(source) = grid_auto_columns_source {
-            items.push(RustOwnedGridTemplateShorthandItem {
-                property_id: PropertyId::GridAutoColumns,
-                source,
-            });
+            items.push(grid_template_shorthand_item(PropertyId::GridAutoColumns, source)?);
         }
         return Some(items);
     }
@@ -865,14 +858,8 @@ fn parse_rust_owned_grid_template_areas_syntax(
     let grid_template_rows_source = serialize_grid_template_row_track_source_items(&row_track_source_items);
 
     let mut items = vec![
-        RustOwnedGridTemplateShorthandItem {
-            property_id: PropertyId::GridTemplateAreas,
-            source: grid_template_areas_source,
-        },
-        RustOwnedGridTemplateShorthandItem {
-            property_id: PropertyId::GridTemplateRows,
-            source: grid_template_rows_source,
-        },
+        grid_template_shorthand_item(PropertyId::GridTemplateAreas, grid_template_areas_source)?,
+        grid_template_shorthand_item(PropertyId::GridTemplateRows, grid_template_rows_source)?,
     ];
 
     parser.discard_whitespace();
@@ -888,13 +875,13 @@ fn parse_rust_owned_grid_template_areas_syntax(
         if columns.is_empty() {
             return None;
         }
-        items.push(RustOwnedGridTemplateShorthandItem {
-            property_id: PropertyId::GridTemplateColumns,
-            source: serialize_component_values_for_reparsing(
+        items.push(grid_template_shorthand_item(
+            PropertyId::GridTemplateColumns,
+            serialize_component_values_for_reparsing(
                 strip_whitespace(&parser.component_values[columns_start..parser.index]),
                 source,
             )?,
-        });
+        )?);
     } else if parser.has_next_component_value() {
         return None;
     }

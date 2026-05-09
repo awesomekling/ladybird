@@ -4316,14 +4316,17 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::GridTemplateShorthand(vec![
                 RustOwnedGridTemplateShorthandItem {
                     property_id: PropertyId::GridAutoFlow,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::GridAutoFlow], "row dense").unwrap(),
                     source: "row dense".to_string(),
                 },
                 RustOwnedGridTemplateShorthandItem {
                     property_id: PropertyId::GridTemplateColumns,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::GridTemplateColumns], "1fr").unwrap(),
                     source: "1fr".to_string(),
                 },
                 RustOwnedGridTemplateShorthandItem {
                     property_id: PropertyId::GridAutoRows,
+                    style_value: parse_rust_owned_style_value(&[PropertyId::GridAutoRows], "10px").unwrap(),
                     source: "10px".to_string(),
                 },
             ]),
