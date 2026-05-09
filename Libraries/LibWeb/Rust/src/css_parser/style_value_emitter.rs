@@ -2811,7 +2811,6 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedNestedPrimitiveValue) 
         RustOwnedNestedPrimitiveValue::Number(_)
         | RustOwnedNestedPrimitiveValue::Length { .. }
         | RustOwnedNestedPrimitiveValue::Percentage(_)
-        | RustOwnedNestedPrimitiveValue::MathFunction(_)
         | RustOwnedNestedPrimitiveValue::Source(_) => {
             let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
             GridTrackBreadthCallbackPayload {
@@ -2822,7 +2821,27 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedNestedPrimitiveValue) 
                 source_or_unit,
             }
         }
-        RustOwnedNestedPrimitiveValue::Flex { .. } | RustOwnedNestedPrimitiveValue::FlexSource(_) => {
+        RustOwnedNestedPrimitiveValue::MathFunction(value) if value.value_type != PropertyValueType::Flex => {
+            let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
+            GridTrackBreadthCallbackPayload {
+                breadth_kind: GRID_TRACK_BREADTH_LENGTH_PERCENTAGE,
+                primitive_kind,
+                has_numeric_value: nested_primitive_callback_has_numeric_value(breadth),
+                numeric_value,
+                source_or_unit,
+            }
+        }
+        RustOwnedNestedPrimitiveValue::Flex { .. } => {
+            let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
+            GridTrackBreadthCallbackPayload {
+                breadth_kind: GRID_TRACK_BREADTH_FLEX,
+                primitive_kind,
+                has_numeric_value: nested_primitive_callback_has_numeric_value(breadth),
+                numeric_value,
+                source_or_unit,
+            }
+        }
+        RustOwnedNestedPrimitiveValue::MathFunction(_) => {
             let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
             GridTrackBreadthCallbackPayload {
                 breadth_kind: GRID_TRACK_BREADTH_FLEX,
@@ -4619,7 +4638,6 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
             },
         ),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
-        RustOwnedNestedPrimitiveValue::FlexSource(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
 }
 
@@ -4630,7 +4648,6 @@ fn nested_primitive_callback_has_numeric_value(value: &RustOwnedNestedPrimitiveV
             | RustOwnedNestedPrimitiveValue::MathFunction(_)
             | RustOwnedNestedPrimitiveValue::TreeCountingFunction(_)
             | RustOwnedNestedPrimitiveValue::Source(_)
-            | RustOwnedNestedPrimitiveValue::FlexSource(_)
     )
 }
 

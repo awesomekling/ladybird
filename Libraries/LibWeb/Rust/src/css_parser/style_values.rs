@@ -792,7 +792,6 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     MathFunction(RustOwnedMathFunction),
     TreeCountingFunction(RustOwnedTreeCountingFunction),
     Source(String),
-    FlexSource(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -4000,10 +4000,12 @@ pub(super) fn component_value_parse_as_nested_non_negative_flex(
             if !component_value_contains_flex_dimension(component_value) {
                 return None;
             }
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing and range-checking math functions still happens in C++.
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-                .map(RustOwnedNestedPrimitiveValue::FlexSource)
+            parse_rust_owned_math_function(
+                PropertyValueType::Flex,
+                std::slice::from_ref(component_value),
+                filtered_input_string.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::MathFunction)
         }
         _ => None,
     }

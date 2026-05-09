@@ -4228,6 +4228,26 @@ fn parses_style_values_with_rust_owned_ast() {
             ])),
         })
     );
+    assert!(matches!(
+        parse_rust_owned_style_value(&[PropertyId::GridAutoRows], "minmax(1px, calc(1fr + 2fr))"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::GridAutoRows,
+            value: RustOwnedStyleValueKind::GridAutoTrackSizes(RustOwnedGridTrackSizeList::List(items)),
+        }) if matches!(
+            items.as_slice(),
+            [RustOwnedGridTrackSizeListItem::Track(RustOwnedExplicitGridTrack::Size(
+                RustOwnedGridTrackSize::MinMax {
+                    max: RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                        name,
+                        source,
+                        value_type: PropertyValueType::Flex,
+                        ..
+                    }),
+                    ..
+                },
+            ))] if name == "calc" && source == "calc(1fr + 2fr)"
+        )
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Grid], "auto-flow dense 10px / 1fr"),
         Some(RustOwnedStyleValue {
