@@ -2820,6 +2820,7 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    let font_shorthand_component_values = parse("italic bold 16px / 1.5 serif");
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Font], "italic bold 16px / 1.5 serif"),
         Some(RustOwnedStyleValue {
@@ -2829,26 +2830,31 @@ fn parses_style_values_with_rust_owned_ast() {
                     property_id: PropertyId::FontStyle,
                     style_value: parse_rust_owned_style_value(&[PropertyId::FontStyle], "italic").unwrap(),
                     source: "italic".to_string(),
+                    component_values: font_shorthand_component_values[0..2].to_vec(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontWeight,
                     style_value: parse_rust_owned_style_value(&[PropertyId::FontWeight], "bold").unwrap(),
                     source: "bold".to_string(),
+                    component_values: font_shorthand_component_values[2..4].to_vec(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontSize,
                     style_value: parse_rust_owned_style_value(&[PropertyId::FontSize], "16px").unwrap(),
                     source: "16px".to_string(),
+                    component_values: font_shorthand_component_values[4..6].to_vec(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::LineHeight,
                     style_value: parse_rust_owned_style_value(&[PropertyId::LineHeight], "1.5").unwrap(),
                     source: "1.5".to_string(),
+                    component_values: font_shorthand_component_values[8..10].to_vec(),
                 },
                 RustOwnedFontShorthandItem {
                     property_id: PropertyId::FontFamily,
                     style_value: parse_rust_owned_style_value(&[PropertyId::FontFamily], "serif").unwrap(),
                     source: "serif".to_string(),
+                    component_values: font_shorthand_component_values[10..].to_vec(),
                 },
             ]),
         })
@@ -3287,6 +3293,7 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    let border_bottom_component_values = parse("1px solid #123456");
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BorderBottom], "1px solid #123456"),
         Some(RustOwnedStyleValue {
@@ -3305,6 +3312,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         }),
                     },
                     source: "1px".to_string(),
+                    component_values: border_bottom_component_values[0..1].to_vec(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::BorderBottomStyle,
@@ -3315,6 +3323,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         )),
                     },
                     source: "solid".to_string(),
+                    component_values: border_bottom_component_values[2..3].to_vec(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::BorderBottomColor,
@@ -3330,10 +3339,12 @@ fn parses_style_values_with_rust_owned_ast() {
                         }),
                     },
                     source: "#123456".to_string(),
+                    component_values: border_bottom_component_values[4..5].to_vec(),
                 },
             ]),
         })
     );
+    let outline_component_values = parse("auto red thick");
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Outline], "auto red thick"),
         Some(RustOwnedStyleValue {
@@ -3348,6 +3359,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         )),
                     },
                     source: "auto".to_string(),
+                    component_values: outline_component_values[0..1].to_vec(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::OutlineColor,
@@ -3363,6 +3375,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         }),
                     },
                     source: "red".to_string(),
+                    component_values: outline_component_values[2..3].to_vec(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::OutlineWidth,
@@ -3373,6 +3386,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         )),
                     },
                     source: "thick".to_string(),
+                    component_values: outline_component_values[4..5].to_vec(),
                 },
             ]),
         })

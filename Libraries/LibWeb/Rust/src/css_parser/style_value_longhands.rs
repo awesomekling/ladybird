@@ -1620,6 +1620,7 @@ pub(super) fn rust_owned_component_shorthand_style_value_kind(
             property_id: remaining_longhands.remove(matching_longhand_index),
             style_value: matching_style_value?,
             source: component_source,
+            component_values: parser.component_values[start..parser.index].to_vec(),
         });
     }
 

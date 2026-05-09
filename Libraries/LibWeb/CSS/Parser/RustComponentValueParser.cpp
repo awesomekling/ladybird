@@ -1200,6 +1200,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             Image,
             ImageSetResolution,
             NestedPrimitive,
+            ShorthandItem,
             StyleColor,
         };
 
@@ -1209,6 +1210,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListImage = 3,
             SourceComponentValueListImageSetResolution = 4,
             SourceComponentValueListNestedPrimitive = 5,
+            SourceComponentValueListShorthandItem = 6,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1247,6 +1249,33 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 break;
             case SourceComponentValueTarget::NestedPrimitive:
                 pending_nested_primitive_source_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::ShorthandItem:
+                VERIFY(style_value.has_value());
+                switch (style_value->kind) {
+                case FFI::CssStyleValueKind::ComponentShorthand:
+                    VERIFY(!style_value->component_shorthand_items.is_empty());
+                    style_value->component_shorthand_items.last().value_component_values = move(source_component_value_builder.root_values);
+                    break;
+                case FFI::CssStyleValueKind::CoordinatingValueListShorthand:
+                    VERIFY(!style_value->coordinating_value_list_shorthand_items.is_empty());
+                    style_value->coordinating_value_list_shorthand_items.last().value_component_values = move(source_component_value_builder.root_values);
+                    break;
+                case FFI::CssStyleValueKind::FontShorthand:
+                    VERIFY(!style_value->font_shorthand_items.is_empty());
+                    style_value->font_shorthand_items.last().value_component_values = move(source_component_value_builder.root_values);
+                    break;
+                case FFI::CssStyleValueKind::LayerShorthand:
+                    VERIFY(!style_value->layer_shorthand_items.is_empty());
+                    style_value->layer_shorthand_items.last().value_component_values = move(source_component_value_builder.root_values);
+                    break;
+                case FFI::CssStyleValueKind::PositionalValueListShorthand:
+                    VERIFY(!style_value->positional_value_list_shorthand_items.is_empty());
+                    style_value->positional_value_list_shorthand_items.last().value_component_values = move(source_component_value_builder.root_values);
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
                 break;
             case SourceComponentValueTarget::StyleColor:
                 if (style_color_source_component_value_target) {
@@ -1288,6 +1317,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             case SourceComponentValueListNestedPrimitive:
                 source_component_value_target = SourceComponentValueTarget::NestedPrimitive;
+                return;
+            case SourceComponentValueListShorthandItem:
+                source_component_value_target = SourceComponentValueTarget::ShorthandItem;
                 return;
             default:
                 VERIFY_NOT_REACHED();

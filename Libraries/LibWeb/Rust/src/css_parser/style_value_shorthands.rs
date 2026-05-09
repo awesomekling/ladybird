@@ -99,6 +99,7 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
                 layer_index,
                 style_value,
                 source: serialized_value,
+                component_values: parser.component_values[start..parser.index].to_vec(),
             });
             parsed_any_value = true;
         }
@@ -330,6 +331,7 @@ fn consume_layer_shorthand_item(
                 property_id,
                 style_value,
                 source: candidate_source,
+                component_values: parser.component_values[start..end].to_vec(),
             }];
             remaining_property_ids.retain(|remaining_property_id| *remaining_property_id != property_id);
 
@@ -392,6 +394,7 @@ fn consume_layer_shorthand_size(
             property_id,
             style_value,
             source: candidate_source,
+            component_values: parser.component_values[start..end].to_vec(),
         });
     }
 
@@ -1245,6 +1248,7 @@ where
             property_id,
             style_value,
             source: candidate_source,
+            component_values: parser.component_values[start..end].to_vec(),
         });
     }
 
@@ -1345,6 +1349,7 @@ fn consume_font_size_line_height_and_family(
                                 &font_size_source,
                             )?,
                             source: font_size_source,
+                            component_values: parser.component_values[start..font_size_end].to_vec(),
                         },
                         RustOwnedFontShorthandItem {
                             property_id: PropertyId::LineHeight,
@@ -1353,6 +1358,7 @@ fn consume_font_size_line_height_and_family(
                                 &line_height_source,
                             )?,
                             source: line_height_source,
+                            component_values: parser.component_values[line_height_start..line_height_end].to_vec(),
                         },
                         font_family,
                     ]);
@@ -1371,6 +1377,7 @@ fn consume_font_size_line_height_and_family(
                         &font_size_source,
                     )?,
                     source: font_size_source,
+                    component_values: parser.component_values[start..font_size_end].to_vec(),
                 },
                 font_family,
             ]);
@@ -1395,6 +1402,7 @@ fn consume_font_family_after(
         property_id: PropertyId::FontFamily,
         style_value: parse_rust_owned_font_shorthand_item_style_value(PropertyId::FontFamily, &family_source)?,
         source: family_source,
+        component_values: parser.component_values[start..].to_vec(),
     })
 }
 
@@ -1490,6 +1498,7 @@ pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
             index: values.len(),
             style_value,
             source: serialized_value,
+            component_values: parser.component_values[start..parser.index].to_vec(),
         });
     }
 

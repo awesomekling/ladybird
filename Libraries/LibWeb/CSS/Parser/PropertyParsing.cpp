@@ -1559,6 +1559,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_value();
             };
+            auto parse_rust_component_values_as_property = [&](PropertyID property_id, String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
+                TokenStream value_tokens { component_values };
+                auto value = parse_css_value(property_id, value_tokens, source);
+                value_tokens.discard_whitespace();
+                if (value.is_error() || value_tokens.has_next_token())
+                    return nullptr;
+                return value.release_value();
+            };
             auto unwrap_single_coordinating_value_list_item = [](PropertyID property_id, RefPtr<StyleValue const>& parsed_value) {
                 if (first_is_one_of(property_id,
                         PropertyID::AnimationComposition,
@@ -3949,7 +3957,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 bool is_valid = true;
                 for (auto const& item : rust_style_value->font_shorthand_items) {
-                    auto value = parse_value(item.property_id, item.value);
+                    auto value = item.value_component_values.is_empty()
+                        ? parse_value(item.property_id, item.value)
+                        : parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                     if (!value) {
                         is_valid = false;
                         break;
@@ -4678,6 +4688,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     }
 
+                    if (!item.value_component_values.is_empty())
+                        return parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                     return parse_rust_source_as_property(item.property_id, item.value);
                 };
 
@@ -5105,7 +5117,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return position.release_nonnull();
                     }
 
-                    auto value = parse_rust_source_as_property(item.property_id, item.value);
+                    auto value = item.value_component_values.is_empty()
+                        ? parse_rust_source_as_property(item.property_id, item.value)
+                        : parse_rust_component_values_as_property(item.property_id, item.value, item.value_component_values);
                     if (!value)
                         return nullptr;
                     if (value->is_value_list() && value->as_value_list().size() == 1)
@@ -5522,6 +5536,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return wrap_single_value_shorthand_if_needed(property_id, SuperellipseStyleValue::create(parameter.release_nonnull()));
                     }
 
+                    if (!item.value_component_values.is_empty())
+                        return parse_rust_component_values_as_property(property_id, item.value, item.value_component_values);
                     return parse_rust_source_as_property(property_id, item.value);
                 };
 

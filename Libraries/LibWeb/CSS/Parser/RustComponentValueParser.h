@@ -131,6 +131,7 @@ public:
     struct FontShorthandItem {
         PropertyID property_id;
         String value;
+        Vector<ComponentValue> value_component_values;
     };
 
     struct ComponentShorthandItem {
@@ -148,6 +149,7 @@ public:
         u8 color_alpha { 0 };
         Optional<String> color_name_or_source;
         Vector<ComponentValue> color_source_component_values;
+        Vector<ComponentValue> value_component_values;
     };
 
     struct RustCalculationNodeEvent {
@@ -162,6 +164,7 @@ public:
         size_t index { 0 };
         PropertyID property_id;
         String value;
+        Vector<ComponentValue> value_component_values;
         Optional<Keyword> keyword;
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> primitive_numeric_value;
@@ -499,6 +502,7 @@ public:
         size_t layer_index { 0 };
         PropertyID property_id;
         String value;
+        Vector<ComponentValue> value_component_values;
         Optional<Keyword> keyword;
         bool has_color { false };
         bool color_is_simple { false };
@@ -656,6 +660,7 @@ public:
         size_t layer_index { 0 };
         PropertyID property_id;
         String value;
+        Vector<ComponentValue> value_component_values;
         Optional<Keyword> keyword;
         Optional<FlyString> custom_ident;
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };

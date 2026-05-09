@@ -248,6 +248,7 @@ pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
     pub(crate) layer_index: usize,
     pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -256,6 +257,7 @@ pub(crate) struct RustOwnedLayerShorthandItem {
     pub(crate) property_id: PropertyId,
     pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -263,6 +265,7 @@ pub(crate) struct RustOwnedFontShorthandItem {
     pub(crate) property_id: PropertyId,
     pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,6 +273,7 @@ pub(crate) struct RustOwnedComponentShorthandItem {
     pub(crate) property_id: PropertyId,
     pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -296,6 +300,7 @@ pub(crate) struct RustOwnedPositionalValueListShorthandItem {
     pub(crate) index: usize,
     pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
