@@ -2755,9 +2755,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return AngleStyleValue::create(Angle { *value.numeric_value, angle_unit.release_value() });
             };
+            auto materialize_rust_tree_counting_function = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, TreeCountingFunctionStyleValue::ComputedType computed_type) -> RefPtr<StyleValue const> {
+                if (value.primitive_kind != FFI::CssPrimitiveValueKind::Invalid)
+                    return nullptr;
+                if (!context_allows_tree_counting_functions())
+                    return nullptr;
+                if (value.source_or_unit.equals_ignoring_ascii_case("sibling-count()"sv))
+                    return TreeCountingFunctionStyleValue::create(TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingCount, computed_type);
+                if (value.source_or_unit.equals_ignoring_ascii_case("sibling-index()"sv))
+                    return TreeCountingFunctionStyleValue::create(TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingIndex, computed_type);
+                return nullptr;
+            };
             auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
-                if (!value.numeric_value.has_value())
+                if (!value.numeric_value.has_value()) {
+                    if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Integer))
+                        return tree_counting_function;
                     return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
+                }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer)
                     return nullptr;
                 if (*value.numeric_value < AK::NumericLimits<i32>::min() || *value.numeric_value > AK::NumericLimits<i32>::max())
@@ -2767,15 +2781,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
             };
             auto materialize_rust_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-                if (!value.numeric_value.has_value())
+                if (!value.numeric_value.has_value()) {
+                    if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
+                        return tree_counting_function;
                     return parse_rust_source_as_number(value.source_or_unit);
+                }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
                     return nullptr;
                 return NumberStyleValue::create(*value.numeric_value);
             };
             auto materialize_rust_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-                if (!value.numeric_value.has_value())
+                if (!value.numeric_value.has_value()) {
+                    if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
+                        return tree_counting_function;
                     return parse_rust_source_as_non_negative_number(value.source_or_unit);
+                }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
                     return nullptr;
                 if (*value.numeric_value < 0)
