@@ -857,6 +857,9 @@ public:
         FFI::CssNonnegativeIntegerSymbolPairOrder order;
         String source;
         bool is_string { false };
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        bool has_numeric_value { false };
+        double numeric_value { 0.0 };
     };
 
     struct DescriptorResult {

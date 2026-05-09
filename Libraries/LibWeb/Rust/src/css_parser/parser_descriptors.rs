@@ -45,6 +45,31 @@ pub(crate) enum RustOwnedPageSizeDescriptor {
     },
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedDescriptorPrimitiveValue {
+    pub(crate) primitive_kind: CssPrimitiveValueKind,
+    pub(crate) numeric_value: Option<f64>,
+    pub(crate) source_or_unit: String,
+}
+
+impl RustOwnedDescriptorPrimitiveValue {
+    pub(crate) fn primitive_kind(&self) -> CssPrimitiveValueKind {
+        self.primitive_kind
+    }
+
+    pub(crate) fn has_numeric_value(&self) -> bool {
+        self.numeric_value.is_some()
+    }
+
+    pub(crate) fn numeric_value(&self) -> f64 {
+        self.numeric_value.unwrap_or(0.0)
+    }
+
+    pub(crate) fn source_or_unit(&self) -> &str {
+        &self.source_or_unit
+    }
+}
+
 pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -321,6 +346,12 @@ pub(crate) fn parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_inp
 }
 
 pub(crate) fn parse_rust_owned_length_descriptor(filtered_input: &[u8]) -> Option<String> {
+    parse_rust_owned_length_descriptor_value(filtered_input).map(|value| value.source_or_unit)
+}
+
+pub(crate) fn parse_rust_owned_length_descriptor_value(
+    filtered_input: &[u8],
+) -> Option<RustOwnedDescriptorPrimitiveValue> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let filtered_input = filtered_input_to_string(filtered_input);
@@ -328,11 +359,34 @@ pub(crate) fn parse_rust_owned_length_descriptor(filtered_input: &[u8]) -> Optio
 
     // https://drafts.csswg.org/css-values-4/#lengths
     // <length>
-    matches!(component_values, [component_value] if component_value_parse_as_length_descriptor(component_value))
-        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
+    let [component_value] = component_values else {
+        return None;
+    };
+
+    let value = component_value_parse_as_nested_length(component_value, &filtered_input)?;
+    let (primitive_kind, numeric_value, source_or_unit) = match value {
+        RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, Some(value), unit),
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
+            (CssPrimitiveValueKind::Invalid, None, value.source)
+        }
+        RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, None, source),
+        _ => return None,
+    };
+    Some(RustOwnedDescriptorPrimitiveValue {
+        primitive_kind,
+        numeric_value,
+        source_or_unit,
+    })
 }
 
 pub(crate) fn parse_rust_owned_positive_percentage_descriptor(filtered_input: &[u8]) -> Option<String> {
+    parse_rust_owned_positive_percentage_descriptor_value(filtered_input).map(|value| value.source_or_unit)
+}
+
+pub(crate) fn parse_rust_owned_positive_percentage_descriptor_value(
+    filtered_input: &[u8],
+) -> Option<RustOwnedDescriptorPrimitiveValue> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let filtered_input = filtered_input_to_string(filtered_input);
@@ -340,8 +394,34 @@ pub(crate) fn parse_rust_owned_positive_percentage_descriptor(filtered_input: &[
 
     // https://drafts.csswg.org/css-values-4/#percentages
     // <percentage [0,∞]>
-    matches!(component_values, [component_value] if component_value_parse_as_positive_percentage_descriptor(component_value))
-        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
+    let [component_value] = component_values else {
+        return None;
+    };
+
+    if !component_value_parse_as_positive_percentage_descriptor(component_value) {
+        return None;
+    }
+
+    let value = component_value_parse_as_nested_length_percentage(component_value, &filtered_input)?;
+    let (primitive_kind, numeric_value, source_or_unit) = match value {
+        RustOwnedNestedPrimitiveValue::Percentage(value) => (
+            CssPrimitiveValueKind::Percentage,
+            Some(value),
+            serialize_component_values_for_reparsing(component_values, &filtered_input)?,
+        ),
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
+            (CssPrimitiveValueKind::Invalid, None, value.source)
+        }
+        RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, None, source),
+        RustOwnedNestedPrimitiveValue::Length { unit, .. } => (CssPrimitiveValueKind::Invalid, None, unit),
+        _ => return None,
+    };
+    Some(RustOwnedDescriptorPrimitiveValue {
+        primitive_kind,
+        numeric_value,
+        source_or_unit,
+    })
 }
 
 pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Option<RustOwnedPageSizeDescriptor> {

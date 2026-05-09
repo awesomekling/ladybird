@@ -955,13 +955,16 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
             auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
             result = DescriptorResult { .kind = kind };
         },
-        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string) {
+        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value) {
             auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
             VERIFY(result.has_value());
             result->items.append(DescriptorResultItem {
                 .order = order,
                 .source = string_from_ffi_bytes(source_ptr, source_len),
                 .is_string = is_string,
+                .primitive_kind = primitive_kind,
+                .has_numeric_value = has_numeric_value,
+                .numeric_value = numeric_value,
             });
         });
 

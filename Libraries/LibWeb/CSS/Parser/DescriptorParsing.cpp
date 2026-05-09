@@ -516,17 +516,22 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!length_sources.has_value() || length_sources->kind != FFI::CssDescriptorResultKind::Length || length_sources->items.size() != 1)
                         return nullptr;
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> length_tokens { component_values };
+                    auto const& length_source = length_sources->items.first();
+                    if (length_source.primitive_kind == FFI::CssPrimitiveValueKind::Length && length_source.has_numeric_value) {
+                        auto length_unit = string_to_length_unit(length_source.source);
+                        if (!length_unit.has_value())
+                            return nullptr;
+                        return LengthStyleValue::create(Length(length_source.numeric_value, *length_unit));
+                    }
 
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(length_source.source.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream<ComponentValue> length_tokens { component_values };
                     auto length = parse_length_value(length_tokens, infinite_range);
                     if (!length)
                         return nullptr;
-
                     length_tokens.discard_whitespace();
                     if (length_tokens.has_next_token())
                         return nullptr;
-
                     return length.release_nonnull();
                 }
                 case DescriptorMetadata::ValueType::OptionalDeclarationValue: {
@@ -649,23 +654,22 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!percentage_sources.has_value() || percentage_sources->kind != FFI::CssDescriptorResultKind::PositivePercentage || percentage_sources->items.size() != 1)
                         return nullptr;
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> percentage_tokens { component_values };
+                    auto const& percentage_source = percentage_sources->items.first();
+                    if (percentage_source.primitive_kind == FFI::CssPrimitiveValueKind::Percentage && percentage_source.has_numeric_value)
+                        return PercentageStyleValue::create(Percentage(percentage_source.numeric_value));
 
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(percentage_source.source.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream<ComponentValue> percentage_tokens { component_values };
                     if (auto percentage_value = parse_percentage_value(percentage_tokens, non_negative_range)) {
                         percentage_tokens.discard_whitespace();
                         if (percentage_tokens.has_next_token())
                             return nullptr;
-
                         if (percentage_value->is_percentage())
                             return percentage_value.release_nonnull();
-
-                        // FIXME: Support relative lengths within calcs here (i.e. by absolutizing and clamping rather
-                        //        than rejecting anything that doesn't resolve at parse time)
                         if (percentage_value->is_calculated()) {
                             auto percentage = percentage_value->as_calculated().resolve_percentage({});
                             if (percentage.has_value() && percentage->value() >= 0)
-                                return PercentageStyleValue::create(percentage.release_value());
+                                return PercentageStyleValue::create(Percentage(percentage.release_value()));
                             return nullptr;
                         }
                     }

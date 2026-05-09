@@ -369,7 +369,7 @@ pub(crate) fn parse_descriptor_result<K, S>(
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
-    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str, bool),
+    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str, bool, CssPrimitiveValueKind, bool, f64),
 {
     let default_order = CssNonnegativeIntegerSymbolPairOrder::IntegerFirst;
 
@@ -381,7 +381,14 @@ where
 
             kind_callback(CssDescriptorResultKind::CounterStyleAdditiveSymbols);
             for tuple in &tuples {
-                source_callback(tuple.order, &tuple.source, false);
+                source_callback(
+                    tuple.order,
+                    &tuple.source,
+                    false,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                );
             }
         }
         CssDescriptorValueType::CounterStyleNegative => {
@@ -391,7 +398,7 @@ where
 
             kind_callback(CssDescriptorResultKind::CounterStyleNegative);
             for symbol in &symbols {
-                source_callback(default_order, symbol, false);
+                source_callback(default_order, symbol, false, CssPrimitiveValueKind::Invalid, false, 0.0);
             }
         }
         CssDescriptorValueType::CounterStyleSystem => {
@@ -418,14 +425,21 @@ where
                 RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol } => {
                     if let Some(first_symbol) = first_symbol {
                         kind_callback(CssDescriptorResultKind::CounterStyleSystemFixedWithInteger);
-                        source_callback(default_order, &first_symbol, false);
+                        source_callback(
+                            default_order,
+                            &first_symbol,
+                            false,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                        );
                     } else {
                         kind_callback(CssDescriptorResultKind::CounterStyleSystemFixed);
                     }
                 }
                 RustOwnedCounterStyleSystemDescriptor::Extends { name } => {
                     kind_callback(CssDescriptorResultKind::CounterStyleSystemExtends);
-                    source_callback(default_order, &name, false);
+                    source_callback(default_order, &name, false, CssPrimitiveValueKind::Invalid, false, 0.0);
                 }
             }
         }
@@ -435,7 +449,14 @@ where
             };
 
             kind_callback(CssDescriptorResultKind::CounterStylePad);
-            source_callback(pad.order, &pad.source, false);
+            source_callback(
+                pad.order,
+                &pad.source,
+                false,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+            );
         }
         CssDescriptorValueType::CounterStyleRange => {
             let Some(range) = parse_rust_owned_counter_style_range_descriptor(filtered_input) else {
@@ -449,7 +470,7 @@ where
                 RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
                     kind_callback(CssDescriptorResultKind::CounterStyleRangeList);
                     for range in &ranges {
-                        source_callback(default_order, range, false);
+                        source_callback(default_order, range, false, CssPrimitiveValueKind::Invalid, false, 0.0);
                     }
                 }
             }
@@ -461,7 +482,7 @@ where
 
             kind_callback(CssDescriptorResultKind::Symbols);
             for symbol in &symbols {
-                source_callback(default_order, symbol, false);
+                source_callback(default_order, symbol, false, CssPrimitiveValueKind::Invalid, false, 0.0);
             }
         }
         CssDescriptorValueType::Symbol => {
@@ -470,7 +491,14 @@ where
             };
 
             kind_callback(CssDescriptorResultKind::Symbol);
-            source_callback(default_order, &symbol, false);
+            source_callback(
+                default_order,
+                &symbol,
+                false,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+            );
         }
         CssDescriptorValueType::CropOrCross => {
             let mut kind = None;
@@ -497,7 +525,14 @@ where
             };
 
             kind_callback(CssDescriptorResultKind::FamilyName);
-            source_callback(default_order, &family_name, is_string);
+            source_callback(
+                default_order,
+                &family_name,
+                is_string,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+            );
         }
         CssDescriptorValueType::FontSrcList => {
             let Some(sources) = parse_rust_owned_font_src_list_descriptor(filtered_input) else {
@@ -506,7 +541,7 @@ where
 
             kind_callback(CssDescriptorResultKind::FontSrcList);
             for source in &sources {
-                source_callback(default_order, source, false);
+                source_callback(default_order, source, false, CssPrimitiveValueKind::Invalid, false, 0.0);
             }
         }
         CssDescriptorValueType::FontWeightAbsolutePair => {
@@ -516,16 +551,23 @@ where
 
             kind_callback(CssDescriptorResultKind::FontWeightAbsolutePair);
             for weight in &weights {
-                source_callback(default_order, weight, false);
+                source_callback(default_order, weight, false, CssPrimitiveValueKind::Invalid, false, 0.0);
             }
         }
         CssDescriptorValueType::Length => {
-            let Some(source) = parse_rust_owned_length_descriptor(filtered_input) else {
+            let Some(value) = parse_rust_owned_length_descriptor_value(filtered_input) else {
                 return false;
             };
 
             kind_callback(CssDescriptorResultKind::Length);
-            source_callback(default_order, &source, false);
+            source_callback(
+                default_order,
+                value.source_or_unit(),
+                false,
+                value.primitive_kind(),
+                value.has_numeric_value(),
+                value.numeric_value(),
+            );
         }
         CssDescriptorValueType::PageSize => {
             let Some(page_size) = parse_rust_owned_page_size_descriptor(filtered_input) else {
@@ -539,27 +581,48 @@ where
                 RustOwnedPageSizeDescriptor::Lengths(lengths) => {
                     kind_callback(CssDescriptorResultKind::PageSizeLengths);
                     for length in &lengths {
-                        source_callback(default_order, length, false);
+                        source_callback(default_order, length, false, CssPrimitiveValueKind::Invalid, false, 0.0);
                     }
                 }
                 RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {
                     kind_callback(CssDescriptorResultKind::PageSizeAndOrientation);
                     if let Some(page_size) = page_size {
-                        source_callback(default_order, &page_size, false);
+                        source_callback(
+                            default_order,
+                            &page_size,
+                            false,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                        );
                     }
                     if let Some(orientation) = orientation {
-                        source_callback(default_order, &orientation, false);
+                        source_callback(
+                            default_order,
+                            &orientation,
+                            false,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                        );
                     }
                 }
             }
         }
         CssDescriptorValueType::PositivePercentage => {
-            let Some(source) = parse_rust_owned_positive_percentage_descriptor(filtered_input) else {
+            let Some(value) = parse_rust_owned_positive_percentage_descriptor_value(filtered_input) else {
                 return false;
             };
 
             kind_callback(CssDescriptorResultKind::PositivePercentage);
-            source_callback(default_order, &source, false);
+            source_callback(
+                default_order,
+                value.source_or_unit(),
+                false,
+                value.primitive_kind(),
+                value.has_numeric_value(),
+                value.numeric_value(),
+            );
         }
         CssDescriptorValueType::String => {
             let Some(source) = parse_rust_owned_string_descriptor(filtered_input) else {
@@ -567,7 +630,7 @@ where
             };
 
             kind_callback(CssDescriptorResultKind::String);
-            source_callback(default_order, &source, true);
+            source_callback(default_order, &source, true, CssPrimitiveValueKind::String, false, 0.0);
         }
         _ => return false,
     }

@@ -682,7 +682,7 @@ fn parse_descriptor_result_value(
         value_type,
         input.as_bytes(),
         |parsed_kind| kind = Some(parsed_kind),
-        |_, source, is_string| items.push((source.to_string(), is_string)),
+        |_, source, is_string, _, _, _| items.push((source.to_string(), is_string)),
     );
 
     parsed.then_some(kind.map(|kind| (kind, items))).flatten()
