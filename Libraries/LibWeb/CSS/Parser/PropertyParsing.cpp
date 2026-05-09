@@ -430,10 +430,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Integer, metadata->range);
                     break;
                 case ValueType::Number:
+                    if (rust_style_value->property_id == PropertyID::LineHeight) {
+                        calculation_context.percentages_resolve_as = ValueType::Length;
+                        auto length_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Length);
+                        if (length_metadata.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Length, length_metadata->range);
+                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::LengthPercentage);
+                        if (length_percentage_metadata.has_value() && length_percentage_metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, length_percentage_metadata->percentage_range.value());
+                        else if (length_metadata.has_value() && length_metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, length_metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Number, metadata->range);
                     break;
                 case ValueType::OpacityValue:
-                    return nullptr;
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Number, metadata->range);
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
+                    break;
                 case ValueType::Percentage:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
                     break;
@@ -474,12 +487,26 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     }
+                    if (rust_style_value->property_id == PropertyID::LineHeight) {
+                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Number);
+                        VERIFY(number_metadata.has_value());
+                        calculation_context.percentages_resolve_as = ValueType::Length;
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Number, number_metadata->range);
+                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::LengthPercentage);
+                        if (length_percentage_metadata.has_value() && length_percentage_metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, length_percentage_metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
                     break;
                 case ValueType::LengthPercentage:
                     calculation_context.percentages_resolve_as = ValueType::Length;
                     if (metadata->percentage_range.has_value())
                         calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
+                    if (rust_style_value->property_id == PropertyID::LineHeight) {
+                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Number);
+                        VERIFY(number_metadata.has_value());
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Number, number_metadata->range);
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
                     break;
                 case ValueType::Resolution:
@@ -504,6 +531,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
 
                 Vector<NonnullRefPtr<CalculationNode const>> stack;
+                bool saw_percentage_leaf = false;
                 auto pop_children = [&](u32 child_count) -> Optional<Vector<NonnullRefPtr<CalculationNode const>>> {
                     if (child_count > stack.size())
                         return {};
@@ -526,7 +554,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     switch (event.primitive_kind) {
                     case FFI::CssPrimitiveValueKind::Number:
                         return NumericCalculationNode::create(Number { Number::Type::Number, *event.numeric_value }, calculation_context);
+                    case FFI::CssPrimitiveValueKind::Keyword: {
+                        auto maybe_keyword = keyword_from_string(event.metadata);
+                        if (!maybe_keyword.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::from_keyword(*maybe_keyword, calculation_context);
+                    }
                     case FFI::CssPrimitiveValueKind::Percentage:
+                        saw_percentage_leaf = true;
                         return NumericCalculationNode::create(Percentage { *event.numeric_value }, calculation_context);
                     case FFI::CssPrimitiveValueKind::Angle: {
                         auto unit = string_to_angle_unit(event.metadata);
@@ -800,6 +835,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
+                            if (!matches_number(*children->first()))
+                                return nullptr;
                             stack.append(ExpCalculationNode::create(children->first()));
                             break;
                         }
@@ -873,8 +910,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 switch (*rust_style_value->value_type) {
                 case ValueType::Integer:
                 case ValueType::Number:
-                case ValueType::OpacityValue:
+                    if (saw_percentage_leaf && !calculation_context.percentages_resolve_as.has_value())
+                        return nullptr;
                     if (!calculated_value->resolves_to_number())
+                        return nullptr;
+                    break;
+                case ValueType::OpacityValue:
+                    if (!calculated_value->resolves_to_number() && !calculated_value->resolves_to_percentage())
                         return nullptr;
                     break;
                 case ValueType::Percentage:
@@ -902,10 +944,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     break;
                 case ValueType::Length:
+                    if (rust_style_value->property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
+                        break;
                     if (!calculated_value->resolves_to_length())
                         return nullptr;
                     break;
                 case ValueType::LengthPercentage:
+                    if (rust_style_value->property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
+                        break;
                     if (!calculated_value->resolves_to_length_percentage())
                         return nullptr;
                     break;
@@ -926,6 +972,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
 
                 tokens.discard_a_token();
+                if (*rust_style_value->value_type == ValueType::OpacityValue)
+                    return OpacityValueStyleValue::create(move(calculated_value));
                 return calculated_value;
             };
             auto materialize_rust_scroll_function_value = [&]() -> RefPtr<StyleValue const> {
@@ -6095,11 +6143,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     } else {
                         maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
                     }
-
-                    if (!maybe_parsed_value
-                        && rust_style_value->kind == FFI::CssStyleValueKind::MathFunction
-                        && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue))
-                        maybe_parsed_value = parse_rust_numeric_value();
 
                     if (maybe_parsed_value) {
                         generated_transaction.commit();
