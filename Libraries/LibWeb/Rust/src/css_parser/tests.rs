@@ -675,14 +675,14 @@ fn parse_optional_declaration_value_descriptor_value(input: &str) -> bool {
 fn parse_descriptor_result_value(
     input: &str,
     value_type: CssDescriptorValueType,
-) -> Option<(CssDescriptorResultKind, Vec<String>)> {
+) -> Option<(CssDescriptorResultKind, Vec<(String, bool)>)> {
     let mut kind = None;
     let mut items = Vec::new();
     let parsed = parse_descriptor_result(
         value_type,
         input.as_bytes(),
         |parsed_kind| kind = Some(parsed_kind),
-        |_, source| items.push(source.to_string()),
+        |_, source, is_string| items.push((source.to_string(), is_string)),
     );
 
     parsed.then_some(kind.map(|kind| (kind, items))).flatten()
@@ -1842,14 +1842,14 @@ fn parses_descriptor_results_with_rust_owned_dispatch() {
         parse_descriptor_result_value("2 \"II\", \"I\" 1", CssDescriptorValueType::CounterStyleAdditiveSymbols),
         Some((
             CssDescriptorResultKind::CounterStyleAdditiveSymbols,
-            vec!["2 \"II\"".to_string(), "\"I\" 1".to_string()]
+            vec![("2 \"II\"".to_string(), false), ("\"I\" 1".to_string(), false)]
         ))
     );
     assert_eq!(
         parse_descriptor_result_value("\"-\" \"\"", CssDescriptorValueType::CounterStyleNegative),
         Some((
             CssDescriptorResultKind::CounterStyleNegative,
-            vec!["\"-\"".to_string(), "\"\"".to_string()]
+            vec![("\"-\"".to_string(), false), ("\"\"".to_string(), false)]
         ))
     );
     assert_eq!(
@@ -1859,33 +1859,42 @@ fn parses_descriptor_results_with_rust_owned_dispatch() {
         ),
         Some((
             CssDescriptorResultKind::FontSrcList,
-            vec!["url(example.woff2)".to_string(), "local(Example)".to_string()]
+            vec![
+                ("url(example.woff2)".to_string(), false),
+                ("local(Example)".to_string(), false)
+            ]
         ))
     );
     assert_eq!(
         parse_descriptor_result_value("normal bold", CssDescriptorValueType::FontWeightAbsolutePair),
         Some((
             CssDescriptorResultKind::FontWeightAbsolutePair,
-            vec!["normal".to_string(), "bold".to_string()]
+            vec![("normal".to_string(), false), ("bold".to_string(), false)]
         ))
     );
     assert_eq!(
         parse_descriptor_result_value("\"hello\"", CssDescriptorValueType::String),
-        Some((CssDescriptorResultKind::String, vec!["\"hello\"".to_string()]))
+        Some((CssDescriptorResultKind::String, vec![("hello".to_string(), true)]))
     );
     assert_eq!(
         parse_descriptor_result_value("example", CssDescriptorValueType::FamilyName),
-        Some((CssDescriptorResultKind::FamilyName, vec!["example".to_string()]))
+        Some((
+            CssDescriptorResultKind::FamilyName,
+            vec![("example".to_string(), false)]
+        ))
     );
     assert_eq!(
         parse_descriptor_result_value("\"Bongo Sans\"", CssDescriptorValueType::FamilyName),
-        Some((CssDescriptorResultKind::FamilyName, vec!["\"Bongo Sans\"".to_string()]))
+        Some((
+            CssDescriptorResultKind::FamilyName,
+            vec![("Bongo Sans".to_string(), true)]
+        ))
     );
     assert_eq!(
         parse_descriptor_result_value("calc(50% + 25%)", CssDescriptorValueType::PositivePercentage),
         Some((
             CssDescriptorResultKind::PositivePercentage,
-            vec!["calc(50% + 25%)".to_string()]
+            vec![("calc(50% + 25%)".to_string(), false)]
         ))
     );
 }
@@ -8210,7 +8219,7 @@ fn rejects_invalid_string_descriptors() {
 fn parses_rust_owned_string_descriptors() {
     assert_eq!(
         parse_rust_owned_string_descriptor("\"hello\"".as_bytes()),
-        Some("\"hello\"".to_string())
+        Some("hello".to_string())
     );
     assert_eq!(parse_rust_owned_string_descriptor("ident".as_bytes()), None);
 }

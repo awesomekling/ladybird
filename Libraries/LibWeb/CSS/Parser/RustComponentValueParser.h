@@ -856,6 +856,7 @@ public:
     struct DescriptorResultItem {
         FFI::CssNonnegativeIntegerSymbolPairOrder order;
         String source;
+        bool is_string { false };
     };
 
     struct DescriptorResult {

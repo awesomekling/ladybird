@@ -406,13 +406,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!family_name.has_value() || family_name->kind != FFI::CssDescriptorResultKind::FamilyName || family_name->items.size() != 1)
                         return nullptr;
 
-                    auto parsed_family_name = RustComponentValueParser::parse_a_family_name(family_name->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    if (!parsed_family_name.has_value())
-                        return nullptr;
-
-                    if (parsed_family_name->is_string)
-                        return StringStyleValue::create(parsed_family_name->name);
-                    return CustomIdentStyleValue::create(parsed_family_name->name);
+                    auto const& parsed_family_name = family_name->items.first();
+                    if (parsed_family_name.is_string)
+                        return StringStyleValue::create(FlyString::from_utf8_without_validation(parsed_family_name.source.bytes()));
+                    return CustomIdentStyleValue::create(FlyString::from_utf8_without_validation(parsed_family_name.source.bytes()));
                 }
                 case DescriptorMetadata::ValueType::FontSrcList: {
                     // "If a component value is parsed correctly and is of a font format or font tech that the UA
@@ -687,18 +684,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!string_sources.has_value() || string_sources->kind != FFI::CssDescriptorResultKind::String || string_sources->items.size() != 1)
                         return nullptr;
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(string_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> string_tokens { component_values };
-
-                    auto string = parse_string_value(string_tokens);
-                    if (!string)
-                        return nullptr;
-
-                    string_tokens.discard_whitespace();
-                    if (string_tokens.has_next_token())
-                        return nullptr;
-
-                    return string.release_nonnull();
+                    auto const& string_value = string_sources->items.first();
+                    return StringStyleValue::create(FlyString::from_utf8_without_validation(string_value.source.bytes()));
                 }
                 case DescriptorMetadata::ValueType::Symbol: {
                     // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol

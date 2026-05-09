@@ -515,6 +515,7 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
         order: CssNonnegativeIntegerSymbolPairOrder,
         source: *const u8,
         source_len: usize,
+        is_string: bool,
     ),
 ) -> bool {
     unsafe {
@@ -527,7 +528,7 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
                 value_type,
                 input,
                 |kind| kind_callback(ctx, kind),
-                |order, source| source_callback(ctx, order, source.as_ptr(), source.len()),
+                |order, source, is_string| source_callback(ctx, order, source.as_ptr(), source.len(), is_string),
             )
         })
     }

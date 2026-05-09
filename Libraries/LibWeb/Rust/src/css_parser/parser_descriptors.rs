@@ -413,13 +413,11 @@ pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Op
 pub(crate) fn parse_rust_owned_string_descriptor(filtered_input: &[u8]) -> Option<String> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let filtered_input = filtered_input_to_string(filtered_input);
     let component_values = strip_whitespace(&component_values);
 
     // https://drafts.csswg.org/css-values-4/#strings
     // <string>
-    component_values_parse_as_string(component_values)
-        .then(|| serialize_component_values_for_reparsing(component_values, &filtered_input))?
+    component_values_string_value(component_values).map(ToString::to_string)
 }
 
 pub(crate) fn parse_a_counter_style_name<N>(filtered_input: &[u8], mut name_callback: N) -> bool
