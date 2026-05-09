@@ -73,15 +73,19 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
                 filtered_input_string,
             )?;
 
-            let RustOwnedStyleValueParseResult::Parsed(style_value) =
-                parse_rust_owned_style_value_for_property_with_mode(
-                    &remaining_property_ids,
-                    serialized_value.as_bytes(),
-                    true,
-                    CssPrimitiveValueOptions::default(),
-                )
-            else {
-                return None;
+            let matched_property_id = property_id_from_u16(remaining_property_ids[0])?;
+            let parsed_style_value = parse_rust_owned_style_value_for_property_with_mode(
+                &[matched_property_id as u16],
+                serialized_value.as_bytes(),
+                true,
+                CssPrimitiveValueOptions::default(),
+            );
+            let style_value = match parsed_style_value {
+                RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
+                RustOwnedStyleValueParseResult::Invalid => RustOwnedStyleValue {
+                    property_id: matched_property_id,
+                    value: RustOwnedStyleValueKind::GuaranteedInvalid,
+                },
             };
             let matched_property_id = style_value.property_id as u16;
 
@@ -366,10 +370,24 @@ fn consume_layer_shorthand_size(
 }
 
 fn source_parses_as_property(property_id: PropertyId, source: &str) -> bool {
-    matches!(
+    if matches!(
         parse_rust_owned_style_value_for_property(&[property_id as u16], source.as_bytes()),
         RustOwnedStyleValueParseResult::Parsed(_)
-    )
+    ) {
+        return true;
+    }
+
+    // https://drafts.csswg.org/css-values-5/#resolve-property
+    // If a property value contains one or more arbitrary substitution functions,
+    // and all of those functions are themselves syntactically valid according to
+    // their argument grammars, the entire value’s grammar must be assumed to be
+    // valid at parse time.
+    source_contains_arbitrary_substitution_function(source)
+}
+
+fn source_contains_arbitrary_substitution_function(source: &str) -> bool {
+    collect_substitution_function_presence(source.as_bytes())
+        .is_some_and(|presence| presence.0 || presence.1 || presence.2 || presence.3 || presence.4)
 }
 
 pub(crate) fn parse_grid_placement_shorthand<C>(property_id: u16, filtered_input: &[u8], mut callback: C) -> bool
@@ -1348,16 +1366,38 @@ pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
             filtered_input_string,
         )?;
 
-        let property_ids = [longhands[values.len()] as u16];
-        let RustOwnedStyleValueParseResult::Parsed(style_value) =
-            parse_rust_owned_style_value_for_property_with_options(
-                &property_ids,
-                serialized_value.as_bytes(),
-                primitive_value_options,
-            )
-        else {
-            return None;
+        let matched_property_id = longhands[values.len()];
+        let style_value = match parse_rust_owned_style_value_for_property_with_options(
+            &[matched_property_id as u16],
+            serialized_value.as_bytes(),
+            primitive_value_options,
+        ) {
+            RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
+            RustOwnedStyleValueParseResult::Invalid => {
+                if !source_contains_arbitrary_substitution_function(&serialized_value) {
+                    return None;
+                }
+                RustOwnedStyleValue {
+                    property_id: matched_property_id,
+                    value: RustOwnedStyleValueKind::GuaranteedInvalid,
+                }
+            }
         };
+        let style_value_is_acceptable = match &style_value.value {
+            RustOwnedStyleValueKind::Primitive(_) => true,
+            RustOwnedStyleValueKind::Anchor(_) => true,
+            RustOwnedStyleValueKind::AnchorSize(_) => true,
+            RustOwnedStyleValueKind::Color(_) => primitive_value_options.allow_quirky_color,
+            RustOwnedStyleValueKind::MathFunction(_) => true,
+            RustOwnedStyleValueKind::TreeCountingFunction(_) => true,
+            RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(keyword)) => {
+                property_accepts_keyword(matched_property_id, keyword)
+            }
+            _ => false,
+        };
+        if !style_value_is_acceptable && !source_contains_arbitrary_substitution_function(&serialized_value) {
+            return None;
+        }
         values.push(RustOwnedPositionalValueListShorthandItem {
             index: values.len(),
             style_value,

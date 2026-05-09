@@ -954,11 +954,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto parse_rust_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 TokenStream value_tokens { component_values };
-                auto value = parse_css_value_for_property(property_id, value_tokens);
+                auto value = parse_css_value(property_id, value_tokens, source);
                 value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
+                if (value.is_error() || value_tokens.has_next_token())
                     return nullptr;
-                return value.release_nonnull();
+                return value.release_value();
             };
             auto unwrap_single_coordinating_value_list_item = [](PropertyID property_id, RefPtr<StyleValue const>& parsed_value) {
                 if (first_is_one_of(property_id,

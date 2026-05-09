@@ -6339,6 +6339,18 @@ fn parses_positional_value_list_shorthands() {
         }
     );
     assert_eq!(
+        parse_rust_owned_positional_shorthand(PropertyId::Margin, "var(--a) 10px").map(|items| {
+            items
+                .iter()
+                .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![
+            (0, PropertyId::MarginTop, "var(--a)".to_string()),
+            (1, PropertyId::MarginRight, "10px".to_string()),
+        ])
+    );
+    assert_eq!(
         parse_positional_shorthand(PropertyId::BorderBlockWidth, "thin 2px"),
         Some(vec![(0, "thin".to_string()), (1, "2px".to_string())])
     );
