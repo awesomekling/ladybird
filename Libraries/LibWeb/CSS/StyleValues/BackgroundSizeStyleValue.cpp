@@ -8,6 +8,9 @@
  */
 
 #include "BackgroundSizeStyleValue.h"
+#include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/PropertyNameAndID.h>
+#include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 
 namespace Web::CSS {
 
@@ -32,8 +35,20 @@ void BackgroundSizeStyleValue::serialize(StringBuilder& builder, SerializationMo
 
 ValueComparingNonnullRefPtr<StyleValue const> BackgroundSizeStyleValue::absolutized(ComputationContext const& computation_context) const
 {
-    auto absolutized_size_x = m_properties.size_x->absolutized(computation_context);
-    auto absolutized_size_y = m_properties.size_y->absolutized(computation_context);
+    auto absolutize_or_resolve = [&](NonnullRefPtr<StyleValue const> const& value) -> ValueComparingNonnullRefPtr<StyleValue const> {
+        if (!value->is_unresolved() || !computation_context.abstract_element.has_value())
+            return value->absolutized(computation_context);
+
+        auto resolved = Parser::Parser::resolve_unresolved_style_value(
+            Parser::ParsingParams { computation_context.abstract_element->document() },
+            *computation_context.abstract_element,
+            PropertyNameAndID::from_id(PropertyID::Width),
+            value->as_unresolved());
+        return resolved->absolutized(computation_context);
+    };
+
+    auto absolutized_size_x = absolutize_or_resolve(m_properties.size_x);
+    auto absolutized_size_y = absolutize_or_resolve(m_properties.size_y);
 
     if (absolutized_size_x == m_properties.size_x && absolutized_size_y == m_properties.size_y)
         return *this;
