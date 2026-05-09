@@ -882,12 +882,6 @@ public:
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input,
         bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
-    static Optional<Vector<CoordinatingValueListShorthandItem>> parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID>, StringView input);
-    static Optional<Vector<LayerShorthandItem>> parse_layer_shorthand(PropertyID, StringView input);
-    static Optional<Vector<FontShorthandItem>> parse_font_shorthand(StringView input);
-    static Optional<Vector<GridPlacementShorthandItem>> parse_grid_placement_shorthand(PropertyID, StringView input);
-    static Optional<Vector<GridTemplateShorthandItem>> parse_grid_template_shorthand(PropertyID, StringView input);
-    static Optional<Vector<PositionalValueListShorthandItem>> parse_positional_value_list_shorthand(PropertyID, StringView input);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static Optional<SyntaxComponent> parse_syntax_component(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
