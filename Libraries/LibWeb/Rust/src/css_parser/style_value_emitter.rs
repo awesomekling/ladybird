@@ -15,21 +15,29 @@ where
 {
     emit_rust_owned_style_value_with_calculation_callback(
         style_value,
+        "",
         callback,
         &mut |_, _, _, _, _, _| {},
+        &mut |_| {},
+        &mut || {},
         &mut |_| {},
     );
 }
 
-pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
+pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, E>(
     style_value: &RustOwnedStyleValue,
+    filtered_input: &str,
     callback: &mut C,
     calculation_callback: &mut D,
     url_modifier_callback: &mut U,
+    source_component_value_list_callback: &mut S,
+    source_component_value_callback: &mut E,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     U: FnMut(&UrlModifier),
+    S: FnMut(),
+    E: FnMut(CssComponentValue),
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
@@ -83,9 +91,12 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
+                    filtered_input,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
+                    source_component_value_list_callback,
+                    source_component_value_callback,
                 );
             }
         }
@@ -128,9 +139,12 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
+                    filtered_input,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
+                    source_component_value_list_callback,
+                    source_component_value_callback,
                 );
             }
         }
@@ -245,9 +259,12 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
+                    filtered_input,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
+                    source_component_value_list_callback,
+                    source_component_value_callback,
                 );
             }
         }
@@ -271,9 +288,12 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                 );
                 emit_rust_owned_style_value_with_calculation_callback(
                     &item.style_value,
+                    filtered_input,
                     callback,
                     calculation_callback,
                     url_modifier_callback,
+                    source_component_value_list_callback,
+                    source_component_value_callback,
                 );
             }
         }
@@ -677,7 +697,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                 0,
                 flex_shrink,
             );
-            callback_flex_basis(callback, property_id, flex_basis);
+            callback_flex_basis(
+                callback,
+                filtered_input,
+                source_component_value_list_callback,
+                source_component_value_callback,
+                property_id,
+                flex_basis,
+            );
         }
         RustOwnedStyleValueKind::FlexFlow(value) => {
             if let Some(flex_direction) = value.flex_direction {
@@ -3945,9 +3972,17 @@ fn callback_counter_style<C>(
     }
 }
 
-fn callback_flex_basis<C>(callback: &mut C, property_id: u16, value: &RustOwnedFlexBasis)
-where
+fn callback_flex_basis<C, S, E>(
+    callback: &mut C,
+    filtered_input: &str,
+    source_component_value_list_callback: &mut S,
+    source_component_value_callback: &mut E,
+    property_id: u16,
+    value: &RustOwnedFlexBasis,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedFlexBasis::Value(value) => match value {
@@ -3971,21 +4006,28 @@ where
                     "",
                 );
             }
-            RustOwnedNestedPrimitiveValue::Source { source, .. } => callback(
-                CssStyleValueKind::Flex,
-                property_id,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
-                false,
-                0.0,
-                FLEX_SHORTHAND_CALLBACK_BASIS,
-                FLEX_BASIS_KIND_SOURCE,
-                0,
-                0,
-                source.as_bytes(),
-                "",
-            ),
+            RustOwnedNestedPrimitiveValue::Source {
+                source,
+                component_values,
+            } => {
+                callback(
+                    CssStyleValueKind::Flex,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    FLEX_SHORTHAND_CALLBACK_BASIS,
+                    FLEX_BASIS_KIND_SOURCE,
+                    0,
+                    0,
+                    source.as_bytes(),
+                    "",
+                );
+                source_component_value_list_callback();
+                emit_component_values(component_values, filtered_input, source_component_value_callback);
+            }
             _ => callback_nested_primitive(
                 callback,
                 CssStyleValueKind::Flex,

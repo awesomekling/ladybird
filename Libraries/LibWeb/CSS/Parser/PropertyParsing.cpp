@@ -2589,9 +2589,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return materialize_rust_calculation_tree_values(PropertyID::FlexBasis, ValueType::LengthPercentage, value.flex_basis_calculation_node_events, DiscardCalculationToken::No);
                     return materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
                 case RustComponentValueParser::RustFlexBasisKind::Source:
-                    if (!value.flex_basis_source.has_value())
+                    if (!value.flex_basis_source.has_value() || value.flex_basis_source_component_values.is_empty())
                         return nullptr;
-                    return parse_rust_source_as_property(PropertyID::FlexBasis, *value.flex_basis_source);
+                    // AD-HOC: Source-backed Rust flex-basis values are still
+                    // materialized by the existing C++ property parser until
+                    // flex-basis has a Rust-owned unresolved value result.
+                    TokenStream value_tokens { value.flex_basis_source_component_values };
+                    auto parsed_value = parse_css_value(PropertyID::FlexBasis, value_tokens, *value.flex_basis_source);
+                    value_tokens.discard_whitespace();
+                    if (parsed_value.is_error() || value_tokens.has_next_token())
+                        return nullptr;
+                    return parsed_value.release_value();
                 }
 
                 VERIFY_NOT_REACHED();

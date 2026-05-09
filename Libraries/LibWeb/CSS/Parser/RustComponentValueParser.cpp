@@ -1192,7 +1192,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
     for (auto property_id : property_ids)
         ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
 
-    Optional<RustStyleValue> style_value;
+    struct StyleValueParseContext {
+        Optional<RustStyleValue> style_value;
+        ComponentValueBuilder flex_basis_source_component_value_builder;
+        bool is_collecting_flex_basis_source_component_values { false };
+
+        void flush_flex_basis_source_component_values()
+        {
+            if (!is_collecting_flex_basis_source_component_values)
+                return;
+            VERIFY(style_value.has_value());
+            VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
+            VERIFY(flex_basis_source_component_value_builder.stack.is_empty());
+            style_value->flex_basis_source_component_values = move(flex_basis_source_component_value_builder.root_values);
+            flex_basis_source_component_value_builder = {};
+            is_collecting_flex_basis_source_component_values = false;
+        }
+
+        void start_flex_basis_source_component_values()
+        {
+            flush_flex_basis_source_component_values();
+            VERIFY(style_value.has_value());
+            VERIFY(style_value->kind == FFI::CssStyleValueKind::Flex);
+            VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
+            is_collecting_flex_basis_source_component_values = true;
+        }
+    };
+
+    StyleValueParseContext context;
     auto input_bytes = input.bytes();
     FFI::rust_css_parse_style_value_for_property(
         ffi_property_ids.data(),
@@ -1203,9 +1230,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         allow_quirky_color,
         allow_svg_unitless_length,
         allow_svg_unitless_angle,
-        &style_value,
+        &context,
         [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, bool has_secondary_numeric_value, double secondary_numeric_value, u8 color_red, u8 color_green, u8 color_blue, u8 color_alpha, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
-            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
+            context.flush_flex_basis_source_component_values();
+            auto& style_value = context.style_value;
             RustStyleValue value {
                 .kind = kind,
                 .property_id = static_cast<PropertyID>(property_id),
@@ -3469,7 +3498,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             style_value = move(value);
         },
         [](void* raw_style_value, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
-            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
+            context.flush_flex_basis_source_component_values();
+            auto& style_value = context.style_value;
             VERIFY(style_value.has_value());
             auto event = RustCalculationNodeEvent {
                 .kind = kind,
@@ -3770,7 +3801,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             style_value->calculation_node_events.append(move(event));
         },
         [](void* raw_style_value, FFI::CssUrlModifier const* rust_modifier) {
-            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
+            context.flush_flex_basis_source_component_values();
+            auto& style_value = context.style_value;
             VERIFY(style_value.has_value());
 
             RequestURLModifier modifier = [&]() {
@@ -3789,9 +3822,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             VERIFY(!style_value->filter_value_list_events.is_empty());
             VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::Url);
             style_value->filter_value_list_events.last().request_url_modifiers.append(move(modifier));
+        },
+        [](void* raw_style_value) {
+            auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
+            context.start_flex_basis_source_component_values();
+        },
+        [](void* raw_style_value, FFI::CssComponentValue const* component_value) {
+            auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
+            VERIFY(context.is_collecting_flex_basis_source_component_values);
+            append_component_value_token(context.flex_basis_source_component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
-    return style_value;
+    context.flush_flex_basis_source_component_values();
+    return context.style_value;
 }
 
 Optional<RustComponentValueParser::PropertyNumericMetadata> RustComponentValueParser::property_numeric_metadata(ReadonlySpan<PropertyID> property_ids, ValueType value_type)

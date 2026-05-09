@@ -112,33 +112,43 @@ where
         &mut callback,
         |_, _, _, _, _, _| {},
         |_| {},
+        (&mut || {}, &mut |_| {}),
     )
 }
 
-pub(crate) fn parse_style_value_for_property_with_options_and_calculation_callback<C, D, U>(
+pub(crate) fn parse_style_value_for_property_with_options_and_calculation_callback<C, D, U, S, E>(
     property_ids: &[u16],
     filtered_input: &[u8],
     primitive_value_options: CssPrimitiveValueOptions,
     mut callback: C,
     mut calculation_callback: D,
     mut url_modifier_callback: U,
+    source_component_value_callbacks: (&mut S, &mut E),
 ) -> bool
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     U: FnMut(&UrlModifier),
+    S: FnMut(),
+    E: FnMut(CssComponentValue),
 {
     let RustOwnedStyleValueParseResult::Parsed(style_value) =
         parse_rust_owned_style_value_for_property_with_options(property_ids, filtered_input, primitive_value_options)
     else {
         return false;
     };
+    let Some(filtered_input_string) = str::from_utf8(filtered_input).ok() else {
+        return false;
+    };
 
     emit_rust_owned_style_value_with_calculation_callback(
         &style_value,
+        filtered_input_string,
         &mut callback,
         &mut calculation_callback,
         &mut url_modifier_callback,
+        source_component_value_callbacks.0,
+        source_component_value_callbacks.1,
     );
     if let RustOwnedStyleValueKind::MathFunction(value) = &style_value.value {
         emit_rust_owned_calculation_tree(&value.calculation, &mut calculation_callback);

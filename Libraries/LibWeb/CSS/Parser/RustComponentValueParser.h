@@ -707,6 +707,7 @@ public:
         Optional<RustNestedPrimitiveValue> flex_basis;
         Vector<RustCalculationNodeEvent> flex_basis_calculation_node_events;
         Optional<String> flex_basis_source;
+        Vector<ComponentValue> flex_basis_source_component_values;
         RustFlexCalculationComponent last_flex_calculation_component { RustFlexCalculationComponent::None };
         Optional<FlexDirection> flex_direction;
         Optional<FlexWrap> flex_wrap;
