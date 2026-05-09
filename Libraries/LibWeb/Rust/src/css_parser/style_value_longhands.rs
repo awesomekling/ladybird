@@ -1587,20 +1587,25 @@ pub(super) fn rust_owned_component_shorthand_style_value_kind(
         parser.index += 1;
 
         let component_source = serialize_consumed_component_values(&parser, start, &source)?;
+        let mut matching_style_value = None;
         let matching_longhand_index = remaining_longhands.iter().position(|longhand| {
             let property_ids = [*longhand as u16];
-            matches!(
-                parse_rust_owned_style_value_for_property_with_options(
-                    &property_ids,
-                    component_source.as_bytes(),
-                    primitive_value_options,
-                ),
-                RustOwnedStyleValueParseResult::Parsed(_)
-            )
+            match parse_rust_owned_style_value_for_property_with_options(
+                &property_ids,
+                component_source.as_bytes(),
+                primitive_value_options,
+            ) {
+                RustOwnedStyleValueParseResult::Parsed(style_value) => {
+                    matching_style_value = Some(style_value);
+                    true
+                }
+                RustOwnedStyleValueParseResult::Invalid => false,
+            }
         })?;
 
         items.push(RustOwnedComponentShorthandItem {
             property_id: remaining_longhands.remove(matching_longhand_index),
+            style_value: matching_style_value?,
             source: component_source,
         });
     }

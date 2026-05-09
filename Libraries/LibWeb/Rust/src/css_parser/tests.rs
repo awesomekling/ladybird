@@ -3239,14 +3239,41 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::ComponentShorthand(vec![
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::BorderBottomWidth,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::BorderBottomWidth,
+                        value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                            value: RustOwnedNestedPrimitiveValue::Length {
+                                value: 1.0,
+                                unit: "px".to_string(),
+                            },
+                            value_type: PropertyValueType::Length,
+                        }),
+                    },
                     source: "1px".to_string(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::BorderBottomStyle,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::BorderBottomStyle,
+                        value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                            "solid".to_string(),
+                        )),
+                    },
                     source: "solid".to_string(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::BorderBottomColor,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::BorderBottomColor,
+                        value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                            kind: CssParsedColorKind::Rgba,
+                            red: 0x12,
+                            green: 0x34,
+                            blue: 0x56,
+                            alpha: 0xff,
+                            name: None,
+                        }),
+                    },
                     source: "#123456".to_string(),
                 },
             ]),
@@ -3259,14 +3286,37 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::ComponentShorthand(vec![
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::OutlineStyle,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::OutlineStyle,
+                        value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                            "auto".to_string()
+                        )),
+                    },
                     source: "auto".to_string(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::OutlineColor,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::OutlineColor,
+                        value: RustOwnedStyleValueKind::Color(RustOwnedColor::Simple {
+                            kind: CssParsedColorKind::Rgba,
+                            red: 255,
+                            green: 0,
+                            blue: 0,
+                            alpha: 255,
+                            name: Some("red".to_string()),
+                        }),
+                    },
                     source: "red".to_string(),
                 },
                 RustOwnedComponentShorthandItem {
                     property_id: PropertyId::OutlineWidth,
+                    style_value: RustOwnedStyleValue {
+                        property_id: PropertyId::OutlineWidth,
+                        value: RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                            "thick".to_string()
+                        )),
+                    },
                     source: "thick".to_string(),
                 },
             ]),
