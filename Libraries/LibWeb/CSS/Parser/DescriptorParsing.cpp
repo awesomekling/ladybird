@@ -633,10 +633,62 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (page_size_descriptor->kind != FFI::CssDescriptorResultKind::PageSizeAndOrientation)
                         return nullptr;
 
+                    auto page_size_keyword_to_style_value = [](u8 keyword) -> RefPtr<StyleValue const> {
+                        switch (keyword) {
+                        case 1:
+                            return KeywordStyleValue::create(Keyword::A5);
+                        case 2:
+                            return KeywordStyleValue::create(Keyword::A4);
+                        case 3:
+                            return KeywordStyleValue::create(Keyword::A3);
+                        case 4:
+                            return KeywordStyleValue::create(Keyword::B5);
+                        case 5:
+                            return KeywordStyleValue::create(Keyword::B4);
+                        case 6:
+                            return KeywordStyleValue::create(Keyword::JisB5);
+                        case 7:
+                            return KeywordStyleValue::create(Keyword::JisB4);
+                        case 8:
+                            return KeywordStyleValue::create(Keyword::Letter);
+                        case 9:
+                            return KeywordStyleValue::create(Keyword::Legal);
+                        case 10:
+                            return KeywordStyleValue::create(Keyword::Ledger);
+                        }
+                        return nullptr;
+                    };
+                    auto orientation_to_style_value = [](u8 orientation) -> RefPtr<StyleValue const> {
+                        switch (orientation) {
+                        case 1:
+                            return KeywordStyleValue::create(Keyword::Portrait);
+                        case 2:
+                            return KeywordStyleValue::create(Keyword::Landscape);
+                        }
+                        return nullptr;
+                    };
+
                     // [ <page-size> || [ portrait | landscape ] ]
                     RefPtr<StyleValue const> page_size;
                     RefPtr<StyleValue const> orientation;
                     for (auto const& item : page_size_descriptor->items) {
+                        if (item.page_size_keyword != 0) {
+                            if (page_size)
+                                return nullptr;
+                            page_size = page_size_keyword_to_style_value(item.page_size_keyword);
+                            if (!page_size)
+                                return nullptr;
+                            continue;
+                        }
+                        if (item.page_size_orientation != 0) {
+                            if (orientation)
+                                return nullptr;
+                            orientation = orientation_to_style_value(item.page_size_orientation);
+                            if (!orientation)
+                                return nullptr;
+                            continue;
+                        }
+
                         auto const& source = item.source;
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> keyword_tokens { component_values };

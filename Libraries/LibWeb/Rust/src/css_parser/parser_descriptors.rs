@@ -40,8 +40,8 @@ pub(crate) enum RustOwnedPageSizeDescriptor {
     Auto,
     Lengths(Vec<RustOwnedDescriptorPrimitiveValue>),
     PageSizeAndOrientation {
-        page_size: Option<String>,
-        orientation: Option<String>,
+        page_size: Option<CssPageSizeKeyword>,
+        orientation: Option<CssPageSizeOrientation>,
     },
 }
 
@@ -475,23 +475,19 @@ pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Op
 
     for _ in 0..2 {
         parser.discard_whitespace();
-        let start = parser.index;
         let Some(ident) = parser.consume_an_ident() else {
             break;
         };
-        let source =
-            serialize_component_values_for_reparsing(&parser.component_values[start..parser.index], &filtered_input)?;
-
         if is_page_size_keyword(&ident) {
             if page_size.is_some() {
                 return None;
             }
-            page_size = Some(source);
+            page_size = page_size_keyword_from_string(&ident);
         } else if ident.eq_ignore_ascii_case("portrait") || ident.eq_ignore_ascii_case("landscape") {
             if orientation.is_some() {
                 return None;
             }
-            orientation = Some(source);
+            orientation = page_size_orientation_from_string(&ident);
         } else {
             return None;
         }

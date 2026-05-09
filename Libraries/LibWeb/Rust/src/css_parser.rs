@@ -369,7 +369,7 @@ pub(crate) fn parse_descriptor_result<K, S>(
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
-    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str, bool, CssPrimitiveValueKind, bool, f64),
+    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str, bool, CssPrimitiveValueKind, bool, f64, u8, u8),
 {
     let default_order = CssNonnegativeIntegerSymbolPairOrder::IntegerFirst;
 
@@ -388,6 +388,8 @@ where
                     CssPrimitiveValueKind::Invalid,
                     false,
                     0.0,
+                    0,
+                    0,
                 );
             }
         }
@@ -398,7 +400,16 @@ where
 
             kind_callback(CssDescriptorResultKind::CounterStyleNegative);
             for symbol in &symbols {
-                source_callback(default_order, symbol, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                source_callback(
+                    default_order,
+                    symbol,
+                    false,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                );
             }
         }
         CssDescriptorValueType::CounterStyleSystem => {
@@ -432,6 +443,8 @@ where
                             CssPrimitiveValueKind::Invalid,
                             false,
                             0.0,
+                            0,
+                            0,
                         );
                     } else {
                         kind_callback(CssDescriptorResultKind::CounterStyleSystemFixed);
@@ -439,7 +452,16 @@ where
                 }
                 RustOwnedCounterStyleSystemDescriptor::Extends { name } => {
                     kind_callback(CssDescriptorResultKind::CounterStyleSystemExtends);
-                    source_callback(default_order, &name, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                    source_callback(
+                        default_order,
+                        &name,
+                        false,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                    );
                 }
             }
         }
@@ -456,6 +478,8 @@ where
                 CssPrimitiveValueKind::Invalid,
                 false,
                 0.0,
+                0,
+                0,
             );
         }
         CssDescriptorValueType::CounterStyleRange => {
@@ -470,7 +494,16 @@ where
                 RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
                     kind_callback(CssDescriptorResultKind::CounterStyleRangeList);
                     for range in &ranges {
-                        source_callback(default_order, range, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                        source_callback(
+                            default_order,
+                            range,
+                            false,
+                            CssPrimitiveValueKind::Invalid,
+                            false,
+                            0.0,
+                            0,
+                            0,
+                        );
                     }
                 }
             }
@@ -482,7 +515,16 @@ where
 
             kind_callback(CssDescriptorResultKind::Symbols);
             for symbol in &symbols {
-                source_callback(default_order, symbol, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                source_callback(
+                    default_order,
+                    symbol,
+                    false,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                );
             }
         }
         CssDescriptorValueType::Symbol => {
@@ -498,6 +540,8 @@ where
                 CssPrimitiveValueKind::Invalid,
                 false,
                 0.0,
+                0,
+                0,
             );
         }
         CssDescriptorValueType::CropOrCross => {
@@ -532,6 +576,8 @@ where
                 CssPrimitiveValueKind::Invalid,
                 false,
                 0.0,
+                0,
+                0,
             );
         }
         CssDescriptorValueType::FontSrcList => {
@@ -541,7 +587,16 @@ where
 
             kind_callback(CssDescriptorResultKind::FontSrcList);
             for source in &sources {
-                source_callback(default_order, source, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                source_callback(
+                    default_order,
+                    source,
+                    false,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                );
             }
         }
         CssDescriptorValueType::FontWeightAbsolutePair => {
@@ -551,7 +606,16 @@ where
 
             kind_callback(CssDescriptorResultKind::FontWeightAbsolutePair);
             for weight in &weights {
-                source_callback(default_order, weight, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                source_callback(
+                    default_order,
+                    weight,
+                    false,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                );
             }
         }
         CssDescriptorValueType::Length => {
@@ -567,6 +631,8 @@ where
                 value.primitive_kind(),
                 value.has_numeric_value(),
                 value.numeric_value(),
+                0,
+                0,
             );
         }
         CssDescriptorValueType::PageSize => {
@@ -588,6 +654,8 @@ where
                             length.primitive_kind(),
                             length.has_numeric_value(),
                             length.numeric_value(),
+                            0,
+                            0,
                         );
                     }
                 }
@@ -596,21 +664,25 @@ where
                     if let Some(page_size) = page_size {
                         source_callback(
                             default_order,
-                            &page_size,
+                            "",
                             false,
                             CssPrimitiveValueKind::Invalid,
                             false,
                             0.0,
+                            page_size as u8 + 1,
+                            0,
                         );
                     }
                     if let Some(orientation) = orientation {
                         source_callback(
                             default_order,
-                            &orientation,
+                            "",
                             false,
                             CssPrimitiveValueKind::Invalid,
                             false,
                             0.0,
+                            0,
+                            orientation as u8 + 1,
                         );
                     }
                 }
@@ -629,6 +701,8 @@ where
                 value.primitive_kind(),
                 value.has_numeric_value(),
                 value.numeric_value(),
+                0,
+                0,
             );
         }
         CssDescriptorValueType::String => {
@@ -637,7 +711,16 @@ where
             };
 
             kind_callback(CssDescriptorResultKind::String);
-            source_callback(default_order, &source, true, CssPrimitiveValueKind::String, false, 0.0);
+            source_callback(
+                default_order,
+                &source,
+                true,
+                CssPrimitiveValueKind::String,
+                false,
+                0.0,
+                0,
+                0,
+            );
         }
         _ => return false,
     }

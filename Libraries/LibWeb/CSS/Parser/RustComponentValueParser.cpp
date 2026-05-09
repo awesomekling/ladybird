@@ -955,7 +955,7 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
             auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
             result = DescriptorResult { .kind = kind };
         },
-        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value) {
+        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u8 page_size_keyword, u8 page_size_orientation) {
             auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
             VERIFY(result.has_value());
             result->items.append(DescriptorResultItem {
@@ -965,6 +965,8 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
                 .primitive_kind = primitive_kind,
                 .has_numeric_value = has_numeric_value,
                 .numeric_value = numeric_value,
+                .page_size_keyword = page_size_keyword,
+                .page_size_orientation = page_size_orientation,
             });
         });
 

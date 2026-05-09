@@ -519,6 +519,8 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
         primitive_kind: CssPrimitiveValueKind,
         has_numeric_value: bool,
         numeric_value: f64,
+        page_size_keyword: u8,
+        page_size_orientation: u8,
     ),
 ) -> bool {
     unsafe {
@@ -531,7 +533,14 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
                 value_type,
                 input,
                 |kind| kind_callback(ctx, kind),
-                |order, source, is_string, primitive_kind, has_numeric_value, numeric_value| {
+                |order,
+                 source,
+                 is_string,
+                 primitive_kind,
+                 has_numeric_value,
+                 numeric_value,
+                 page_size_keyword,
+                 page_size_orientation| {
                     source_callback(
                         ctx,
                         order,
@@ -541,6 +550,8 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
                         primitive_kind,
                         has_numeric_value,
                         numeric_value,
+                        page_size_keyword,
+                        page_size_orientation,
                     );
                 },
             )

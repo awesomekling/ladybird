@@ -1178,10 +1178,31 @@ pub(super) fn scroll_function_axis_from_string(input: &str) -> Option<CssScrollF
 pub(super) fn is_page_size_keyword(input: &str) -> bool {
     // https://drafts.csswg.org/css-page-3/#typedef-page-size-page-size
     // <page-size> = A5 | A4 | A3 | B5 | B4 | JIS-B5 | JIS-B4 | letter | legal | ledger
-    matches!(
-        input.to_ascii_lowercase().as_str(),
-        "a5" | "a4" | "a3" | "b5" | "b4" | "jis-b5" | "jis-b4" | "letter" | "legal" | "ledger"
-    )
+    page_size_keyword_from_string(input).is_some()
+}
+
+pub(super) fn page_size_keyword_from_string(input: &str) -> Option<CssPageSizeKeyword> {
+    match input.to_ascii_lowercase().as_str() {
+        "a5" => Some(CssPageSizeKeyword::A5),
+        "a4" => Some(CssPageSizeKeyword::A4),
+        "a3" => Some(CssPageSizeKeyword::A3),
+        "b5" => Some(CssPageSizeKeyword::B5),
+        "b4" => Some(CssPageSizeKeyword::B4),
+        "jis-b5" => Some(CssPageSizeKeyword::JisB5),
+        "jis-b4" => Some(CssPageSizeKeyword::JisB4),
+        "letter" => Some(CssPageSizeKeyword::Letter),
+        "legal" => Some(CssPageSizeKeyword::Legal),
+        "ledger" => Some(CssPageSizeKeyword::Ledger),
+        _ => None,
+    }
+}
+
+pub(super) fn page_size_orientation_from_string(input: &str) -> Option<CssPageSizeOrientation> {
+    match input.to_ascii_lowercase().as_str() {
+        "portrait" => Some(CssPageSizeOrientation::Portrait),
+        "landscape" => Some(CssPageSizeOrientation::Landscape),
+        _ => None,
+    }
 }
 
 pub(super) fn component_values_parse_as_resolution(component_values: &[ComponentValue]) -> bool {

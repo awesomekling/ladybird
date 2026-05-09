@@ -857,6 +857,28 @@ pub enum CssPageSizeDescriptorKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssPageSizeKeyword {
+    A5,
+    A4,
+    A3,
+    B5,
+    B4,
+    JisB5,
+    JisB4,
+    Letter,
+    Legal,
+    Ledger,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssPageSizeOrientation {
+    Portrait,
+    Landscape,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssCropOrCrossKind {
     Crop,
     Cross,

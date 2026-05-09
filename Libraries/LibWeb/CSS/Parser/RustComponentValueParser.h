@@ -860,6 +860,8 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         bool has_numeric_value { false };
         double numeric_value { 0.0 };
+        u8 page_size_keyword { 0 };
+        u8 page_size_orientation { 0 };
     };
 
     struct DescriptorResult {
