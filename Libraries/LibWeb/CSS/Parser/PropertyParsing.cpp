@@ -4327,7 +4327,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
                         // https://github.com/w3c/csswg-drafts/issues/5742
                         flex_grow = NumberStyleValue::create(1);
-                        flex_basis = parse_rust_source_as_property(PropertyID::FlexBasis, rust_style_value->flex_grow->source_or_unit);
+                        flex_basis = materialize_rust_nested_length_percentage(*rust_style_value->flex_basis, non_negative_range);
                     }
                     if (!flex_grow || !flex_shrink || !flex_basis)
                         break;
