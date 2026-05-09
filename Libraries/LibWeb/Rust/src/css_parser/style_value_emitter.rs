@@ -470,7 +470,13 @@ where
                     RustOwnedNestedPrimitiveValue::Source(source) => {
                         (CssPrimitiveValueKind::Invalid, false, 0.0, source.as_str())
                     }
-                    _ => unreachable!("counter definitions only use integer values"),
+                    RustOwnedNestedPrimitiveValue::MathFunction(value) => {
+                        (CssPrimitiveValueKind::Invalid, false, 0.0, value.source.as_str())
+                    }
+                    RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
+                        (CssPrimitiveValueKind::Invalid, false, 0.0, value.source.as_str())
+                    }
+                    _ => unreachable!("counter definitions only use integer-like values"),
                 };
                 callback(
                     CssStyleValueKind::CounterDefinitions,
