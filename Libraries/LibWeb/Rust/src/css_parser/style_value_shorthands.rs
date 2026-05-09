@@ -307,7 +307,20 @@ fn consume_layer_shorthand_item(
                 strip_whitespace(&parser.component_values[start..end]),
                 source,
             )?;
-            if !source_parses_as_property(property_id, &candidate_source) {
+            let style_value = match parse_rust_owned_style_value_for_property_with_options(
+                &[property_id as u16],
+                candidate_source.as_bytes(),
+                CssPrimitiveValueOptions::default(),
+            ) {
+                RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
+                RustOwnedStyleValueParseResult::Invalid => {
+                    if !source_parses_as_property(property_id, &candidate_source) {
+                        continue;
+                    }
+                    return None;
+                }
+            };
+            if style_value.property_id != property_id {
                 continue;
             }
 
@@ -315,6 +328,7 @@ fn consume_layer_shorthand_item(
             let mut items = vec![RustOwnedLayerShorthandItem {
                 layer_index,
                 property_id,
+                style_value,
                 source: candidate_source,
             }];
             remaining_property_ids.retain(|remaining_property_id| *remaining_property_id != property_id);
@@ -355,7 +369,20 @@ fn consume_layer_shorthand_size(
     for end in ((start + 1)..=parser.component_values.len()).rev() {
         let candidate_source =
             serialize_component_values_for_reparsing(strip_whitespace(&parser.component_values[start..end]), source)?;
-        if !source_parses_as_property(property_id, &candidate_source) {
+        let style_value = match parse_rust_owned_style_value_for_property_with_options(
+            &[property_id as u16],
+            candidate_source.as_bytes(),
+            CssPrimitiveValueOptions::default(),
+        ) {
+            RustOwnedStyleValueParseResult::Parsed(style_value) => style_value,
+            RustOwnedStyleValueParseResult::Invalid => {
+                if !source_parses_as_property(property_id, &candidate_source) {
+                    continue;
+                }
+                return None;
+            }
+        };
+        if style_value.property_id != property_id {
             continue;
         }
 
@@ -363,6 +390,7 @@ fn consume_layer_shorthand_size(
         return Some(RustOwnedLayerShorthandItem {
             layer_index,
             property_id,
+            style_value,
             source: candidate_source,
         });
     }

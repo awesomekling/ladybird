@@ -254,6 +254,7 @@ pub(crate) struct RustOwnedCoordinatingValueListShorthandItem {
 pub(crate) struct RustOwnedLayerShorthandItem {
     pub(crate) layer_index: usize,
     pub(crate) property_id: PropertyId,
+    pub(crate) style_value: RustOwnedStyleValue,
     pub(crate) source: String,
 }
 
