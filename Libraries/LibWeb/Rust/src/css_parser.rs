@@ -504,14 +504,14 @@ where
                 }
                 RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
                     kind_callback(CssDescriptorResultKind::CounterStyleRangeList);
-                    for range in &ranges {
+                    for bound in &ranges {
                         source_callback(
                             default_order,
-                            range,
+                            bound.source_or_unit(),
                             false,
-                            CssPrimitiveValueKind::Invalid,
-                            false,
-                            0.0,
+                            bound.primitive_kind(),
+                            bound.has_numeric_value(),
+                            bound.numeric_value(),
                             0,
                             0,
                         );

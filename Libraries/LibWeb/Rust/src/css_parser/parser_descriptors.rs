@@ -9,7 +9,7 @@ use super::*;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedCounterStyleRangeDescriptor {
     Auto,
-    List(Vec<String>),
+    List(Vec<RustOwnedDescriptorPrimitiveValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -152,20 +152,14 @@ pub(crate) fn parse_rust_owned_counter_style_range_descriptor(
     let mut ranges = Vec::new();
     loop {
         parser.discard_whitespace();
-        let start = parser.index;
-        if !parser.consume_counter_style_range_bound_syntax() {
+        let Some(first_bound) = parser.consume_counter_style_range_bound_value(&filtered_input) else {
             break;
-        }
+        };
 
         parser.discard_whitespace();
-        if !parser.consume_counter_style_range_bound_syntax() {
-            return None;
-        }
-
-        ranges.push(serialize_component_values_for_reparsing(
-            &parser.component_values[start..parser.index],
-            &filtered_input,
-        )?);
+        let second_bound = parser.consume_counter_style_range_bound_value(&filtered_input)?;
+        ranges.push(first_bound);
+        ranges.push(second_bound);
 
         parser.discard_whitespace();
         if !parser.consume_comma() {
@@ -702,6 +696,31 @@ impl ComponentValueParser {
             primitive_kind,
             numeric_value,
             source_or_unit,
+        })
+    }
+
+    fn consume_counter_style_range_bound_value(
+        &mut self,
+        filtered_input: &str,
+    ) -> Option<RustOwnedDescriptorPrimitiveValue> {
+        let start = self.index;
+        if self.consume_ident_matching("infinite") {
+            return Some(RustOwnedDescriptorPrimitiveValue {
+                primitive_kind: CssPrimitiveValueKind::Keyword,
+                numeric_value: None,
+                source_or_unit: "infinite".to_string(),
+            });
+        }
+
+        let integer = self.consume_integer_value()?;
+        let source =
+            serialize_component_values_for_reparsing(&self.component_values[start..self.index], filtered_input)?;
+        Some(RustOwnedDescriptorPrimitiveValue {
+            primitive_kind: integer
+                .map(|_| CssPrimitiveValueKind::Integer)
+                .unwrap_or(CssPrimitiveValueKind::Invalid),
+            numeric_value: integer.map(f64::from),
+            source_or_unit: source,
         })
     }
 

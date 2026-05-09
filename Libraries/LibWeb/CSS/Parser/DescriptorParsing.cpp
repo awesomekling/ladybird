@@ -104,6 +104,26 @@ static RefPtr<StyleValue const> materialize_descriptor_font_weight_absolute(Rust
     }
 }
 
+static RefPtr<StyleValue const> materialize_descriptor_counter_style_range_bound(RustComponentValueParser::DescriptorResultItem const& item)
+{
+    switch (item.primitive_kind) {
+    case FFI::CssPrimitiveValueKind::Keyword: {
+        auto keyword = keyword_from_string(item.source);
+        if (!keyword.has_value() || keyword.value() != Keyword::Infinite)
+            return nullptr;
+        return KeywordStyleValue::create(Keyword::Infinite);
+    }
+    case FFI::CssPrimitiveValueKind::Integer:
+        if (!item.has_numeric_value)
+            return nullptr;
+        if (item.numeric_value < NumericLimits<i32>::min() || item.numeric_value > NumericLimits<i32>::max())
+            return nullptr;
+        return IntegerStyleValue::create(static_cast<i32>(item.numeric_value));
+    default:
+        return nullptr;
+    }
+}
+
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens)
 {
     if (!RustComponentValueParser::at_rule_supports_descriptor(at_rule_id, descriptor_name_and_id.id())) {
@@ -374,15 +394,29 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return KeywordStyleValue::create(Keyword::Auto);
                     if (range->kind != FFI::CssDescriptorResultKind::CounterStyleRangeList)
                         return nullptr;
-
-                    auto const parse_value = [&](TokenStream<ComponentValue>& range_tokens) -> RefPtr<StyleValue const> {
-                        if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
-                            return keyword_value;
-
-                        if (auto integer_value = parse_integer_value(range_tokens, infinite_integer_range); integer_value)
-                            return integer_value;
-
+                    if (range->items.size() % 2 != 0)
                         return nullptr;
+
+                    auto const parse_value = [&](RustComponentValueParser::DescriptorResultItem const& item) -> RefPtr<StyleValue const> {
+                        if (auto value = materialize_descriptor_counter_style_range_bound(item))
+                            return value;
+
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> range_tokens { component_values };
+                        range_tokens.discard_whitespace();
+                        RefPtr<StyleValue const> value;
+                        if (auto keyword_value = parse_specific_keyword_value(range_tokens, Keyword::Infinite))
+                            value = keyword_value;
+                        else if (auto integer_value = parse_integer_value(range_tokens, infinite_integer_range); integer_value)
+                            value = integer_value;
+
+                        if (!value)
+                            return nullptr;
+
+                        range_tokens.discard_whitespace();
+                        if (range_tokens.has_next_token())
+                            return nullptr;
+                        return value;
                     };
 
                     auto const resolve_value = [&](StyleValue const& value, i32 infinite_value) -> Optional<i32> {
@@ -400,14 +434,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     };
 
                     StyleValueVector range_entries;
-                    for (auto const& item : range->items) {
-                        auto const& source = item.source;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> range_tokens { component_values };
-                        range_tokens.discard_whitespace();
-                        auto first_value = parse_value(range_tokens);
-                        range_tokens.discard_whitespace();
-                        auto second_value = parse_value(range_tokens);
+                    for (size_t i = 0; i < range->items.size(); i += 2) {
+                        auto first_value = parse_value(range->items[i]);
+                        auto second_value = parse_value(range->items[i + 1]);
 
                         if (!first_value || !second_value)
                             return nullptr;
@@ -421,10 +450,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                             return nullptr;
 
                         range_entries.append(StyleValueList::create({ first_value.release_nonnull(), second_value.release_nonnull() }, StyleValueList::Separator::Space, StyleValueList::Collapsible::No));
-
-                        range_tokens.discard_whitespace();
-                        if (range_tokens.has_next_token())
-                            return nullptr;
                     }
 
                     return StyleValueList::create(move(range_entries), StyleValueList::Separator::Comma, StyleValueList::Collapsible::No);

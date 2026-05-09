@@ -767,6 +767,14 @@ fn descriptor_keyword_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
     }
 }
 
+fn descriptor_math_value(source: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::Invalid,
+        numeric_value: None,
+        source_or_unit: source.to_string(),
+    }
+}
+
 fn descriptor_math_integer_value(source: &str) -> RustOwnedDescriptorPrimitiveValue {
     RustOwnedDescriptorPrimitiveValue {
         primitive_kind: CssPrimitiveValueKind::Invalid,
@@ -8760,8 +8768,17 @@ fn parses_rust_owned_counter_style_range_descriptors() {
     assert_eq!(
         parse_rust_owned_counter_style_range_descriptor("infinite 0, 5 10".as_bytes()),
         Some(RustOwnedCounterStyleRangeDescriptor::List(vec![
-            "infinite 0".to_string(),
-            "5 10".to_string()
+            descriptor_keyword_value("infinite"),
+            descriptor_integer_value(0, "0"),
+            descriptor_integer_value(5, "5"),
+            descriptor_integer_value(10, "10"),
+        ]))
+    );
+    assert_eq!(
+        parse_rust_owned_counter_style_range_descriptor("calc(1) calc(2)".as_bytes()),
+        Some(RustOwnedCounterStyleRangeDescriptor::List(vec![
+            descriptor_math_value("calc(1)"),
+            descriptor_math_value("calc(2)"),
         ]))
     );
 }
