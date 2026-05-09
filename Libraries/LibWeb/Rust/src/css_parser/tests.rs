@@ -52,12 +52,11 @@ use super::{
     RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontStyle, RustOwnedFontVariantLonghand,
     RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow, RustOwnedGridRepeat,
     RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize, RustOwnedGridTrackSizeList,
-    RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage, RustOwnedImageKind, RustOwnedImageSet,
-    RustOwnedImageSetOption, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage,
-    RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue,
-    RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
-    RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder,
-    RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
+    RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage, RustOwnedImageKind, RustOwnedLineStyle,
+    RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType,
+    RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue,
+    RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint,
+    RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
     RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
     RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
@@ -2570,12 +2569,10 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BackgroundImage,
-            value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
-                options: vec![RustOwnedImageSetOption {
-                    image_is_string: false,
-                    image_source: "url(example.png)".to_string(),
-                    resolution: Some("2x".to_string()),
-                    mime_type: None,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "image-set(url(example.png) 2x)".to_string(),
+                    value_type: PropertyValueType::Image,
                 }],
             }),
         })
@@ -2584,13 +2581,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "url(example.png)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BackgroundImage,
-            value: RustOwnedStyleValueKind::Image(RustOwnedImage {
-                kind: RustOwnedImageKind::Url,
-                url: Some(RustOwnedUrlPayload {
-                    function_type: CssUrlFunctionType::Url,
-                    url: "example.png".to_string(),
-                }),
-                source: "url(example.png)".to_string(),
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "url(example.png)".to_string(),
+                    value_type: PropertyValueType::Image,
+                }],
             }),
         })
     );
@@ -2598,10 +2593,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "linear-gradient(black, white)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BackgroundImage,
-            value: RustOwnedStyleValueKind::Image(RustOwnedImage {
-                kind: RustOwnedImageKind::Gradient,
-                url: None,
-                source: "linear-gradient(black, white)".to_string(),
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "linear-gradient(black, white)".to_string(),
+                    value_type: PropertyValueType::Image,
+                }],
             }),
         })
     );
@@ -2612,21 +2608,12 @@ fn parses_style_values_with_rust_owned_ast() {
         ),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BackgroundImage,
-            value: RustOwnedStyleValueKind::ImageSet(RustOwnedImageSet {
-                options: vec![
-                    RustOwnedImageSetOption {
-                        image_is_string: true,
-                        image_source: "example.png".to_string(),
-                        resolution: None,
-                        mime_type: Some("image/png".to_string()),
-                    },
-                    RustOwnedImageSetOption {
-                        image_is_string: false,
-                        image_source: "linear-gradient(black, white)".to_string(),
-                        resolution: Some("2x".to_string()),
-                        mime_type: None,
-                    },
-                ],
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "image-set(\"example.png\" type(\"image/png\"), linear-gradient(black, white) 2x)"
+                        .to_string(),
+                    value_type: PropertyValueType::Image,
+                }],
             }),
         })
     );
@@ -3833,6 +3820,42 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BackgroundImage], "none, url(example.png)"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BackgroundImage,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "none".to_string(),
+                        value_type: PropertyValueType::Image,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "url(example.png)".to_string(),
+                        value_type: PropertyValueType::Image,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::MaskImage], "url(#mask), none"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::MaskImage,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "url(#mask)".to_string(),
+                        value_type: PropertyValueType::Url,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "none".to_string(),
+                        value_type: PropertyValueType::Image,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::TransitionDuration], "-1s"),
         None
     );
@@ -4631,40 +4654,40 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::BackgroundImage], "url(example.png)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::Image,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::BackgroundImage,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "example.png".to_string(),
-            value_type: String::new(),
+            value: "url(example.png)".to_string(),
+            value_type: "Image".to_string(),
         })
     );
     assert_eq!(
         parse_style_value(&[PropertyId::BackgroundImage], "linear-gradient(black, white)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::Image,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::BackgroundImage,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
             value: "linear-gradient(black, white)".to_string(),
-            value_type: String::new(),
+            value_type: "Image".to_string(),
         })
     );
     assert_eq!(
         parse_style_value(&[PropertyId::BackgroundImage], "image-set(url(example.png) 2x)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::Image,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::BackgroundImage,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "example.png".to_string(),
-            value_type: "2x\0".to_string(),
+            value: "image-set(url(example.png) 2x)".to_string(),
+            value_type: "Image".to_string(),
         })
     );
     assert_eq!(

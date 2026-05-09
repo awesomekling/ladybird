@@ -105,6 +105,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BackgroundRepeat:
     case PropertyID::BackgroundSize:
     case PropertyID::BackgroundColor:
+    case PropertyID::BackgroundImage:
     case PropertyID::Border:
     case PropertyID::BorderBlock:
     case PropertyID::BorderImage:
@@ -223,6 +224,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MarginLeft:
     case PropertyID::MarginRight:
     case PropertyID::MarginTop:
+    case PropertyID::MaskImage:
     case PropertyID::MaskPosition:
     case PropertyID::MaskRepeat:
     case PropertyID::MaskSize:
@@ -4942,11 +4944,29 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             case FFI::CssStyleValueKind::GeneratedValueList: {
                 VERIFY(rust_style_value->generated_value_list_sources.size() == rust_style_value->generated_value_list_value_types.size());
                 auto context_guard = push_temporary_value_parsing_context(rust_style_value->property_id);
+                Optional<Vector<Vector<ComponentValue>>> original_component_value_groups;
+                auto generated_value_list_tokens_contain_attr_tainted_value = tokens.remaining_tokens().first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value();
+                if (generated_value_list_tokens_contain_attr_tainted_value) {
+                    // AD-HOC: Re-parsing substituted component values through
+                    // Rust would lose C++-side attr() taint metadata until that
+                    // metadata is carried over FFI.
+                    TokenStream component_value_tokens { tokens.remaining_tokens() };
+                    original_component_value_groups = parse_a_comma_separated_list_of_component_values(component_value_tokens);
+                    component_value_tokens.discard_whitespace();
+                    if (!component_value_tokens.is_empty())
+                        break;
+                    if (original_component_value_groups->size() != rust_style_value->generated_value_list_sources.size())
+                        break;
+                }
 
                 StyleValueVector values;
                 values.ensure_capacity(rust_style_value->generated_value_list_sources.size());
                 for (size_t i = 0; i < rust_style_value->generated_value_list_sources.size(); ++i) {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->generated_value_list_sources[i].bytes_as_string_view(), "utf-8"sv);
+                    Vector<ComponentValue> component_values;
+                    if (original_component_value_groups.has_value())
+                        component_values.extend(original_component_value_groups->at(i));
+                    else
+                        component_values = RustComponentValueParser::parse_a_list_of_component_values(rust_style_value->generated_value_list_sources[i].bytes_as_string_view(), "utf-8"sv);
                     component_values.remove_all_matching([](auto const& component_value) { return component_value.is(Token::Type::Whitespace); });
                     if (component_values.size() == 1 && component_values.first().is(Token::Type::Ident)) {
                         auto keyword = RustComponentValueParser::parse_property_keyword_value({ &rust_style_value->property_id, 1 }, component_values.first().token().ident());

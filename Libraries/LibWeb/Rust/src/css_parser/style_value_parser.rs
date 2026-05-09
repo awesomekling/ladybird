@@ -236,6 +236,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
             | PropertyId::BackgroundColor
+            | PropertyId::BackgroundImage
             | PropertyId::Border
             | PropertyId::BorderBlock
             | PropertyId::BorderImage
@@ -354,6 +355,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MarginLeft
             | PropertyId::MarginRight
             | PropertyId::MarginTop
+            | PropertyId::MaskImage
             | PropertyId::MaskRepeat
             | PropertyId::MaskPosition
             | PropertyId::MaskSize
@@ -524,6 +526,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::BackgroundPosition => {
             rust_owned_position_list_style_value_kind(PropertyValueType::BackgroundPosition, filtered_input)
+        }
+        PropertyId::BackgroundImage | PropertyId::MaskImage => {
+            rust_owned_generated_value_list_style_value_kind(property_id, filtered_input)
         }
         PropertyId::BackgroundPositionX | PropertyId::BackgroundPositionY => {
             rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
@@ -988,10 +993,17 @@ fn rust_owned_generated_value_list_style_value_kind(
                 ..
             }),
         ] = component_values
-            && property_accepts_keyword(property_id, value)
-            && property_accepts_value_type(property_id, PropertyValueType::EasingFunction)
         {
-            Some(PropertyValueType::EasingFunction)
+            if property_accepts_keyword(property_id, value) {
+                generated_property_value_type_order()
+                    .iter()
+                    .find(|value_type| property_accepts_value_type(property_id, **value_type))
+                    .copied()
+            } else if property_accepts_value_type(property_id, PropertyValueType::EasingFunction) {
+                Some(PropertyValueType::EasingFunction)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -1002,7 +1014,12 @@ fn rust_owned_generated_value_list_style_value_kind(
             if !property_accepts_value_type(property_id, *value_type) {
                 continue;
             }
-            if !component_values_parse_as_property_value_type(*value_type, source.as_bytes()) {
+            let value_type_matches = if *value_type == PropertyValueType::Url {
+                property_id == PropertyId::MaskImage && component_values_parse_as_fragment_url(source.as_bytes())
+            } else {
+                component_values_parse_as_property_value_type(*value_type, source.as_bytes())
+            };
+            if !value_type_matches {
                 continue;
             }
             if !component_values_satisfy_property_numeric_range(
