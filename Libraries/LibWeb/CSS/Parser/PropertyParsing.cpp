@@ -26,6 +26,7 @@
 #include <LibWeb/CSS/StyleValues/BorderImageSliceStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusRectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
@@ -404,6 +405,251 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return RatioStyleValue::create(
                     NumberStyleValue::create(*rust_style_value->numeric_value),
                     NumberStyleValue::create(*rust_style_value->secondary_numeric_value));
+            };
+            auto materialize_rust_calculation_tree = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->value_type.has_value() || rust_style_value->calculation_node_events.is_empty())
+                    return nullptr;
+
+                auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
+                if (!metadata.has_value()) {
+                    if (*rust_style_value->value_type != ValueType::OpacityValue)
+                        return nullptr;
+                    metadata = RustComponentValueParser::PropertyNumericMetadata {
+                        .property_id = rust_style_value->property_id,
+                        .range = infinite_range,
+                    };
+                }
+
+                CalculationContext calculation_context {
+                    .resolve_numbers_as_integers = *rust_style_value->value_type == ValueType::Integer,
+                };
+
+                switch (*rust_style_value->value_type) {
+                case ValueType::Integer:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Integer, metadata->range);
+                    break;
+                case ValueType::Number:
+                case ValueType::OpacityValue:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Number, metadata->range);
+                    break;
+                case ValueType::Percentage:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
+                    break;
+                case ValueType::Angle:
+                case ValueType::AnglePercentage:
+                    if (metadata->percentages_resolve_to_value_type)
+                        calculation_context.percentages_resolve_as = ValueType::Angle;
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Angle, metadata->range);
+                    break;
+                case ValueType::Flex:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Flex, metadata->range);
+                    break;
+                case ValueType::Frequency:
+                case ValueType::FrequencyPercentage:
+                    if (metadata->percentages_resolve_to_value_type)
+                        calculation_context.percentages_resolve_as = ValueType::Frequency;
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
+                    break;
+                case ValueType::Length:
+                case ValueType::LengthPercentage:
+                    if (metadata->percentages_resolve_to_value_type)
+                        calculation_context.percentages_resolve_as = ValueType::Length;
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
+                    break;
+                case ValueType::Resolution:
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Resolution, metadata->range);
+                    break;
+                case ValueType::Time:
+                case ValueType::TimePercentage:
+                    if (metadata->percentages_resolve_to_value_type)
+                        calculation_context.percentages_resolve_as = ValueType::Time;
+                    calculation_context.accepted_ranges_by_type.set(ValueType::Time, metadata->range);
+                    break;
+                default:
+                    return nullptr;
+                }
+
+                Vector<NonnullRefPtr<CalculationNode const>> stack;
+                auto pop_children = [&](u32 child_count) -> Optional<Vector<NonnullRefPtr<CalculationNode const>>> {
+                    if (child_count > stack.size())
+                        return {};
+
+                    Vector<NonnullRefPtr<CalculationNode const>> reversed_children;
+                    reversed_children.ensure_capacity(child_count);
+                    for (u32 i = 0; i < child_count; ++i)
+                        reversed_children.append(stack.take_last());
+
+                    Vector<NonnullRefPtr<CalculationNode const>> children;
+                    children.ensure_capacity(child_count);
+                    for (auto i = reversed_children.size(); i > 0; --i)
+                        children.append(reversed_children[i - 1]);
+                    return children;
+                };
+                auto numeric_node_from_event = [&](RustComponentValueParser::RustCalculationNodeEvent const& event) -> RefPtr<CalculationNode const> {
+                    if (!event.numeric_value.has_value())
+                        return nullptr;
+
+                    switch (event.primitive_kind) {
+                    case FFI::CssPrimitiveValueKind::Number:
+                        return NumericCalculationNode::create(Number { Number::Type::Number, *event.numeric_value }, calculation_context);
+                    case FFI::CssPrimitiveValueKind::Percentage:
+                        return NumericCalculationNode::create(Percentage { *event.numeric_value }, calculation_context);
+                    case FFI::CssPrimitiveValueKind::Angle: {
+                        auto unit = string_to_angle_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Angle { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Flex: {
+                        auto unit = string_to_flex_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Flex { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Frequency: {
+                        auto unit = string_to_frequency_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Frequency { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Length: {
+                        auto unit = string_to_length_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Length { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Resolution: {
+                        auto unit = string_to_resolution_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Resolution { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Time: {
+                        auto unit = string_to_time_unit(event.metadata);
+                        if (!unit.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::create(Time { *event.numeric_value, unit.release_value() }, calculation_context);
+                    }
+                    case FFI::CssPrimitiveValueKind::Keyword: {
+                        auto keyword = keyword_from_string(event.metadata);
+                        if (!keyword.has_value())
+                            return nullptr;
+                        return NumericCalculationNode::from_keyword(keyword.release_value(), calculation_context);
+                    }
+                    default:
+                        return nullptr;
+                    }
+                };
+
+                for (auto const& event : rust_style_value->calculation_node_events) {
+                    switch (event.kind) {
+                    case FFI::CssCalculationNodeKind::Numeric: {
+                        auto numeric_node = numeric_node_from_event(event);
+                        if (!numeric_node)
+                            return nullptr;
+                        stack.append(numeric_node.release_nonnull());
+                        break;
+                    }
+                    case FFI::CssCalculationNodeKind::Sum: {
+                        auto children = pop_children(event.child_count);
+                        if (!children.has_value())
+                            return nullptr;
+                        stack.append(SumCalculationNode::create(children.release_value()));
+                        break;
+                    }
+                    case FFI::CssCalculationNodeKind::Product: {
+                        auto children = pop_children(event.child_count);
+                        if (!children.has_value())
+                            return nullptr;
+                        stack.append(ProductCalculationNode::create(children.release_value()));
+                        break;
+                    }
+                    case FFI::CssCalculationNodeKind::Negate: {
+                        auto children = pop_children(1);
+                        if (!children.has_value())
+                            return nullptr;
+                        stack.append(NegateCalculationNode::create(children->first()));
+                        break;
+                    }
+                    case FFI::CssCalculationNodeKind::Invert: {
+                        auto children = pop_children(1);
+                        if (!children.has_value())
+                            return nullptr;
+                        stack.append(InvertCalculationNode::create(children->first()));
+                        break;
+                    }
+                    case FFI::CssCalculationNodeKind::Function:
+                    case FFI::CssCalculationNodeKind::TreeCountingFunction:
+                        return nullptr;
+                    }
+                }
+
+                if (stack.size() != 1)
+                    return nullptr;
+
+                auto calculation_tree = simplify_a_calculation_tree(*stack.first(), calculation_context, CalculationResolutionContext {});
+                auto calculation_type = calculation_tree->numeric_type();
+                if (!calculation_type.has_value())
+                    return nullptr;
+
+                auto calculated_value = CalculatedStyleValue::create(calculation_tree, calculation_type.release_value(), calculation_context);
+                switch (*rust_style_value->value_type) {
+                case ValueType::Integer:
+                case ValueType::Number:
+                case ValueType::OpacityValue:
+                    if (!calculated_value->resolves_to_number())
+                        return nullptr;
+                    break;
+                case ValueType::Percentage:
+                    if (!calculated_value->resolves_to_percentage())
+                        return nullptr;
+                    break;
+                case ValueType::Angle:
+                    if (!calculated_value->resolves_to_angle())
+                        return nullptr;
+                    break;
+                case ValueType::AnglePercentage:
+                    if (!calculated_value->resolves_to_angle_percentage())
+                        return nullptr;
+                    break;
+                case ValueType::Flex:
+                    if (!calculated_value->resolves_to_flex())
+                        return nullptr;
+                    break;
+                case ValueType::Frequency:
+                    if (!calculated_value->resolves_to_frequency())
+                        return nullptr;
+                    break;
+                case ValueType::FrequencyPercentage:
+                    if (!calculated_value->resolves_to_frequency_percentage())
+                        return nullptr;
+                    break;
+                case ValueType::Length:
+                    if (!calculated_value->resolves_to_length())
+                        return nullptr;
+                    break;
+                case ValueType::LengthPercentage:
+                    if (!calculated_value->resolves_to_length_percentage())
+                        return nullptr;
+                    break;
+                case ValueType::Resolution:
+                    if (!calculated_value->resolves_to_resolution())
+                        return nullptr;
+                    break;
+                case ValueType::Time:
+                    if (!calculated_value->resolves_to_time())
+                        return nullptr;
+                    break;
+                case ValueType::TimePercentage:
+                    if (!calculated_value->resolves_to_time_percentage())
+                        return nullptr;
+                    break;
+                default:
+                    return nullptr;
+                }
+
+                tokens.discard_a_token();
+                return calculated_value;
             };
             auto materialize_rust_scroll_function_value = [&]() -> RefPtr<StyleValue const> {
                 StyleValueTuple tuple;
@@ -5565,6 +5811,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();
+                    } else if (rust_style_value->kind == FFI::CssStyleValueKind::MathFunction && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
+                        maybe_parsed_value = materialize_rust_calculation_tree();
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
                     } else {
