@@ -130,6 +130,9 @@ public:
         String value;
     };
 
+    using GridPlacementShorthandItem = FontShorthandItem;
+    using GridTemplateShorthandItem = FontShorthandItem;
+
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
@@ -700,6 +703,8 @@ public:
         Optional<FlyString> cursor_predefined;
         bool filter_value_list_is_none { false };
         Vector<RustFilterValueListEvent> filter_value_list_events;
+        Vector<GridPlacementShorthandItem> grid_placement_shorthand_items;
+        Vector<GridTemplateShorthandItem> grid_template_shorthand_items;
         bool position_area_is_none { false };
         Optional<RustPositionArea> position_area;
         bool position_try_fallbacks_is_none { false };
@@ -759,9 +764,6 @@ public:
     };
 
     using LayerShorthandItem = CoordinatingValueListShorthandItem;
-
-    using GridPlacementShorthandItem = FontShorthandItem;
-    using GridTemplateShorthandItem = FontShorthandItem;
 
     struct PositionalValueListShorthandItem {
         size_t index { 0 };

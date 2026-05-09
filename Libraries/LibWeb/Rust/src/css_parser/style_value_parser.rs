@@ -5,7 +5,10 @@
  */
 
 use super::*;
-use crate::css_parser::style_value_shorthands::parse_rust_owned_font_shorthand;
+use crate::css_parser::style_value_shorthands::{
+    parse_rust_owned_font_shorthand, parse_rust_owned_grid_placement_shorthand,
+    parse_rust_owned_grid_template_shorthand,
+};
 
 pub(crate) fn parse_rust_owned_style_value_for_property(
     property_ids: &[u16],
@@ -73,6 +76,23 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
         {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
         }
+    }
+
+    // AD-HOC: These shorthands have dedicated grammars above. If those reject
+    // the value, do not let the generic generated keyword path accept one of
+    // their longhand keywords as the whole shorthand.
+    if property_ids.len() == 1
+        && let Some(property_id) = property_id_from_u16(property_ids[0])
+        && matches!(
+            property_id,
+            PropertyId::Grid
+                | PropertyId::GridArea
+                | PropertyId::GridColumn
+                | PropertyId::GridRow
+                | PropertyId::GridTemplate
+        )
+    {
+        return RustOwnedStyleValueParseResult::Invalid;
     }
 
     if let [
@@ -376,13 +396,18 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FlexGrow
             | PropertyId::FlexShrink
             | PropertyId::ColumnGap
+            | PropertyId::Grid
             | PropertyId::GridAutoColumns
             | PropertyId::GridAutoFlow
             | PropertyId::GridAutoRows
+            | PropertyId::GridArea
+            | PropertyId::GridColumn
             | PropertyId::GridColumnEnd
             | PropertyId::GridColumnStart
+            | PropertyId::GridRow
             | PropertyId::GridRowEnd
             | PropertyId::GridRowStart
+            | PropertyId::GridTemplate
             | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
@@ -806,6 +831,14 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
         PropertyId::FontVariant => rust_owned_font_variant_style_value_kind(filtered_input),
         PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
+        PropertyId::GridArea | PropertyId::GridColumn | PropertyId::GridRow => {
+            parse_rust_owned_grid_placement_shorthand(property_id, filtered_input)
+                .map(RustOwnedStyleValueKind::GridPlacementShorthand)
+        }
+        PropertyId::Grid | PropertyId::GridTemplate => {
+            parse_rust_owned_grid_template_shorthand(property_id, filtered_input)
+                .map(RustOwnedStyleValueKind::GridTemplateShorthand)
+        }
         PropertyId::GridAutoColumns | PropertyId::GridAutoRows => {
             rust_owned_grid_auto_track_sizes_style_value_kind(filtered_input)
         }

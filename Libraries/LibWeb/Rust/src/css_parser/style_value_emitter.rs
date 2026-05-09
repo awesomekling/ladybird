@@ -61,6 +61,64 @@ where
                 );
             }
         }
+        RustOwnedStyleValueKind::GridPlacementShorthand(items) => {
+            let shorthand_property_id = property_id;
+            for item in items {
+                callback(
+                    CssStyleValueKind::GridPlacementShorthand,
+                    item.property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    0,
+                    0,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
+        RustOwnedStyleValueKind::GridTemplateShorthand(items) => {
+            let shorthand_property_id = property_id;
+            if items.is_empty() {
+                callback(
+                    CssStyleValueKind::GridTemplateShorthand,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+                return;
+            }
+            for item in items {
+                callback(
+                    CssStyleValueKind::GridTemplateShorthand,
+                    item.property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    0,
+                    0,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::FontStyle(value) => callback(
             CssStyleValueKind::FontStyle,
             property_id,

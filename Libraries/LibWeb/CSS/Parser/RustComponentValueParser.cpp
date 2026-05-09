@@ -1185,6 +1185,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 return URL { string_from_ffi_bytes(value_ptr, value_len), url_type, {} };
             };
+            auto shorthand_property_id_from_callback_payload = [&]() {
+                return static_cast<PropertyID>(static_cast<u16>(color_red) | (static_cast<u16>(color_green) << 8));
+            };
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1497,6 +1500,36 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .property_id = static_cast<PropertyID>(property_id),
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::GridPlacementShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::GridPlacementShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                style_value->grid_placement_shorthand_items.append(GridPlacementShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::GridTemplateShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::GridTemplateShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                if (value_len > 0) {
+                    style_value->grid_template_shorthand_items.append(GridTemplateShorthandItem {
+                        .property_id = static_cast<PropertyID>(property_id),
+                        .value = string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::FontLanguageOverride) {
                 value.font_language_override_kind = static_cast<FFI::CssFontLanguageOverrideKind>(color_red);

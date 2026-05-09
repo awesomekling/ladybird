@@ -390,7 +390,7 @@ where
     true
 }
 
-fn parse_rust_owned_grid_placement_shorthand(
+pub(super) fn parse_rust_owned_grid_placement_shorthand(
     property_id: PropertyId,
     filtered_input: &[u8],
 ) -> Option<Vec<RustOwnedGridPlacementShorthandItem>> {
@@ -539,7 +539,7 @@ where
     true
 }
 
-fn parse_rust_owned_grid_template_shorthand(
+pub(super) fn parse_rust_owned_grid_template_shorthand(
     property_id: PropertyId,
     filtered_input: &[u8],
 ) -> Option<Vec<RustOwnedGridTemplateShorthandItem>> {

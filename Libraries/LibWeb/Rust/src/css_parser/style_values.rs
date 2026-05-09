@@ -40,6 +40,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     FontShorthand(Vec<RustOwnedFontShorthandItem>),
     FontStyle(RustOwnedFontStyle),
     FontVariantLonghand(RustOwnedFontVariantLonghand),
+    GridPlacementShorthand(Vec<RustOwnedGridPlacementShorthandItem>),
+    GridTemplateShorthand(Vec<RustOwnedGridTemplateShorthandItem>),
     KeywordList(RustOwnedKeywordList),
     PlaceContent(RustOwnedPlaceShorthand),
     PlaceItems(RustOwnedPlaceShorthand),

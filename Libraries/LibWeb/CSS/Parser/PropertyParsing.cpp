@@ -242,13 +242,18 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FlexGrow:
     case PropertyID::FlexShrink:
     case PropertyID::ColumnGap:
+    case PropertyID::Grid:
     case PropertyID::GridAutoColumns:
     case PropertyID::GridAutoFlow:
     case PropertyID::GridAutoRows:
+    case PropertyID::GridArea:
+    case PropertyID::GridColumn:
     case PropertyID::GridColumnEnd:
     case PropertyID::GridColumnStart:
+    case PropertyID::GridRow:
     case PropertyID::GridRowEnd:
     case PropertyID::GridRowStart:
+    case PropertyID::GridTemplate:
     case PropertyID::GridTemplateAreas:
     case PropertyID::GridTemplateColumns:
     case PropertyID::GridTemplateRows:
@@ -4123,6 +4128,83 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
                 return PropertyAndValue { rust_style_value->property_id, GridAutoFlowStyleValue::create(axis, dense) };
+            }
+            case FFI::CssStyleValueKind::GridPlacementShorthand: {
+                Vector<PropertyID> longhands;
+                StyleValueVector longhand_values;
+                longhands.ensure_capacity(rust_style_value->grid_placement_shorthand_items.size());
+                longhand_values.ensure_capacity(rust_style_value->grid_placement_shorthand_items.size());
+
+                bool is_valid = true;
+                for (auto const& item : rust_style_value->grid_placement_shorthand_items) {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream placement_tokens { component_values };
+                    auto value = parse_css_value_for_property(item.property_id, placement_tokens);
+                    placement_tokens.discard_whitespace();
+                    if (!value || placement_tokens.has_next_token()) {
+                        is_valid = false;
+                        break;
+                    }
+
+                    longhands.unchecked_append(item.property_id);
+                    longhand_values.unchecked_append(value.release_nonnull());
+                }
+
+                if (!is_valid)
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(longhands), move(longhand_values)) };
+            }
+            case FFI::CssStyleValueKind::GridTemplateShorthand: {
+                Vector<PropertyID> sub_properties;
+                Vector<ValueComparingNonnullRefPtr<StyleValue const>> values;
+                if (rust_style_value->property_id == PropertyID::Grid) {
+                    sub_properties.append(PropertyID::GridAutoFlow);
+                    sub_properties.append(PropertyID::GridAutoRows);
+                    sub_properties.append(PropertyID::GridAutoColumns);
+                }
+                sub_properties.append(PropertyID::GridTemplateAreas);
+                sub_properties.append(PropertyID::GridTemplateRows);
+                sub_properties.append(PropertyID::GridTemplateColumns);
+
+                values.ensure_capacity(sub_properties.size());
+                for (auto property_id : sub_properties)
+                    values.unchecked_append(property_initial_value(property_id));
+
+                auto materialize_source_as_property = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
+                    TokenStream property_tokens { component_values };
+                    auto value = parse_css_value_for_property(property_id, property_tokens);
+                    property_tokens.discard_whitespace();
+                    if (!value || property_tokens.has_next_token())
+                        return nullptr;
+                    return value;
+                };
+
+                bool is_valid = true;
+                for (auto const& item : rust_style_value->grid_template_shorthand_items) {
+                    auto value = materialize_source_as_property(item.property_id, item.value);
+                    if (!value) {
+                        is_valid = false;
+                        break;
+                    }
+
+                    auto index = sub_properties.find_first_index(item.property_id);
+                    if (!index.has_value()) {
+                        is_valid = false;
+                        break;
+                    }
+                    values[index.value()] = value.release_nonnull();
+                }
+
+                if (!is_valid)
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(sub_properties), move(values)) };
             }
             case FFI::CssStyleValueKind::GridTemplateAreas:
                 if (rust_style_value->grid_template_areas_is_none || !rust_style_value->grid_template_area_rows.is_empty()) {

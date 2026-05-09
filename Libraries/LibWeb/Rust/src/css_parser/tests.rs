@@ -51,7 +51,8 @@ use super::{
     RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
     RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontShorthandItem, RustOwnedFontStyle,
     RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow,
-    RustOwnedGridRepeat, RustOwnedGridRepeatType, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+    RustOwnedGridPlacementShorthandItem, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+    RustOwnedGridTemplateShorthandItem, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
     RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage,
     RustOwnedImageKind, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition,
     RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
@@ -3667,6 +3668,22 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::GridColumn], "main / span 2"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::GridColumn,
+            value: RustOwnedStyleValueKind::GridPlacementShorthand(vec![
+                RustOwnedGridPlacementShorthandItem {
+                    property_id: PropertyId::GridColumnStart,
+                    source: "main".to_string(),
+                },
+                RustOwnedGridPlacementShorthandItem {
+                    property_id: PropertyId::GridColumnEnd,
+                    source: "span 2".to_string(),
+                },
+            ]),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::GridAutoRows], "10px minmax(1px, 1fr)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::GridAutoRows,
@@ -3690,6 +3707,26 @@ fn parses_style_values_with_rust_owned_ast() {
                     },
                 )),
             ])),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Grid], "auto-flow dense 10px / 1fr"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Grid,
+            value: RustOwnedStyleValueKind::GridTemplateShorthand(vec![
+                RustOwnedGridTemplateShorthandItem {
+                    property_id: PropertyId::GridAutoFlow,
+                    source: "row dense".to_string(),
+                },
+                RustOwnedGridTemplateShorthandItem {
+                    property_id: PropertyId::GridTemplateColumns,
+                    source: "1fr".to_string(),
+                },
+                RustOwnedGridTemplateShorthandItem {
+                    property_id: PropertyId::GridAutoRows,
+                    source: "10px".to_string(),
+                },
+            ]),
         })
     );
     assert_eq!(
