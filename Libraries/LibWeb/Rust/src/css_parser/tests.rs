@@ -727,6 +727,38 @@ fn parse_descriptor_result_value(
     parsed.then_some(kind.map(|kind| (kind, items))).flatten()
 }
 
+fn descriptor_string_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::String,
+        numeric_value: None,
+        source_or_unit: value.to_string(),
+    }
+}
+
+fn descriptor_custom_ident_value(value: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::CustomIdent,
+        numeric_value: None,
+        source_or_unit: value.to_string(),
+    }
+}
+
+fn descriptor_integer_value(value: i32, source: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::Integer,
+        numeric_value: Some(f64::from(value)),
+        source_or_unit: source.to_string(),
+    }
+}
+
+fn descriptor_math_integer_value(source: &str) -> RustOwnedDescriptorPrimitiveValue {
+    RustOwnedDescriptorPrimitiveValue {
+        primitive_kind: CssPrimitiveValueKind::Invalid,
+        numeric_value: None,
+        source_or_unit: source.to_string(),
+    }
+}
+
 fn parse_counter_style_range_descriptor(input: &str) -> Option<(CssCounterStyleRangeKind, usize)> {
     let mut range = None;
     let parsed = parse_counter_style_range(input.as_bytes(), |kind, count| range = Some((kind, count)));
@@ -1881,14 +1913,14 @@ fn parses_descriptor_results_with_rust_owned_dispatch() {
         parse_descriptor_result_value("2 \"II\", \"I\" 1", CssDescriptorValueType::CounterStyleAdditiveSymbols),
         Some((
             CssDescriptorResultKind::CounterStyleAdditiveSymbols,
-            vec![("2 \"II\"".to_string(), false), ("\"I\" 1".to_string(), false)]
+            vec![("II".to_string(), false), ("I".to_string(), false)]
         ))
     );
     assert_eq!(
         parse_descriptor_result_value("\"-\" \"\"", CssDescriptorValueType::CounterStyleNegative),
         Some((
             CssDescriptorResultKind::CounterStyleNegative,
-            vec![("\"-\"".to_string(), false), ("\"\"".to_string(), false)]
+            vec![("-".to_string(), false), ("".to_string(), false)]
         ))
     );
     assert_eq!(
@@ -8370,11 +8402,11 @@ fn rejects_invalid_counter_style_negative_descriptors() {
 fn parses_rust_owned_counter_style_negative_descriptors() {
     assert_eq!(
         parse_rust_owned_counter_style_negative_descriptor("\"-\" \"\"".as_bytes()),
-        Some(vec!["\"-\"".to_string(), "\"\"".to_string()])
+        Some(vec![descriptor_string_value("-"), descriptor_string_value("")])
     );
     assert_eq!(
         parse_rust_owned_counter_style_negative_descriptor("minus".as_bytes()),
-        Some(vec!["minus".to_string()])
+        Some(vec![descriptor_custom_ident_value("minus")])
     );
 }
 
@@ -8441,9 +8473,15 @@ fn parses_rust_owned_counter_style_system_descriptors() {
         Some(RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol: None })
     );
     assert_eq!(
+        parse_rust_owned_counter_style_system_descriptor("fixed 1".as_bytes()),
+        Some(RustOwnedCounterStyleSystemDescriptor::Fixed {
+            first_symbol: Some(descriptor_integer_value(1, "1")),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_counter_style_system_descriptor("fixed calc(1)".as_bytes()),
         Some(RustOwnedCounterStyleSystemDescriptor::Fixed {
-            first_symbol: Some("calc(1)".to_string()),
+            first_symbol: Some(descriptor_math_integer_value("calc(1)")),
         })
     );
     assert_eq!(
@@ -8475,7 +8513,10 @@ fn rejects_invalid_counter_style_symbols_descriptors() {
 fn parses_rust_owned_counter_style_symbols_descriptors() {
     assert_eq!(
         parse_rust_owned_counter_style_symbols_descriptor("\"*\" symbol".as_bytes()),
-        Some(vec!["\"*\"".to_string(), "symbol".to_string()])
+        Some(vec![
+            descriptor_string_value("*"),
+            descriptor_custom_ident_value("symbol")
+        ])
     );
 }
 
@@ -8499,11 +8540,11 @@ fn rejects_invalid_counter_style_symbol_descriptors() {
 fn parses_rust_owned_counter_style_symbol_descriptors() {
     assert_eq!(
         parse_rust_owned_counter_style_symbol_descriptor("\"*\"".as_bytes()),
-        Some("\"*\"".to_string())
+        Some(descriptor_string_value("*"))
     );
     assert_eq!(
         parse_rust_owned_counter_style_symbol_descriptor("symbol".as_bytes()),
-        Some("symbol".to_string())
+        Some(descriptor_custom_ident_value("symbol"))
     );
     assert_eq!(parse_rust_owned_counter_style_symbol_descriptor("1".as_bytes()), None);
 }
@@ -8741,10 +8782,14 @@ fn parses_rust_owned_counter_style_additive_symbols_descriptors() {
             RustOwnedCounterStyleAdditiveTuple {
                 order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
                 source: "2 \"II\"".to_string(),
+                integer: Some(2),
+                symbol: descriptor_string_value("II"),
             },
             RustOwnedCounterStyleAdditiveTuple {
                 order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
                 source: "\"I\" 1".to_string(),
+                integer: Some(1),
+                symbol: descriptor_string_value("I"),
             },
         ])
     );
@@ -8757,6 +8802,8 @@ fn parses_rust_owned_counter_style_pad_descriptors() {
         Some(RustOwnedCounterStylePadDescriptor {
             order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
             source: "2 \"0\"".to_string(),
+            integer: Some(2),
+            symbol: descriptor_string_value("0"),
         })
     );
     assert_eq!(
@@ -8764,6 +8811,8 @@ fn parses_rust_owned_counter_style_pad_descriptors() {
         Some(RustOwnedCounterStylePadDescriptor {
             order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
             source: "\"0\" 2".to_string(),
+            integer: Some(2),
+            symbol: descriptor_string_value("0"),
         })
     );
     assert_eq!(parse_rust_owned_counter_style_pad_descriptor("2".as_bytes()), None);

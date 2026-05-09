@@ -334,6 +334,7 @@ where
     let sources = match value_type {
         CssDescriptorValueType::CounterStyleNegative => {
             parse_rust_owned_counter_style_negative_descriptor(filtered_input)
+                .map(|symbols| symbols.into_iter().map(|symbol| symbol.source_or_unit).collect())
         }
         CssDescriptorValueType::FontSrcList => parse_rust_owned_font_src_list_descriptor(filtered_input),
         CssDescriptorValueType::FontWeightAbsolutePair => {
@@ -345,9 +346,10 @@ where
         }
         CssDescriptorValueType::String => parse_rust_owned_string_descriptor(filtered_input).map(|source| vec![source]),
         CssDescriptorValueType::Symbol => {
-            parse_rust_owned_counter_style_symbol_descriptor(filtered_input).map(|source| vec![source])
+            parse_rust_owned_counter_style_symbol_descriptor(filtered_input).map(|symbol| vec![symbol.source_or_unit])
         }
-        CssDescriptorValueType::Symbols => parse_rust_owned_counter_style_symbols_descriptor(filtered_input),
+        CssDescriptorValueType::Symbols => parse_rust_owned_counter_style_symbols_descriptor(filtered_input)
+            .map(|symbols| symbols.into_iter().map(|symbol| symbol.source_or_unit).collect()),
         _ => None,
     };
 
@@ -383,11 +385,15 @@ where
             for tuple in &tuples {
                 source_callback(
                     tuple.order,
-                    &tuple.source,
+                    if tuple.integer.is_some() {
+                        tuple.symbol.source_or_unit()
+                    } else {
+                        &tuple.source
+                    },
                     false,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
+                    tuple.symbol.primitive_kind(),
+                    tuple.integer.is_some(),
+                    tuple.integer.map(f64::from).unwrap_or(0.0),
                     0,
                     0,
                 );
@@ -402,9 +408,9 @@ where
             for symbol in &symbols {
                 source_callback(
                     default_order,
-                    symbol,
+                    symbol.source_or_unit(),
                     false,
-                    CssPrimitiveValueKind::Invalid,
+                    symbol.primitive_kind(),
                     false,
                     0.0,
                     0,
@@ -438,11 +444,11 @@ where
                         kind_callback(CssDescriptorResultKind::CounterStyleSystemFixedWithInteger);
                         source_callback(
                             default_order,
-                            &first_symbol,
+                            first_symbol.source_or_unit(),
                             false,
-                            CssPrimitiveValueKind::Invalid,
-                            false,
-                            0.0,
+                            first_symbol.primitive_kind(),
+                            first_symbol.has_numeric_value(),
+                            first_symbol.numeric_value(),
                             0,
                             0,
                         );
@@ -473,11 +479,15 @@ where
             kind_callback(CssDescriptorResultKind::CounterStylePad);
             source_callback(
                 pad.order,
-                &pad.source,
+                if pad.integer.is_some() {
+                    pad.symbol.source_or_unit()
+                } else {
+                    &pad.source
+                },
                 false,
-                CssPrimitiveValueKind::Invalid,
-                false,
-                0.0,
+                pad.symbol.primitive_kind(),
+                pad.integer.is_some(),
+                pad.integer.map(f64::from).unwrap_or(0.0),
                 0,
                 0,
             );
@@ -517,9 +527,9 @@ where
             for symbol in &symbols {
                 source_callback(
                     default_order,
-                    symbol,
+                    symbol.source_or_unit(),
                     false,
-                    CssPrimitiveValueKind::Invalid,
+                    symbol.primitive_kind(),
                     false,
                     0.0,
                     0,
@@ -535,9 +545,9 @@ where
             kind_callback(CssDescriptorResultKind::Symbol);
             source_callback(
                 default_order,
-                &symbol,
+                symbol.source_or_unit(),
                 false,
-                CssPrimitiveValueKind::Invalid,
+                symbol.primitive_kind(),
                 false,
                 0.0,
                 0,

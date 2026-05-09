@@ -16,12 +16,16 @@ pub(crate) enum RustOwnedCounterStyleRangeDescriptor {
 pub(crate) struct RustOwnedCounterStyleAdditiveTuple {
     pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
     pub(crate) source: String,
+    pub(crate) integer: Option<i32>,
+    pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedCounterStylePadDescriptor {
     pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
     pub(crate) source: String,
+    pub(crate) integer: Option<i32>,
+    pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,8 +35,12 @@ pub(crate) enum RustOwnedCounterStyleSystemDescriptor {
     Alphabetic,
     Symbolic,
     Additive,
-    Fixed { first_symbol: Option<String> },
-    Extends { name: String },
+    Fixed {
+        first_symbol: Option<RustOwnedDescriptorPrimitiveValue>,
+    },
+    Extends {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,10 +78,19 @@ impl RustOwnedDescriptorPrimitiveValue {
     }
 }
 
-pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedNonnegativeIntegerSymbolPair {
+    pub(crate) order: CssNonnegativeIntegerSymbolPairOrder,
+    pub(crate) source: String,
+    pub(crate) integer: Option<i32>,
+    pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
+}
+
+pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedDescriptorPrimitiveValue>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let filtered_input = filtered_input_to_string(filtered_input);
 
     let mut parser = ComponentValueParser::new(component_values);
     let mut symbols = Vec::new();
@@ -81,10 +98,10 @@ pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input:
     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
     // <symbol> <symbol>?
     parser.discard_whitespace();
-    symbols.push(parser.consume_symbol_source(&filtered_input)?);
+    symbols.push(parser.consume_symbol_value()?);
 
     parser.discard_whitespace();
-    if let Some(symbol) = parser.consume_symbol_source(&filtered_input) {
+    if let Some(symbol) = parser.consume_symbol_value() {
         symbols.push(symbol);
     }
 
@@ -92,10 +109,11 @@ pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(filtered_input:
     (!parser.has_next_component_value()).then_some(symbols)
 }
 
-pub(crate) fn parse_rust_owned_counter_style_symbols_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+pub(crate) fn parse_rust_owned_counter_style_symbols_descriptor(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedDescriptorPrimitiveValue>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let filtered_input = filtered_input_to_string(filtered_input);
 
     let mut parser = ComponentValueParser::new(component_values);
     let mut symbols = Vec::new();
@@ -104,7 +122,7 @@ pub(crate) fn parse_rust_owned_counter_style_symbols_descriptor(filtered_input: 
     // <symbol>+
     loop {
         parser.discard_whitespace();
-        let Some(symbol) = parser.consume_symbol_source(&filtered_input) else {
+        let Some(symbol) = parser.consume_symbol_value() else {
             break;
         };
         symbols.push(symbol);
@@ -178,14 +196,12 @@ pub(crate) fn parse_rust_owned_counter_style_additive_symbols_descriptor(
     // <additive-symbols> = <additive-tuple>#
     loop {
         parser.discard_whitespace();
-        let start = parser.index;
-        let order = parser.parse_a_nonnegative_integer_symbol_pair()?;
+        let pair = parser.parse_a_nonnegative_integer_symbol_pair_value(&filtered_input)?;
         tuples.push(RustOwnedCounterStyleAdditiveTuple {
-            order,
-            source: serialize_component_values_for_reparsing(
-                &parser.component_values[start..parser.index],
-                &filtered_input,
-            )?,
+            order: pair.order,
+            source: pair.source,
+            integer: pair.integer,
+            symbol: pair.symbol,
         });
 
         parser.discard_whitespace();
@@ -227,12 +243,17 @@ pub(crate) fn parse_rust_owned_counter_style_system_descriptor(
         RustOwnedCounterStyleSystemDescriptor::Additive
     } else if parser.consume_ident_matching("fixed") {
         parser.discard_whitespace();
-        let integer_start = parser.index;
-        let first_symbol = if parser.consume_integer_syntax() {
-            Some(serialize_component_values_for_reparsing(
-                &parser.component_values[integer_start..parser.index],
-                &filtered_input,
-            )?)
+        let first_symbol = if let Some(first_symbol) = parser.consume_integer_value() {
+            Some(RustOwnedDescriptorPrimitiveValue {
+                primitive_kind: first_symbol
+                    .map(|_| CssPrimitiveValueKind::Integer)
+                    .unwrap_or(CssPrimitiveValueKind::Invalid),
+                numeric_value: first_symbol.map(f64::from),
+                source_or_unit: serialize_component_values_for_reparsing(
+                    &parser.component_values[(parser.index - 1)..parser.index],
+                    &filtered_input,
+                )?,
+            })
         } else {
             None
         };
@@ -261,33 +282,32 @@ pub(crate) fn parse_rust_owned_counter_style_pad_descriptor(
     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-pad
     // <integer [0,∞]> && <symbol>
     parser.discard_whitespace();
-    let start = parser.index;
-    let order = parser.parse_a_nonnegative_integer_symbol_pair()?;
+    let pair = parser.parse_a_nonnegative_integer_symbol_pair_value(&filtered_input)?;
     parser.discard_whitespace();
     if parser.has_next_component_value() {
         return None;
     }
 
     Some(RustOwnedCounterStylePadDescriptor {
-        order,
-        source: serialize_component_values_for_reparsing(
-            &parser.component_values[start..parser.index],
-            &filtered_input,
-        )?,
+        order: pair.order,
+        source: pair.source,
+        integer: pair.integer,
+        symbol: pair.symbol,
     })
 }
 
-pub(crate) fn parse_rust_owned_counter_style_symbol_descriptor(filtered_input: &[u8]) -> Option<String> {
+pub(crate) fn parse_rust_owned_counter_style_symbol_descriptor(
+    filtered_input: &[u8],
+) -> Option<RustOwnedDescriptorPrimitiveValue> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
-    let filtered_input = filtered_input_to_string(filtered_input);
 
     let mut parser = ComponentValueParser::new(component_values);
 
     // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
     // <symbol> = <string> | <image> | <custom-ident>
     parser.discard_whitespace();
-    let symbol = parser.consume_symbol_source(&filtered_input)?;
+    let symbol = parser.consume_symbol_value()?;
     parser.discard_whitespace();
     (!parser.has_next_component_value()).then_some(symbol)
 }
@@ -540,6 +560,118 @@ where
 }
 
 impl ComponentValueParser {
+    fn consume_nonnegative_integer_value(&mut self) -> Option<Option<i32>> {
+        let component_value = self.next_component_value()?;
+
+        let integer = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { number },
+                ..
+            }) if number_is_integer(*number) && number.value() >= 0.0 && number.value() <= i32::MAX as f64 => {
+                Some(number.value() as i32)
+            }
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing and range-checking math functions still happens in C++.
+            ComponentValue::Function(_) => None,
+            _ => return None,
+        };
+
+        self.index += 1;
+        Some(integer)
+    }
+
+    fn consume_integer_value(&mut self) -> Option<Option<i32>> {
+        let component_value = self.next_component_value()?;
+
+        let integer = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { number },
+                ..
+            }) if number_is_integer(*number)
+                && number.value() >= i32::MIN as f64
+                && number.value() <= i32::MAX as f64 =>
+            {
+                Some(number.value() as i32)
+            }
+            // AD-HOC: The Rust side only recognizes the syntactic branch here.
+            // Materializing math functions still happens in C++.
+            ComponentValue::Function(_) => None,
+            _ => return None,
+        };
+
+        self.index += 1;
+        Some(integer)
+    }
+
+    fn consume_symbol_value(&mut self) -> Option<RustOwnedDescriptorPrimitiveValue> {
+        let component_value = self.next_component_value()?;
+
+        // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
+        // <symbol> = <string> | <image> | <custom-ident>
+        let (primitive_kind, source_or_unit) = match component_value {
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::String { value },
+                ..
+            }) => (CssPrimitiveValueKind::String, value.clone()),
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            }) if is_valid_custom_ident(value, &[]) => (CssPrimitiveValueKind::CustomIdent, value.clone()),
+            // AD-HOC: In line with the generated <symbol> parser, we don't
+            // support <image> here since that part of the grammar is at-risk
+            // and unsupported by other engines.
+            _ => return None,
+        };
+
+        self.index += 1;
+        Some(RustOwnedDescriptorPrimitiveValue {
+            primitive_kind,
+            numeric_value: None,
+            source_or_unit,
+        })
+    }
+
+    fn parse_a_nonnegative_integer_symbol_pair_value(
+        &mut self,
+        filtered_input: &str,
+    ) -> Option<RustOwnedNonnegativeIntegerSymbolPair> {
+        // https://drafts.csswg.org/css-counter-styles-3/#typedef-additive-tuple
+        // <additive-tuple> = [ <integer [0,∞]> && <symbol> ]
+        let saved_index = self.index;
+        if let Some(integer) = self.consume_nonnegative_integer_value() {
+            self.discard_whitespace();
+            if let Some(symbol) = self.consume_symbol_value() {
+                return Some(RustOwnedNonnegativeIntegerSymbolPair {
+                    order: CssNonnegativeIntegerSymbolPairOrder::IntegerFirst,
+                    source: serialize_component_values_for_reparsing(
+                        &self.component_values[saved_index..self.index],
+                        filtered_input,
+                    )?,
+                    integer,
+                    symbol,
+                });
+            }
+        }
+        self.index = saved_index;
+
+        if let Some(symbol) = self.consume_symbol_value() {
+            self.discard_whitespace();
+            if let Some(integer) = self.consume_nonnegative_integer_value() {
+                return Some(RustOwnedNonnegativeIntegerSymbolPair {
+                    order: CssNonnegativeIntegerSymbolPairOrder::SymbolFirst,
+                    source: serialize_component_values_for_reparsing(
+                        &self.component_values[saved_index..self.index],
+                        filtered_input,
+                    )?,
+                    integer,
+                    symbol,
+                });
+            }
+        }
+        self.index = saved_index;
+        None
+    }
+
     fn consume_symbol_source(&mut self, filtered_input: &str) -> Option<String> {
         let start = self.index;
         if !self.consume_symbol_syntax() {

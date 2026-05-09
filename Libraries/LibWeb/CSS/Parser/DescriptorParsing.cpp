@@ -24,6 +24,18 @@
 
 namespace Web::CSS::Parser {
 
+static RefPtr<StyleValue const> materialize_descriptor_symbol(RustComponentValueParser::DescriptorResultItem const& item)
+{
+    switch (item.primitive_kind) {
+    case FFI::CssPrimitiveValueKind::String:
+        return StringStyleValue::create(FlyString::from_utf8_without_validation(item.source.bytes()));
+    case FFI::CssPrimitiveValueKind::CustomIdent:
+        return CustomIdentStyleValue::create(FlyString::from_utf8_without_validation(item.source.bytes()));
+    default:
+        return nullptr;
+    }
+}
+
 RefPtr<StyleValue const> Parser::materialize_nonnegative_integer_symbol_pair(ReadonlySpan<ComponentValue const> component_values, FFI::CssNonnegativeIntegerSymbolPairOrder order)
 {
     auto pair_component_values = Vector<ComponentValue> { component_values };
@@ -54,6 +66,23 @@ RefPtr<StyleValue const> Parser::materialize_nonnegative_integer_symbol_pair(Rea
         return nullptr;
 
     return StyleValueList::create({ integer.release_nonnull(), symbol.release_nonnull() }, StyleValueList::Separator::Space);
+}
+
+static RefPtr<StyleValue const> materialize_descriptor_integer_symbol_pair(RustComponentValueParser::DescriptorResultItem const& item)
+{
+    if (item.primitive_kind != FFI::CssPrimitiveValueKind::String && item.primitive_kind != FFI::CssPrimitiveValueKind::CustomIdent)
+        return nullptr;
+    if (!item.has_numeric_value)
+        return nullptr;
+    if (item.numeric_value < 0 || item.numeric_value > NumericLimits<i32>::max())
+        return nullptr;
+
+    auto integer = IntegerStyleValue::create(static_cast<i32>(item.numeric_value));
+    auto symbol = materialize_descriptor_symbol(item);
+    if (!symbol)
+        return nullptr;
+
+    return StyleValueList::create({ integer, symbol.release_nonnull() }, StyleValueList::Separator::Space);
 }
 
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens)
@@ -142,8 +171,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     StyleValueVector additive_tuples;
                     for (auto const& tuple : additive_symbols->items) {
-                        auto tuple_component_values = RustComponentValueParser::parse_a_list_of_component_values(tuple.source.bytes_as_string_view(), "utf-8"sv);
-                        auto additive_tuple = materialize_nonnegative_integer_symbol_pair(tuple_component_values, tuple.order);
+                        auto additive_tuple = materialize_descriptor_integer_symbol_pair(tuple);
+                        if (!additive_tuple) {
+                            auto tuple_component_values = RustComponentValueParser::parse_a_list_of_component_values(tuple.source.bytes_as_string_view(), "utf-8"sv);
+                            additive_tuple = materialize_nonnegative_integer_symbol_pair(tuple_component_values, tuple.order);
+                        }
                         if (!additive_tuple)
                             return nullptr;
 
@@ -210,7 +242,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     case FFI::CssDescriptorResultKind::CounterStyleSystemFixedWithInteger: {
                         if (system->items.size() != 1)
                             return nullptr;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system->items.first().source.bytes_as_string_view(), "utf-8"sv);
+                        auto const& system_item = system->items.first();
+                        if (system_item.primitive_kind == FFI::CssPrimitiveValueKind::Integer && system_item.has_numeric_value)
+                            return CounterStyleSystemStyleValue::create_fixed(IntegerStyleValue::create(static_cast<i32>(system_item.numeric_value)));
+
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(system_item.source.bytes_as_string_view(), "utf-8"sv);
                         TokenStream<ComponentValue> system_tokens { component_values };
                         auto integer_value = parse_integer_value(system_tokens, infinite_integer_range);
                         if (!integer_value)
@@ -268,13 +304,15 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     StyleValueVector symbols;
                     for (auto const& item : negative->items) {
-                        auto const& source = item.source;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> symbol_tokens { component_values };
-                        auto symbol = parse_symbol_value(symbol_tokens);
-                        symbol_tokens.discard_whitespace();
-                        if (!symbol || symbol_tokens.has_next_token())
-                            return nullptr;
+                        auto symbol = materialize_descriptor_symbol(item);
+                        if (!symbol) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream<ComponentValue> symbol_tokens { component_values };
+                            symbol = parse_symbol_value(symbol_tokens);
+                            symbol_tokens.discard_whitespace();
+                            if (!symbol || symbol_tokens.has_next_token())
+                                return nullptr;
+                        }
                         symbols.append(symbol.release_nonnull());
                     }
 
@@ -293,6 +331,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     auto pad = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStylePad, serialized_pair.bytes_as_string_view(), "utf-8"sv);
                     if (!pad.has_value() || pad->kind != FFI::CssDescriptorResultKind::CounterStylePad || pad->items.size() != 1)
                         return nullptr;
+
+                    auto pair = materialize_descriptor_integer_symbol_pair(pad->items.first());
+                    if (pair)
+                        return pair.release_nonnull();
 
                     auto component_values = RustComponentValueParser::parse_a_list_of_component_values(pad->items.first().source.bytes_as_string_view(), "utf-8"sv);
                     return materialize_nonnegative_integer_symbol_pair(component_values, pad->items.first().order);
@@ -780,16 +822,19 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (!symbol_sources.has_value() || symbol_sources->kind != FFI::CssDescriptorResultKind::Symbol || symbol_sources->items.size() != 1)
                         return nullptr;
 
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream<ComponentValue> symbol_tokens { component_values };
+                    auto symbol = materialize_descriptor_symbol(symbol_sources->items.first());
+                    if (!symbol) {
+                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
+                        TokenStream<ComponentValue> symbol_tokens { component_values };
 
-                    auto symbol = parse_symbol_value(symbol_tokens);
-                    if (!symbol)
-                        return nullptr;
+                        symbol = parse_symbol_value(symbol_tokens);
+                        if (!symbol)
+                            return nullptr;
 
-                    symbol_tokens.discard_whitespace();
-                    if (symbol_tokens.has_next_token())
-                        return nullptr;
+                        symbol_tokens.discard_whitespace();
+                        if (symbol_tokens.has_next_token())
+                            return nullptr;
+                    }
 
                     return symbol.release_nonnull();
                 }
@@ -807,14 +852,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     StyleValueVector symbols;
                     for (auto const& item : symbol_sources->items) {
-                        auto const& source = item.source;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> symbol_tokens { component_values };
-                        symbol_tokens.discard_whitespace();
-                        auto symbol = parse_symbol_value(symbol_tokens);
-                        symbol_tokens.discard_whitespace();
-                        if (!symbol || symbol_tokens.has_next_token())
-                            return nullptr;
+                        auto symbol = materialize_descriptor_symbol(item);
+                        if (!symbol) {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream<ComponentValue> symbol_tokens { component_values };
+                            symbol_tokens.discard_whitespace();
+                            symbol = parse_symbol_value(symbol_tokens);
+                            symbol_tokens.discard_whitespace();
+                            if (!symbol || symbol_tokens.has_next_token())
+                                return nullptr;
+                        }
                         symbols.append(symbol.release_nonnull());
                     }
 
