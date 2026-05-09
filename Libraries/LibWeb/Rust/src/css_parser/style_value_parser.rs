@@ -246,6 +246,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundOrigin
             | PropertyId::Border
             | PropertyId::BorderBlock
+            | PropertyId::BorderBlockEnd
+            | PropertyId::BorderBlockEndColor
+            | PropertyId::BorderBlockEndStyle
+            | PropertyId::BorderBlockStart
+            | PropertyId::BorderBlockStartColor
+            | PropertyId::BorderBlockStartStyle
             | PropertyId::BorderImage
             | PropertyId::BorderImageOutset
             | PropertyId::BorderImageRepeat
@@ -253,6 +259,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderImageSource
             | PropertyId::BorderImageWidth
             | PropertyId::BorderInline
+            | PropertyId::BorderInlineEnd
+            | PropertyId::BorderInlineEndColor
+            | PropertyId::BorderInlineEndStyle
+            | PropertyId::BorderInlineStart
+            | PropertyId::BorderInlineStartColor
+            | PropertyId::BorderInlineStartStyle
             | PropertyId::BorderBottomColor
             | PropertyId::BorderBottomStyle
             | PropertyId::BorderCollapse
@@ -586,9 +598,13 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_generated_value_list_style_value_kind(property_id, filtered_input)
         }
         PropertyId::AspectRatio => rust_owned_aspect_ratio_style_value_kind(filtered_input),
-        PropertyId::Border | PropertyId::BorderBlock | PropertyId::BorderInline => {
-            rust_owned_border_shorthand_style_value_kind(property_id, filtered_input)
-        }
+        PropertyId::Border
+        | PropertyId::BorderBlock
+        | PropertyId::BorderBlockEnd
+        | PropertyId::BorderBlockStart
+        | PropertyId::BorderInline
+        | PropertyId::BorderInlineEnd
+        | PropertyId::BorderInlineStart => rust_owned_border_shorthand_style_value_kind(property_id, filtered_input),
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImage => rust_owned_border_image_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),
@@ -627,7 +643,11 @@ fn parse_rust_owned_property_specific_longhand_value(
         ),
         PropertyId::AccentColor
         | PropertyId::BackgroundColor
+        | PropertyId::BorderBlockEndColor
+        | PropertyId::BorderBlockStartColor
         | PropertyId::BorderBottomColor
+        | PropertyId::BorderInlineEndColor
+        | PropertyId::BorderInlineStartColor
         | PropertyId::BorderLeftColor
         | PropertyId::BorderRightColor
         | PropertyId::BorderTopColor

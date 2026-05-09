@@ -115,13 +115,25 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BackgroundOrigin:
     case PropertyID::Border:
     case PropertyID::BorderBlock:
+    case PropertyID::BorderBlockEnd:
+    case PropertyID::BorderBlockEndColor:
+    case PropertyID::BorderBlockEndStyle:
     case PropertyID::BorderImage:
     case PropertyID::BorderImageOutset:
     case PropertyID::BorderImageRepeat:
     case PropertyID::BorderImageSlice:
     case PropertyID::BorderImageSource:
     case PropertyID::BorderImageWidth:
+    case PropertyID::BorderBlockStart:
+    case PropertyID::BorderBlockStartColor:
+    case PropertyID::BorderBlockStartStyle:
     case PropertyID::BorderInline:
+    case PropertyID::BorderInlineEnd:
+    case PropertyID::BorderInlineEndColor:
+    case PropertyID::BorderInlineEndStyle:
+    case PropertyID::BorderInlineStart:
+    case PropertyID::BorderInlineStartColor:
+    case PropertyID::BorderInlineStartStyle:
     case PropertyID::BorderBottomColor:
     case PropertyID::BorderBottomStyle:
     case PropertyID::BorderCollapse:
@@ -3536,16 +3548,39 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     style_property = PropertyID::BorderBlockStyle;
                     color_property = PropertyID::BorderBlockColor;
                     break;
+                case PropertyID::BorderBlockEnd:
+                    width_property = PropertyID::BorderBlockEndWidth;
+                    style_property = PropertyID::BorderBlockEndStyle;
+                    color_property = PropertyID::BorderBlockEndColor;
+                    break;
+                case PropertyID::BorderBlockStart:
+                    width_property = PropertyID::BorderBlockStartWidth;
+                    style_property = PropertyID::BorderBlockStartStyle;
+                    color_property = PropertyID::BorderBlockStartColor;
+                    break;
                 case PropertyID::BorderInline:
                     width_property = PropertyID::BorderInlineWidth;
                     style_property = PropertyID::BorderInlineStyle;
                     color_property = PropertyID::BorderInlineColor;
                     break;
+                case PropertyID::BorderInlineEnd:
+                    width_property = PropertyID::BorderInlineEndWidth;
+                    style_property = PropertyID::BorderInlineEndStyle;
+                    color_property = PropertyID::BorderInlineEndColor;
+                    break;
+                case PropertyID::BorderInlineStart:
+                    width_property = PropertyID::BorderInlineStartWidth;
+                    style_property = PropertyID::BorderInlineStartStyle;
+                    color_property = PropertyID::BorderInlineStartColor;
+                    break;
                 default:
                     VERIFY_NOT_REACHED();
                 }
 
-                auto const make_single_value_shorthand = [&](PropertyID property_id, Vector<PropertyID> const& longhands, ValueComparingNonnullRefPtr<StyleValue const> const& value) {
+                auto const make_single_value_shorthand = [&](PropertyID property_id, Vector<PropertyID> const& longhands, ValueComparingNonnullRefPtr<StyleValue const> const& value) -> RefPtr<StyleValue const> {
+                    if (!property_is_shorthand(property_id))
+                        return value;
+
                     Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
                     longhand_values.resize_with_default_value(longhands.size(), value);
 
@@ -3589,7 +3624,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
 
-                if (first_is_one_of(rust_style_value->property_id, PropertyID::BorderBlock, PropertyID::BorderInline)) {
+                if (rust_style_value->property_id != PropertyID::Border) {
                     return PropertyAndValue {
                         rust_style_value->property_id,
                         ShorthandStyleValue::create(rust_style_value->property_id,

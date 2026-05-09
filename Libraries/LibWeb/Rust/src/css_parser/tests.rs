@@ -1958,6 +1958,10 @@ fn parses_style_values_with_rust_owned_ast() {
     );
     for property_id in [
         PropertyId::AccentColor,
+        PropertyId::BorderBlockEndColor,
+        PropertyId::BorderBlockStartColor,
+        PropertyId::BorderInlineEndColor,
+        PropertyId::BorderInlineStartColor,
         PropertyId::CaretColor,
         PropertyId::FloodColor,
         PropertyId::OutlineColor,
@@ -1992,8 +1996,12 @@ fn parses_style_values_with_rust_owned_ast() {
     );
     let rust_owned_keyword_longhands = [
         (PropertyId::Appearance, "auto", "auto"),
+        (PropertyId::BorderBlockEndStyle, "hidden", "hidden"),
+        (PropertyId::BorderBlockStartStyle, "dotted", "dotted"),
         (PropertyId::BorderBottomStyle, "solid", "solid"),
         (PropertyId::BorderCollapse, "collapse", "collapse"),
+        (PropertyId::BorderInlineEndStyle, "groove", "groove"),
+        (PropertyId::BorderInlineStartStyle, "ridge", "ridge"),
         (PropertyId::BorderLeftStyle, "dashed", "dashed"),
         (PropertyId::BorderRightStyle, "dotted", "dotted"),
         (PropertyId::BorderTopStyle, "double", "double"),
@@ -2853,6 +2861,24 @@ fn parses_style_values_with_rust_owned_ast() {
                     blue: 0,
                     alpha: 0,
                     name: Some("currentcolor".to_string()),
+                }),
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BorderInlineStart], "green double thin"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BorderInlineStart,
+            value: RustOwnedStyleValueKind::Border(RustOwnedBorder {
+                width: Some(RustOwnedNestedPrimitiveValue::Keyword("thin".to_string())),
+                style: Some(RustOwnedLineStyle::Double),
+                color: Some(RustOwnedColor::Simple {
+                    kind: CssParsedColorKind::Rgba,
+                    red: 0,
+                    green: 128,
+                    blue: 0,
+                    alpha: 255,
+                    name: Some("green".to_string()),
                 }),
             }),
         })

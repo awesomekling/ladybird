@@ -1536,10 +1536,30 @@ pub(super) fn border_shorthand_component_properties(
             PropertyId::BorderBlockStyle,
             PropertyId::BorderBlockColor,
         )),
+        PropertyId::BorderBlockEnd => Some((
+            PropertyId::BorderBlockEndWidth,
+            PropertyId::BorderBlockEndStyle,
+            PropertyId::BorderBlockEndColor,
+        )),
+        PropertyId::BorderBlockStart => Some((
+            PropertyId::BorderBlockStartWidth,
+            PropertyId::BorderBlockStartStyle,
+            PropertyId::BorderBlockStartColor,
+        )),
         PropertyId::BorderInline => Some((
             PropertyId::BorderInlineWidth,
             PropertyId::BorderInlineStyle,
             PropertyId::BorderInlineColor,
+        )),
+        PropertyId::BorderInlineEnd => Some((
+            PropertyId::BorderInlineEndWidth,
+            PropertyId::BorderInlineEndStyle,
+            PropertyId::BorderInlineEndColor,
+        )),
+        PropertyId::BorderInlineStart => Some((
+            PropertyId::BorderInlineStartWidth,
+            PropertyId::BorderInlineStartStyle,
+            PropertyId::BorderInlineStartColor,
         )),
         _ => None,
     }
