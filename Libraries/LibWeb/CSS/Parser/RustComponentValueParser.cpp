@@ -3408,6 +3408,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 }
             }
+            if (style_value->kind == FFI::CssStyleValueKind::PositionalValueListShorthand) {
+                VERIFY(!style_value->positional_value_list_shorthand_items.is_empty());
+                style_value->positional_value_list_shorthand_items.last().calculation_node_events.append(move(event));
+                return;
+            }
             style_value->calculation_node_events.append(move(event));
         });
 

@@ -149,6 +149,14 @@ public:
         Optional<String> color_name_or_source;
     };
 
+    struct RustCalculationNodeEvent {
+        FFI::CssCalculationNodeKind kind;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> numeric_value;
+        u32 child_count { 0 };
+        String metadata;
+    };
+
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         PropertyID property_id;
@@ -158,6 +166,7 @@ public:
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
         Optional<ValueType> primitive_value_type;
+        Vector<RustCalculationNodeEvent> calculation_node_events;
         Optional<Keyword> corner_shape_keyword;
         bool has_corner_shape_superellipse_parameter { false };
     };
@@ -250,14 +259,6 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
-    };
-
-    struct RustCalculationNodeEvent {
-        FFI::CssCalculationNodeKind kind;
-        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
-        Optional<double> numeric_value;
-        u32 child_count { 0 };
-        String metadata;
     };
 
     struct FontStyle {

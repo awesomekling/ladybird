@@ -5172,7 +5172,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             : infinite_range;
 
                         RefPtr<StyleValue const> parsed_value;
-                        if (*item.primitive_value_type == ValueType::Length)
+                        if (!item.calculation_node_events.is_empty())
+                            parsed_value = materialize_rust_calculation_tree_values(property_id, *item.primitive_value_type, item.calculation_node_events, DiscardCalculationToken::No);
+                        else if (*item.primitive_value_type == ValueType::Length)
                             parsed_value = materialize_rust_nested_length(value, range);
                         else if (*item.primitive_value_type == ValueType::LengthPercentage)
                             parsed_value = materialize_rust_nested_length_percentage(value, range);
