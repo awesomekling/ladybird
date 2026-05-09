@@ -50,8 +50,8 @@ use super::{
     RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
     RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
     RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontShorthandItem, RustOwnedFontStyle,
-    RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGridAutoFlow,
-    RustOwnedGridPlacementShorthandItem, RustOwnedGridRepeat, RustOwnedGridRepeatType,
+    RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGradientKind,
+    RustOwnedGridAutoFlow, RustOwnedGridPlacementShorthandItem, RustOwnedGridRepeat, RustOwnedGridRepeatType,
     RustOwnedGridTemplateShorthandItem, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
     RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage,
     RustOwnedImageKind, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition,
@@ -124,7 +124,7 @@ use super::{
     parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
     parse_transition_property_value, parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
     parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
-    parse_will_change_value, strip_whitespace,
+    parse_will_change_value, rust_owned_image_style_value_kind, strip_whitespace,
 };
 use crate::css_tokenizer::{self, TokenType};
 use crate::generated_descriptors::{
@@ -1281,6 +1281,13 @@ fn parse_rust_owned_style_value(property_ids: &[PropertyId], input: &str) -> Opt
     }
 }
 
+fn parse_rust_owned_image(input: &str) -> Option<RustOwnedImage> {
+    match rust_owned_image_style_value_kind(input.as_bytes(), input)? {
+        RustOwnedStyleValueKind::Image(image) => Some(image),
+        _ => None,
+    }
+}
+
 fn parse_coordinating_shorthand(property_ids: &[PropertyId], input: &str) -> Option<Vec<(usize, PropertyId, String)>> {
     let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
     let mut items = Vec::new();
@@ -2350,6 +2357,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
                     }),
+                    gradient: None,
                     source: "url(marker.png)".to_string(),
                 })),
                 list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
@@ -2720,6 +2728,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
                     }),
+                    gradient: None,
                     source: "url(marker.png)".to_string(),
                 })],
                 alt_text: vec![],
@@ -2762,6 +2771,13 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    let gradient = parse_rust_owned_image("linear-gradient(to bottom in oklab, black, white)").unwrap();
+    assert_eq!(gradient.kind, RustOwnedImageKind::Gradient);
+    let gradient = gradient.gradient.as_ref().unwrap();
+    assert_eq!(gradient.kind, RustOwnedGradientKind::Linear);
+    assert!(!gradient.is_repeating);
+    assert!(!gradient.is_webkit_prefixed);
+    assert_eq!(gradient.groups.len(), 3);
     assert_eq!(
         parse_rust_owned_style_value(
             &[PropertyId::BackgroundImage],
@@ -3181,6 +3197,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         function_type: CssUrlFunctionType::Url,
                         url: "border.png".to_string(),
                     }),
+                    gradient: None,
                     source: "url(border.png)".to_string(),
                 })),
                 slice: Some(RustOwnedBorderImageSlice {
@@ -3272,6 +3289,7 @@ fn parses_style_values_with_rust_owned_ast() {
                             function_type: CssUrlFunctionType::Url,
                             url: "cursor.png".to_string(),
                         }),
+                        gradient: None,
                         source: "url(cursor.png)".to_string(),
                     },
                     x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),

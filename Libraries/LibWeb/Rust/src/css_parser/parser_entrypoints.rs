@@ -5150,28 +5150,63 @@ pub(super) fn component_value_parse_as_image_gradient(component_value: &Componen
     component_value_parse_as_image_set_gradient(component_value)
 }
 
-pub(super) fn component_value_parse_as_image_set_gradient(component_value: &ComponentValue) -> bool {
+pub(super) fn component_value_parse_as_image_gradient_value(
+    component_value: &ComponentValue,
+) -> Option<RustOwnedGradient> {
     let ComponentValue::Function(function) = component_value else {
-        return false;
+        return None;
     };
 
     parse_gradient_function(function)
 }
 
-fn parse_gradient_function(function: &Function) -> bool {
+pub(super) fn component_value_parse_as_image_set_gradient(component_value: &ComponentValue) -> bool {
+    let ComponentValue::Function(function) = component_value else {
+        return false;
+    };
+
+    parse_gradient_function(function).is_some()
+}
+
+fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
     let name = function.name.to_ascii_lowercase();
     let (name, is_webkit_prefixed) = name
         .strip_prefix("-webkit-")
         .map(|name| (name, true))
         .unwrap_or((&name, false));
-    let name = name.strip_prefix("repeating-").unwrap_or(name);
+    let (name, is_repeating) = if let Some(name) = name.strip_prefix("repeating-") {
+        (name, true)
+    } else {
+        (name, false)
+    };
 
-    match name {
-        "linear-gradient" => parse_linear_gradient_function(function, is_webkit_prefixed),
-        "radial-gradient" if !is_webkit_prefixed => parse_radial_gradient_function(function),
-        "conic-gradient" if !is_webkit_prefixed => parse_conic_gradient_function(function),
-        _ => false,
+    let kind = match name {
+        "linear-gradient" => RustOwnedGradientKind::Linear,
+        "radial-gradient" if !is_webkit_prefixed => RustOwnedGradientKind::Radial,
+        "conic-gradient" if !is_webkit_prefixed => RustOwnedGradientKind::Conic,
+        _ => return None,
+    };
+
+    let valid = match kind {
+        RustOwnedGradientKind::Linear => parse_linear_gradient_function(function, is_webkit_prefixed),
+        RustOwnedGradientKind::Radial => parse_radial_gradient_function(function),
+        RustOwnedGradientKind::Conic => parse_conic_gradient_function(function),
+    };
+    if !valid {
+        return None;
     }
+
+    let groups = split_component_values_on_comma(&function.value)
+        .into_iter()
+        .map(|group| group.to_vec())
+        .collect();
+
+    Some(RustOwnedGradient {
+        kind,
+        is_repeating,
+        is_webkit_prefixed,
+        groups,
+    })
 }
 
 fn parse_linear_gradient_function(function: &Function, is_webkit_prefixed: bool) -> bool {
@@ -7476,6 +7511,7 @@ pub(super) fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Opt
             RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
                 kind: RustOwnedImageKind::ImageSet,
                 url: None,
+                gradient: None,
                 source: filtered_input_to_string(filtered_input),
             })),
             _ => None,

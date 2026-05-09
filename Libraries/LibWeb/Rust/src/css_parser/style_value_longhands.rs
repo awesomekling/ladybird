@@ -1945,6 +1945,7 @@ pub(super) fn consume_border_image_source(
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
             url: None,
+            gradient: None,
             source,
         })),
         _ => None,
@@ -3500,6 +3501,7 @@ pub(super) fn rust_owned_image_style_value_kind(
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Url,
             url: rust_owned_url_payload_from_component_value(component_value),
+            gradient: None,
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -3510,9 +3512,11 @@ pub(super) fn rust_owned_image_style_value_kind(
     if let ComponentValue::Function(_) = component_value
         && component_value_parse_as_image_gradient(component_value)
     {
+        let gradient = component_value_parse_as_image_gradient_value(component_value)?;
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
             url: None,
+            gradient: Some(gradient),
             source: serialize_component_values_for_reparsing(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
@@ -3534,6 +3538,7 @@ pub(super) fn rust_owned_image_from_component_value(
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
             url: None,
+            gradient: None,
             source,
         }),
         _ => None,

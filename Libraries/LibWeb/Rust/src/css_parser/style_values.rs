@@ -235,6 +235,7 @@ pub(crate) struct RustOwnedFontFamilyList {
     pub(crate) values: Vec<FontFamilyValue>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedStyleValueParseResult {
     Parsed(RustOwnedStyleValue),
@@ -338,6 +339,7 @@ pub(crate) struct RustOwnedImage {
     pub(crate) kind: RustOwnedImageKind,
     pub(crate) source: String,
     pub(crate) url: Option<RustOwnedUrlPayload>,
+    pub(crate) gradient: Option<RustOwnedGradient>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -358,6 +360,22 @@ pub(crate) enum RustOwnedImageKind {
     Url,
     Gradient,
     ImageSet,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGradient {
+    pub(crate) kind: RustOwnedGradientKind,
+    pub(crate) is_repeating: bool,
+    pub(crate) is_webkit_prefixed: bool,
+    pub(crate) groups: Vec<Vec<ComponentValue>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RustOwnedGradientKind {
+    Linear,
+    Radial,
+    Conic,
 }
 
 #[derive(Clone, Debug, PartialEq)]
