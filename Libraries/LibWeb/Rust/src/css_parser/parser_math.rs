@@ -13,10 +13,31 @@ pub(crate) enum RustOwnedCalculationNode {
         name: String,
         arguments: Vec<RustOwnedCalculationNode>,
     },
+    Random {
+        value_sharing: RustOwnedRandomValueSharing,
+        minimum: Box<RustOwnedCalculationNode>,
+        maximum: Box<RustOwnedCalculationNode>,
+        step: Option<Box<RustOwnedCalculationNode>>,
+    },
     Sum(Vec<RustOwnedCalculationNode>),
     Product(Vec<RustOwnedCalculationNode>),
     Negate(Box<RustOwnedCalculationNode>),
     Invert(Box<RustOwnedCalculationNode>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedRandomValueSharing {
+    Auto {
+        element_shared: bool,
+    },
+    DashedIdent {
+        name: String,
+        element_shared: bool,
+    },
+    Fixed {
+        calculation: Box<RustOwnedCalculationNode>,
+        preserve_calculation: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +68,10 @@ pub(crate) fn parse_rust_owned_calculation_function(function: &Function) -> Opti
         return parse_rust_owned_round_function(function);
     }
 
+    if function.name.eq_ignore_ascii_case("random") {
+        return parse_rust_owned_random_function(function);
+    }
+
     let mut arguments = Vec::new();
     for argument in split_calculation_arguments(&function.value) {
         arguments.push(parse_rust_owned_calculation(argument)?);
@@ -56,6 +81,127 @@ pub(crate) fn parse_rust_owned_calculation_function(function: &Function) -> Opti
         name: function.name.clone(),
         arguments,
     })
+}
+
+fn parse_rust_owned_random_function(function: &Function) -> Option<RustOwnedCalculationNode> {
+    let arguments = split_calculation_arguments(&function.value);
+    if arguments.len() < 2 || arguments.len() > 4 {
+        return None;
+    }
+
+    let mut argument_index = 0;
+    let value_sharing = if let Some(value_sharing) = parse_random_value_sharing(arguments[0]) {
+        argument_index += 1;
+        value_sharing
+    } else {
+        RustOwnedRandomValueSharing::Auto { element_shared: false }
+    };
+
+    let minimum = parse_rust_owned_calculation(arguments.get(argument_index)?)?;
+    argument_index += 1;
+    let maximum = parse_rust_owned_calculation(arguments.get(argument_index)?)?;
+    argument_index += 1;
+    let step = if let Some(argument) = arguments.get(argument_index) {
+        argument_index += 1;
+        Some(Box::new(parse_rust_owned_calculation(argument)?))
+    } else {
+        None
+    };
+
+    if argument_index != arguments.len() {
+        return None;
+    }
+
+    Some(RustOwnedCalculationNode::Random {
+        value_sharing,
+        minimum: Box::new(minimum),
+        maximum: Box::new(maximum),
+        step,
+    })
+}
+
+fn parse_random_value_sharing(values: &[ComponentValue]) -> Option<RustOwnedRandomValueSharing> {
+    // https://drafts.csswg.org/css-values-5/#typedef-random-value-sharing
+    // <random-value-sharing> = [ [ auto | <dashed-ident> ] ||
+    // element-shared ] | fixed <number [0,1]>
+    let values = values
+        .iter()
+        .filter(|value| {
+            !matches!(
+                value,
+                ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Whitespace,
+                    ..
+                })
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if values.is_empty() {
+        return None;
+    }
+
+    if let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value },
+        ..
+    })) = values.first()
+        && value.eq_ignore_ascii_case("fixed")
+    {
+        let fixed_values = values[1..].iter().map(|value| (*value).clone()).collect::<Vec<_>>();
+        let preserve_calculation = matches!(
+            fixed_values.as_slice(),
+            [ComponentValue::Function(function)] if function.name.eq_ignore_ascii_case("calc")
+        );
+        return Some(RustOwnedRandomValueSharing::Fixed {
+            calculation: Box::new(parse_rust_owned_calculation(&fixed_values)?),
+            preserve_calculation,
+        });
+    }
+
+    let mut has_explicit_auto = false;
+    let mut dashed_ident = None;
+    let mut element_shared = false;
+    for value in values {
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) = value
+        else {
+            return None;
+        };
+
+        if value.eq_ignore_ascii_case("auto") {
+            if has_explicit_auto || dashed_ident.is_some() {
+                return None;
+            }
+            has_explicit_auto = true;
+            continue;
+        }
+
+        if value.eq_ignore_ascii_case("element-shared") {
+            if element_shared {
+                return None;
+            }
+            element_shared = true;
+            continue;
+        }
+
+        if value.starts_with("--") {
+            if has_explicit_auto || dashed_ident.is_some() {
+                return None;
+            }
+            dashed_ident = Some(value.clone());
+            continue;
+        }
+
+        return None;
+    }
+
+    if let Some(name) = dashed_ident {
+        Some(RustOwnedRandomValueSharing::DashedIdent { name, element_shared })
+    } else {
+        Some(RustOwnedRandomValueSharing::Auto { element_shared })
+    }
 }
 
 fn parse_rust_owned_round_function(function: &Function) -> Option<RustOwnedCalculationNode> {
@@ -158,6 +304,29 @@ where
                 name.as_bytes(),
             );
         }
+        RustOwnedCalculationNode::Random {
+            value_sharing,
+            minimum,
+            maximum,
+            step,
+        } => {
+            if let RustOwnedRandomValueSharing::Fixed { calculation, .. } = value_sharing {
+                emit_rust_owned_calculation_tree(calculation, callback);
+            }
+            emit_rust_owned_calculation_tree(minimum, callback);
+            emit_rust_owned_calculation_tree(maximum, callback);
+            if let Some(step) = step {
+                emit_rust_owned_calculation_tree(step, callback);
+            }
+            callback(
+                CssCalculationNodeKind::Function,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                random_child_count(value_sharing, step.is_some()),
+                random_value_sharing_metadata(value_sharing).as_bytes(),
+            );
+        }
         RustOwnedCalculationNode::Sum(children) => {
             for child in children {
                 emit_rust_owned_calculation_tree(child, callback);
@@ -205,6 +374,34 @@ where
                 1,
                 &[],
             );
+        }
+    }
+}
+
+fn random_child_count(value_sharing: &RustOwnedRandomValueSharing, has_step: bool) -> u32 {
+    let mut child_count = if has_step { 3 } else { 2 };
+    if matches!(value_sharing, RustOwnedRandomValueSharing::Fixed { .. }) {
+        child_count += 1;
+    }
+    child_count
+}
+
+fn random_value_sharing_metadata(value_sharing: &RustOwnedRandomValueSharing) -> String {
+    match value_sharing {
+        RustOwnedRandomValueSharing::Auto { element_shared } => {
+            format!("random\0auto\0{}\0", u8::from(*element_shared))
+        }
+        RustOwnedRandomValueSharing::DashedIdent { name, element_shared } => {
+            format!("random\0dashed-ident\0{}\0{name}", u8::from(*element_shared))
+        }
+        RustOwnedRandomValueSharing::Fixed {
+            preserve_calculation, ..
+        } => {
+            if *preserve_calculation {
+                format!("random\0fixed\0{}\0calc", 0)
+            } else {
+                format!("random\0fixed\0{}\0", 0)
+            }
         }
     }
 }

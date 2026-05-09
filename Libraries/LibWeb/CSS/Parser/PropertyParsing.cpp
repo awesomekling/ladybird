@@ -58,6 +58,7 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RadialSizeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
@@ -596,6 +597,83 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     stack.append(RoundCalculationNode::create(strategy, children.at(0), children.at(1)));
                     return true;
                 };
+                auto append_random_node = [&](Vector<NonnullRefPtr<CalculationNode const>> const& children, StringView metadata) -> bool {
+                    if (!context_allows_random_functions())
+                        return false;
+
+                    auto metadata_parts = metadata.split_view('\0', SplitBehavior::KeepEmpty);
+                    if (metadata_parts.size() != 4 || metadata_parts[0] != "random"sv)
+                        return false;
+
+                    auto has_fixed_value_sharing = metadata_parts[1] == "fixed"sv;
+                    auto minimum_index = has_fixed_value_sharing ? 1uz : 0uz;
+                    if (children.size() != minimum_index + 2 && children.size() != minimum_index + 3)
+                        return false;
+
+                    auto const& minimum = children.at(minimum_index);
+                    auto const& maximum = children.at(minimum_index + 1);
+                    auto step_index = minimum_index + 2;
+                    if (!matches_sign_argument(*minimum) || !matches_sign_argument(*maximum))
+                        return false;
+                    if (!have_consistent_types(*minimum, *maximum))
+                        return false;
+                    if (children.size() == step_index + 1) {
+                        if (!matches_sign_argument(*children.at(step_index)))
+                            return false;
+                        if (!have_consistent_types(*minimum, *children.at(step_index)))
+                            return false;
+                    }
+
+                    m_random_function_index++;
+
+                    auto element_shared = metadata_parts[2] == "1"sv;
+                    RefPtr<RandomValueSharingStyleValue const> value_sharing;
+                    if (metadata_parts[1] == "auto"sv) {
+                        if (has_fixed_value_sharing)
+                            return false;
+                        if (!metadata_parts[3].is_empty())
+                            return false;
+                        value_sharing = RandomValueSharingStyleValue::create_auto(random_value_sharing_auto_name(), element_shared);
+                    } else if (metadata_parts[1] == "dashed-ident"sv) {
+                        if (has_fixed_value_sharing)
+                            return false;
+                        if (metadata_parts[3].is_empty())
+                            return false;
+                        value_sharing = RandomValueSharingStyleValue::create_dashed_ident(MUST(FlyString::from_utf8(metadata_parts[3])), element_shared);
+                    } else if (metadata_parts[1] == "fixed"sv) {
+                        if (element_shared)
+                            return false;
+                        auto preserve_fixed_calculation = metadata_parts[3] == "calc"sv;
+                        if (!metadata_parts[3].is_empty() && !preserve_fixed_calculation)
+                            return false;
+                        auto fixed_calculation_tree = simplify_a_calculation_tree(*children.at(0), calculation_context, CalculationResolutionContext {});
+                        auto fixed_calculation_type = fixed_calculation_tree->numeric_type();
+                        if (!fixed_calculation_type.has_value() || !fixed_calculation_type->matches_number(calculation_context.percentages_resolve_as))
+                            return false;
+                        auto fixed_value = CalculatedStyleValue::create(fixed_calculation_tree, fixed_calculation_type.release_value(), calculation_context);
+                        if (!fixed_value->resolves_to_number())
+                            return false;
+                        auto resolved_fixed_number = fixed_value->resolve_number(CalculationResolutionContext {});
+                        if (resolved_fixed_number.has_value() && (*resolved_fixed_number < 0 || *resolved_fixed_number > 0.999999))
+                            return false;
+                        if (is<NumericCalculationNode>(*children.at(0)) && !preserve_fixed_calculation) {
+                            auto const* fixed_number = as<NumericCalculationNode>(*children.at(0)).value().get_pointer<Number>();
+                            if (!fixed_number)
+                                return false;
+                            value_sharing = RandomValueSharingStyleValue::create_fixed(NumberStyleValue::create(fixed_number->value()));
+                        } else {
+                            value_sharing = RandomValueSharingStyleValue::create_fixed(fixed_value);
+                        }
+                    } else {
+                        return false;
+                    }
+
+                    RefPtr<CalculationNode const> step;
+                    if (children.size() == step_index + 1)
+                        step = children.at(step_index);
+                    stack.append(RandomCalculationNode::create(value_sharing.release_nonnull(), minimum, maximum, move(step)));
+                    return true;
+                };
 
                 for (auto const& event : rust_style_value->calculation_node_events) {
                     switch (event.kind) {
@@ -745,6 +823,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         if (event.metadata.equals_ignoring_ascii_case("rem"sv) && children->size() == 2) {
                             stack.append(RemCalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        if (event.metadata.bytes_as_string_view().starts_with("random"sv)) {
+                            if (!append_random_node(*children, event.metadata))
+                                return nullptr;
                             break;
                         }
                         return nullptr;

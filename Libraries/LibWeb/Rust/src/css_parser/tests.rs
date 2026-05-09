@@ -6961,6 +6961,64 @@ fn emits_rust_owned_round_calculations_with_strategy() {
 }
 
 #[test]
+fn emits_rust_owned_random_calculations_with_value_sharing() {
+    let calculation = parse_math_ast("random(--foo element-shared, 10px, 30px, 5px)").unwrap();
+    let mut events = Vec::new();
+
+    emit_rust_owned_calculation_tree(
+        &calculation,
+        &mut |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+            events.push((
+                kind,
+                primitive_kind,
+                has_numeric_value,
+                numeric_value,
+                child_count,
+                metadata.to_vec(),
+            ));
+        },
+    );
+
+    assert_eq!(
+        events,
+        vec![
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                10.0,
+                0,
+                b"px".to_vec(),
+            ),
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                30.0,
+                0,
+                b"px".to_vec(),
+            ),
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                5.0,
+                0,
+                b"px".to_vec(),
+            ),
+            (
+                CssCalculationNodeKind::Function,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                3,
+                b"random\0dashed-ident\01\0--foo".to_vec(),
+            ),
+        ]
+    );
+}
+
+#[test]
 fn parses_preserved_tokens() {
     let values = parse("a, b");
 
