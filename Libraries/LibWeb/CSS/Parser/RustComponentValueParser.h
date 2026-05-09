@@ -249,6 +249,7 @@ public:
         PositionXOffset,
         PositionYOffset,
         PositionComponentOffset,
+        StrokeDasharray,
         BorderRadiusHorizontal,
         BorderRadiusVertical,
         BorderWidthLength,

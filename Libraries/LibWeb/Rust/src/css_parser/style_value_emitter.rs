@@ -15,6 +15,7 @@ const SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION: u8 = 4;
 const SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE: u8 = 5;
 const SOURCE_COMPONENT_VALUE_LIST_SHORTHAND_ITEM: u8 = 6;
 const SOURCE_COMPONENT_VALUE_LIST_OPEN_TYPE_TAG_VALUE: u8 = 7;
+const SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE: u8 = 8;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -44,6 +45,20 @@ fn emit_nested_primitive_source_component_values<S, E>(
         && !component_values.is_empty()
     {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, component_values);
+    }
+}
+
+fn emit_secondary_nested_primitive_source_component_values<S, E>(
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    if let RustOwnedNestedPrimitiveValue::Source { component_values, .. } = value
+        && !component_values.is_empty()
+    {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE, component_values);
     }
 }
 
@@ -1622,8 +1637,30 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             "",
         ),
         RustOwnedStyleValueKind::TransformOrigin(value) => {
-            callback_transform_origin_component(callback, calculation_callback, property_id, 0, &value.x);
-            callback_transform_origin_component(callback, calculation_callback, property_id, 1, &value.y);
+            callback_transform_origin_component(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                0,
+                &value.x,
+            );
+            callback_transform_origin_component(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                1,
+                &value.y,
+            );
             emit_nested_primitive_source_component_values(
                 &mut SourceComponentValueEmitter {
                     filtered_input,
@@ -1846,8 +1883,9 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             ),
             RustOwnedStrokeDasharray::Values(values) => {
                 for value in values {
-                    callback_nested_primitive_with_source_component_values(
+                    callback_nested_primitive_with_source_component_values_and_calculation(
                         callback,
+                        calculation_callback,
                         &mut SourceComponentValueEmitter {
                             filtered_input,
                             list_callback: source_component_value_list_callback,
@@ -3581,6 +3619,7 @@ fn callback_explicit_grid_track<C, S, E>(
                 let min_payload = grid_track_breadth_callback_payload(min);
                 let max_payload = grid_track_breadth_callback_payload(max);
                 emit_nested_primitive_source_component_values(source_component_value_emitter, min);
+                emit_secondary_nested_primitive_source_component_values(source_component_value_emitter, max);
                 callback(
                     kind,
                     property_id,
@@ -5288,8 +5327,9 @@ fn callback_filter_value_list_style_value<C, D, U, S, E>(
                         offset_y,
                         radius,
                     } => {
-                        callback_nested_primitive_pair(
+                        callback_nested_primitive_pair_with_source_component_values(
                             callback,
+                            source_component_value_emitter,
                             CssStyleValueKind::FilterValueList,
                             property_id,
                             FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW,
@@ -5553,6 +5593,34 @@ fn callback_nested_primitive_pair<C>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
+fn callback_nested_primitive_pair_with_source_component_values<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+    secondary_value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    emit_nested_primitive_source_component_values(source_component_value_emitter, value);
+    emit_secondary_nested_primitive_source_component_values(source_component_value_emitter, secondary_value);
+    callback_nested_primitive_pair(
+        callback,
+        style_value_kind,
+        property_id,
+        kind,
+        secondary_kind,
+        value,
+        secondary_value,
+    );
+}
+
 fn callback_nested_primitive<C>(
     callback: &mut C,
     style_value_kind: CssStyleValueKind,
@@ -5789,19 +5857,23 @@ fn rust_owned_position_edge_to_callback_value(edge: PositionEdge) -> u8 {
     }
 }
 
-fn callback_transform_origin_component<C, D>(
+fn callback_transform_origin_component<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
-    callback_nested_primitive_with_calculation(
+    callback_nested_primitive_with_source_component_values_and_calculation(
         callback,
         calculation_callback,
+        source_component_value_emitter,
         CssStyleValueKind::TransformOrigin,
         property_id,
         kind,

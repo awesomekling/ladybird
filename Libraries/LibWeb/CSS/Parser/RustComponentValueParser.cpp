@@ -1201,6 +1201,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             ImageSetResolution,
             NestedPrimitive,
             OpenTypeTagValue,
+            SecondaryNestedPrimitive,
             ShorthandItem,
             StyleColor,
         };
@@ -1213,6 +1214,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListNestedPrimitive = 5,
             SourceComponentValueListShorthandItem = 6,
             SourceComponentValueListOpenTypeTagValue = 7,
+            SourceComponentValueListSecondaryNestedPrimitive = 8,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1221,6 +1223,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         RustStyleColor* style_color_source_component_value_target { nullptr };
         Vector<ComponentValue>* source_component_values_target { nullptr };
         Vector<ComponentValue> pending_nested_primitive_source_component_values;
+        Vector<ComponentValue> pending_secondary_nested_primitive_source_component_values;
 
         void flush_source_component_values()
         {
@@ -1256,6 +1259,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(style_value.has_value());
                 VERIFY(!style_value->open_type_tag_values.is_empty());
                 style_value->open_type_tag_values.last().value_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::SecondaryNestedPrimitive:
+                pending_secondary_nested_primitive_source_component_values = move(source_component_value_builder.root_values);
                 break;
             case SourceComponentValueTarget::ShorthandItem:
                 VERIFY(style_value.has_value());
@@ -1325,6 +1331,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             case SourceComponentValueListNestedPrimitive:
                 source_component_value_target = SourceComponentValueTarget::NestedPrimitive;
                 return;
+            case SourceComponentValueListSecondaryNestedPrimitive:
+                source_component_value_target = SourceComponentValueTarget::SecondaryNestedPrimitive;
+                return;
             case SourceComponentValueListShorthandItem:
                 source_component_value_target = SourceComponentValueTarget::ShorthandItem;
                 return;
@@ -1376,6 +1385,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 RustNestedPrimitiveValue nested_value {
                     .primitive_kind = static_cast<FFI::CssPrimitiveValueKind>(color_alpha),
                     .source_or_unit = value_type_len == 0 ? String {} : string_from_ffi_bytes(value_type_ptr, value_type_len),
+                    .source_component_values = move(context.pending_secondary_nested_primitive_source_component_values),
                 };
                 if (has_secondary_numeric_value)
                     nested_value.numeric_value = secondary_numeric_value;
@@ -2276,6 +2286,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->stroke_dasharray_none = true;
                 } else {
                     style_value->stroke_dasharray_values.append(nested_primitive_value_from_callback_payload());
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::StrokeDasharray;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::BorderSpacing) {
@@ -3734,6 +3745,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->position_components.is_empty());
                     VERIFY(style_value->position_components.last().offset.has_value());
                     style_value->position_components.last().offset->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::StrokeDasharray) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::StrokeDasharray:
+                    VERIFY(!style_value->stroke_dasharray_values.is_empty());
+                    style_value->stroke_dasharray_values.last().calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

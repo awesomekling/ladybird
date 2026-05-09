@@ -3176,9 +3176,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return materialize_rust_nested_length_percentage(value, non_negative_range);
                 }
                 if (!value.numeric_value.has_value()) {
-                    if (auto number_value = parse_rust_source_as_non_negative_number(value.source_or_unit))
-                        return number_value;
-                    return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
+                    if (!value.source_component_values.is_empty()) {
+                        if (auto number_value = parse_rust_component_values_as_non_negative_number(value.source_component_values))
+                            return number_value;
+                        return parse_rust_component_values_as_non_negative_length_percentage(value.source_or_unit, value.source_component_values);
+                    }
+                    return nullptr;
                 }
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number) {
                     if (*value.numeric_value < 0)
@@ -3357,6 +3360,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (!non_negative_range.contains(flex.to_fr()))
                             return {};
                         flex_value = FlexStyleValue::create(flex);
+                    } else if (!value.source_component_values.is_empty()) {
+                        TokenStream value_tokens { value.source_component_values };
+                        flex_value = parse_flex_value(value_tokens, non_negative_range);
+                        value_tokens.discard_whitespace();
+                        if (!flex_value || value_tokens.has_next_token())
+                            return {};
                     } else {
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
                         TokenStream value_tokens { component_values };
