@@ -3657,6 +3657,44 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Animation,
+        value: RustOwnedStyleValueKind::CoordinatingValueListShorthand(animation_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Animation], "1s ease-in 2s slide")
+    else {
+        panic!("Expected animation to parse as a coordinating value list shorthand");
+    };
+    assert_eq!(
+        animation_items
+            .iter()
+            .map(|item| (item.layer_index, item.style_value.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::AnimationDuration, "1s"),
+            (0, PropertyId::AnimationTimingFunction, "ease-in"),
+            (0, PropertyId::AnimationDelay, "2s"),
+            (0, PropertyId::AnimationName, "slide"),
+        ]
+    );
+    let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Transition,
+        value: RustOwnedStyleValueKind::CoordinatingValueListShorthand(transition_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Transition], "opacity 200ms ease allow-discrete")
+    else {
+        panic!("Expected transition to parse as a coordinating value list shorthand");
+    };
+    assert_eq!(
+        transition_items
+            .iter()
+            .map(|item| (item.layer_index, item.style_value.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::TransitionProperty, "opacity"),
+            (0, PropertyId::TransitionDuration, "200ms"),
+            (0, PropertyId::TransitionTimingFunction, "ease"),
+            (0, PropertyId::TransitionBehavior, "allow-discrete"),
+        ]
+    );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span 2 main"),
         Some(RustOwnedStyleValue {

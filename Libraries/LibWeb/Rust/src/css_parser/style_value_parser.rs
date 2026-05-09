@@ -6,8 +6,8 @@
 
 use super::*;
 use crate::css_parser::style_value_shorthands::{
-    parse_rust_owned_font_shorthand, parse_rust_owned_grid_placement_shorthand,
-    parse_rust_owned_grid_template_shorthand,
+    parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_font_shorthand,
+    parse_rust_owned_grid_placement_shorthand, parse_rust_owned_grid_template_shorthand,
 };
 
 pub(crate) fn parse_rust_owned_style_value_for_property(
@@ -90,6 +90,8 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                 | PropertyId::GridColumn
                 | PropertyId::GridRow
                 | PropertyId::GridTemplate
+                | PropertyId::Animation
+                | PropertyId::Transition
         )
     {
         return RustOwnedStyleValueParseResult::Invalid;
@@ -251,6 +253,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnchorName
             | PropertyId::AnchorScope
             | PropertyId::AnimationComposition
+            | PropertyId::Animation
             | PropertyId::AnimationDelay
             | PropertyId::AnimationDirection
             | PropertyId::AnimationDuration
@@ -561,6 +564,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TransformOrigin
             | PropertyId::TransformStyle
             | PropertyId::TransitionBehavior
+            | PropertyId::Transition
             | PropertyId::TransitionDelay
             | PropertyId::TransitionDuration
             | PropertyId::TransitionProperty
@@ -831,6 +835,30 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
         PropertyId::FontVariant => rust_owned_font_variant_style_value_kind(filtered_input),
         PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
+        PropertyId::Animation | PropertyId::Transition => {
+            let property_ids = match property_id {
+                PropertyId::Animation => &[
+                    PropertyId::AnimationDuration as u16,
+                    PropertyId::AnimationTimingFunction as u16,
+                    PropertyId::AnimationDelay as u16,
+                    PropertyId::AnimationIterationCount as u16,
+                    PropertyId::AnimationDirection as u16,
+                    PropertyId::AnimationFillMode as u16,
+                    PropertyId::AnimationPlayState as u16,
+                    PropertyId::AnimationName as u16,
+                ][..],
+                PropertyId::Transition => &[
+                    PropertyId::TransitionProperty as u16,
+                    PropertyId::TransitionDuration as u16,
+                    PropertyId::TransitionTimingFunction as u16,
+                    PropertyId::TransitionDelay as u16,
+                    PropertyId::TransitionBehavior as u16,
+                ][..],
+                _ => unreachable!(),
+            };
+            parse_rust_owned_coordinating_value_list_shorthand(property_ids, filtered_input)
+                .map(RustOwnedStyleValueKind::CoordinatingValueListShorthand)
+        }
         PropertyId::GridArea | PropertyId::GridColumn | PropertyId::GridRow => {
             parse_rust_owned_grid_placement_shorthand(property_id, filtered_input)
                 .map(RustOwnedStyleValueKind::GridPlacementShorthand)

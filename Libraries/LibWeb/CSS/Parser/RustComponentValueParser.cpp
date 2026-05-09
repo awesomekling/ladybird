@@ -1188,6 +1188,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto shorthand_property_id_from_callback_payload = [&]() {
                 return static_cast<PropertyID>(static_cast<u16>(color_red) | (static_cast<u16>(color_green) << 8));
             };
+            auto layer_index_from_callback_payload = [&]() {
+                return static_cast<size_t>(static_cast<u16>(color_blue) | (static_cast<u16>(color_alpha) << 8));
+            };
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1497,6 +1500,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 style_value->font_shorthand_items.append(FontShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                style_value->coordinating_value_list_shorthand_items.append(CoordinatingValueListShorthandItem {
+                    .layer_index = layer_index_from_callback_payload(),
                     .property_id = static_cast<PropertyID>(property_id),
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });

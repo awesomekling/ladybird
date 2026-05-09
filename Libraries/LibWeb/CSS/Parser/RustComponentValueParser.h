@@ -133,6 +133,14 @@ public:
     using GridPlacementShorthandItem = FontShorthandItem;
     using GridTemplateShorthandItem = FontShorthandItem;
 
+    struct CoordinatingValueListShorthandItem {
+        size_t layer_index { 0 };
+        PropertyID property_id;
+        String value;
+    };
+
+    using LayerShorthandItem = CoordinatingValueListShorthandItem;
+
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
@@ -701,6 +709,7 @@ public:
         Vector<RustShadow> shadows;
         Vector<RustCursorImage> cursor_images;
         Optional<FlyString> cursor_predefined;
+        Vector<CoordinatingValueListShorthandItem> coordinating_value_list_shorthand_items;
         bool filter_value_list_is_none { false };
         Vector<RustFilterValueListEvent> filter_value_list_events;
         Vector<GridPlacementShorthandItem> grid_placement_shorthand_items;
@@ -756,14 +765,6 @@ public:
         u8 alpha { 0 };
         Optional<FlyString> name;
     };
-
-    struct CoordinatingValueListShorthandItem {
-        size_t layer_index { 0 };
-        PropertyID property_id;
-        String value;
-    };
-
-    using LayerShorthandItem = CoordinatingValueListShorthandItem;
 
     struct PositionalValueListShorthandItem {
         size_t index { 0 };

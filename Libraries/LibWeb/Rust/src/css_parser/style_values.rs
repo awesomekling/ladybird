@@ -31,6 +31,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     CounterDefinitions(RustOwnedCounterDefinitions),
     BorderRadius(RustOwnedBorderRadius),
     Columns(RustOwnedColumns),
+    CoordinatingValueListShorthand(Vec<RustOwnedCoordinatingValueListShorthandItem>),
     Content(RustOwnedContent),
     Cursor(RustOwnedCursor),
     Display(RustOwnedDisplay),

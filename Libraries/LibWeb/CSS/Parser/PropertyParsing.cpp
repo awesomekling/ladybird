@@ -96,6 +96,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AlignSelf:
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
+    case PropertyID::Animation:
     case PropertyID::AnimationComposition:
     case PropertyID::AnimationDelay:
     case PropertyID::AnimationDirection:
@@ -406,6 +407,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TransformBox:
     case PropertyID::TransformOrigin:
     case PropertyID::TransformStyle:
+    case PropertyID::Transition:
     case PropertyID::TransitionBehavior:
     case PropertyID::TransitionDelay:
     case PropertyID::TransitionDuration:
@@ -1445,6 +1447,30 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
                 return value.release_nonnull();
+            };
+            auto unwrap_single_coordinating_value_list_item = [](PropertyID property_id, RefPtr<StyleValue const>& parsed_value) {
+                if (first_is_one_of(property_id,
+                        PropertyID::AnimationComposition,
+                        PropertyID::AnimationDelay,
+                        PropertyID::AnimationDirection,
+                        PropertyID::AnimationDuration,
+                        PropertyID::AnimationFillMode,
+                        PropertyID::AnimationIterationCount,
+                        PropertyID::AnimationName,
+                        PropertyID::AnimationPlayState,
+                        PropertyID::AnimationTimingFunction,
+                        PropertyID::AnimationTimeline,
+                        PropertyID::ScrollTimelineName,
+                        PropertyID::TransitionBehavior,
+                        PropertyID::TransitionDelay,
+                        PropertyID::TransitionDuration,
+                        PropertyID::TransitionProperty,
+                        PropertyID::TransitionTimingFunction,
+                        PropertyID::ViewTimelineName)
+                    && parsed_value->is_value_list()
+                    && parsed_value->as_value_list().size() == 1) {
+                    parsed_value = parsed_value->as_value_list().values()[0];
+                }
             };
             auto parse_rust_source_as_integer_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
@@ -3923,6 +3949,86 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     ShorthandStyleValue::create(PropertyID::Columns,
                         { PropertyID::ColumnCount, PropertyID::ColumnWidth, PropertyID::ColumnHeight },
                         { property_initial_value(PropertyID::ColumnCount), property_initial_value(PropertyID::ColumnWidth), property_initial_value(PropertyID::ColumnHeight) }) };
+            case FFI::CssStyleValueKind::CoordinatingValueListShorthand: {
+                Vector<PropertyID> longhand_ids;
+                Vector<PropertyID> reset_only_longhand_ids;
+                switch (rust_style_value->property_id) {
+                case PropertyID::Animation:
+                    longhand_ids = {
+                        PropertyID::AnimationDuration,
+                        PropertyID::AnimationTimingFunction,
+                        PropertyID::AnimationDelay,
+                        PropertyID::AnimationIterationCount,
+                        PropertyID::AnimationDirection,
+                        PropertyID::AnimationFillMode,
+                        PropertyID::AnimationPlayState,
+                        PropertyID::AnimationName
+                    };
+                    // FIXME: The animation-trigger properties are reset-only
+                    // sub-properties of the animation shorthand.
+                    reset_only_longhand_ids = { PropertyID::AnimationTimeline };
+                    break;
+                case PropertyID::Transition:
+                    longhand_ids = {
+                        PropertyID::TransitionProperty,
+                        PropertyID::TransitionDuration,
+                        PropertyID::TransitionTimingFunction,
+                        PropertyID::TransitionDelay,
+                        PropertyID::TransitionBehavior
+                    };
+                    break;
+                default:
+                    break;
+                }
+                if (longhand_ids.is_empty())
+                    break;
+
+                Vector<HashMap<PropertyID, NonnullRefPtr<StyleValue const>>> parsed_layers;
+                bool is_valid = true;
+                for (auto const& item : rust_style_value->coordinating_value_list_shorthand_items) {
+                    if (item.layer_index >= parsed_layers.size())
+                        parsed_layers.resize(item.layer_index + 1);
+
+                    auto parsed_value = parse_rust_source_as_property(item.property_id, item.value);
+                    if (!parsed_value) {
+                        is_valid = false;
+                        break;
+                    }
+
+                    unwrap_single_coordinating_value_list_item(item.property_id, parsed_value);
+                    parsed_layers[item.layer_index].set(item.property_id, parsed_value.release_nonnull());
+                }
+                if (!is_valid || parsed_layers.is_empty())
+                    break;
+
+                StyleValueVector longhand_values;
+                for (auto const& longhand_id : longhand_ids) {
+                    StyleValueVector layer_values;
+                    layer_values.ensure_capacity(parsed_layers.size());
+                    for (auto const& parsed_layer : parsed_layers) {
+                        layer_values.unchecked_append(*parsed_layer.get(longhand_id).value_or_lazy_evaluated([&]() -> ValueComparingNonnullRefPtr<StyleValue const> {
+                            return property_initial_value(longhand_id)->as_value_list().values()[0];
+                        }));
+                    }
+                    if (layer_values.size() != parsed_layers.size()) {
+                        is_valid = false;
+                        break;
+                    }
+                    longhand_values.append(StyleValueList::create(move(layer_values), StyleValueList::Separator::Comma));
+                }
+                if (!is_valid)
+                    break;
+
+                Vector<PropertyID> longhand_ids_including_reset_only_longhands;
+                longhand_ids_including_reset_only_longhands.extend(longhand_ids);
+                longhand_ids_including_reset_only_longhands.extend(reset_only_longhand_ids);
+                for (auto reset_only_longhand_id : reset_only_longhand_ids)
+                    longhand_values.append(property_initial_value(reset_only_longhand_id));
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(longhand_ids_including_reset_only_longhands), move(longhand_values)) };
+            }
             case FFI::CssStyleValueKind::Content:
                 if (auto value = materialize_rust_content_value()) {
                     discard_rust_owned_property_value_tokens();

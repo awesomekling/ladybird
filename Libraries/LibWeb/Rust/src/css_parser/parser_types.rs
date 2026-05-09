@@ -1881,6 +1881,7 @@ pub enum CssStyleValueKind {
     CounterDefinitions,
     BorderRadius,
     Columns,
+    CoordinatingValueListShorthand,
     Content,
     Cursor,
     Display,

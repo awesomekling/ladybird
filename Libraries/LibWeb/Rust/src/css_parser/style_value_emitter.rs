@@ -42,6 +42,26 @@ where
         RustOwnedStyleValueKind::ImageSet(image_set) => {
             callback_image_set_style_value(callback, property_id, image_set);
         }
+        RustOwnedStyleValueKind::CoordinatingValueListShorthand(items) => {
+            let shorthand_property_id = property_id;
+            for item in items {
+                callback(
+                    CssStyleValueKind::CoordinatingValueListShorthand,
+                    item.style_value.property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    (item.layer_index & 0xff) as u8,
+                    ((item.layer_index >> 8) & 0xff) as u8,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::FontShorthand(items) => {
             for item in items {
                 callback(
