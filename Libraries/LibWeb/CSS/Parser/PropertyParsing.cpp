@@ -2711,6 +2711,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto materialize_rust_nested_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 return materialize_rust_nested_length_percentage_for_property(rust_style_value->property_id, value, range);
             };
+            auto rust_nested_primitive_has_rust_backing = [](RustComponentValueParser::RustNestedPrimitiveValue const& value) {
+                return value.numeric_value.has_value()
+                    || !value.calculation_node_events.is_empty()
+                    || !value.source_component_values.is_empty();
+            };
             auto materialize_rust_position_edge = [](RustComponentValueParser::RustPositionEdge edge) -> Optional<PositionEdge> {
                 switch (edge) {
                 case RustComponentValueParser::RustPositionEdge::None:
@@ -2731,6 +2736,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto materialize_rust_position_component = [&](PropertyID property_id, RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<StyleValue const> {
                 RefPtr<StyleValue const> offset;
                 if (component.offset.has_value()) {
+                    if (!rust_nested_primitive_has_rust_backing(*component.offset))
+                        return nullptr;
                     offset = materialize_rust_nested_length_percentage_for_property(property_id, *component.offset, infinite_range);
                     if (!offset)
                         return nullptr;
@@ -2846,6 +2853,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     return KeywordStyleValue::create(Keyword::Auto);
                 }
+                if (!rust_nested_primitive_has_rust_backing(value))
+                    return nullptr;
                 return materialize_rust_nested_length_percentage_for_property(property_id, value, non_negative_range);
             };
             auto materialize_rust_fit_content = [&]() -> RefPtr<StyleValue const> {
@@ -2854,6 +2863,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return KeywordStyleValue::create(Keyword::FitContent);
                 case RustComponentValueParser::RustFitContentKind::Function: {
                     if (!rust_style_value->fit_content_argument.has_value())
+                        return nullptr;
+                    if (!rust_nested_primitive_has_rust_backing(*rust_style_value->fit_content_argument))
                         return nullptr;
                     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
                     auto argument = materialize_rust_nested_length_percentage(*rust_style_value->fit_content_argument, infinite_range);
@@ -4442,6 +4453,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->border_width_keyword.has_value())
                     width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), KeywordStyleValue::create(to_keyword(*rust_style_value->border_width_keyword)));
                 else if (rust_style_value->border_width_length.has_value()) {
+                    if (!rust_nested_primitive_has_rust_backing(*rust_style_value->border_width_length))
+                        break;
                     auto width_value = materialize_rust_nested_length_for_property(width_property, *rust_style_value->border_width_length, non_negative_range);
                     if (!width_value)
                         break;
@@ -5811,6 +5824,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::TransformOrigin:
                 if (rust_style_value->transform_origin_x.has_value() && rust_style_value->transform_origin_y.has_value() && rust_style_value->transform_origin_z.has_value()) {
+                    if (!rust_nested_primitive_has_rust_backing(*rust_style_value->transform_origin_z))
+                        break;
                     auto x_value = materialize_rust_nested_transform_origin_component(*rust_style_value->transform_origin_x);
                     auto y_value = materialize_rust_nested_transform_origin_component(*rust_style_value->transform_origin_y);
                     auto z_value = materialize_rust_nested_length(*rust_style_value->transform_origin_z, infinite_range);

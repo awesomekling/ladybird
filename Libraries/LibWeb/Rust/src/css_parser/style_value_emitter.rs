@@ -551,7 +551,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         }
         RustOwnedStyleValueKind::BackgroundSize(value) => {
             for value in &value.values {
-                callback_background_size(callback, calculation_callback, property_id, value);
+                callback_background_size(
+                    callback,
+                    calculation_callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    property_id,
+                    value,
+                );
             }
         }
         RustOwnedStyleValueKind::BorderRadius(value) => {
@@ -694,6 +704,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 callback_border_width_style_value(
                     callback,
                     calculation_callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
                     CssStyleValueKind::Border,
                     property_id,
                     width,
@@ -1239,8 +1254,30 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 &[],
                 "",
             );
-            callback_position_component(callback, calculation_callback, property_id, 2, &value.value.x);
-            callback_position_component(callback, calculation_callback, property_id, 3, &value.value.y);
+            callback_position_component(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                2,
+                &value.value.x,
+            );
+            callback_position_component(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                3,
+                &value.value.y,
+            );
         }
         RustOwnedStyleValueKind::PositionList(value) => {
             callback_style_value_type(callback, CssStyleValueKind::Position, property_id, value.value_type);
@@ -1262,11 +1299,44 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                             &[],
                             "",
                         );
-                        callback_position_component(callback, calculation_callback, property_id, 2, &position.x);
-                        callback_position_component(callback, calculation_callback, property_id, 3, &position.y);
+                        callback_position_component(
+                            callback,
+                            calculation_callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
+                            property_id,
+                            2,
+                            &position.x,
+                        );
+                        callback_position_component(
+                            callback,
+                            calculation_callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
+                            property_id,
+                            3,
+                            &position.y,
+                        );
                     }
                     RustOwnedPositionListItem::Component(component) => {
-                        callback_position_component(callback, calculation_callback, property_id, 4, component);
+                        callback_position_component(
+                            callback,
+                            calculation_callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
+                            property_id,
+                            4,
+                            component,
+                        );
                     }
                 }
             }
@@ -1691,17 +1761,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 1,
                 &value.y,
             );
-            emit_nested_primitive_source_component_values(
+            callback_nested_primitive_with_source_component_values_and_calculation(
+                callback,
+                calculation_callback,
                 &mut SourceComponentValueEmitter {
                     filtered_input,
                     list_callback: source_component_value_list_callback,
                     component_value_callback: source_component_value_callback,
                 },
-                &value.z,
-            );
-            callback_nested_primitive_with_calculation(
-                callback,
-                calculation_callback,
                 CssStyleValueKind::TransformOrigin,
                 property_id,
                 2,
@@ -2011,7 +2078,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             );
         }
         RustOwnedStyleValueKind::FitContent(value) => {
-            callback_fit_content_style_value(callback, calculation_callback, property_id, &value.value);
+            callback_fit_content_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                &value.value,
+            );
         }
         RustOwnedStyleValueKind::FontFamily(value) => {
             for value in &value.values {
@@ -2637,15 +2714,18 @@ fn callback_border_image_slice_style_value<C, D, S, E>(
     }
 }
 
-fn callback_border_width_style_value<C, D>(
+fn callback_border_width_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = value {
         let Some(line_width) = line_width_from_keyword(keyword) else {
@@ -2667,7 +2747,16 @@ fn callback_border_width_style_value<C, D>(
             "",
         );
     } else {
-        callback_nested_primitive_with_calculation(callback, calculation_callback, kind, property_id, 0, 1, value);
+        callback_nested_primitive_with_source_component_values_and_calculation(
+            callback,
+            calculation_callback,
+            source_component_value_emitter,
+            kind,
+            property_id,
+            0,
+            1,
+            value,
+        );
     }
 }
 
@@ -2894,14 +2983,17 @@ fn callback_border_image_repeat_style_value<C>(
     }
 }
 
-fn callback_fit_content_style_value<C, D>(
+fn callback_fit_content_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     if matches!(value, RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "fit-content") {
         callback(
@@ -2920,9 +3012,10 @@ fn callback_fit_content_style_value<C, D>(
             "",
         );
     } else {
-        callback_nested_primitive_with_calculation(
+        callback_nested_primitive_with_source_component_values_and_calculation(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             CssStyleValueKind::FitContent,
             property_id,
             FIT_CONTENT_CALLBACK_FUNCTION,
@@ -5838,15 +5931,18 @@ fn callback_view_timeline_inset_count<C>(
     );
 }
 
-fn callback_position_component<C, D>(
+fn callback_position_component<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     component_kind: u8,
     component: &RustOwnedPositionComponent,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let edge = component.edge.map_or(0, rust_owned_position_edge_to_callback_value);
     let Some(offset) = component.offset.as_ref() else {
@@ -5868,6 +5964,7 @@ fn callback_position_component<C, D>(
         return;
     };
 
+    emit_nested_primitive_source_component_values(source_component_value_emitter, offset);
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(offset);
     callback(
         CssStyleValueKind::Position,
@@ -5924,14 +6021,17 @@ fn callback_transform_origin_component<C, D, S, E>(
     );
 }
 
-fn callback_background_size<C, D>(
+fn callback_background_size<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedBackgroundSize,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     const KEYWORD: u8 = 0;
     const WIDTH: u8 = 1;
@@ -5941,9 +6041,23 @@ fn callback_background_size<C, D>(
         RustOwnedBackgroundSize::Cover => callback_background_size_keyword(callback, property_id, KEYWORD, "cover"),
         RustOwnedBackgroundSize::Contain => callback_background_size_keyword(callback, property_id, KEYWORD, "contain"),
         RustOwnedBackgroundSize::Explicit { width, height } => {
-            callback_background_size_component(callback, calculation_callback, property_id, WIDTH, width);
+            callback_background_size_component(
+                callback,
+                calculation_callback,
+                source_component_value_emitter,
+                property_id,
+                WIDTH,
+                width,
+            );
             if let Some(height) = height {
-                callback_background_size_component(callback, calculation_callback, property_id, HEIGHT, height);
+                callback_background_size_component(
+                    callback,
+                    calculation_callback,
+                    source_component_value_emitter,
+                    property_id,
+                    HEIGHT,
+                    height,
+                );
             }
         }
     }
@@ -5970,19 +6084,23 @@ where
     );
 }
 
-fn callback_background_size_component<C, D>(
+fn callback_background_size_component<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
-    callback_nested_primitive_with_calculation(
+    callback_nested_primitive_with_source_component_values_and_calculation(
         callback,
         calculation_callback,
+        source_component_value_emitter,
         CssStyleValueKind::BackgroundSize,
         property_id,
         kind,
