@@ -301,7 +301,6 @@ private:
     ParseErrorOr<NonnullRefPtr<StyleValue const>> parse_css_value(PropertyID, TokenStream<ComponentValue>&, Optional<String> original_source_text = {});
     ParseErrorOr<NonnullRefPtr<StyleValue const>> parse_descriptor_value(AtRuleID, DescriptorNameAndID const&, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> materialize_nonnegative_integer_symbol_pair(ReadonlySpan<ComponentValue const>, FFI::CssNonnegativeIntegerSymbolPairOrder);
-    RefPtr<StyleValue const> parse_positional_value_list_shorthand(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_css_value_for_property(PropertyID, TokenStream<ComponentValue>&);
     struct PropertyAndValue {
         PropertyID property;
@@ -383,27 +382,17 @@ private:
     using ParseFunction = AK::Function<RefPtr<StyleValue const>(TokenStream<ComponentValue>&)>;
     RefPtr<StyleValueList const> parse_comma_separated_value_list(TokenStream<ComponentValue>&, ParseFunction);
     RefPtr<StyleValueList const> parse_simple_comma_separated_value_list(PropertyID, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_coordinating_value_list_shorthand(TokenStream<ComponentValue>&, PropertyID shorthand_id, Vector<PropertyID> const& longhand_ids, Vector<PropertyID> const& reset_only_longhand_ids);
     RefPtr<StyleValue const> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
 
-    RefPtr<StyleValue const> parse_animation_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_background_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_font_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_alternates_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_east_asian_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_emoji(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_mask_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transition_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_grid_track_size_list_shorthand_value(PropertyID, TokenStream<ComponentValue>&, bool include_grid_auto_properties = false);
-    RefPtr<StyleValue const> parse_grid_track_placement_shorthand_value(PropertyID, TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_grid_area_shorthand_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_grid_shorthand_value(TokenStream<ComponentValue>&);
 
 #define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name, name_title, name_string) \
     RefPtr<StyleValue const> parse_##value_type_name##_value(TokenStream<ComponentValue>& tokens);
