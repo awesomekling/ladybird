@@ -2204,6 +2204,24 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::CornerStartStartShape], "notch"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::CornerStartStartShape,
+            value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+                value: RustOwnedNestedPrimitiveValue::Keyword("notch".to_string()),
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::CornerEndEndShape], "superellipse(3)"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::CornerEndEndShape,
+            value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+                value: RustOwnedNestedPrimitiveValue::Number(3.0),
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::ListStyleType,

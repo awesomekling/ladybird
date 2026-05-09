@@ -184,6 +184,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ContentVisibility:
     case PropertyID::CornerBottomLeftShape:
     case PropertyID::CornerBottomRightShape:
+    case PropertyID::CornerEndEndShape:
+    case PropertyID::CornerEndStartShape:
+    case PropertyID::CornerStartEndShape:
+    case PropertyID::CornerStartStartShape:
     case PropertyID::CornerTopLeftShape:
     case PropertyID::CornerTopRightShape:
     case PropertyID::CounterIncrement:

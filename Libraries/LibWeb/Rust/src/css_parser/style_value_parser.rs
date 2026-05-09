@@ -315,6 +315,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ContentVisibility
             | PropertyId::CornerBottomLeftShape
             | PropertyId::CornerBottomRightShape
+            | PropertyId::CornerEndEndShape
+            | PropertyId::CornerEndStartShape
+            | PropertyId::CornerStartEndShape
+            | PropertyId::CornerStartStartShape
             | PropertyId::CornerTopLeftShape
             | PropertyId::CornerTopRightShape
             | PropertyId::CounterIncrement
@@ -635,6 +639,10 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::CornerBottomLeftShape
         | PropertyId::CornerBottomRightShape
+        | PropertyId::CornerEndEndShape
+        | PropertyId::CornerEndStartShape
+        | PropertyId::CornerStartEndShape
+        | PropertyId::CornerStartStartShape
         | PropertyId::CornerTopLeftShape
         | PropertyId::CornerTopRightShape => rust_owned_generated_property_specific_style_value_kind(
             property_id,
