@@ -4836,7 +4836,6 @@ fn parses_style_values_with_rust_owned_ast() {
                 ],
                 separator: RustOwnedStyleValueListSeparator::Space,
                 value_type: Some(PropertyValueType::TransformList),
-                source: Some("translateX(10px) scale(2)".to_string()),
             }),
         })
     );

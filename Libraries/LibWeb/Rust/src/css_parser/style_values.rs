@@ -1264,7 +1264,6 @@ pub(crate) struct RustOwnedStyleValueList {
     pub(crate) values: Vec<RustOwnedStyleValueKind>,
     pub(crate) separator: RustOwnedStyleValueListSeparator,
     pub(crate) value_type: Option<PropertyValueType>,
-    pub(crate) source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

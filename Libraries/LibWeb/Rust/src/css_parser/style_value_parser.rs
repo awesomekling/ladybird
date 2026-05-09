@@ -1553,7 +1553,6 @@ fn rust_owned_transform_list_style_value_kind(
         values,
         separator: RustOwnedStyleValueListSeparator::Space,
         value_type: Some(PropertyValueType::TransformList),
-        source: Some(filtered_input_string.to_string()),
     }))
 }
 
