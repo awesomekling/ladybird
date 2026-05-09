@@ -3768,6 +3768,27 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             }
             style_value->calculation_node_events.append(move(event));
+        },
+        [](void* raw_style_value, FFI::CssUrlModifier const* rust_modifier) {
+            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            VERIFY(style_value.has_value());
+
+            RequestURLModifier modifier = [&]() {
+                switch (rust_modifier->kind) {
+                case FFI::CssUrlModifierKind::CrossOrigin:
+                    return RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value));
+                case FFI::CssUrlModifierKind::Integrity:
+                    return RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len));
+                case FFI::CssUrlModifierKind::ReferrerPolicy:
+                    return RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value));
+                }
+                VERIFY_NOT_REACHED();
+            }();
+
+            VERIFY(style_value->kind == FFI::CssStyleValueKind::FilterValueList);
+            VERIFY(!style_value->filter_value_list_events.is_empty());
+            VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::Url);
+            style_value->filter_value_list_events.last().request_url_modifiers.append(move(modifier));
         });
 
     return style_value;

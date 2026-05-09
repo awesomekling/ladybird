@@ -3586,6 +3586,28 @@ pub(super) fn rust_owned_url_payload_from_component_value(
     Some(RustOwnedUrlPayload {
         function_type: url_function.function_type,
         url: url_function.url,
+        request_url_modifiers: vec![],
+    })
+}
+
+pub(super) fn rust_owned_url_with_modifiers_from_component_value(
+    component_value: &ComponentValue,
+    filtered_input_string: &str,
+) -> Option<RustOwnedUrl> {
+    serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
+    let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
+    let url_function = parser.parse_a_url_function()?;
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    Some(RustOwnedUrl {
+        url: Some(RustOwnedUrlPayload {
+            function_type: url_function.function_type,
+            url: url_function.url,
+            request_url_modifiers: url_function.request_url_modifiers,
+        }),
     })
 }
 
@@ -3662,6 +3684,7 @@ pub(super) fn rust_owned_image_set_option(
             url: Some(RustOwnedUrlPayload {
                 function_type: CssUrlFunctionType::Url,
                 url: source,
+                request_url_modifiers: vec![],
             }),
             gradient: None,
         }

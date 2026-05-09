@@ -111,19 +111,22 @@ where
         primitive_value_options,
         &mut callback,
         |_, _, _, _, _, _| {},
+        |_| {},
     )
 }
 
-pub(crate) fn parse_style_value_for_property_with_options_and_calculation_callback<C, D>(
+pub(crate) fn parse_style_value_for_property_with_options_and_calculation_callback<C, D, U>(
     property_ids: &[u16],
     filtered_input: &[u8],
     primitive_value_options: CssPrimitiveValueOptions,
     mut callback: C,
     mut calculation_callback: D,
+    mut url_modifier_callback: U,
 ) -> bool
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    U: FnMut(&UrlModifier),
 {
     let RustOwnedStyleValueParseResult::Parsed(style_value) =
         parse_rust_owned_style_value_for_property_with_options(property_ids, filtered_input, primitive_value_options)
@@ -131,7 +134,12 @@ where
         return false;
     };
 
-    emit_rust_owned_style_value_with_calculation_callback(&style_value, &mut callback, &mut calculation_callback);
+    emit_rust_owned_style_value_with_calculation_callback(
+        &style_value,
+        &mut callback,
+        &mut calculation_callback,
+        &mut url_modifier_callback,
+    );
     if let RustOwnedStyleValueKind::MathFunction(value) = &style_value.value {
         emit_rust_owned_calculation_tree(&value.calculation, &mut calculation_callback);
     }
@@ -7996,10 +8004,9 @@ pub(super) fn parse_rust_owned_filter_value_list_value(filtered_input: &[u8]) ->
     for component_value in component_values {
         let mut url_parser = ComponentValueParser::new(vec![component_value.clone()]);
         if url_parser.parse_a_url_function().is_some() {
-            filters.push(RustOwnedFilterValue::Url(rust_owned_url_from_component_value(
-                &component_value,
-                filtered_input_string,
-            )?));
+            filters.push(RustOwnedFilterValue::Url(
+                rust_owned_url_with_modifiers_from_component_value(&component_value, filtered_input_string)?,
+            ));
             continue;
         }
 

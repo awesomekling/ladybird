@@ -13,16 +13,23 @@ pub(super) fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, 
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    emit_rust_owned_style_value_with_calculation_callback(style_value, callback, &mut |_, _, _, _, _, _| {});
+    emit_rust_owned_style_value_with_calculation_callback(
+        style_value,
+        callback,
+        &mut |_, _, _, _, _, _| {},
+        &mut |_| {},
+    );
 }
 
-pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
+pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
     style_value: &RustOwnedStyleValue,
     callback: &mut C,
     calculation_callback: &mut D,
+    url_modifier_callback: &mut U,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    U: FnMut(&UrlModifier),
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
@@ -78,6 +85,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
                     &item.style_value,
                     callback,
                     calculation_callback,
+                    url_modifier_callback,
                 );
             }
         }
@@ -122,6 +130,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
                     &item.style_value,
                     callback,
                     calculation_callback,
+                    url_modifier_callback,
                 );
             }
         }
@@ -238,6 +247,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
                     &item.style_value,
                     callback,
                     calculation_callback,
+                    url_modifier_callback,
                 );
             }
         }
@@ -263,6 +273,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
                     &item.style_value,
                     callback,
                     calculation_callback,
+                    url_modifier_callback,
                 );
             }
         }
@@ -705,7 +716,13 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
             }
         }
         RustOwnedStyleValueKind::FilterValueList(value) => {
-            callback_filter_value_list_style_value(callback, calculation_callback, property_id, value);
+            callback_filter_value_list_style_value(
+                callback,
+                calculation_callback,
+                url_modifier_callback,
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
             CssStyleValueKind::GridAutoFlow,
@@ -4410,14 +4427,16 @@ fn callback_shape_outside_basic_shape_nested_primitive<C, D>(
     }
 }
 
-fn callback_filter_value_list_style_value<C, D>(
+fn callback_filter_value_list_style_value<C, D, U>(
     callback: &mut C,
     calculation_callback: &mut D,
+    url_modifier_callback: &mut U,
     property_id: u16,
     value: &RustOwnedFilterValueList,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    U: FnMut(&UrlModifier),
 {
     match value {
         RustOwnedFilterValueList::None => callback(
@@ -4455,6 +4474,11 @@ fn callback_filter_value_list_style_value<C, D>(
                             payload.as_bytes(),
                             "",
                         );
+                        if let Some(url) = &url.url {
+                            for modifier in &url.request_url_modifiers {
+                                url_modifier_callback(modifier);
+                            }
+                        }
                     }
                     RustOwnedFilterValue::Blur { radius } => callback_optional_filter_nested_primitive(
                         callback,

@@ -337,7 +337,7 @@ pub(crate) struct UrlFunction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum UrlModifier {
+pub(crate) enum UrlModifier {
     CrossOrigin(CssUrlCrossOriginModifierValue),
     Integrity(String),
     ReferrerPolicy(CssUrlReferrerPolicyModifierValue),
@@ -352,7 +352,7 @@ impl UrlModifier {
         }
     }
 
-    pub(super) fn as_ffi(&self) -> CssUrlModifier {
+    pub(crate) fn as_ffi(&self) -> CssUrlModifier {
         match self {
             UrlModifier::CrossOrigin(value) => CssUrlModifier {
                 kind: CssUrlModifierKind::CrossOrigin,

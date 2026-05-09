@@ -29,20 +29,20 @@ use super::{
     CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
     CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
     CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
-    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUrlFunctionType,
-    CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
-    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
-    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind, DescriptorResultCallbacks, FamilyName, FontFamilyValue, FontStyle, FontVariant,
-    FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
-    MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
-    MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge, PseudoElementSelectorValue, Rule,
-    RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope,
-    RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
-    RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeFillRule,
-    RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorder, RustOwnedBorderImage,
-    RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList, RustOwnedBorderImageRepeat,
-    RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind,
+    CssUrlCrossOriginModifierValue, CssUrlFunctionType, CssUrlModifierKind, CssValueTypeSyntaxKind,
+    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
+    CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
+    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind, DescriptorResultCallbacks,
+    FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue, FontVariantEastAsianValue,
+    FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind, MediaFeatureSyntax,
+    MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
+    OpenTypeTaggedValue, Parser, PositionEdge, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
+    RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName,
+    RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList,
+    RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
+    RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
+    RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
     RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
     RustOwnedColumns, RustOwnedComponentShorthandItem, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
     RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
@@ -76,7 +76,7 @@ use super::{
     RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
     SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
     TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH, TEXT_DECORATION_LINE_OVERLINE,
-    TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, auto_keyword,
+    TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType, UrlModifier, auto_keyword,
     component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
     component_values_parse_as_property_value_type, component_values_parse_as_property_value_type_with_options,
     component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
@@ -2407,6 +2407,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "#paint".to_string(),
+                        request_url_modifiers: vec![],
                     }),
                 },
                 fallback_color: Some(RustOwnedColor::Simple {
@@ -2429,6 +2430,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "#paint".to_string(),
+                        request_url_modifiers: vec![],
                     }),
                 },
                 fallback_color: Some(RustOwnedColor::Simple {
@@ -2514,6 +2516,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
+                        request_url_modifiers: vec![],
                     }),
                     gradient: None,
                 })),
@@ -2742,6 +2745,23 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Filter], "url(\"filter.svg\" cross-origin(anonymous))"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Filter,
+            value: RustOwnedStyleValueKind::FilterValueList(RustOwnedFilterValueList::Filters(vec![
+                RustOwnedFilterValue::Url(RustOwnedUrl {
+                    url: Some(RustOwnedUrlPayload {
+                        function_type: CssUrlFunctionType::Url,
+                        url: "filter.svg".to_string(),
+                        request_url_modifiers: vec![UrlModifier::CrossOrigin(
+                            CssUrlCrossOriginModifierValue::Anonymous
+                        )],
+                    }),
+                }),
+            ])),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::AnchorName], "--foo, --bar"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::AnchorName,
@@ -2922,6 +2942,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "marker.png".to_string(),
+                        request_url_modifiers: vec![],
                     }),
                     gradient: None,
                 })],
@@ -3474,6 +3495,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     url: Some(RustOwnedUrlPayload {
                         function_type: CssUrlFunctionType::Url,
                         url: "border.png".to_string(),
+                        request_url_modifiers: vec![],
                     }),
                     gradient: None,
                 })),
@@ -3566,6 +3588,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         url: Some(RustOwnedUrlPayload {
                             function_type: CssUrlFunctionType::Url,
                             url: "cursor.png".to_string(),
+                            request_url_modifiers: vec![],
                         }),
                         gradient: None,
                     },

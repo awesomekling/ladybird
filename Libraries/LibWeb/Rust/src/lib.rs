@@ -745,6 +745,7 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
         metadata: *const u8,
         metadata_len: usize,
     ),
+    url_modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
 ) -> bool {
     unsafe {
         abort_on_panic(|| {
@@ -807,6 +808,10 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                         metadata.as_ptr(),
                         metadata.len(),
                     );
+                },
+                |modifier| {
+                    let modifier = modifier.as_ffi();
+                    url_modifier_callback(ctx, &raw const modifier);
                 },
             )
         })

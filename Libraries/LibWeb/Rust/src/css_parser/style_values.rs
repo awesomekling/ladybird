@@ -362,6 +362,7 @@ pub(crate) struct RustOwnedUrl {
 pub(crate) struct RustOwnedUrlPayload {
     pub(crate) function_type: CssUrlFunctionType,
     pub(crate) url: String,
+    pub(crate) request_url_modifiers: Vec<UrlModifier>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

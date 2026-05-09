@@ -2262,9 +2262,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return nullptr;
             };
-            auto parse_rust_source_as_url = [&](String const& source) -> Optional<URL> {
-                return RustComponentValueParser::parse_a_url_function(source.bytes_as_string_view(), "utf-8"sv);
-            };
             auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
@@ -4572,10 +4569,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         case RustComponentValueParser::RustFilterValueListEventKind::None:
                             break;
                         case RustComponentValueParser::RustFilterValueListEventKind::Url: {
-                            auto url = event.url.has_value() ? event.url : parse_rust_source_as_url(event.source);
-                            if (!url.has_value())
+                            if (!event.url.has_value())
                                 break;
-                            filter_value_list.append(url.release_value());
+                            filter_value_list.append(URL { event.url->url(), event.url->type(), event.request_url_modifiers });
                             break;
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::DropShadowRadius:

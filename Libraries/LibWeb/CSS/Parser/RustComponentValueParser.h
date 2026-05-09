@@ -632,6 +632,7 @@ public:
         RustNestedPrimitiveValue secondary_value;
         String source;
         Optional<URL> url;
+        Vector<RequestURLModifier> request_url_modifiers;
         Optional<RustNestedPrimitiveValue> drop_shadow_radius;
         Optional<RustStyleColor> drop_shadow_color;
     };
