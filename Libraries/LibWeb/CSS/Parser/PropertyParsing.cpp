@@ -578,7 +578,89 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         stack.append(InvertCalculationNode::create(children->first()));
                         break;
                     }
-                    case FFI::CssCalculationNodeKind::Function:
+                    case FFI::CssCalculationNodeKind::Function: {
+                        auto children = pop_children(event.child_count);
+                        if (!children.has_value())
+                            return nullptr;
+
+                        if (event.metadata.equals_ignoring_ascii_case("min"sv)) {
+                            stack.append(MinCalculationNode::create(children.release_value()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("max"sv)) {
+                            stack.append(MaxCalculationNode::create(children.release_value()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("hypot"sv)) {
+                            stack.append(HypotCalculationNode::create(children.release_value()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("clamp"sv) && children->size() == 3) {
+                            stack.append(ClampCalculationNode::create(children->at(0), children->at(1), children->at(2)));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("abs"sv) && children->size() == 1) {
+                            stack.append(AbsCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("sign"sv) && children->size() == 1) {
+                            stack.append(SignCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("sin"sv) && children->size() == 1) {
+                            stack.append(SinCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("cos"sv) && children->size() == 1) {
+                            stack.append(CosCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("tan"sv) && children->size() == 1) {
+                            stack.append(TanCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("asin"sv) && children->size() == 1) {
+                            stack.append(AsinCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("acos"sv) && children->size() == 1) {
+                            stack.append(AcosCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("atan"sv) && children->size() == 1) {
+                            stack.append(AtanCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("atan2"sv) && children->size() == 2) {
+                            stack.append(Atan2CalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("pow"sv) && children->size() == 2) {
+                            stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("sqrt"sv) && children->size() == 1) {
+                            stack.append(SqrtCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("log"sv) && children->size() == 2) {
+                            stack.append(LogCalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
+                            stack.append(ExpCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("mod"sv) && children->size() == 2) {
+                            stack.append(ModCalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("rem"sv) && children->size() == 2) {
+                            stack.append(RemCalculationNode::create(children->at(0), children->at(1)));
+                            break;
+                        }
+                        return nullptr;
+                    }
                     case FFI::CssCalculationNodeKind::TreeCountingFunction:
                         return nullptr;
                     }
