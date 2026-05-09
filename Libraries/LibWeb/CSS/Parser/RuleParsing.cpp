@@ -267,13 +267,11 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     if (import_prelude->supports.has_value()) {
         supports = parse_a_supports_from_string(import_prelude->supports->bytes_as_string_view(), "utf-8"sv);
         if (!supports) {
-            auto supports_component_values = RustComponentValueParser::parse_a_list_of_component_values(import_prelude->supports->bytes_as_string_view(), "utf-8"sv);
-            TokenStream supports_tokens { supports_component_values };
             m_rule_context.append(RuleContext::SupportsCondition);
-            auto supports_declaration = parse_supports_declaration(supports_tokens);
+            auto supports_declaration = RustComponentValueParser::parse_a_declaration(import_prelude->supports->bytes_as_string_view(), "utf-8"sv, m_rule_context);
             m_rule_context.take_last();
-            if (supports_declaration)
-                supports = Supports::create(supports_declaration.release_nonnull<BooleanExpression>());
+            if (supports_declaration.has_value())
+                supports = Supports::create(Supports::Declaration::create(import_prelude->supports.value(), convert_to_style_property(supports_declaration.release_value()).has_value()));
         }
     }
 
