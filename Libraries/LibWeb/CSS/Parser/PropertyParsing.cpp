@@ -437,37 +437,65 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
                     break;
                 case ValueType::Angle:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        calculation_context.percentages_resolve_as = ValueType::Angle;
+                        if (metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Angle, metadata->range);
                     break;
                 case ValueType::AnglePercentage:
                     calculation_context.percentages_resolve_as = ValueType::Angle;
+                    if (metadata->percentage_range.has_value())
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     calculation_context.accepted_ranges_by_type.set(ValueType::Angle, metadata->range);
                     break;
                 case ValueType::Flex:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Flex, metadata->range);
                     break;
                 case ValueType::Frequency:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        calculation_context.percentages_resolve_as = ValueType::Frequency;
+                        if (metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
                     break;
                 case ValueType::FrequencyPercentage:
                     calculation_context.percentages_resolve_as = ValueType::Frequency;
+                    if (metadata->percentage_range.has_value())
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
                     break;
                 case ValueType::Length:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        calculation_context.percentages_resolve_as = ValueType::Length;
+                        if (metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
                     break;
                 case ValueType::LengthPercentage:
                     calculation_context.percentages_resolve_as = ValueType::Length;
+                    if (metadata->percentage_range.has_value())
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     calculation_context.accepted_ranges_by_type.set(ValueType::Length, metadata->range);
                     break;
                 case ValueType::Resolution:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Resolution, metadata->range);
                     break;
                 case ValueType::Time:
+                    if (metadata->percentages_resolve_to_value_type) {
+                        calculation_context.percentages_resolve_as = ValueType::Time;
+                        if (metadata->percentage_range.has_value())
+                            calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
+                    }
                     calculation_context.accepted_ranges_by_type.set(ValueType::Time, metadata->range);
                     break;
                 case ValueType::TimePercentage:
                     calculation_context.percentages_resolve_as = ValueType::Time;
+                    if (metadata->percentage_range.has_value())
+                        calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     calculation_context.accepted_ranges_by_type.set(ValueType::Time, metadata->range);
                     break;
                 default:
@@ -539,6 +567,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     }
                 };
+                auto matches_number = [&](CalculationNode const& node) {
+                    auto const& numeric_type = node.numeric_type();
+                    return numeric_type.has_value() && numeric_type->matches_number(calculation_context.percentages_resolve_as);
+                };
+                auto matches_sign_argument = [&](CalculationNode const& node) {
+                    auto const& numeric_type = node.numeric_type();
+                    return numeric_type.has_value()
+                        && (numeric_type->matches_number(calculation_context.percentages_resolve_as)
+                            || numeric_type->matches_dimension()
+                            || numeric_type->matches_percentage());
+                };
 
                 for (auto const& event : rust_style_value->calculation_node_events) {
                     switch (event.kind) {
@@ -602,6 +641,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             stack.append(AbsCalculationNode::create(children->first()));
                             break;
                         }
+                        if (event.metadata.equals_ignoring_ascii_case("sign"sv) && children->size() == 1) {
+                            if (!matches_sign_argument(*children->first()))
+                                return nullptr;
+                            stack.append(SignCalculationNode::create(children->first()));
+                            break;
+                        }
                         if (event.metadata.equals_ignoring_ascii_case("sin"sv) && children->size() == 1) {
                             stack.append(SinCalculationNode::create(children->first()));
                             break;
@@ -632,6 +677,20 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         if (event.metadata.equals_ignoring_ascii_case("sqrt"sv) && children->size() == 1) {
                             stack.append(SqrtCalculationNode::create(children->first()));
+                            break;
+                        }
+                        if (event.metadata.equals_ignoring_ascii_case("pow"sv) && children->size() == 2) {
+                            if (!matches_number(*children->at(0)) || !matches_number(*children->at(1)))
+                                return nullptr;
+
+                            auto const& left_numeric_type = children->at(0)->numeric_type();
+                            auto const& right_numeric_type = children->at(1)->numeric_type();
+                            VERIFY(left_numeric_type.has_value());
+                            VERIFY(right_numeric_type.has_value());
+                            if (!left_numeric_type->consistent_type(*right_numeric_type).has_value())
+                                return nullptr;
+
+                            stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
                             break;
                         }
                         if (event.metadata.equals_ignoring_ascii_case("log"sv) && children->size() == 2) {
