@@ -1723,7 +1723,10 @@ impl ComponentValueParser {
         }
         if self.consume_ident_matching("oblique") {
             self.discard_whitespace();
-            if self.next_component_value().is_some_and(component_value_parse_as_angle) {
+            if self
+                .next_component_value()
+                .is_some_and(component_value_parse_as_font_style_angle)
+            {
                 self.index += 1;
                 return Some(FontStyle::Oblique { has_angle: true });
             }
@@ -3013,5 +3016,27 @@ impl ComponentValueParser {
         }
 
         None
+    }
+}
+
+fn component_value_parse_as_font_style_angle(component_value: &ComponentValue) -> bool {
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit },
+            ..
+        }) if matches!(dimension_for_unit(unit), Some(DimensionType::Angle)) => {
+            let angle_in_degrees = match unit.to_ascii_lowercase().as_str() {
+                "deg" => number.value(),
+                "grad" => number.value() * 0.9,
+                "rad" => number.value() * 57.29577951308232,
+                "turn" => number.value() * 360.0,
+                _ => return false,
+            };
+            (-90.0..=90.0).contains(&angle_in_degrees)
+        }
+        // AD-HOC: The Rust side only recognizes the syntactic branch here.
+        // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => true,
+        _ => false,
     }
 }

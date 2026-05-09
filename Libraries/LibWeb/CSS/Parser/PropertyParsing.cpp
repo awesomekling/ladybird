@@ -1844,16 +1844,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return values[0];
                 return StyleValueList::create(move(values), StyleValueList::Separator::Space);
             };
-            auto parse_rust_source_as_angle = [&](String const& source) -> RefPtr<StyleValue const> {
+            auto parse_rust_source_as_angle = [&](String const& source, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Angle, infinite_range } } });
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Angle, accepted_range } } });
                     if (calc && calc->as_calculated().resolves_to_angle())
                         return calc;
                 }
                 TokenStream value_tokens { component_values };
-                auto value = parse_angle_value(value_tokens, infinite_range);
+                auto value = parse_angle_value(value_tokens, accepted_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -2174,9 +2174,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
             };
-            auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
                 if (!value.numeric_value.has_value())
-                    return parse_rust_source_as_angle(value.source_or_unit);
+                    return parse_rust_source_as_angle(value.source_or_unit, accepted_range);
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Angle)
                     return nullptr;
                 auto angle_unit = string_to_angle_unit(value.source_or_unit);
@@ -2238,7 +2238,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     RefPtr<StyleValue const> value;
                     switch (argument.parameter_type) {
                     case TransformFunctionParameterType::Angle:
-                        value = materialize_rust_nested_angle(argument.value);
+                        value = materialize_rust_nested_angle(argument.value, infinite_range);
                         break;
                     case TransformFunctionParameterType::Length:
                         value = materialize_rust_nested_length(argument.value, infinite_range);
@@ -3238,7 +3238,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->font_style.has_angle) {
                     if (!rust_style_value->font_style.angle.has_value())
                         break;
-                    auto angle_value = materialize_rust_nested_angle(*rust_style_value->font_style.angle);
+                    auto angle_value = materialize_rust_nested_angle(*rust_style_value->font_style.angle, { .min = -90, .max = 90 });
                     if (!angle_value)
                         break;
                     discard_rust_owned_property_value_tokens();
@@ -3823,7 +3823,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                         case RustComponentValueParser::RustFilterValueListEventKind::HueRotate: {
                             auto angle = event.has_value
-                                ? materialize_rust_nested_angle(event.value)
+                                ? materialize_rust_nested_angle(event.value, infinite_range)
                                 : AngleStyleValue::create(Angle::make_degrees(0));
                             if (!angle)
                                 break;
@@ -4456,7 +4456,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     auto materialize_rotation = [&](TransformFunction function) -> RefPtr<StyleValue const> {
                         if (arguments.size() != 1)
                             return nullptr;
-                        auto angle = materialize_rust_nested_angle(arguments[0].value);
+                        auto angle = materialize_rust_nested_angle(arguments[0].value, infinite_range);
                         if (!angle)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, function, { angle.release_nonnull() });
@@ -4505,7 +4505,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         auto x = materialize_rust_nested_number(arguments[0].value);
                         auto y = materialize_rust_nested_number(arguments[1].value);
                         auto z = materialize_rust_nested_number(arguments[2].value);
-                        auto angle = materialize_rust_nested_angle(arguments[3].value);
+                        auto angle = materialize_rust_nested_angle(arguments[3].value, infinite_range);
                         if (!x || !y || !z || !angle)
                             return nullptr;
                         return TransformationStyleValue::create(rust_style_value->property_id, TransformFunction::Rotate3d, { x.release_nonnull(), y.release_nonnull(), z.release_nonnull(), angle.release_nonnull() });

@@ -8296,13 +8296,13 @@ pub(super) fn component_value_parse_as_nested_angle(
             })
         }
         ComponentValue::Function(_) => parse_rust_owned_math_function(
-            PropertyValueType::Number,
+            PropertyValueType::Angle,
             std::slice::from_ref(component_value),
             source.as_bytes(),
         )
         .map(RustOwnedNestedPrimitiveValue::MathFunction)
         .or_else(|| {
-            parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
+            parse_rust_owned_tree_counting_function(PropertyValueType::Angle, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
         .or_else(|| {

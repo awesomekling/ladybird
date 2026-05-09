@@ -4943,6 +4943,21 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    assert!(matches!(
+        parse_rust_owned_style_value(&[PropertyId::FontStyle], "oblique calc(100deg)"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::FontStyle,
+            value: RustOwnedStyleValueKind::FontStyle(RustOwnedFontStyle {
+                value: FontStyle::Oblique { has_angle: true },
+                angle: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    ref name,
+                    ref source,
+                    value_type: PropertyValueType::Angle,
+                    ..
+                })),
+            }),
+        }) if name == "calc" && source == "calc(100deg)"
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::FontVariantNumeric], "tabular-nums slashed-zero"),
         Some(RustOwnedStyleValue {
@@ -7732,6 +7747,14 @@ fn parses_font_styles() {
         Some(FontStyle::Oblique { has_angle: true })
     );
     assert_eq!(
+        parse_font_style("oblique 100grad"),
+        Some(FontStyle::Oblique { has_angle: true })
+    );
+    assert_eq!(
+        parse_font_style("oblique -0.25turn"),
+        Some(FontStyle::Oblique { has_angle: true })
+    );
+    assert_eq!(
         parse_font_style("oblique calc(10deg + 1deg)"),
         Some(FontStyle::Oblique { has_angle: true })
     );
@@ -7742,6 +7765,9 @@ fn rejects_invalid_font_styles() {
     assert_eq!(parse_font_style("normal italic"), None);
     assert_eq!(parse_font_style("italic 10deg"), None);
     assert_eq!(parse_font_style("oblique 10px"), None);
+    assert_eq!(parse_font_style("oblique 91deg"), None);
+    assert_eq!(parse_font_style("oblique -101grad"), None);
+    assert_eq!(parse_font_style("oblique 1turn"), None);
 }
 
 #[test]
