@@ -100,12 +100,10 @@ use style_value_parser::{
     component_values_parse_as_property_value_type_with_options, parse_rust_owned_generated_longhand_value,
 };
 use style_value_shorthands::parse_rust_owned_grid_template_areas_value;
+#[cfg(test)]
 pub(crate) use style_value_shorthands::{
     parse_coordinating_value_list_shorthand, parse_font_shorthand, parse_grid_placement_shorthand,
     parse_grid_template_shorthand, parse_layer_shorthand, parse_positional_value_list_shorthand,
-};
-#[cfg(test)]
-pub(crate) use style_value_shorthands::{
     parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
 };
 use style_values::*;
