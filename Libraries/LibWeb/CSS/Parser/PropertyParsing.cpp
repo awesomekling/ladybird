@@ -984,8 +984,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     parsed_value = parsed_value->as_value_list().values()[0];
                 }
             };
+            auto remove_whitespace_component_values = [](Vector<ComponentValue> const& component_values) {
+                Vector<ComponentValue> filtered_component_values;
+                filtered_component_values.ensure_capacity(component_values.size());
+                for (auto const& component_value : component_values) {
+                    if (!component_value.is(Token::Type::Whitespace))
+                        filtered_component_values.append(component_value);
+                }
+                return filtered_component_values;
+            };
             auto parse_rust_source_as_integer_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .resolve_numbers_as_integers = true, .accepted_ranges_by_type = { { ValueType::Integer, range } } });
+                    if (calc && calc->as_calculated().resolves_to_number())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_integer_value(value_tokens, range);
                 value_tokens.discard_whitespace();
@@ -995,6 +1010,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, infinite_range } } });
+                    if (calc && calc->as_calculated().resolves_to_number())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
@@ -1004,6 +1025,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_number_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, range } } });
+                    if (calc && calc->as_calculated().resolves_to_number())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_value(value_tokens, range);
                 value_tokens.discard_whitespace();
@@ -1013,6 +1040,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Percentage, infinite_range } } });
+                    if (calc && calc->as_calculated().resolves_to_percentage())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_percentage_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
@@ -1637,6 +1670,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, non_negative_range } } });
+                    if (calc && calc->as_calculated().resolves_to_number())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_value(value_tokens, non_negative_range);
                 value_tokens.discard_whitespace();
@@ -1646,6 +1685,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, infinite_range }, { ValueType::Percentage, infinite_range } } });
+                    if (calc && (calc->as_calculated().resolves_to_number() || calc->as_calculated().resolves_to_percentage()))
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_percentage_value(value_tokens, infinite_range, infinite_range);
                 value_tokens.discard_whitespace();
@@ -1664,6 +1709,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_non_negative_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, non_negative_range }, { ValueType::Percentage, non_negative_range } } });
+                    if (calc && (calc->as_calculated().resolves_to_number() || calc->as_calculated().resolves_to_percentage()))
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_percentage_value(value_tokens, non_negative_range, non_negative_range);
                 value_tokens.discard_whitespace();
@@ -1709,6 +1760,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Length, infinite_range } } });
+                    if (calc && calc->as_calculated().resolves_to_length_percentage())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
                 value_tokens.discard_whitespace();
@@ -1718,6 +1775,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Length, infinite_range } } });
+                    if (calc && calc->as_calculated().resolves_to_length())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
@@ -1727,6 +1790,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_non_negative_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Length, non_negative_range } } });
+                    if (calc && calc->as_calculated().resolves_to_length_percentage())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
                 value_tokens.discard_whitespace();
@@ -1736,6 +1805,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_non_negative_length = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Length, non_negative_range } } });
+                    if (calc && calc->as_calculated().resolves_to_length())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_length_value(value_tokens, non_negative_range);
                 value_tokens.discard_whitespace();
@@ -1771,6 +1846,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto parse_rust_source_as_angle = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
+                auto stripped_component_values = remove_whitespace_component_values(component_values);
+                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
+                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Angle, infinite_range } } });
+                    if (calc && calc->as_calculated().resolves_to_angle())
+                        return calc;
+                }
                 TokenStream value_tokens { component_values };
                 auto value = parse_angle_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
