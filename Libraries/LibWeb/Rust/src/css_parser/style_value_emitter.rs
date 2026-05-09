@@ -481,6 +481,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     payload.as_bytes(),
                     "",
                 );
+                if let RustOwnedBorderImageSource::Image(image) = source
+                    && !image.component_values.is_empty()
+                {
+                    SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    }
+                    .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+                }
             }
             if let Some(slice) = &value.slice {
                 callback_border_image_slice_style_value(
@@ -590,9 +600,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_optional_column_length(callback, property_id, 1, value.column_width.as_ref());
             callback_optional_column_length(callback, property_id, 2, value.column_height.as_ref());
         }
-        RustOwnedStyleValueKind::Content(value) => {
-            callback_content_style_value(callback, property_id, value);
-        }
+        RustOwnedStyleValueKind::Content(value) => callback_content_style_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            value,
+        ),
         RustOwnedStyleValueKind::ColorScheme(value) => {
             let scheme_bytes = null_separated_string_list_bytes(&value.schemes);
             callback(
@@ -685,7 +702,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
         }
-        RustOwnedStyleValueKind::Cursor(value) => callback_cursor_style_value(callback, property_id, value),
+        RustOwnedStyleValueKind::Cursor(value) => callback_cursor_style_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            value,
+        ),
         RustOwnedStyleValueKind::Display(value) => callback(
             CssStyleValueKind::Display,
             property_id,
@@ -862,7 +888,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(image) = value.image.as_ref() {
-                callback_list_style_image(callback, property_id, image);
+                callback_list_style_image(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    property_id,
+                    image,
+                );
             }
             if let Some(list_style_type) = value.list_style_type.as_ref() {
                 callback_list_style_type(callback, property_id, list_style_type);
@@ -1150,9 +1185,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 value,
             );
         }
-        RustOwnedStyleValueKind::ShapeOutside(value) => {
-            callback_shape_outside_style_value(callback, calculation_callback, property_id, value);
-        }
+        RustOwnedStyleValueKind::ShapeOutside(value) => callback_shape_outside_style_value(
+            callback,
+            calculation_callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            value,
+        ),
         RustOwnedStyleValueKind::TextDecoration(value) => {
             if let Some(line) = value.line {
                 callback(
@@ -3677,9 +3720,15 @@ fn image_set_option_metadata(option: &RustOwnedImageSetOption) -> String {
     )
 }
 
-fn callback_cursor_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedCursor)
-where
+fn callback_cursor_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedCursor,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for image in &value.images {
         let (image_kind, url_function_type, payload) = image_callback_payload(&image.image);
@@ -3698,6 +3747,9 @@ where
             payload.as_bytes(),
             "",
         );
+        if !image.image.component_values.is_empty() {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.image.component_values);
+        }
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
             callback_nested_primitive(
                 callback,
@@ -3735,9 +3787,15 @@ where
     );
 }
 
-fn callback_list_style_image<C>(callback: &mut C, property_id: u16, value: &RustOwnedListStyleImage)
-where
+fn callback_list_style_image<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedListStyleImage,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (kind, image_kind, url_function_type, payload) = match value {
         RustOwnedListStyleImage::None => (LIST_STYLE_IMAGE_CALLBACK_NONE, 0, IMAGE_URL_FUNCTION_TYPE_NONE, ""),
@@ -3761,6 +3819,11 @@ where
         payload.as_bytes(),
         "",
     );
+    if let RustOwnedListStyleImage::Image(image) = value
+        && !image.component_values.is_empty()
+    {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
 }
 
 fn callback_list_style_type<C>(callback: &mut C, property_id: u16, value: &RustOwnedListStyleType)
@@ -3825,9 +3888,15 @@ where
     );
 }
 
-fn callback_content_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedContent)
-where
+fn callback_content_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedContent,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedContent::Normal => callback_content_event(callback, property_id, CONTENT_CALLBACK_NORMAL, ""),
@@ -3842,7 +3911,7 @@ where
                         callback_content_event(callback, property_id, CONTENT_CALLBACK_ITEM_STRING, source);
                     }
                     RustOwnedContentItem::Image(image) => {
-                        callback_content_image_event(callback, property_id, image);
+                        callback_content_image_event(callback, source_component_value_emitter, property_id, image);
                     }
                     RustOwnedContentItem::Counter(counter) => {
                         callback_content_counter_event(callback, property_id, CONTENT_CALLBACK_ITEM_COUNTER, counter);
@@ -3924,9 +3993,15 @@ where
     }
 }
 
-fn callback_content_image_event<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
-where
+fn callback_content_image_event<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    image: &RustOwnedImage,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (image_kind, url_function_type, payload) = image_callback_payload(image);
     callback(
@@ -3944,6 +4019,9 @@ where
         payload.as_bytes(),
         "",
     );
+    if !image.component_values.is_empty() {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
 }
 
 fn callback_counter_function_style_value<C>(
@@ -4227,21 +4305,24 @@ fn flex_basis_kind_from_keyword(keyword: &str) -> Option<u8> {
     None
 }
 
-fn callback_shape_outside_style_value<C, D>(
+fn callback_shape_outside_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedShapeOutside,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedShapeOutside::None => {
             callback_shape_outside_event(callback, property_id, SHAPE_OUTSIDE_CALLBACK_NONE, 0, "");
         }
         RustOwnedShapeOutside::Image(image) => {
-            callback_shape_outside_image_event(callback, property_id, image);
+            callback_shape_outside_image_event(callback, source_component_value_emitter, property_id, image);
         }
         RustOwnedShapeOutside::Shape { basic_shape, shape_box } => {
             if let Some(basic_shape) = basic_shape {
@@ -4289,9 +4370,15 @@ where
     );
 }
 
-fn callback_shape_outside_image_event<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
-where
+fn callback_shape_outside_image_event<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    image: &RustOwnedImage,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (image_kind, url_function_type, payload) = image_callback_payload(image);
     callback(
@@ -4309,6 +4396,9 @@ where
         payload.as_bytes(),
         "",
     );
+    if !image.component_values.is_empty() {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
 }
 
 fn callback_shape_outside_basic_shape_event<C, D>(

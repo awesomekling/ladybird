@@ -473,6 +473,7 @@ public:
         RustImageKind image_kind { RustImageKind::Url };
         String image_source;
         Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
         Optional<RustNestedPrimitiveValue> x;
         Optional<RustNestedPrimitiveValue> y;
     };
@@ -622,6 +623,7 @@ public:
         RustImageKind image_kind { RustImageKind::Url };
         String source;
         Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
         RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
         FlyString counter_name;
         FlyString counter_join_string;
@@ -726,6 +728,7 @@ public:
         Optional<RustImageKind> list_style_image_source_kind;
         Optional<String> list_style_image_source;
         Optional<URL> list_style_image_source_url;
+        Vector<ComponentValue> list_style_image_source_component_values;
         Optional<RustListStyleTypeKind> list_style_type_kind;
         Optional<String> list_style_type_string;
         Optional<CounterStyle> list_style_type_counter_style;
@@ -745,6 +748,7 @@ public:
         Optional<RustImageKind> border_image_source_source_kind;
         Optional<String> border_image_source_source;
         Optional<URL> border_image_source_source_url;
+        Vector<ComponentValue> border_image_source_source_component_values;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };
         bool border_image_shorthand_has_outset { false };
@@ -816,6 +820,7 @@ public:
         Optional<RustImageKind> shape_outside_image_source_kind;
         Optional<String> shape_outside_image_source;
         Optional<URL> shape_outside_image_source_url;
+        Vector<ComponentValue> shape_outside_image_source_component_values;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Optional<u8> shape_outside_basic_shape_fill_rule;
         Vector<RustBasicShapeRectangleComponent> shape_outside_basic_shape_rectangle_components;

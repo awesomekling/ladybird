@@ -2350,6 +2350,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->list_style_image_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
                         style_value->list_style_image_source_url = image_url_from_callback_payload();
+                        note_source_component_values_target(style_value->list_style_image_source_component_values);
                     }
                 } else {
                     auto type_kind = static_cast<RustListStyleTypeKind>(color_green);
@@ -2472,6 +2473,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->border_image_source_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
                         style_value->border_image_source_source_url = image_url_from_callback_payload();
+                        note_source_component_values_target(style_value->border_image_source_source_component_values);
                     }
                     break;
                 case 1:
@@ -2684,6 +2686,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_image_source_kind = static_cast<RustImageKind>(color_green);
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
                     style_value->shape_outside_image_source_url = image_url_from_callback_payload();
+                    note_source_component_values_target(style_value->shape_outside_image_source_component_values);
                     break;
                 case RustShapeOutsideEventKind::BasicShape: {
                     style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
@@ -2792,6 +2795,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         .source = string_from_ffi_bytes(value_ptr, value_len),
                         .image_url = image_url_from_callback_payload(),
                     });
+                    if (static_cast<RustContentEventKind>(color_red) == RustContentEventKind::ItemImage)
+                        note_source_component_values_target(style_value->content_events.last().image_source_component_values);
                     break;
                 case RustContentEventKind::ItemCounter:
                 case RustContentEventKind::AltTextCounter:
@@ -2972,6 +2977,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .image_url = image_url_from_callback_payload(),
                 };
                 style_value->cursor_images.append(move(image));
+                note_source_component_values_target(style_value->cursor_images.last().image_source_component_values);
                 return;
             } else if (first_is_one_of(kind,
                            FFI::CssStyleValueKind::GridAutoTrackSizes,
