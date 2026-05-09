@@ -9463,6 +9463,14 @@ fn parses_primitive_value_prefixes() {
         parse_primitive_prefix("50%", CssPrimitiveValueType::Opacity),
         CssPrimitiveValueKind::Opacity
     );
+    assert_eq!(
+        parse_primitive_prefix("random(3, 1)", CssPrimitiveValueType::Number),
+        CssPrimitiveValueKind::Number
+    );
+    assert_eq!(
+        parse_primitive_prefix("random(10%, 30%)", CssPrimitiveValueType::Length),
+        CssPrimitiveValueKind::Length
+    );
 }
 
 #[test]
