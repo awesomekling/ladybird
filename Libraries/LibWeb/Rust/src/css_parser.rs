@@ -76,13 +76,14 @@ mod style_value_shorthands;
 mod style_values;
 
 pub(crate) use parser_arbitrary_substitutions::{
-    parse_arbitrary_substitution_function_declaration_value_arguments,
+    collect_substitution_function_presence, parse_arbitrary_substitution_function_declaration_value_arguments,
     parse_arbitrary_substitution_function_if_arguments,
 };
 pub(crate) use parser_descriptors::*;
 use parser_emitters::*;
 pub(crate) use parser_entrypoints::*;
 use parser_selectors::*;
+pub(crate) use parser_shared::serialize_component_values_for_reparsing;
 pub(crate) use parser_shared::strip_whitespace;
 use parser_shared::*;
 use parser_syntax_media::*;

@@ -1072,6 +1072,50 @@ pub unsafe extern "C" fn rust_css_parse_arbitrary_substitution_function_if_argum
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - The output pointers must be valid for writes
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_collect_arbitrary_substitution_function_presence(
+    input: *const u8,
+    input_len: usize,
+    attr: *mut bool,
+    env: *mut bool,
+    if_: *mut bool,
+    inherit: *mut bool,
+    var: *mut bool,
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+            let Some((attr_value, env_value, if_value, inherit_value, var_value)) =
+                css_parser::collect_substitution_function_presence(input)
+            else {
+                return false;
+            };
+
+            if !attr.is_null() {
+                *attr = attr_value;
+            }
+            if !env.is_null() {
+                *env = env_value;
+            }
+            if !if_.is_null() {
+                *if_ = if_value;
+            }
+            if !inherit.is_null() {
+                *inherit = inherit_value;
+            }
+            if !var.is_null() {
+                *var = var_value;
+            }
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]

@@ -206,7 +206,7 @@ pub(crate) fn strip_whitespace(component_values: &[ComponentValue]) -> &[Compone
     &component_values[start..end]
 }
 
-pub(super) fn serialize_component_values_for_reparsing(
+pub(crate) fn serialize_component_values_for_reparsing(
     component_values: &[ComponentValue],
     filtered_input: &str,
 ) -> Option<String> {

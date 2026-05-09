@@ -60,6 +60,40 @@ fn is_empty_after_trimming(component_values: &[ComponentValue]) -> bool {
     strip_whitespace(component_values).is_empty()
 }
 
+#[derive(Default)]
+struct ArbitrarySubstitutionFunctionPresence {
+    attr: bool,
+    env: bool,
+    if_: bool,
+    inherit: bool,
+    var: bool,
+}
+
+impl ArbitrarySubstitutionFunctionPresence {
+    fn has_any(&self) -> bool {
+        self.attr || self.env || self.if_ || self.inherit || self.var
+    }
+}
+
+fn function_id_from_name(name: &str) -> Option<ArbitrarySubstitutionFunction> {
+    if name.eq_ignore_ascii_case("attr") {
+        return Some(ArbitrarySubstitutionFunction::Attr);
+    }
+    if name.eq_ignore_ascii_case("env") {
+        return Some(ArbitrarySubstitutionFunction::Env);
+    }
+    if name.eq_ignore_ascii_case("if") {
+        return Some(ArbitrarySubstitutionFunction::If);
+    }
+    if name.eq_ignore_ascii_case("inherit") {
+        return Some(ArbitrarySubstitutionFunction::Inherit);
+    }
+    if name.eq_ignore_ascii_case("var") {
+        return Some(ArbitrarySubstitutionFunction::Var);
+    }
+    None
+}
+
 pub(crate) fn parse_arbitrary_substitution_function_declaration_value_arguments(
     filtered_input: &[u8],
     function: u8,
@@ -155,6 +189,84 @@ pub(crate) fn parse_arbitrary_substitution_function_if_arguments(
     Some(parsed_branches)
 }
 
+fn collect_arbitrary_substitution_function_presence(
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+    presence: &mut ArbitrarySubstitutionFunctionPresence,
+) -> bool {
+    for component_value in component_values {
+        match component_value {
+            ComponentValue::Function(function) => {
+                if let Some(function_id) = function_id_from_name(&function.name) {
+                    let Some(serialized_values) =
+                        serialize_component_values_for_reparsing(&function.value, filtered_input)
+                    else {
+                        return false;
+                    };
+                    let is_valid = match function_id {
+                        ArbitrarySubstitutionFunction::Attr
+                        | ArbitrarySubstitutionFunction::Env
+                        | ArbitrarySubstitutionFunction::Inherit
+                        | ArbitrarySubstitutionFunction::Var => {
+                            parse_arbitrary_substitution_function_declaration_value_arguments(
+                                serialized_values.as_bytes(),
+                                function_id as u8,
+                            )
+                            .is_some()
+                        }
+                        ArbitrarySubstitutionFunction::If => {
+                            parse_arbitrary_substitution_function_if_arguments(serialized_values.as_bytes()).is_some()
+                        }
+                    };
+
+                    if !is_valid {
+                        return false;
+                    }
+
+                    match function_id {
+                        ArbitrarySubstitutionFunction::Attr => presence.attr = true,
+                        ArbitrarySubstitutionFunction::Env => presence.env = true,
+                        ArbitrarySubstitutionFunction::If => presence.if_ = true,
+                        ArbitrarySubstitutionFunction::Inherit => presence.inherit = true,
+                        ArbitrarySubstitutionFunction::Var => presence.var = true,
+                    }
+                }
+
+                if !collect_arbitrary_substitution_function_presence(&function.value, filtered_input, presence) {
+                    return false;
+                }
+            }
+            ComponentValue::SimpleBlock(block) => {
+                if !collect_arbitrary_substitution_function_presence(&block.value, filtered_input, presence) {
+                    return false;
+                }
+            }
+            ComponentValue::PreservedToken(_) => {}
+        }
+    }
+
+    true
+}
+
+pub fn collect_substitution_function_presence(input: &[u8]) -> Option<(bool, bool, bool, bool, bool)> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut presence = ArbitrarySubstitutionFunctionPresence::default();
+    if !collect_arbitrary_substitution_function_presence(&component_values, filtered_input_string, &mut presence) {
+        return None;
+    }
+    if !presence.has_any() {
+        return Some((false, false, false, false, false));
+    }
+    Some((
+        presence.attr,
+        presence.env,
+        presence.if_,
+        presence.inherit,
+        presence.var,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +301,26 @@ mod tests {
     fn rejects_invalid_if_arguments() {
         assert!(parse_arbitrary_substitution_function_if_arguments(b"foo;").is_none());
         assert!(parse_arbitrary_substitution_function_if_arguments(b"foo bar").is_none());
+    }
+
+    #[test]
+    fn collects_substitution_function_presence() {
+        assert_eq!(
+            collect_substitution_function_presence(b"var(--x, attr(data-x number))"),
+            Some((true, false, false, false, true))
+        );
+        assert_eq!(
+            collect_substitution_function_presence(b"red"),
+            Some((false, false, false, false, false))
+        );
+        assert_eq!(
+            collect_substitution_function_presence(b"attr(data-foo %)"),
+            Some((true, false, false, false, false))
+        );
+        assert_eq!(
+            collect_substitution_function_presence(b"attr(data-foo number)"),
+            Some((true, false, false, false, false))
+        );
+        assert!(collect_substitution_function_presence(b"if(foo)").is_none());
     }
 }

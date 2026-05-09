@@ -1076,48 +1076,38 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
 Parser::ParseErrorOr<void> Parser::collect_arbitrary_substitution_function_presence(Vector<ComponentValue> const& component_values, SubstitutionFunctionsPresence& presence)
 {
-    for (auto const& component_value : component_values) {
-        if (collect_arbitrary_substitution_function_presence(component_value, presence).is_error())
-            return ParseError::SyntaxError;
+    auto serialized_component_values = serialize_component_values_for_reparsing(component_values);
+    auto serialized_bytes = serialized_component_values.bytes();
+
+    bool attr { false };
+    bool env { false };
+    bool if_ { false };
+    bool inherit { false };
+    bool var { false };
+    if (!FFI::rust_css_collect_arbitrary_substitution_function_presence(
+            serialized_bytes.data(),
+            serialized_bytes.size(),
+            &attr,
+            &env,
+            &if_,
+            &inherit,
+            &var)) {
+        return ParseError::SyntaxError;
     }
 
+    presence.attr = attr;
+    presence.env = env;
+    presence.if_ = if_;
+    presence.inherit = inherit;
+    presence.var = var;
     return {};
 }
 
 Parser::ParseErrorOr<void> Parser::collect_arbitrary_substitution_function_presence(ComponentValue const& component_value, SubstitutionFunctionsPresence& presence)
 {
-    if (component_value.is_function()) {
-        auto const& function = component_value.function();
-        if (auto arbitrary_substitution_function = to_arbitrary_substitution_function(function.name); arbitrary_substitution_function.has_value()) {
-            if (!parse_according_to_argument_grammar(arbitrary_substitution_function.value(), function.value).has_value())
-                return ParseError::SyntaxError;
-
-            switch (arbitrary_substitution_function.value()) {
-            case ArbitrarySubstitutionFunction::Attr:
-                presence.attr = true;
-                break;
-            case ArbitrarySubstitutionFunction::Env:
-                presence.env = true;
-                break;
-            case ArbitrarySubstitutionFunction::If:
-                presence.if_ = true;
-                break;
-            case ArbitrarySubstitutionFunction::Inherit:
-                presence.inherit = true;
-                break;
-            case ArbitrarySubstitutionFunction::Var:
-                presence.var = true;
-                break;
-            }
-        }
-
-        return collect_arbitrary_substitution_function_presence(function.value, presence);
-    }
-
-    if (component_value.is_block())
-        return collect_arbitrary_substitution_function_presence(component_value.block().value, presence);
-
-    return {};
+    Vector<ComponentValue> values;
+    values.append(component_value);
+    return collect_arbitrary_substitution_function_presence(values, presence);
 }
 
 bool Parser::has_ignored_vendor_prefix(StringView string)
