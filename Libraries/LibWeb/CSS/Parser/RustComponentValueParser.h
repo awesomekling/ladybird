@@ -155,8 +155,6 @@ public:
         String value;
     };
 
-    using LayerShorthandItem = CoordinatingValueListShorthandItem;
-
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         PropertyID property_id;
@@ -448,6 +446,28 @@ public:
         Optional<Keyword> keyword;
         Optional<RustNestedPrimitiveValue> width;
         Optional<RustNestedPrimitiveValue> height;
+    };
+
+    struct LayerShorthandItem {
+        size_t layer_index { 0 };
+        PropertyID property_id;
+        String value;
+        Optional<Keyword> keyword;
+        bool has_color { false };
+        bool color_is_simple { false };
+        u8 color_red { 0 };
+        u8 color_green { 0 };
+        u8 color_blue { 0 };
+        u8 color_alpha { 0 };
+        Optional<String> color_name_or_source;
+        Optional<RustImageKind> image_kind;
+        Optional<String> image_source;
+        Optional<URL> image_url;
+        Vector<RustBackgroundSize> background_sizes;
+        Vector<RustPosition> positions;
+        Optional<ValueType> position_value_type;
+        Vector<u8> repeat_x_values;
+        Vector<u8> repeat_y_values;
     };
 
     enum class RustFilterValueListEventKind : u8 {

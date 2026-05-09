@@ -4619,8 +4619,72 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(sub_properties), move(values)) };
             }
             case FFI::CssStyleValueKind::LayerShorthand: {
-                auto parse_single_layer_value = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
-                    auto value = parse_rust_source_as_property(property_id, source);
+                auto materialize_single_background_size = [&](RustComponentValueParser::RustBackgroundSize const& background_size) -> RefPtr<StyleValue const> {
+                    if (background_size.keyword.has_value()) {
+                        if (!first_is_one_of(*background_size.keyword, Keyword::Cover, Keyword::Contain))
+                            return nullptr;
+                        return KeywordStyleValue::create(*background_size.keyword);
+                    }
+
+                    if (!background_size.width.has_value())
+                        return nullptr;
+                    auto width = materialize_rust_nested_background_size_component(*background_size.width);
+                    auto height = background_size.height.has_value()
+                        ? materialize_rust_nested_background_size_component(*background_size.height)
+                        : KeywordStyleValue::create(Keyword::Auto);
+                    if (!width || !height)
+                        return nullptr;
+
+                    return BackgroundSizeStyleValue::create(width.release_nonnull(), height.release_nonnull());
+                };
+
+                auto materialize_single_layer_value = [&](RustComponentValueParser::LayerShorthandItem const& item) -> RefPtr<StyleValue const> {
+                    if (item.keyword.has_value())
+                        return KeywordStyleValue::create(*item.keyword);
+
+                    if (item.has_color) {
+                        auto color = materialize_rust_style_color(
+                            RustComponentValueParser::RustStyleColor {
+                                .is_simple = item.color_is_simple,
+                                .kind = static_cast<FFI::CssParsedColorKind>(item.color_is_simple ? FFI::CssParsedColorKind::Rgba : FFI::CssParsedColorKind::Invalid),
+                                .red = item.color_red,
+                                .green = item.color_green,
+                                .blue = item.color_blue,
+                                .alpha = item.color_alpha,
+                                .name = item.color_is_simple ? item.color_name_or_source : Optional<String> {},
+                                .source = item.color_is_simple ? Optional<String> {} : item.color_name_or_source,
+                            },
+                            parse_rust_source_as_color);
+                        if (color)
+                            return color.release_nonnull();
+                    }
+
+                    if (item.image_kind.has_value() && item.image_source.has_value()) {
+                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, *item.image_source, item.image_url))
+                            return image;
+                    }
+
+                    if (!item.background_sizes.is_empty()) {
+                        if (item.background_sizes.size() != 1)
+                            return nullptr;
+                        return materialize_single_background_size(item.background_sizes[0]);
+                    }
+
+                    if (!item.repeat_x_values.is_empty()) {
+                        VERIFY(item.repeat_x_values.size() == item.repeat_y_values.size());
+                        if (item.repeat_x_values.size() != 1)
+                            return nullptr;
+                        return RepeatStyleStyleValue::create(
+                            repetition_from_rust(item.repeat_x_values[0]),
+                            repetition_from_rust(item.repeat_y_values[0]));
+                    }
+
+                    if (item.position_value_type.has_value() && item.positions.size() == 1) {
+                        if (auto position = materialize_rust_position(item.positions[0]))
+                            return position.release_nonnull();
+                    }
+
+                    auto value = parse_rust_source_as_property(item.property_id, item.value);
                     if (!value)
                         return nullptr;
                     if (value->is_value_list() && value->as_value_list().size() == 1)
@@ -4712,23 +4776,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         switch (item.property_id) {
                         case PropertyID::BackgroundAttachment:
-                            background_attachment = parse_single_layer_value(item.property_id, item.value);
+                            background_attachment = materialize_single_layer_value(item);
                             if (!background_attachment)
                                 is_valid = false;
                             break;
                         case PropertyID::BackgroundColor:
-                            background_color = parse_single_layer_value(item.property_id, item.value);
+                            background_color = materialize_single_layer_value(item);
                             if (!background_color)
                                 is_valid = false;
                             break;
                         case PropertyID::BackgroundImage:
-                            background_image = parse_single_layer_value(item.property_id, item.value);
+                            background_image = materialize_single_layer_value(item);
                             if (!background_image)
                                 is_valid = false;
                             break;
                         case PropertyID::BackgroundClip:
                         case PropertyID::BackgroundOrigin: {
-                            auto value = parse_single_layer_value(item.property_id, item.value);
+                            auto value = materialize_single_layer_value(item);
                             if (!value) {
                                 is_valid = false;
                                 break;
@@ -4740,11 +4804,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case PropertyID::BackgroundPosition: {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            auto position = parse_position_value(value_tokens, PositionParsingMode::BackgroundPosition);
-                            value_tokens.discard_whitespace();
-                            if (!position || value_tokens.has_next_token()) {
+                            if (item.positions.size() != 1) {
+                                is_valid = false;
+                                break;
+                            }
+                            auto position = materialize_rust_position(item.positions[0]);
+                            if (!position) {
                                 is_valid = false;
                                 break;
                             }
@@ -4753,12 +4818,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case PropertyID::BackgroundRepeat:
-                            background_repeat = parse_single_layer_value(item.property_id, item.value);
+                            background_repeat = materialize_single_layer_value(item);
                             if (!background_repeat)
                                 is_valid = false;
                             break;
                         case PropertyID::BackgroundSize:
-                            background_size = parse_single_layer_value(item.property_id, item.value);
+                            background_size = materialize_single_layer_value(item);
                             if (!background_size)
                                 is_valid = false;
                             break;
@@ -4867,32 +4932,29 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                         switch (item.property_id) {
                         case PropertyID::MaskImage:
-                            mask_image = parse_single_layer_value(item.property_id, item.value);
+                            mask_image = materialize_single_layer_value(item);
                             if (!mask_image)
                                 is_valid = false;
                             break;
                         case PropertyID::MaskPosition: {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream value_tokens { component_values };
-                            mask_position = parse_position_value(value_tokens);
-                            value_tokens.discard_whitespace();
-                            if (!mask_position || value_tokens.has_next_token())
+                            mask_position = materialize_single_layer_value(item);
+                            if (!mask_position)
                                 is_valid = false;
                             break;
                         }
                         case PropertyID::MaskSize:
-                            mask_size = parse_single_layer_value(item.property_id, item.value);
+                            mask_size = materialize_single_layer_value(item);
                             if (!mask_size)
                                 is_valid = false;
                             break;
                         case PropertyID::MaskRepeat:
-                            mask_repeat = parse_single_layer_value(item.property_id, item.value);
+                            mask_repeat = materialize_single_layer_value(item);
                             if (!mask_repeat)
                                 is_valid = false;
                             break;
                         case PropertyID::MaskOrigin:
                         case PropertyID::MaskClip: {
-                            auto value = parse_single_layer_value(item.property_id, item.value);
+                            auto value = materialize_single_layer_value(item);
                             if (!value) {
                                 is_valid = false;
                                 break;
@@ -4906,12 +4968,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             break;
                         }
                         case PropertyID::MaskComposite:
-                            mask_composite = parse_single_layer_value(item.property_id, item.value);
+                            mask_composite = materialize_single_layer_value(item);
                             if (!mask_composite)
                                 is_valid = false;
                             break;
                         case PropertyID::MaskMode:
-                            mask_mode = parse_single_layer_value(item.property_id, item.value);
+                            mask_mode = materialize_single_layer_value(item);
                             if (!mask_mode)
                                 is_valid = false;
                             break;

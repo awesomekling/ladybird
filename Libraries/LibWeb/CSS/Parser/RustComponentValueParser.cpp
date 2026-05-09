@@ -1336,6 +1336,118 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 return;
             }
 
+            if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::LayerShorthand && kind != FFI::CssStyleValueKind::LayerShorthand) {
+                VERIFY(!style_value->layer_shorthand_items.is_empty());
+                auto& item = style_value->layer_shorthand_items.last();
+                VERIFY(item.property_id == static_cast<PropertyID>(property_id));
+
+                if (kind == FFI::CssStyleValueKind::Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    item.keyword = keyword.release_value();
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::Color) {
+                    item.has_color = true;
+                    item.color_is_simple = true;
+                    item.color_red = color_red;
+                    item.color_green = color_green;
+                    item.color_blue = color_blue;
+                    item.color_alpha = color_alpha;
+                    auto color_name = string_from_ffi_bytes(value_ptr, value_len);
+                    if (!color_name.is_empty())
+                        item.color_name_or_source = move(color_name);
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::ColorFunction) {
+                    item.has_color = true;
+                    item.color_name_or_source = string_from_ffi_bytes(value_ptr, value_len);
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::Image) {
+                    item.image_kind = static_cast<RustImageKind>(color_red);
+                    item.image_source = string_from_ffi_bytes(value_ptr, value_len);
+                    item.image_url = image_url_from_callback_payload();
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::RepeatStyle) {
+                    item.repeat_x_values.append(color_red);
+                    item.repeat_y_values.append(color_green);
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::BackgroundSize) {
+                    enum : u8 {
+                        Keyword,
+                        Width,
+                        Height,
+                    };
+                    if (color_red == Keyword) {
+                        auto keyword = keyword_from_string({ value_ptr, value_len });
+                        if (!keyword.has_value())
+                            return;
+                        item.background_sizes.append({
+                            .keyword = keyword.release_value(),
+                        });
+                    } else if (color_red == Width) {
+                        item.background_sizes.append({
+                            .width = nested_primitive_value_from_callback_payload(),
+                        });
+                    } else {
+                        VERIFY(color_red == Height);
+                        VERIFY(!item.background_sizes.is_empty());
+                        VERIFY(item.background_sizes.last().width.has_value());
+                        VERIFY(!item.background_sizes.last().keyword.has_value());
+                        item.background_sizes.last().height = nested_primitive_value_from_callback_payload();
+                    }
+                    return;
+                }
+
+                if (kind == FFI::CssStyleValueKind::Position) {
+                    enum : u8 {
+                        Header,
+                        BeginPosition,
+                        PositionX,
+                        PositionY,
+                        LonghandComponent,
+                    };
+
+                    auto position_component_from_callback_payload = [&]() {
+                        RustPositionComponent component {
+                            .edge = static_cast<RustPositionEdge>(color_green),
+                        };
+                        if (color_blue != 0)
+                            component.offset = nested_primitive_value_from_callback_payload();
+                        return component;
+                    };
+
+                    if (color_red == Header) {
+                        auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                        if (!value_type.has_value())
+                            return;
+                        item.position_value_type = value_type.release_value();
+                    } else if (color_red == BeginPosition) {
+                        item.positions.append({});
+                    } else if (color_red == PositionX) {
+                        VERIFY(!item.positions.is_empty());
+                        item.positions.last().x = position_component_from_callback_payload();
+                    } else if (color_red == PositionY) {
+                        VERIFY(!item.positions.is_empty());
+                        item.positions.last().y = position_component_from_callback_payload();
+                    } else {
+                        VERIFY(color_red == LonghandComponent);
+                    }
+                    return;
+                }
+
+                return;
+            }
+
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
                 if (!keyword.has_value())

@@ -214,6 +214,7 @@ where
                     item.source.as_bytes(),
                     "",
                 );
+                emit_rust_owned_style_value(&item.style_value, callback);
             }
         }
         RustOwnedStyleValueKind::PositionalValueListShorthand(items) => {
