@@ -520,21 +520,20 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     for (auto const& item : source_lists->items) {
                         // https://drafts.csswg.org/css-fonts/#font-face-src-parsing
                         // <font-src> = <url> [ format(<font-format>)]? [ tech( <font-tech>#)]? | local(<family-name>)
-                        auto font_source = RustComponentValueParser::parse_a_font_source(item.source.bytes_as_string_view(), "utf-8"sv);
-                        if (!font_source.has_value())
+                        if (!item.font_source_kind.has_value())
                             continue;
 
-                        if (font_source->format.has_value() && !font_format_is_supported(*font_source->format)) {
+                        if (item.font_source_format.has_value() && !font_format_is_supported(*item.font_source_format)) {
                             ErrorReporter::the().report(InvalidValueError {
                                 .value_type = "<font-src>"_fly_string,
                                 .value_string = item.source,
-                                .description = MUST(String::formatted("format({}) is not supported.", *font_source->format)),
+                                .description = MUST(String::formatted("format({}) is not supported.", *item.font_source_format)),
                             });
                             continue;
                         }
 
                         bool supports_all_tech = true;
-                        for (auto font_tech : font_source->tech) {
+                        for (auto font_tech : item.font_source_tech) {
                             if (font_tech_is_supported(font_tech))
                                 continue;
 
@@ -549,16 +548,23 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         if (!supports_all_tech)
                             continue;
 
-                        auto source = font_source->source.visit(
-                            [](RustComponentValueParser::FamilyName const& family_name) -> FontSourceStyleValue::Source {
-                                if (family_name.is_string)
-                                    return FontSourceStyleValue::Local { StringStyleValue::create(family_name.name) };
-                                return FontSourceStyleValue::Local { CustomIdentStyleValue::create(family_name.name) };
-                            },
-                            [](URL const& url) -> FontSourceStyleValue::Source {
-                                return url;
-                            });
-                        valid_sources.append(FontSourceStyleValue::create(move(source), move(font_source->format), move(font_source->tech)));
+                        Optional<FontSourceStyleValue::Source> source;
+                        switch (*item.font_source_kind) {
+                        case FFI::CssFontSourceKind::Local: {
+                            if (!item.font_source_family_name.has_value())
+                                continue;
+                            source = item.font_source_family_name->is_string
+                                ? FontSourceStyleValue::Source { FontSourceStyleValue::Local { StringStyleValue::create(item.font_source_family_name->name) } }
+                                : FontSourceStyleValue::Source { FontSourceStyleValue::Local { CustomIdentStyleValue::create(item.font_source_family_name->name) } };
+                            break;
+                        }
+                        case FFI::CssFontSourceKind::Url:
+                            if (!item.url_function_type.has_value() || !item.url.has_value())
+                                continue;
+                            source = URL { *item.url, *item.url_function_type, item.request_url_modifiers };
+                            break;
+                        }
+                        valid_sources.append(FontSourceStyleValue::create(source.release_value(), item.font_source_format, item.font_source_tech));
                     }
                     if (valid_sources.is_empty())
                         return nullptr;

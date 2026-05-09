@@ -927,6 +927,11 @@ DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rul
     return metadata;
 }
 
+static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType);
+static CrossOriginModifierValue cross_origin_modifier_value_from_rust(FFI::CssUrlCrossOriginModifierValue);
+static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI::CssUrlReferrerPolicyModifierValue);
+static FontTech font_tech_from_rust(FFI::CssFontTech);
+
 Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
 {
     Optional<DescriptorResult> result;
@@ -955,6 +960,56 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
                 .page_size_keyword = page_size_keyword,
                 .page_size_orientation = page_size_orientation,
             });
+        },
+        [](void* raw_result, FFI::CssFontSourceKind kind, u8 const* family_name_ptr, size_t family_name_len, bool family_name_is_string) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            auto& item = result->items.last();
+            item.font_source_kind = kind;
+            if (kind == FFI::CssFontSourceKind::Local) {
+                item.font_source_family_name = FamilyName {
+                    .name = fly_string_from_ffi_bytes(family_name_ptr, family_name_len),
+                    .is_string = family_name_is_string,
+                };
+            }
+        },
+        [](void* raw_result, FFI::CssUrlFunction const* rust_url_function) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            auto& item = result->items.last();
+            item.url_function_type = url_function_type_from_rust(rust_url_function->function_type);
+            item.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
+        },
+        [](void* raw_result, FFI::CssUrlModifier const* rust_modifier) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            auto& item = result->items.last();
+            switch (rust_modifier->kind) {
+            case FFI::CssUrlModifierKind::CrossOrigin:
+                item.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
+                break;
+            case FFI::CssUrlModifierKind::Integrity:
+                item.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
+                break;
+            case FFI::CssUrlModifierKind::ReferrerPolicy:
+                item.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
+                break;
+            }
+        },
+        [](void* raw_result, u8 const* format_ptr, size_t format_len) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            result->items.last().font_source_format = fly_string_from_ffi_bytes(format_ptr, format_len);
+        },
+        [](void* raw_result, FFI::CssFontTech rust_font_tech) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            VERIFY(!result->items.is_empty());
+            result->items.last().font_source_tech.append(font_tech_from_rust(rust_font_tech));
         });
 
     if (!parsed || !result.has_value())

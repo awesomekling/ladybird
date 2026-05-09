@@ -330,7 +330,7 @@ pub(crate) struct Declaration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct UrlFunction {
+pub(crate) struct UrlFunction {
     pub(super) function_type: CssUrlFunctionType,
     pub(super) url: String,
     pub(super) request_url_modifiers: Vec<UrlModifier>,
@@ -380,7 +380,7 @@ impl UrlModifier {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum FontSource {
+pub(crate) enum FontSource {
     Local(FamilyName),
     Url {
         url_function: UrlFunction,

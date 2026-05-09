@@ -86,6 +86,12 @@ pub(crate) struct RustOwnedNonnegativeIntegerSymbolPair {
     pub(crate) symbol: RustOwnedDescriptorPrimitiveValue,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedFontSourceDescriptor {
+    pub(crate) source: String,
+    pub(crate) font_source: FontSource,
+}
+
 pub(crate) fn parse_rust_owned_counter_style_negative_descriptor(
     filtered_input: &[u8],
 ) -> Option<Vec<RustOwnedDescriptorPrimitiveValue>> {
@@ -306,7 +312,9 @@ pub(crate) fn parse_rust_owned_counter_style_symbol_descriptor(
     (!parser.has_next_component_value()).then_some(symbol)
 }
 
-pub(crate) fn parse_rust_owned_font_src_list_descriptor(filtered_input: &[u8]) -> Option<Vec<String>> {
+pub(crate) fn parse_rust_owned_font_src_list_descriptor(
+    filtered_input: &[u8],
+) -> Option<Vec<RustOwnedFontSourceDescriptor>> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let filtered_input = filtered_input_to_string(filtered_input);
@@ -324,8 +332,11 @@ pub(crate) fn parse_rust_owned_font_src_list_descriptor(filtered_input: &[u8]) -
         .try_fold(Vec::new(), |mut sources, source| {
             let source = strip_whitespace(source);
             let mut parser = ComponentValueParser::new(source.to_vec());
-            if parser.parse_a_font_source().is_some() {
-                sources.push(serialize_component_values_for_reparsing(source, &filtered_input)?);
+            if let Some(font_source) = parser.parse_a_font_source() {
+                sources.push(RustOwnedFontSourceDescriptor {
+                    source: serialize_component_values_for_reparsing(source, &filtered_input)?,
+                    font_source,
+                });
             }
             Some(sources)
         })?;

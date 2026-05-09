@@ -33,15 +33,16 @@ use super::{
     CssUrlModifierKind, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
     CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
     CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
-    CssWillChangeValueKind, FamilyName, FontFamilyValue, FontStyle, FontVariant, FontVariantAlternatesValue,
-    FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue, MediaFeatureNameKind,
-    MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax, MfComparison, NamespaceType,
-    OpenTypeTaggedValue, Parser, PositionEdge, PseudoElementSelectorValue, Rule, RuleContext, RuleOrListOfDeclarations,
-    RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName,
-    RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList,
-    RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
-    RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
-    RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
+    CssWillChangeValueKind, DescriptorResultCallbacks, FamilyName, FontFamilyValue, FontStyle, FontVariant,
+    FontVariantAlternatesValue, FontVariantEastAsianValue, FontVariantLigaturesValue, FontVariantNumericValue,
+    MediaFeatureNameKind, MediaFeatureSyntax, MediaFeatureValueSyntaxKind, MediaQueryModifier, MediaQuerySyntax,
+    MfComparison, NamespaceType, OpenTypeTaggedValue, Parser, PositionEdge, PseudoElementSelectorValue, Rule,
+    RuleContext, RuleOrListOfDeclarations, RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope,
+    RustOwnedAnchorSizeFunction, RustOwnedAnimationName, RustOwnedAnimationNameItem, RustOwnedAspectRatio,
+    RustOwnedBackgroundSize, RustOwnedBackgroundSizeList, RustOwnedBasicShape, RustOwnedBasicShapeFillRule,
+    RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint, RustOwnedBorder, RustOwnedBorderImage,
+    RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList, RustOwnedBorderImageRepeat,
+    RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
     RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
     RustOwnedColumns, RustOwnedComponentShorthandItem, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
     RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
@@ -711,6 +712,10 @@ fn parse_optional_declaration_value_descriptor_value(input: &str) -> bool {
     parse_optional_declaration_value_descriptor(input.as_bytes())
 }
 
+fn ignore_font_source_callback(_: CssFontSourceKind, _: Option<&str>, _: bool) {}
+
+fn ignore_format_callback(_: &str) {}
+
 fn parse_descriptor_result_value(
     input: &str,
     value_type: CssDescriptorValueType,
@@ -720,8 +725,17 @@ fn parse_descriptor_result_value(
     let parsed = parse_descriptor_result(
         value_type,
         input.as_bytes(),
-        |parsed_kind| kind = Some(parsed_kind),
-        |_, source, is_string, _, _, _, _, _| items.push((source.to_string(), is_string)),
+        DescriptorResultCallbacks {
+            kind_callback: |parsed_kind| kind = Some(parsed_kind),
+            source_callback: |_, source: &str, is_string, _, _, _, _, _| {
+                items.push((source.to_string(), is_string));
+            },
+            font_source_callback: ignore_font_source_callback,
+            url_callback: |_| {},
+            modifier_callback: |_| {},
+            format_callback: ignore_format_callback,
+            tech_callback: |_| {},
+        },
     );
 
     parsed.then_some(kind.map(|kind| (kind, items))).flatten()
@@ -8879,18 +8893,21 @@ fn rejects_invalid_crop_or_cross_descriptors() {
 
 #[test]
 fn parses_rust_owned_font_src_list_descriptors() {
+    let parse_sources = |input: &str| {
+        parse_rust_owned_font_src_list_descriptor(input.as_bytes())
+            .map(|sources| sources.into_iter().map(|source| source.source).collect::<Vec<_>>())
+    };
+
     assert_eq!(
-        parse_rust_owned_font_src_list_descriptor("url(example.woff2), local(Example)".as_bytes()),
+        parse_sources("url(example.woff2), local(Example)"),
         Some(vec!["url(example.woff2)".to_string(), "local(Example)".to_string()])
     );
     assert_eq!(
-        parse_rust_owned_font_src_list_descriptor(", url(example.woff2)".as_bytes()),
+        parse_sources(", url(example.woff2)"),
         Some(vec!["url(example.woff2)".to_string()])
     );
     assert_eq!(
-        parse_rust_owned_font_src_list_descriptor(
-            "url(example.woff2) format(woff2) tech(variations, color-COLRv1)".as_bytes()
-        ),
+        parse_sources("url(example.woff2) format(woff2) tech(variations, color-COLRv1)"),
         Some(vec![
             "url(example.woff2) format(woff2) tech(variations, color-COLRv1)".to_string()
         ])

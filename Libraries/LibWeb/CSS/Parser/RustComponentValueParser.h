@@ -870,6 +870,13 @@ public:
         double numeric_value { 0.0 };
         u8 page_size_keyword { 0 };
         u8 page_size_orientation { 0 };
+        Optional<FFI::CssFontSourceKind> font_source_kind;
+        Optional<FamilyName> font_source_family_name;
+        Optional<URL::Type> url_function_type;
+        Optional<String> url;
+        Vector<RequestURLModifier> request_url_modifiers;
+        Optional<FlyString> font_source_format;
+        Vector<FontTech> font_source_tech;
     };
 
     struct DescriptorResult {

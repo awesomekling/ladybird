@@ -498,6 +498,17 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
         page_size_keyword: u8,
         page_size_orientation: u8,
     ),
+    font_source_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssFontSourceKind,
+        family_name_ptr: *const u8,
+        family_name_len: usize,
+        family_name_is_string: bool,
+    ),
+    url_callback: unsafe extern "C" fn(ctx: *mut c_void, url_function: *const CssUrlFunction),
+    modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
+    format_callback: unsafe extern "C" fn(ctx: *mut c_void, format_ptr: *const u8, format_len: usize),
+    tech_callback: unsafe extern "C" fn(ctx: *mut c_void, tech: CssFontTech),
 ) -> bool {
     unsafe {
         abort_on_panic(|| {
@@ -508,27 +519,48 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
             css_parser::parse_descriptor_result(
                 value_type,
                 input,
-                |kind| kind_callback(ctx, kind),
-                |order,
-                 source,
-                 is_string,
-                 primitive_kind,
-                 has_numeric_value,
-                 numeric_value,
-                 page_size_keyword,
-                 page_size_orientation| {
-                    source_callback(
-                        ctx,
-                        order,
-                        source.as_ptr(),
-                        source.len(),
-                        is_string,
-                        primitive_kind,
-                        has_numeric_value,
-                        numeric_value,
-                        page_size_keyword,
-                        page_size_orientation,
-                    );
+                css_parser::DescriptorResultCallbacks {
+                    kind_callback: |kind| kind_callback(ctx, kind),
+                    source_callback: |order,
+                                      source: &str,
+                                      is_string,
+                                      primitive_kind,
+                                      has_numeric_value,
+                                      numeric_value,
+                                      page_size_keyword,
+                                      page_size_orientation| {
+                        source_callback(
+                            ctx,
+                            order,
+                            source.as_ptr(),
+                            source.len(),
+                            is_string,
+                            primitive_kind,
+                            has_numeric_value,
+                            numeric_value,
+                            page_size_keyword,
+                            page_size_orientation,
+                        );
+                    },
+                    font_source_callback: |kind, family_name: Option<&str>, family_name_is_string| {
+                        let (family_name_ptr, family_name_len) = family_name
+                            .map_or((std::ptr::null(), 0), |family_name| {
+                                (family_name.as_ptr(), family_name.len())
+                            });
+                        font_source_callback(ctx, kind, family_name_ptr, family_name_len, family_name_is_string);
+                    },
+                    url_callback: |url_function| {
+                        url_callback(ctx, &raw const url_function);
+                    },
+                    modifier_callback: |modifier| {
+                        modifier_callback(ctx, &raw const modifier);
+                    },
+                    format_callback: |format: &str| {
+                        format_callback(ctx, format.as_ptr(), format.len());
+                    },
+                    tech_callback: |tech| {
+                        tech_callback(ctx, tech);
+                    },
                 },
             )
         })

@@ -323,15 +323,29 @@ where
     })
 }
 
-pub(crate) fn parse_descriptor_result<K, S>(
+pub(crate) struct DescriptorResultCallbacks<K, S, F, U, M, O, T> {
+    pub(crate) kind_callback: K,
+    pub(crate) source_callback: S,
+    pub(crate) font_source_callback: F,
+    pub(crate) url_callback: U,
+    pub(crate) modifier_callback: M,
+    pub(crate) format_callback: O,
+    pub(crate) tech_callback: T,
+}
+
+pub(crate) fn parse_descriptor_result<K, S, F, U, M, O, T>(
     value_type: CssDescriptorValueType,
     filtered_input: &[u8],
-    mut kind_callback: K,
-    mut source_callback: S,
+    mut callbacks: DescriptorResultCallbacks<K, S, F, U, M, O, T>,
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
-    S: FnMut(CssNonnegativeIntegerSymbolPairOrder, &str, bool, CssPrimitiveValueKind, bool, f64, u8, u8),
+    S: for<'a> FnMut(CssNonnegativeIntegerSymbolPairOrder, &'a str, bool, CssPrimitiveValueKind, bool, f64, u8, u8),
+    F: for<'a> FnMut(CssFontSourceKind, Option<&'a str>, bool),
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+    O: for<'a> FnMut(&'a str),
+    T: FnMut(CssFontTech),
 {
     let default_order = CssNonnegativeIntegerSymbolPairOrder::IntegerFirst;
 
@@ -341,9 +355,9 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::CounterStyleAdditiveSymbols);
+            (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleAdditiveSymbols);
             for tuple in &tuples {
-                source_callback(
+                (callbacks.source_callback)(
                     tuple.order,
                     if tuple.integer.is_some() {
                         tuple.symbol.source_or_unit()
@@ -364,9 +378,9 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::CounterStyleNegative);
+            (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleNegative);
             for symbol in &symbols {
-                source_callback(
+                (callbacks.source_callback)(
                     default_order,
                     symbol.source_or_unit(),
                     false,
@@ -385,24 +399,24 @@ where
 
             match system {
                 RustOwnedCounterStyleSystemDescriptor::Cyclic => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemCyclic);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemCyclic);
                 }
                 RustOwnedCounterStyleSystemDescriptor::Numeric => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemNumeric);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemNumeric);
                 }
                 RustOwnedCounterStyleSystemDescriptor::Alphabetic => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemAlphabetic);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemAlphabetic);
                 }
                 RustOwnedCounterStyleSystemDescriptor::Symbolic => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemSymbolic);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemSymbolic);
                 }
                 RustOwnedCounterStyleSystemDescriptor::Additive => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemAdditive);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemAdditive);
                 }
                 RustOwnedCounterStyleSystemDescriptor::Fixed { first_symbol } => {
                     if let Some(first_symbol) = first_symbol {
-                        kind_callback(CssDescriptorResultKind::CounterStyleSystemFixedWithInteger);
-                        source_callback(
+                        (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemFixedWithInteger);
+                        (callbacks.source_callback)(
                             default_order,
                             first_symbol.source_or_unit(),
                             false,
@@ -413,12 +427,12 @@ where
                             0,
                         );
                     } else {
-                        kind_callback(CssDescriptorResultKind::CounterStyleSystemFixed);
+                        (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemFixed);
                     }
                 }
                 RustOwnedCounterStyleSystemDescriptor::Extends { name } => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleSystemExtends);
-                    source_callback(
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleSystemExtends);
+                    (callbacks.source_callback)(
                         default_order,
                         &name,
                         false,
@@ -436,8 +450,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::CounterStylePad);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::CounterStylePad);
+            (callbacks.source_callback)(
                 pad.order,
                 if pad.integer.is_some() {
                     pad.symbol.source_or_unit()
@@ -459,12 +473,12 @@ where
 
             match range {
                 RustOwnedCounterStyleRangeDescriptor::Auto => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleRangeAuto);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleRangeAuto);
                 }
                 RustOwnedCounterStyleRangeDescriptor::List(ranges) => {
-                    kind_callback(CssDescriptorResultKind::CounterStyleRangeList);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleRangeList);
                     for bound in &ranges {
-                        source_callback(
+                        (callbacks.source_callback)(
                             default_order,
                             bound.source_or_unit(),
                             false,
@@ -483,9 +497,9 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::Symbols);
+            (callbacks.kind_callback)(CssDescriptorResultKind::Symbols);
             for symbol in &symbols {
-                source_callback(
+                (callbacks.source_callback)(
                     default_order,
                     symbol.source_or_unit(),
                     false,
@@ -502,8 +516,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::Symbol);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::Symbol);
+            (callbacks.source_callback)(
                 default_order,
                 symbol.source_or_unit(),
                 false,
@@ -521,9 +535,11 @@ where
             }
 
             match kind {
-                Some(CssCropOrCrossKind::Crop) => kind_callback(CssDescriptorResultKind::Crop),
-                Some(CssCropOrCrossKind::Cross) => kind_callback(CssDescriptorResultKind::Cross),
-                Some(CssCropOrCrossKind::CropAndCross) => kind_callback(CssDescriptorResultKind::CropAndCross),
+                Some(CssCropOrCrossKind::Crop) => (callbacks.kind_callback)(CssDescriptorResultKind::Crop),
+                Some(CssCropOrCrossKind::Cross) => (callbacks.kind_callback)(CssDescriptorResultKind::Cross),
+                Some(CssCropOrCrossKind::CropAndCross) => {
+                    (callbacks.kind_callback)(CssDescriptorResultKind::CropAndCross);
+                }
                 None => return false,
             }
         }
@@ -538,8 +554,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::FamilyName);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::FamilyName);
+            (callbacks.source_callback)(
                 default_order,
                 &family_name,
                 is_string,
@@ -555,11 +571,11 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::FontSrcList);
+            (callbacks.kind_callback)(CssDescriptorResultKind::FontSrcList);
             for source in &sources {
-                source_callback(
+                (callbacks.source_callback)(
                     default_order,
-                    source,
+                    &source.source,
                     false,
                     CssPrimitiveValueKind::Invalid,
                     false,
@@ -567,6 +583,36 @@ where
                     0,
                     0,
                 );
+                match &source.font_source {
+                    FontSource::Local(family_name) => {
+                        (callbacks.font_source_callback)(
+                            CssFontSourceKind::Local,
+                            Some(&family_name.name),
+                            family_name.is_string,
+                        );
+                    }
+                    FontSource::Url {
+                        url_function,
+                        format,
+                        tech,
+                    } => {
+                        (callbacks.font_source_callback)(CssFontSourceKind::Url, None, false);
+                        (callbacks.url_callback)(CssUrlFunction {
+                            function_type: url_function.function_type,
+                            url_ptr: url_function.url.as_ptr(),
+                            url_len: url_function.url.len(),
+                        });
+                        for modifier in &url_function.request_url_modifiers {
+                            (callbacks.modifier_callback)(modifier.as_ffi());
+                        }
+                        if let Some(format) = format {
+                            (callbacks.format_callback)(format);
+                        }
+                        for font_tech in tech {
+                            (callbacks.tech_callback)(*font_tech);
+                        }
+                    }
+                }
             }
         }
         CssDescriptorValueType::FontWeightAbsolutePair => {
@@ -574,9 +620,9 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::FontWeightAbsolutePair);
+            (callbacks.kind_callback)(CssDescriptorResultKind::FontWeightAbsolutePair);
             for weight in &weights {
-                source_callback(
+                (callbacks.source_callback)(
                     default_order,
                     weight.source_or_unit(),
                     false,
@@ -593,8 +639,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::Length);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::Length);
+            (callbacks.source_callback)(
                 default_order,
                 value.source_or_unit(),
                 false,
@@ -612,12 +658,12 @@ where
 
             match page_size {
                 RustOwnedPageSizeDescriptor::Auto => {
-                    kind_callback(CssDescriptorResultKind::PageSizeAuto);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::PageSizeAuto);
                 }
                 RustOwnedPageSizeDescriptor::Lengths(lengths) => {
-                    kind_callback(CssDescriptorResultKind::PageSizeLengths);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::PageSizeLengths);
                     for length in &lengths {
-                        source_callback(
+                        (callbacks.source_callback)(
                             default_order,
                             length.source_or_unit(),
                             false,
@@ -630,9 +676,9 @@ where
                     }
                 }
                 RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {
-                    kind_callback(CssDescriptorResultKind::PageSizeAndOrientation);
+                    (callbacks.kind_callback)(CssDescriptorResultKind::PageSizeAndOrientation);
                     if let Some(page_size) = page_size {
-                        source_callback(
+                        (callbacks.source_callback)(
                             default_order,
                             "",
                             false,
@@ -644,7 +690,7 @@ where
                         );
                     }
                     if let Some(orientation) = orientation {
-                        source_callback(
+                        (callbacks.source_callback)(
                             default_order,
                             "",
                             false,
@@ -663,8 +709,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::PositivePercentage);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::PositivePercentage);
+            (callbacks.source_callback)(
                 default_order,
                 value.source_or_unit(),
                 false,
@@ -680,8 +726,8 @@ where
                 return false;
             };
 
-            kind_callback(CssDescriptorResultKind::String);
-            source_callback(
+            (callbacks.kind_callback)(CssDescriptorResultKind::String);
+            (callbacks.source_callback)(
                 default_order,
                 &source,
                 true,
