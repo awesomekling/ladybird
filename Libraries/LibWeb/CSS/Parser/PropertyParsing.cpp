@@ -407,35 +407,39 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     NumberStyleValue::create(*rust_style_value->numeric_value),
                     NumberStyleValue::create(*rust_style_value->secondary_numeric_value));
             };
-            auto materialize_rust_calculation_tree = [&]() -> RefPtr<StyleValue const> {
-                if (!rust_style_value->value_type.has_value() || rust_style_value->calculation_node_events.is_empty())
+            enum class DiscardCalculationToken {
+                No,
+                Yes,
+            };
+            auto materialize_rust_calculation_tree_values = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
+                if (calculation_node_events.is_empty())
                     return nullptr;
 
-                auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
+                auto metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, value_type);
                 if (!metadata.has_value()) {
-                    if (*rust_style_value->value_type != ValueType::OpacityValue)
+                    if (value_type != ValueType::OpacityValue)
                         return nullptr;
                     metadata = RustComponentValueParser::PropertyNumericMetadata {
-                        .property_id = rust_style_value->property_id,
+                        .property_id = property_id,
                         .range = infinite_range,
                     };
                 }
 
                 CalculationContext calculation_context {
-                    .resolve_numbers_as_integers = *rust_style_value->value_type == ValueType::Integer,
+                    .resolve_numbers_as_integers = value_type == ValueType::Integer,
                 };
 
-                switch (*rust_style_value->value_type) {
+                switch (value_type) {
                 case ValueType::Integer:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Integer, metadata->range);
                     break;
                 case ValueType::Number:
-                    if (rust_style_value->property_id == PropertyID::LineHeight) {
+                    if (property_id == PropertyID::LineHeight) {
                         calculation_context.percentages_resolve_as = ValueType::Length;
-                        auto length_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Length);
+                        auto length_metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, ValueType::Length);
                         if (length_metadata.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Length, length_metadata->range);
-                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::LengthPercentage);
+                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, ValueType::LengthPercentage);
                         if (length_percentage_metadata.has_value() && length_percentage_metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, length_percentage_metadata->percentage_range.value());
                         else if (length_metadata.has_value() && length_metadata->percentage_range.has_value())
@@ -487,12 +491,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
                     }
-                    if (rust_style_value->property_id == PropertyID::LineHeight) {
-                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Number);
+                    if (property_id == PropertyID::LineHeight) {
+                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, ValueType::Number);
                         VERIFY(number_metadata.has_value());
                         calculation_context.percentages_resolve_as = ValueType::Length;
                         calculation_context.accepted_ranges_by_type.set(ValueType::Number, number_metadata->range);
-                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::LengthPercentage);
+                        auto length_percentage_metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, ValueType::LengthPercentage);
                         if (length_percentage_metadata.has_value() && length_percentage_metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, length_percentage_metadata->percentage_range.value());
                     }
@@ -502,8 +506,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.percentages_resolve_as = ValueType::Length;
                     if (metadata->percentage_range.has_value())
                         calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
-                    if (rust_style_value->property_id == PropertyID::LineHeight) {
-                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Number);
+                    if (property_id == PropertyID::LineHeight) {
+                        auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, ValueType::Number);
                         VERIFY(number_metadata.has_value());
                         calculation_context.accepted_ranges_by_type.set(ValueType::Number, number_metadata->range);
                     }
@@ -710,7 +714,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return true;
                 };
 
-                for (auto const& event : rust_style_value->calculation_node_events) {
+                for (auto const& event : calculation_node_events) {
                     switch (event.kind) {
                     case FFI::CssCalculationNodeKind::Numeric: {
                         auto numeric_node = numeric_node_from_event(event);
@@ -888,7 +892,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return nullptr;
                         }
 
-                        auto computed_type = *rust_style_value->value_type == ValueType::Integer
+                        auto computed_type = value_type == ValueType::Integer
                             ? TreeCountingFunctionStyleValue::ComputedType::Integer
                             : TreeCountingFunctionStyleValue::ComputedType::Number;
                         auto tree_counting_function = TreeCountingFunctionStyleValue::create(function, computed_type);
@@ -907,7 +911,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
 
                 auto calculated_value = CalculatedStyleValue::create(calculation_tree, calculation_type.release_value(), calculation_context);
-                switch (*rust_style_value->value_type) {
+                switch (value_type) {
                 case ValueType::Integer:
                 case ValueType::Number:
                     if (saw_percentage_leaf && !calculation_context.percentages_resolve_as.has_value())
@@ -944,13 +948,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     break;
                 case ValueType::Length:
-                    if (rust_style_value->property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
+                    if (property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
                         break;
                     if (!calculated_value->resolves_to_length())
                         return nullptr;
                     break;
                 case ValueType::LengthPercentage:
-                    if (rust_style_value->property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
+                    if (property_id == PropertyID::LineHeight && calculated_value->resolves_to_number())
                         break;
                     if (!calculated_value->resolves_to_length_percentage())
                         return nullptr;
@@ -971,10 +975,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 }
 
-                tokens.discard_a_token();
-                if (*rust_style_value->value_type == ValueType::OpacityValue)
+                if (discard_token == DiscardCalculationToken::Yes)
+                    tokens.discard_a_token();
+                if (value_type == ValueType::OpacityValue)
                     return OpacityValueStyleValue::create(move(calculated_value));
                 return calculated_value;
+            };
+            auto materialize_rust_calculation_tree = [&]() -> RefPtr<StyleValue const> {
+                if (!rust_style_value->value_type.has_value())
+                    return nullptr;
+                return materialize_rust_calculation_tree_values(rust_style_value->property_id, *rust_style_value->value_type, rust_style_value->calculation_node_events, DiscardCalculationToken::Yes);
             };
             auto materialize_rust_scroll_function_value = [&]() -> RefPtr<StyleValue const> {
                 StyleValueTuple tuple;
@@ -4273,6 +4283,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                     if (item.custom_ident.has_value())
                         return CustomIdentStyleValue::create(*item.custom_ident);
+
+                    if (item.primitive_value_type.has_value() && !item.calculation_node_events.is_empty()) {
+                        if (auto value = materialize_rust_calculation_tree_values(item.property_id, *item.primitive_value_type, item.calculation_node_events, DiscardCalculationToken::No))
+                            return value.release_nonnull();
+                    }
 
                     if (item.primitive_value_type.has_value() && item.primitive_numeric_value.has_value()) {
                         if (*item.primitive_value_type == ValueType::Time && item.primitive_kind == FFI::CssPrimitiveValueKind::Time) {

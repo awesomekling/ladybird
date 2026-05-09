@@ -606,6 +606,7 @@ public:
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
         Optional<ValueType> primitive_value_type;
+        Vector<RustCalculationNodeEvent> calculation_node_events;
         u8 easing_function_kind { 0 };
         Vector<RustNestedPrimitiveValue> easing_function_values;
         Vector<RustLinearEasingStop> linear_easing_stops;

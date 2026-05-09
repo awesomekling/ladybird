@@ -3378,13 +3378,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         [](void* raw_style_value, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
             auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
             VERIFY(style_value.has_value());
-            style_value->calculation_node_events.append(RustCalculationNodeEvent {
+            auto event = RustCalculationNodeEvent {
                 .kind = kind,
                 .primitive_kind = primitive_kind,
                 .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
                 .child_count = child_count,
                 .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
-            });
+            };
+            if (style_value->kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand) {
+                VERIFY(!style_value->coordinating_value_list_shorthand_items.is_empty());
+                style_value->coordinating_value_list_shorthand_items.last().calculation_node_events.append(move(event));
+                return;
+            }
+            style_value->calculation_node_events.append(move(event));
         });
 
     return style_value;
