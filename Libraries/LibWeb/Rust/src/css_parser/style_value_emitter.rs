@@ -2811,6 +2811,7 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedNestedPrimitiveValue) 
         RustOwnedNestedPrimitiveValue::Number(_)
         | RustOwnedNestedPrimitiveValue::Length { .. }
         | RustOwnedNestedPrimitiveValue::Percentage(_)
+        | RustOwnedNestedPrimitiveValue::MathFunction(_)
         | RustOwnedNestedPrimitiveValue::Source(_) => {
             let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
             GridTrackBreadthCallbackPayload {
@@ -2856,7 +2857,9 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedNestedPrimitiveValue) 
             numeric_value: 0.0,
             source_or_unit: "",
         },
-        _ => unreachable!("grid track breadths only use length-percentage, flex, source, and known keywords"),
+        _ => {
+            unreachable!("grid track breadths only use length-percentage, flex, source-backed math, and known keywords")
+        }
     }
 }
 

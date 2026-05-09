@@ -5371,6 +5371,19 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_style_value(&[PropertyId::OffsetDistance], "0%"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::OffsetDistance,
+            primitive_kind: CssPrimitiveValueKind::Percentage,
+            numeric_value: Some(0.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: String::new(),
+            value_type: "LengthPercentage".to_string(),
+        })
+    );
+    assert_eq!(
         parse_style_value(&[PropertyId::OffsetPosition], "auto"),
         Some(ParsedStyleValue {
             kind: CssStyleValueKind::Keyword,
@@ -6494,6 +6507,16 @@ fn selects_property_numeric_metadata_with_generated_metadata() {
         property_numeric_metadata(&[PropertyId::Color, PropertyId::BackgroundPositionX], "Length"),
         Some(PropertyNumericMetadata {
             property_id: PropertyId::BackgroundPositionX,
+            minimum: f32::MIN as f64,
+            maximum: f32::MAX as f64,
+            percentage_range: Some((f32::MIN as f64, f32::MAX as f64)),
+            percentages_resolve_to_value_type: true,
+        })
+    );
+    assert_eq!(
+        property_numeric_metadata(&[PropertyId::Color, PropertyId::OffsetDistance], "LengthPercentage"),
+        Some(PropertyNumericMetadata {
+            property_id: PropertyId::OffsetDistance,
             minimum: f32::MIN as f64,
             maximum: f32::MAX as f64,
             percentage_range: Some((f32::MIN as f64, f32::MAX as f64)),

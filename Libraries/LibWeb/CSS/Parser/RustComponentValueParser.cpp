@@ -1033,6 +1033,9 @@ static Optional<ValueType> value_type_from_rust_property_value_type_name(StringV
     } while (false)
 
     __TRY_VALUE_TYPE(Anchor);
+    __TRY_VALUE_TYPE(AnchorSize);
+    __TRY_VALUE_TYPE(Angle);
+    __TRY_VALUE_TYPE(AnglePercentage);
     __TRY_VALUE_TYPE(BackgroundPosition);
     __TRY_VALUE_TYPE(BasicShape);
     __TRY_VALUE_TYPE(Color);
@@ -1042,7 +1045,9 @@ static Optional<ValueType> value_type_from_rust_property_value_type_name(StringV
     __TRY_VALUE_TYPE(CustomIdent);
     __TRY_VALUE_TYPE(DashedIdent);
     __TRY_VALUE_TYPE(EasingFunction);
+    __TRY_VALUE_TYPE(FilterValueList);
     __TRY_VALUE_TYPE(FitContent);
+    __TRY_VALUE_TYPE(Flex);
     __TRY_VALUE_TYPE(FontKerningValue);
     __TRY_VALUE_TYPE(FontOpticalSizingValue);
     __TRY_VALUE_TYPE(FontStyle);
@@ -1055,9 +1060,12 @@ static Optional<ValueType> value_type_from_rust_property_value_type_name(StringV
     __TRY_VALUE_TYPE(FontVariantPositionValue);
     __TRY_VALUE_TYPE(FontWeightAbsolute);
     __TRY_VALUE_TYPE(FontWidthCss3);
+    __TRY_VALUE_TYPE(Frequency);
+    __TRY_VALUE_TYPE(FrequencyPercentage);
     __TRY_VALUE_TYPE(Image);
     __TRY_VALUE_TYPE(Integer);
     __TRY_VALUE_TYPE(Length);
+    __TRY_VALUE_TYPE(LengthPercentage);
     __TRY_VALUE_TYPE(Number);
     __TRY_VALUE_TYPE(OpacityValue);
     __TRY_VALUE_TYPE(OpentypeTag);
@@ -1066,9 +1074,12 @@ static Optional<ValueType> value_type_from_rust_property_value_type_name(StringV
     __TRY_VALUE_TYPE(Position);
     __TRY_VALUE_TYPE(Ratio);
     __TRY_VALUE_TYPE(Rect);
+    __TRY_VALUE_TYPE(Resolution);
     __TRY_VALUE_TYPE(ScrollFunction);
     __TRY_VALUE_TYPE(String);
     __TRY_VALUE_TYPE(Time);
+    __TRY_VALUE_TYPE(TimePercentage);
+    __TRY_VALUE_TYPE(TransformFunction);
     __TRY_VALUE_TYPE(TransformList);
     __TRY_VALUE_TYPE(Url);
     __TRY_VALUE_TYPE(ViewFunction);

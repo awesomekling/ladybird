@@ -147,19 +147,27 @@ where
         if !property_accepts_value_type(property_id, value_type) {
             continue;
         }
-        let Some(range) = property_accepted_range_by_value_type(property_id, value_type) else {
-            continue;
-        };
+        let range = property_accepted_range_by_value_type(property_id, value_type).unwrap_or(PropertyNumericRange {
+            minimum: None,
+            maximum: None,
+        });
 
         let (minimum, maximum) = numeric_range_to_f64(range, value_type);
         let percentages_resolve_to_value_type =
-            property_resolves_percentages_relative_to(property_id) == Some(value_type);
-        if percentages_resolve_to_value_type {
-            let Some(percentage_range) =
-                property_accepted_range_by_value_type(property_id, PropertyValueType::Percentage)
-            else {
-                continue;
+            match (property_resolves_percentages_relative_to(property_id), value_type) {
+                (Some(relative_to), _) if relative_to == value_type => true,
+                (Some(PropertyValueType::Angle), PropertyValueType::AnglePercentage)
+                | (Some(PropertyValueType::Frequency), PropertyValueType::FrequencyPercentage)
+                | (Some(PropertyValueType::Length), PropertyValueType::LengthPercentage)
+                | (Some(PropertyValueType::Time), PropertyValueType::TimePercentage) => true,
+                _ => false,
             };
+        if percentages_resolve_to_value_type {
+            let percentage_range = property_accepted_range_by_value_type(property_id, PropertyValueType::Percentage)
+                .unwrap_or(PropertyNumericRange {
+                    minimum: None,
+                    maximum: None,
+                });
             let (percentage_minimum, percentage_maximum) =
                 numeric_range_to_f64(percentage_range, PropertyValueType::Percentage);
             callback(
