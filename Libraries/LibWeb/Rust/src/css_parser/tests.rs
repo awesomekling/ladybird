@@ -3165,6 +3165,21 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10%"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BorderImageSlice,
+            value: RustOwnedStyleValueKind::BorderImageSlice(RustOwnedBorderImageSlice {
+                values: vec![
+                    RustOwnedNestedPrimitiveValue::Percentage(10.0),
+                    RustOwnedNestedPrimitiveValue::Percentage(10.0),
+                    RustOwnedNestedPrimitiveValue::Percentage(10.0),
+                    RustOwnedNestedPrimitiveValue::Percentage(10.0),
+                ],
+                fill: false,
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BorderImageSlice], "10% fill 20"),
         None
     );

@@ -2211,12 +2211,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 VERIFY_NOT_REACHED();
             };
             auto materialize_rust_border_image_slice = [&](Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& values) -> RefPtr<StyleValue const> {
-                if (values.size() != 4)
+                if (values.is_empty() || values.size() > 4)
                     return nullptr;
+
                 auto top = materialize_rust_nested_non_negative_number_percentage(values[0]);
-                auto right = materialize_rust_nested_non_negative_number_percentage(values[1]);
-                auto bottom = materialize_rust_nested_non_negative_number_percentage(values[2]);
-                auto left = materialize_rust_nested_non_negative_number_percentage(values[3]);
+                if (!top)
+                    return nullptr;
+
+                auto right = values.size() >= 2 ? materialize_rust_nested_non_negative_number_percentage(values[1]) : top;
+                if (!right)
+                    return nullptr;
+
+                auto bottom = values.size() >= 3 ? materialize_rust_nested_non_negative_number_percentage(values[2]) : top;
+                if (!bottom)
+                    return nullptr;
+
+                auto left = values.size() >= 4 ? materialize_rust_nested_non_negative_number_percentage(values[3]) : right;
                 if (!top || !right || !bottom || !left)
                     return nullptr;
                 return BorderImageSliceStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull(), rust_style_value->border_image_slice_fill);
