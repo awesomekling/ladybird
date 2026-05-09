@@ -277,6 +277,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ColorScheme
             | PropertyId::ColumnCount
             | PropertyId::ColumnSpan
+            | PropertyId::ColumnWidth
             | PropertyId::Columns
             | PropertyId::Contain
             | PropertyId::ContainerType
@@ -286,6 +287,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::CounterReset
             | PropertyId::CounterSet
             | PropertyId::Cursor
+            | PropertyId::Cx
+            | PropertyId::Cy
             | PropertyId::Direction
             | PropertyId::Display
             | PropertyId::DominantBaseline
@@ -359,6 +362,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MinWidth
             | PropertyId::MixBlendMode
             | PropertyId::ObjectFit
+            | PropertyId::ObjectPosition
             | PropertyId::OverflowWrap
             | PropertyId::OverflowClipMargin
             | PropertyId::OverflowClipMarginBlock
@@ -390,6 +394,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::PaddingTop
             | PropertyId::PaintOrder
             | PropertyId::Perspective
+            | PropertyId::PerspectiveOrigin
             | PropertyId::PointerEvents
             | PropertyId::Position
             | PropertyId::PlaceContent
@@ -401,10 +406,13 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::PositionTryOrder
             | PropertyId::PositionVisibility
             | PropertyId::Quotes
+            | PropertyId::R
             | PropertyId::Resize
             | PropertyId::Right
             | PropertyId::Rotate
             | PropertyId::RowGap
+            | PropertyId::Rx
+            | PropertyId::Ry
             | PropertyId::Scale
             | PropertyId::ScrollBehavior
             | PropertyId::ScrollTimeline
@@ -449,6 +457,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TimelineScope
             | PropertyId::Top
             | PropertyId::TouchAction
+            | PropertyId::Transform
             | PropertyId::TransformBox
             | PropertyId::TransformOrigin
             | PropertyId::TransformStyle
@@ -460,6 +469,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Translate
             | PropertyId::UnicodeBidi
             | PropertyId::UserSelect
+            | PropertyId::VerticalAlign
             | PropertyId::ViewTimeline
             | PropertyId::ViewTimelineName
             | PropertyId::ViewTransitionName
@@ -473,6 +483,8 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::WordBreak
             | PropertyId::WordSpacing
             | PropertyId::WritingMode
+            | PropertyId::X
+            | PropertyId::Y
             | PropertyId::ZIndex
     )
 }
@@ -555,6 +567,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::BorderRightWidth
         | PropertyId::BorderTopWidth
         | PropertyId::ColumnGap
+        | PropertyId::ColumnWidth
+        | PropertyId::Cx
+        | PropertyId::Cy
         | PropertyId::FlexBasis
         | PropertyId::FlexGrow
         | PropertyId::FlexShrink
@@ -596,7 +611,10 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::PaddingRight
         | PropertyId::PaddingTop
         | PropertyId::Perspective
+        | PropertyId::R
         | PropertyId::RowGap
+        | PropertyId::Rx
+        | PropertyId::Ry
         | PropertyId::ShapeMargin
         | PropertyId::ShapeImageThreshold
         | PropertyId::StopColor
@@ -610,8 +628,11 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::TextDecorationColor
         | PropertyId::TextDecorationThickness
         | PropertyId::TextUnderlineOffset
+        | PropertyId::VerticalAlign
         | PropertyId::Widows
         | PropertyId::Width
+        | PropertyId::X
+        | PropertyId::Y
         | PropertyId::WordSpacing
         | PropertyId::ZIndex => rust_owned_generated_property_specific_style_value_kind(
             property_id,
@@ -646,6 +667,9 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
         PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
+        PropertyId::ObjectPosition | PropertyId::PerspectiveOrigin => {
+            rust_owned_position_style_value_kind(PropertyValueType::Position, filtered_input_to_string(filtered_input))
+        }
         PropertyId::MaskPosition => {
             rust_owned_position_list_style_value_kind(PropertyValueType::Position, filtered_input)
         }
@@ -692,6 +716,19 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TextIndent => rust_owned_text_indent_style_value_kind(filtered_input),
         PropertyId::TextUnderlinePosition => rust_owned_text_underline_position_style_value_kind(filtered_input),
         PropertyId::TouchAction => rust_owned_touch_action_style_value_kind(filtered_input),
+        PropertyId::Transform => {
+            let (mut parser, _) = parser_from_filtered_input(filtered_input);
+            let component_values = parser.parse_a_list_of_component_values();
+            let component_values = strip_whitespace(&component_values);
+            if matches!(component_values, [component_value] if component_value_is_ident(Some(component_value), "none"))
+            {
+                Some(RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(
+                    "none".to_string(),
+                )))
+            } else {
+                rust_owned_transform_list_style_value_kind(filtered_input, &filtered_input_to_string(filtered_input))
+            }
+        }
         PropertyId::TransformOrigin => rust_owned_transform_origin_style_value_kind(filtered_input),
         PropertyId::Rotate | PropertyId::Scale | PropertyId::Translate => {
             rust_owned_transform_longhand_style_value_kind(property_id, filtered_input)

@@ -146,6 +146,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ColorScheme:
     case PropertyID::ColumnCount:
     case PropertyID::ColumnSpan:
+    case PropertyID::ColumnWidth:
     case PropertyID::Columns:
     case PropertyID::Contain:
     case PropertyID::ContainerType:
@@ -155,6 +156,8 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::CounterReset:
     case PropertyID::CounterSet:
     case PropertyID::Cursor:
+    case PropertyID::Cx:
+    case PropertyID::Cy:
     case PropertyID::Direction:
     case PropertyID::Display:
     case PropertyID::DominantBaseline:
@@ -228,6 +231,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MinWidth:
     case PropertyID::MixBlendMode:
     case PropertyID::ObjectFit:
+    case PropertyID::ObjectPosition:
     case PropertyID::OverflowWrap:
     case PropertyID::OverflowClipMargin:
     case PropertyID::OverflowClipMarginBlock:
@@ -259,6 +263,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::PaddingTop:
     case PropertyID::PaintOrder:
     case PropertyID::Perspective:
+    case PropertyID::PerspectiveOrigin:
     case PropertyID::PointerEvents:
     case PropertyID::Position:
     case PropertyID::PlaceContent:
@@ -270,10 +275,13 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::PositionTryOrder:
     case PropertyID::PositionVisibility:
     case PropertyID::Quotes:
+    case PropertyID::R:
     case PropertyID::Resize:
     case PropertyID::Right:
     case PropertyID::Rotate:
     case PropertyID::RowGap:
+    case PropertyID::Rx:
+    case PropertyID::Ry:
     case PropertyID::Scale:
     case PropertyID::ScrollBehavior:
     case PropertyID::ScrollTimeline:
@@ -318,6 +326,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TimelineScope:
     case PropertyID::Top:
     case PropertyID::TouchAction:
+    case PropertyID::Transform:
     case PropertyID::TransformBox:
     case PropertyID::TransformOrigin:
     case PropertyID::TransformStyle:
@@ -329,6 +338,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Translate:
     case PropertyID::UnicodeBidi:
     case PropertyID::UserSelect:
+    case PropertyID::VerticalAlign:
     case PropertyID::ViewTimeline:
     case PropertyID::ViewTimelineName:
     case PropertyID::ViewTransitionName:
@@ -342,6 +352,8 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::WordBreak:
     case PropertyID::WordSpacing:
     case PropertyID::WritingMode:
+    case PropertyID::X:
+    case PropertyID::Y:
     case PropertyID::ZIndex:
         return true;
     default:
