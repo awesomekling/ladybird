@@ -211,6 +211,11 @@ public:
         Source,
     };
 
+    enum class RustTreeCountingFunction : u8 {
+        SiblingCount,
+        SiblingIndex,
+    };
+
     enum class RustTextDecorationThicknessKind : u8 {
         Auto,
         FromFont,
@@ -583,6 +588,7 @@ public:
         Optional<String> list_style_type_string;
         Optional<CounterStyle> list_style_type_counter_style;
         Optional<RustNestedPrimitiveValue> math_depth_integer;
+        Optional<RustTreeCountingFunction> tree_counting_function;
         bool aspect_ratio_has_auto { false };
         Optional<RustNestedPrimitiveValue> aspect_ratio_numerator;
         Optional<RustNestedPrimitiveValue> aspect_ratio_denominator;

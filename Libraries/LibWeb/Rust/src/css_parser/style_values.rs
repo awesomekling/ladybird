@@ -319,7 +319,6 @@ pub(crate) struct RustOwnedMathFunction {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedTreeCountingFunction {
     pub(crate) function: RustOwnedTreeCountingFunctionKind,
-    pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
 }
 

@@ -1396,7 +1396,7 @@ pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
         };
     }
 
-    if let Some(function) = parse_rust_owned_tree_counting_function(value_type, component_values, filtered_input) {
+    if let Some(function) = parse_rust_owned_tree_counting_function(value_type, component_values) {
         return RustOwnedStyleValue {
             property_id,
             value: RustOwnedStyleValueKind::TreeCountingFunction(function),

@@ -2903,8 +2903,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (!value_type.has_value())
                     return;
                 value.value_type = value_type.release_value();
-                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::AnchorSize || kind == FFI::CssStyleValueKind::ColorFunction || kind == FFI::CssStyleValueKind::MathFunction || kind == FFI::CssStyleValueKind::TreeCountingFunction) && value_len > 0)
+                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::AnchorSize || kind == FFI::CssStyleValueKind::ColorFunction || kind == FFI::CssStyleValueKind::MathFunction) && value_len > 0)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                if (kind == FFI::CssStyleValueKind::TreeCountingFunction) {
+                    if (color_red == static_cast<u8>(RustTreeCountingFunction::SiblingCount))
+                        value.tree_counting_function = RustTreeCountingFunction::SiblingCount;
+                    else if (color_red == static_cast<u8>(RustTreeCountingFunction::SiblingIndex))
+                        value.tree_counting_function = RustTreeCountingFunction::SiblingIndex;
+                    else
+                        return;
+                }
                 if (has_numeric_value)
                     value.numeric_value = numeric_value;
                 if (has_secondary_numeric_value)

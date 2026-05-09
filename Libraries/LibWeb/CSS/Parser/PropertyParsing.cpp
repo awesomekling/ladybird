@@ -5568,6 +5568,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             tokens.discard_a_token();
                         }
                         maybe_parsed_value = materialize_rust_ratio_value();
+                    } else if (rust_style_value->kind == FFI::CssStyleValueKind::TreeCountingFunction && rust_style_value->tree_counting_function.has_value()) {
+                        tokens.discard_a_token();
+                        maybe_parsed_value = TreeCountingFunctionStyleValue::create(
+                            *rust_style_value->tree_counting_function == RustComponentValueParser::RustTreeCountingFunction::SiblingCount
+                                ? TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingCount
+                                : TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingIndex,
+                            *rust_style_value->value_type == ValueType::Integer ? TreeCountingFunctionStyleValue::ComputedType::Integer : TreeCountingFunctionStyleValue::ComputedType::Number);
                     } else if (rust_style_value->numeric_value.has_value() && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         tokens.discard_a_token();
                         maybe_parsed_value = materialize_rust_numeric_value();

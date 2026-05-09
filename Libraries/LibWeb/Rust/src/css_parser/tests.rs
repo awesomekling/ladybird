@@ -3676,10 +3676,9 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::FontWeight,
             value: RustOwnedStyleValueKind::TreeCountingFunction(RustOwnedTreeCountingFunction {
                 function: RustOwnedTreeCountingFunctionKind::SiblingCount,
-                source,
                 value_type: PropertyValueType::Number,
             }),
-        }) if source == "sibling-count()"
+        })
     ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::ObjectPosition], "left 10px top 20%"),
@@ -4285,7 +4284,6 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedNestedPrimitiveValue::TreeCountingFunction(
             RustOwnedTreeCountingFunction {
                 function: RustOwnedTreeCountingFunctionKind::SiblingCount,
-                source: "sibling-count()".to_string(),
                 value_type: PropertyValueType::Number,
             }
         ))
@@ -5674,7 +5672,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "sibling-count()".to_string(),
+            value: String::new(),
             value_type: "Number".to_string(),
         })
     );

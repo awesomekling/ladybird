@@ -367,9 +367,14 @@ pub(crate) fn parse_rust_owned_length_descriptor_value(
     let (primitive_kind, numeric_value, source_or_unit) = match value {
         RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, Some(value), unit),
         RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
-        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
-            (CssPrimitiveValueKind::Invalid, None, value.source)
-        }
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => (
+            CssPrimitiveValueKind::Invalid,
+            None,
+            match value.function {
+                RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()".to_string(),
+                RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()".to_string(),
+            },
+        ),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, None, source),
         _ => return None,
     };
@@ -410,9 +415,14 @@ pub(crate) fn parse_rust_owned_positive_percentage_descriptor_value(
             serialize_component_values_for_reparsing(component_values, &filtered_input)?,
         ),
         RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
-        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
-            (CssPrimitiveValueKind::Invalid, None, value.source)
-        }
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => (
+            CssPrimitiveValueKind::Invalid,
+            None,
+            match value.function {
+                RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()".to_string(),
+                RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()".to_string(),
+            },
+        ),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, None, source),
         RustOwnedNestedPrimitiveValue::Length { unit, .. } => (CssPrimitiveValueKind::Invalid, None, unit),
         _ => return None,
@@ -452,9 +462,14 @@ pub(crate) fn parse_rust_owned_page_size_descriptor(filtered_input: &[u8]) -> Op
         let (primitive_kind, numeric_value, source_or_unit) = match value {
             RustOwnedNestedPrimitiveValue::Length { value, unit } => (CssPrimitiveValueKind::Length, Some(value), unit),
             RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, None, value.source),
-            RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
-                (CssPrimitiveValueKind::Invalid, None, value.source)
-            }
+            RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => (
+                CssPrimitiveValueKind::Invalid,
+                None,
+                match value.function {
+                    RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()".to_string(),
+                    RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()".to_string(),
+                },
+            ),
             RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, None, source),
             _ => return None,
         };

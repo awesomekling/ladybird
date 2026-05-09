@@ -473,9 +473,15 @@ where
                     RustOwnedNestedPrimitiveValue::MathFunction(value) => {
                         (CssPrimitiveValueKind::Invalid, false, 0.0, value.source.as_str())
                     }
-                    RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
-                        (CssPrimitiveValueKind::Invalid, false, 0.0, value.source.as_str())
-                    }
+                    RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => (
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        match value.function {
+                            RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()",
+                            RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()",
+                        },
+                    ),
                     _ => unreachable!("counter definitions only use integer-like values"),
                 };
                 callback(
@@ -1604,13 +1610,20 @@ fn callback_rust_owned_tree_counting_function<C>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let _ = value.function;
-    callback_source_backed_value_type_kind_style_value(
-        callback,
+    callback(
         CssStyleValueKind::TreeCountingFunction,
         property_id,
-        &value.source,
-        value.value_type,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        value.function as u8,
+        0,
+        0,
+        0,
+        &[],
+        property_value_type_name(value.value_type),
     );
 }
 
@@ -4581,9 +4594,14 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
         RustOwnedNestedPrimitiveValue::Time { value, unit } => (CssPrimitiveValueKind::Time, *value, unit),
         RustOwnedNestedPrimitiveValue::Keyword(keyword) => (CssPrimitiveValueKind::Keyword, 0.0, keyword),
         RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, 0.0, &value.source),
-        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
-            (CssPrimitiveValueKind::Invalid, 0.0, &value.source)
-        }
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => (
+            CssPrimitiveValueKind::Invalid,
+            0.0,
+            match value.function {
+                RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()",
+                RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()",
+            },
+        ),
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
         RustOwnedNestedPrimitiveValue::FlexSource(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
