@@ -2349,6 +2349,15 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::CornerEndEndShape], "superellipse(random(3, 1))"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::CornerEndEndShape,
+            value: RustOwnedStyleValueKind::CornerShape(RustOwnedCornerShape {
+                value: RustOwnedNestedPrimitiveValue::Source("random(3, 1)".to_string()),
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::ListStyleType], "symbols(\"*\" \"**\")"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::ListStyleType,

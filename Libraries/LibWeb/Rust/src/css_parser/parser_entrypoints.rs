@@ -1994,12 +1994,13 @@ pub(crate) fn parse_primitive_value(
 
 fn function_can_represent_number(function: &Function) -> bool {
     is_math_function_name(&function.name)
+        || function.name.eq_ignore_ascii_case("random")
         || function.name.eq_ignore_ascii_case("sibling-index")
         || function.name.eq_ignore_ascii_case("sibling-count")
 }
 
 fn function_can_represent_dimension(function: &Function) -> bool {
-    is_math_function_name(&function.name)
+    is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("random")
 }
 
 fn function_can_represent_length(function: &Function) -> bool {
@@ -3926,7 +3927,9 @@ pub(super) fn component_value_parse_as_non_negative_length_percentage(component_
         }) => number.value() == 0.0,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        ComponentValue::Function(function) => {
+            is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("random")
+        }
         _ => false,
     }
 }
@@ -3945,7 +3948,9 @@ pub(super) fn component_value_parse_as_non_negative_length(component_value: &Com
         }) => number.value() == 0.0,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        ComponentValue::Function(function) => {
+            is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("random")
+        }
         _ => false,
     }
 }
@@ -4013,7 +4018,8 @@ pub(super) fn component_value_parse_as_non_negative_flex(component_value: &Compo
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
         ComponentValue::Function(function) => {
-            is_math_function_name(&function.name) && component_value_contains_flex_dimension(component_value)
+            (is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("random"))
+                && component_value_contains_flex_dimension(component_value)
         }
         _ => false,
     }
@@ -8527,7 +8533,9 @@ pub(super) fn component_value_parse_as_non_negative_number_percentage(component_
         }) => number.value() >= 0.0,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(function) => is_math_function_name(&function.name),
+        ComponentValue::Function(function) => {
+            is_math_function_name(&function.name) || function.name.eq_ignore_ascii_case("random")
+        }
         _ => false,
     }
 }
