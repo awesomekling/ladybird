@@ -1085,9 +1085,14 @@ Optional<Parser::FunctionPrelude> Parser::parse_function_prelude(TokenStream<Com
             parameter_tokens.discard_a_token(); // :
             parameter_tokens.discard_whitespace();
 
-            auto maybe_default_value = parse_declaration_value(parameter_tokens);
+            auto default_value_start_index = parameter_tokens.current_index();
+            while (parameter_tokens.has_next_token())
+                parameter_tokens.discard_a_token();
 
-            if (!maybe_default_value.has_value()) {
+            default_value = Vector<ComponentValue> { parameter_tokens.tokens_since(default_value_start_index) };
+            TokenStream default_value_tokens { default_value.value() };
+            default_value_tokens.discard_whitespace();
+            if (default_value_tokens.is_empty()) {
                 ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                     .rule_name = "@function"_fly_string,
                     .prelude = parameter_tokens.dump_string(),
@@ -1099,11 +1104,9 @@ Optional<Parser::FunctionPrelude> Parser::parse_function_prelude(TokenStream<Com
             // If a default value and a parameter type are both provided, then the default value must parse successfully
             // according to that parameter type’s syntax. Otherwise, the @function rule is invalid.
             // FIXME: Chrome allows ASFs regardless of the parameter's type
-            auto serialized_default_value = serialize_component_values_for_css_type_reparsing(maybe_default_value.value());
+            auto serialized_default_value = serialize_component_values_for_css_type_reparsing(default_value.value());
             if (!RustComponentValueParser::syntax_matches(serialized_default_value, type->to_string(), LimitSingleComponentIdentToCustomIdent::No))
                 return {};
-
-            default_value = maybe_default_value;
         }
 
         parameter_tokens.discard_whitespace();
