@@ -2632,6 +2632,33 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Flex], "0"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Flex,
+            value: RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::Longhands {
+                flex_grow: RustOwnedNestedPrimitiveValue::Number(0.0),
+                flex_shrink: RustOwnedNestedPrimitiveValue::Number(1.0),
+                flex_basis: RustOwnedFlexBasis::Value(RustOwnedNestedPrimitiveValue::Percentage(0.0)),
+            }),
+        })
+    );
+    assert!(matches!(
+        parse_rust_owned_style_value(&[PropertyId::Flex], "calc(10px + 0.5em)"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Flex,
+            value: RustOwnedStyleValueKind::FlexShorthand(RustOwnedFlexShorthand::Longhands {
+                flex_grow: RustOwnedNestedPrimitiveValue::Number(1.0),
+                flex_shrink: RustOwnedNestedPrimitiveValue::Number(1.0),
+                flex_basis: RustOwnedFlexBasis::Value(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    name,
+                    source,
+                    value_type: PropertyValueType::Length,
+                    ..
+                })),
+            }),
+        }) if name == "calc" && source == "calc(10px + 0.5em)"
+    ));
+    assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Flex], "1 1 fit-content(20%)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Flex,

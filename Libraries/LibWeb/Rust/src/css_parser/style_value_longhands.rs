@@ -425,6 +425,20 @@ pub(super) fn rust_owned_flex_shorthand_style_value_kind(filtered_input: &[u8]) 
     // Value: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
     let value = match component_values.as_slice() {
         [component_value] if component_value_is_ident(Some(component_value), "none") => RustOwnedFlexShorthand::None,
+        [
+            component_value @ ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Number { .. },
+                ..
+            }),
+        ] => {
+            // NOTE: The spec says that flex-basis should be 0 here, but other engines currently use 0%.
+            // https://github.com/w3c/csswg-drafts/issues/5742
+            RustOwnedFlexShorthand::Longhands {
+                flex_grow: flex_factor_from_component_value(component_value)?,
+                flex_shrink: RustOwnedNestedPrimitiveValue::Number(1.0),
+                flex_basis: RustOwnedFlexBasis::Value(RustOwnedNestedPrimitiveValue::Percentage(0.0)),
+            }
+        }
         [component_value] if component_value_parse_as_flex_basis(component_value) => {
             RustOwnedFlexShorthand::Longhands {
                 flex_grow: RustOwnedNestedPrimitiveValue::Number(1.0),
