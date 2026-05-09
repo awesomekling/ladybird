@@ -233,6 +233,14 @@ public:
         String source_or_unit;
     };
 
+    struct RustCalculationNodeEvent {
+        FFI::CssCalculationNodeKind kind;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> numeric_value;
+        u32 child_count { 0 };
+        String metadata;
+    };
+
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
@@ -593,6 +601,7 @@ public:
         Optional<CounterStyle> list_style_type_counter_style;
         Optional<RustNestedPrimitiveValue> math_depth_integer;
         Optional<RustTreeCountingFunction> tree_counting_function;
+        Vector<RustCalculationNodeEvent> calculation_node_events;
         bool aspect_ratio_has_auto { false };
         Optional<RustNestedPrimitiveValue> aspect_ratio_numerator;
         Optional<RustNestedPrimitiveValue> aspect_ratio_denominator;

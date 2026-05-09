@@ -2992,6 +2992,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             }
 
             style_value = move(value);
+        },
+        [](void* raw_style_value, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
+            auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);
+            VERIFY(style_value.has_value());
+            style_value->calculation_node_events.append(RustCalculationNodeEvent {
+                .kind = kind,
+                .primitive_kind = primitive_kind,
+                .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
+                .child_count = child_count,
+                .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
+            });
         });
 
     return style_value;

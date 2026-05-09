@@ -42,9 +42,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use css_parser::{
     CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssAttributeCaseType,
     CssAttributeMatchType, CssBackgroundSizeValueKind, CssBasicShapeValueKind, CssBooleanExpressionEventKind,
-    CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssComponentValue,
-    CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind, CssCounterStyleKind,
-    CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
+    CssCalculationNodeKind, CssColorFunctionValueKind, CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind,
+    CssComponentValue, CssComponentValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
+    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
     CssCounterStyleSystemKind, CssCropOrCrossKind, CssDeclaration, CssDescriptorResultKind, CssDescriptorSyntaxKind,
     CssDescriptorValueType, CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind,
     CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
@@ -708,6 +708,16 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
         value_type: *const u8,
         value_type_len: usize,
     ),
+    calculation_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCalculationNodeKind,
+        primitive_kind: CssPrimitiveValueKind,
+        has_numeric_value: bool,
+        numeric_value: f64,
+        child_count: u32,
+        metadata: *const u8,
+        metadata_len: usize,
+    ),
 ) -> bool {
     unsafe {
         abort_on_panic(|| {
@@ -718,7 +728,7 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                 return false;
             };
 
-            css_parser::parse_style_value_for_property_with_options(
+            css_parser::parse_style_value_for_property_with_options_and_calculation_callback(
                 property_ids,
                 input,
                 css_parser::CssPrimitiveValueOptions {
@@ -757,6 +767,18 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                         value.len(),
                         value_type.as_ptr(),
                         value_type.len(),
+                    );
+                },
+                |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+                    calculation_callback(
+                        ctx,
+                        kind,
+                        primitive_kind,
+                        has_numeric_value,
+                        numeric_value,
+                        child_count,
+                        metadata.as_ptr(),
+                        metadata.len(),
                     );
                 },
             )
