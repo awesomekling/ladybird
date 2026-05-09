@@ -1976,6 +1976,20 @@ pub(crate) fn parse_primitive_value(
     }
 }
 
+fn function_can_represent_number(function: &Function) -> bool {
+    is_math_function_name(&function.name)
+        || function.name.eq_ignore_ascii_case("sibling-index")
+        || function.name.eq_ignore_ascii_case("sibling-count")
+}
+
+fn function_can_represent_dimension(function: &Function) -> bool {
+    is_math_function_name(&function.name)
+}
+
+fn function_can_represent_length(function: &Function) -> bool {
+    function_can_represent_dimension(function) || function.name.eq_ignore_ascii_case("anchor-size")
+}
+
 pub(super) fn parse_integer_value_prefix(component_value: &ComponentValue) -> CssPrimitiveValueKind {
     // https://drafts.csswg.org/css-values-4/#integers
     // <integer> = [-+]? [0-9]+
@@ -1986,7 +2000,7 @@ pub(super) fn parse_integer_value_prefix(component_value: &ComponentValue) -> Cs
         }) if number_is_integer(*number) => CssPrimitiveValueKind::Integer,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math and tree-counting functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Integer,
+        ComponentValue::Function(function) if function_can_represent_number(function) => CssPrimitiveValueKind::Integer,
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2001,7 +2015,7 @@ pub(super) fn parse_number_value_prefix(component_value: &ComponentValue) -> Css
         }) => CssPrimitiveValueKind::Number,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math and tree-counting functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Number,
+        ComponentValue::Function(function) if function_can_represent_number(function) => CssPrimitiveValueKind::Number,
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2016,7 +2030,9 @@ pub(super) fn parse_percentage_value_prefix(component_value: &ComponentValue) ->
         }) => CssPrimitiveValueKind::Percentage,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Percentage,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => {
+            CssPrimitiveValueKind::Percentage
+        }
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2040,7 +2056,9 @@ pub(super) fn parse_angle_value_prefix(
         }) if options.allow_svg_unitless_angle => CssPrimitiveValueKind::Angle,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Angle,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => {
+            CssPrimitiveValueKind::Angle
+        }
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2055,7 +2073,7 @@ pub(super) fn parse_flex_value_prefix(component_value: &ComponentValue) -> CssPr
         }) if matches!(dimension_for_unit(unit), Some(DimensionType::Flex)) => CssPrimitiveValueKind::Flex,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Flex,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => CssPrimitiveValueKind::Flex,
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2070,7 +2088,9 @@ pub(super) fn parse_frequency_value_prefix(component_value: &ComponentValue) -> 
         }) if matches!(dimension_for_unit(unit), Some(DimensionType::Frequency)) => CssPrimitiveValueKind::Frequency,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Frequency,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => {
+            CssPrimitiveValueKind::Frequency
+        }
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2096,7 +2116,7 @@ pub(super) fn parse_length_value_prefix(
         }
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions and anchor-size() still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Length,
+        ComponentValue::Function(function) if function_can_represent_length(function) => CssPrimitiveValueKind::Length,
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2113,7 +2133,9 @@ pub(super) fn parse_resolution_value_prefix(component_value: &ComponentValue) ->
         }
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Resolution,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => {
+            CssPrimitiveValueKind::Resolution
+        }
         _ => CssPrimitiveValueKind::Invalid,
     }
 }
@@ -2140,7 +2162,7 @@ pub(super) fn parse_time_value_prefix(component_value: &ComponentValue) -> CssPr
         }) if matches!(dimension_for_unit(unit), Some(DimensionType::Time)) => CssPrimitiveValueKind::Time,
         // AD-HOC: The Rust side only recognizes the syntactic branch here.
         // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => CssPrimitiveValueKind::Time,
+        ComponentValue::Function(function) if function_can_represent_dimension(function) => CssPrimitiveValueKind::Time,
         _ => CssPrimitiveValueKind::Invalid,
     }
 }

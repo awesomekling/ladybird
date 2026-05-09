@@ -60,11 +60,11 @@ use super::{
     RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
     RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
     RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
-    RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollFunction, RustOwnedScrollTimeline,
-    RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox,
-    RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue,
-    RustOwnedSourceBackedValueKind, RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind,
-    RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
+    RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+    RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+    RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedSourceBackedValue, RustOwnedSourceBackedValueKind,
+    RustOwnedStrokeDasharray, RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList,
+    RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult, RustOwnedTextDecoration,
     RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition, RustOwnedTextWrap,
     RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
     RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
@@ -3274,9 +3274,11 @@ fn parses_style_values_with_rust_owned_ast() {
         parse_rust_owned_style_value(&[PropertyId::AnimationTimeline], "scroll(root y)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::AnimationTimeline,
-            value: RustOwnedStyleValueKind::ScrollFunction(RustOwnedScrollFunction {
-                scroller: CssScrollFunctionScrollerKind::Root,
-                axis: CssScrollFunctionAxisKind::Y,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![RustOwnedGeneratedValueListItem {
+                    source: "scroll(root y)".to_string(),
+                    value_type: PropertyValueType::ScrollFunction,
+                }],
             }),
         })
     );
@@ -3840,6 +3842,96 @@ fn parses_style_values_with_rust_owned_ast() {
                     RustOwnedGeneratedValueListItem {
                         source: "-200ms".to_string(),
                         value_type: PropertyValueType::Time,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationDuration], "auto, 250ms"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationDuration,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "auto".to_string(),
+                        value_type: PropertyValueType::Time,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "250ms".to_string(),
+                        value_type: PropertyValueType::Time,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationDirection], "normal, alternate-reverse"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationDirection,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "normal".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "alternate-reverse".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationIterationCount], "infinite, 2"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationIterationCount,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "infinite".to_string(),
+                        value_type: PropertyValueType::Number,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "2".to_string(),
+                        value_type: PropertyValueType::Number,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationPlayState], "running, paused"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationPlayState,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "running".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "paused".to_string(),
+                        value_type: PropertyValueType::CustomIdent,
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::AnimationTimeline], "auto, --track"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::AnimationTimeline,
+            value: RustOwnedStyleValueKind::GeneratedValueList(RustOwnedGeneratedValueList {
+                items: vec![
+                    RustOwnedGeneratedValueListItem {
+                        source: "auto".to_string(),
+                        value_type: PropertyValueType::DashedIdent,
+                    },
+                    RustOwnedGeneratedValueListItem {
+                        source: "--track".to_string(),
+                        value_type: PropertyValueType::DashedIdent,
                     },
                 ],
             }),
@@ -4825,13 +4917,13 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::AnimationTimeline], "scroll(root y)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::ScrollFunction,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::AnimationTimeline,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: String::new(),
+            value: "scroll(root y)".to_string(),
             value_type: "ScrollFunction".to_string(),
         })
     );
@@ -4890,13 +4982,13 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::AnimationTimeline], "view(y 1px 2px)"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::ViewFunction,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::AnimationTimeline,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: String::new(),
+            value: "view(y 1px 2px)".to_string(),
             value_type: "ViewFunction".to_string(),
         })
     );
@@ -5146,13 +5238,13 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::AnimationDuration], "250ms"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::Primitive,
+            kind: CssStyleValueKind::GeneratedValueList,
             property_id: PropertyId::AnimationDuration,
-            primitive_kind: CssPrimitiveValueKind::Time,
-            numeric_value: Some(250.0),
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "ms".to_string(),
+            value: "250ms".to_string(),
             value_type: "Time".to_string(),
         })
     );
@@ -5520,6 +5612,26 @@ fn parses_coordinating_value_list_shorthands() {
             (1, PropertyId::AnimationDuration, "2s".to_string()),
             (1, PropertyId::AnimationName, "fade".to_string()),
         ])
+    );
+    assert_eq!(
+        parse_coordinating_shorthand(
+            &[
+                PropertyId::AnimationDuration,
+                PropertyId::AnimationTimingFunction,
+                PropertyId::AnimationDelay,
+                PropertyId::AnimationIterationCount,
+                PropertyId::AnimationDirection,
+                PropertyId::AnimationFillMode,
+                PropertyId::AnimationPlayState,
+                PropertyId::AnimationName,
+            ],
+            "cubic-bezier(0, -2, 1, 3)"
+        ),
+        Some(vec![(
+            0,
+            PropertyId::AnimationTimingFunction,
+            "cubic-bezier(0, -2, 1, 3)".to_string()
+        )])
     );
     assert_eq!(
         parse_coordinating_shorthand(

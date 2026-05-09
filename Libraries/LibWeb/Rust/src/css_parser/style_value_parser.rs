@@ -227,8 +227,15 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AlignSelf
             | PropertyId::AnchorName
             | PropertyId::AnchorScope
-            | PropertyId::AnimationName
+            | PropertyId::AnimationComposition
             | PropertyId::AnimationDelay
+            | PropertyId::AnimationDirection
+            | PropertyId::AnimationDuration
+            | PropertyId::AnimationFillMode
+            | PropertyId::AnimationIterationCount
+            | PropertyId::AnimationName
+            | PropertyId::AnimationPlayState
+            | PropertyId::AnimationTimeline
             | PropertyId::AnimationTimingFunction
             | PropertyId::Appearance
             | PropertyId::AspectRatio
@@ -594,7 +601,14 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_background_position_longhand_list_style_value_kind(property_id, filtered_input)
         }
         PropertyId::AnimationName => rust_owned_animation_name_style_value_kind(filtered_input),
-        PropertyId::AnimationDelay
+        PropertyId::AnimationComposition
+        | PropertyId::AnimationDelay
+        | PropertyId::AnimationDirection
+        | PropertyId::AnimationDuration
+        | PropertyId::AnimationFillMode
+        | PropertyId::AnimationIterationCount
+        | PropertyId::AnimationPlayState
+        | PropertyId::AnimationTimeline
         | PropertyId::AnimationTimingFunction
         | PropertyId::TransitionDelay
         | PropertyId::TransitionDuration

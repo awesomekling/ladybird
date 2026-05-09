@@ -96,8 +96,15 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AlignSelf:
     case PropertyID::AnchorName:
     case PropertyID::AnchorScope:
+    case PropertyID::AnimationComposition:
     case PropertyID::AnimationDelay:
+    case PropertyID::AnimationDirection:
+    case PropertyID::AnimationDuration:
+    case PropertyID::AnimationFillMode:
+    case PropertyID::AnimationIterationCount:
     case PropertyID::AnimationName:
+    case PropertyID::AnimationPlayState:
+    case PropertyID::AnimationTimeline:
     case PropertyID::AnimationTimingFunction:
     case PropertyID::Appearance:
     case PropertyID::AspectRatio:
@@ -470,9 +477,16 @@ RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenSt
 {
     auto unwrap_single_coordinating_value_list_item = [](PropertyID property_id, RefPtr<StyleValue const>& parsed_value) {
         if (first_is_one_of(property_id,
+                PropertyID::AnimationComposition,
                 PropertyID::AnimationDelay,
-                PropertyID::AnimationTimingFunction,
+                PropertyID::AnimationDirection,
+                PropertyID::AnimationDuration,
+                PropertyID::AnimationFillMode,
+                PropertyID::AnimationIterationCount,
                 PropertyID::AnimationName,
+                PropertyID::AnimationPlayState,
+                PropertyID::AnimationTimingFunction,
+                PropertyID::AnimationTimeline,
                 PropertyID::ScrollTimelineName,
                 PropertyID::TransitionBehavior,
                 PropertyID::TransitionDelay,
