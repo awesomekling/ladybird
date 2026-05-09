@@ -910,16 +910,11 @@ pub(super) fn rust_owned_math_depth_style_value_kind(filtered_input: &[u8]) -> O
     if let [ComponentValue::Function(function)] = component_values.as_slice()
         && function.name.eq_ignore_ascii_case("add")
     {
-        let integer_source = serialize_component_values_for_reparsing(&function.value, filtered_input_string)?;
-        if !component_values_parse_as_property_value_type(PropertyValueType::Integer, integer_source.as_bytes()) {
+        let function_values = remove_whitespace_component_values(&function.value);
+        let [component_value] = function_values.as_slice() else {
             return None;
-        }
-        let integer = match remove_whitespace_component_values(&function.value).as_slice() {
-            [component_value] => component_value_parse_as_nested_integer(component_value, filtered_input_string)?,
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing and range-checking function values still happens in C++.
-            _ => RustOwnedNestedPrimitiveValue::Source(integer_source),
         };
+        let integer = component_value_parse_as_nested_integer(component_value, filtered_input_string)?;
         return Some(RustOwnedStyleValueKind::MathDepth(RustOwnedMathDepth::Add { integer }));
     }
 
