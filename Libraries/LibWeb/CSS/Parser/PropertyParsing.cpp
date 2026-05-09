@@ -3737,9 +3737,51 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }) };
             }
             case FFI::CssStyleValueKind::ComponentShorthand: {
+                auto materialize_component_shorthand_item = [&](RustComponentValueParser::ComponentShorthandItem const& item) -> RefPtr<StyleValue const> {
+                    if (item.keyword.has_value())
+                        return KeywordStyleValue::create(*item.keyword);
+
+                    if (item.has_color) {
+                        if (item.color_is_simple) {
+                            Optional<FlyString> name;
+                            if (item.color_name_or_source.has_value())
+                                name = FlyString::from_utf8_without_validation(item.color_name_or_source->bytes());
+                            return ColorStyleValue::create_from_color({ item.color_red, item.color_green, item.color_blue, item.color_alpha }, ColorSyntax::Legacy, move(name));
+                        }
+
+                        if (!item.color_name_or_source.has_value())
+                            return nullptr;
+                        return parse_rust_source_as_property(item.property_id, *item.color_name_or_source);
+                    }
+
+                    if (item.primitive_value_type.has_value()) {
+                        if (item.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                            auto keyword = keyword_from_string(item.primitive_source_or_unit);
+                            if (!keyword.has_value())
+                                return nullptr;
+                            return KeywordStyleValue::create(*keyword);
+                        }
+
+                        RustComponentValueParser::RustNestedPrimitiveValue value {
+                            .primitive_kind = item.primitive_kind,
+                            .source_or_unit = item.primitive_source_or_unit,
+                        };
+                        if (item.primitive_numeric_value.has_value())
+                            value.numeric_value = *item.primitive_numeric_value;
+
+                        if (*item.primitive_value_type == ValueType::Length)
+                            return materialize_rust_nested_length(value, non_negative_range);
+
+                        if (*item.primitive_value_type == ValueType::LengthPercentage)
+                            return materialize_rust_nested_length_percentage(value, non_negative_range);
+                    }
+
+                    return nullptr;
+                };
+
                 HashMap<PropertyID, ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
                 for (auto const& item : rust_style_value->component_shorthand_items) {
-                    auto parsed_value = parse_rust_source_as_property(item.property_id, item.value);
+                    auto parsed_value = materialize_component_shorthand_item(item);
                     if (!parsed_value) {
                         parsed_values.clear();
                         break;

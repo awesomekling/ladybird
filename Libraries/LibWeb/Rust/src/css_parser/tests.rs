@@ -5318,7 +5318,7 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(
         parse_style_value(&[PropertyId::Outline], "auto red thick"),
         Some(ParsedStyleValue {
-            kind: CssStyleValueKind::ComponentShorthand,
+            kind: CssStyleValueKind::Keyword,
             property_id: PropertyId::OutlineWidth,
             primitive_kind: CssPrimitiveValueKind::Invalid,
             numeric_value: None,

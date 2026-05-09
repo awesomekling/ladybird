@@ -133,7 +133,21 @@ public:
         String value;
     };
 
-    using ComponentShorthandItem = FontShorthandItem;
+    struct ComponentShorthandItem {
+        PropertyID property_id;
+        Optional<Keyword> keyword;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> primitive_numeric_value;
+        String primitive_source_or_unit;
+        Optional<ValueType> primitive_value_type;
+        bool has_color { false };
+        bool color_is_simple { false };
+        u8 color_red { 0 };
+        u8 color_green { 0 };
+        u8 color_blue { 0 };
+        u8 color_alpha { 0 };
+        Optional<String> color_name_or_source;
+    };
 
     struct CoordinatingValueListShorthandItem {
         size_t layer_index { 0 };

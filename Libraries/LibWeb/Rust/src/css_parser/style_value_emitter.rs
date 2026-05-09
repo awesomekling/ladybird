@@ -6,6 +6,8 @@
 
 use super::*;
 
+const COMPONENT_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
+
 pub(super) fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, callback: &mut C)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
@@ -94,11 +96,12 @@ where
                     0.0,
                     (shorthand_property_id & 0xff) as u8,
                     (shorthand_property_id >> 8) as u8,
+                    COMPONENT_SHORTHAND_CALLBACK_ITEM_START,
                     0,
-                    0,
-                    item.source.as_bytes(),
+                    &[],
                     "",
                 );
+                emit_rust_owned_style_value(&item.style_value, callback);
             }
         }
         RustOwnedStyleValueKind::GridPlacementShorthand(items) => {
