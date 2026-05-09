@@ -1701,10 +1701,17 @@ pub(super) fn rust_owned_color_from_component_value(
         });
     }
 
+    let ComponentValue::Function(function) = component_value else {
+        return None;
+    };
     component_value_parse_as_color_value(component_value)
         .then(|| serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source))
         .flatten()
-        .map(RustOwnedColor::Source)
+        .map(|source| RustOwnedColor::Function {
+            name: function.name.clone(),
+            arguments: function.value.clone(),
+            source,
+        })
 }
 
 pub(super) fn rust_owned_paint_color_or_none_from_component_value(

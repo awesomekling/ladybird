@@ -1922,7 +1922,7 @@ fn callback_rust_owned_color<C>(
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
-        RustOwnedColor::Source(source) => callback(
+        RustOwnedColor::Function { source, .. } => callback(
             kind,
             property_id,
             CssPrimitiveValueKind::Invalid,
@@ -1967,7 +1967,7 @@ where
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
-        RustOwnedColor::Source(source) => callback_source_backed_value_type_kind_style_value(
+        RustOwnedColor::Function { source, .. } => callback_source_backed_value_type_kind_style_value(
             callback,
             CssStyleValueKind::ColorFunction,
             property_id,

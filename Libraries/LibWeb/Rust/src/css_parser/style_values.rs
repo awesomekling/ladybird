@@ -592,7 +592,11 @@ pub(crate) enum RustOwnedColor {
         alpha: u8,
         name: Option<String>,
     },
-    Source(String),
+    Function {
+        name: String,
+        arguments: Vec<ComponentValue>,
+        source: String,
+    },
 }
 
 pub(crate) const LINE_WIDTH_THIN: u8 = 0;

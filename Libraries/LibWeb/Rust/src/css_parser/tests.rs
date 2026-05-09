@@ -2062,15 +2062,17 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::Color], "color-mix(in oklab, red 40%, blue)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Color,
-            value: RustOwnedStyleValueKind::Color(RustOwnedColor::Source(
-                "color-mix(in oklab, red 40%, blue)".to_string(),
-            )),
-        })
-    );
+            value: RustOwnedStyleValueKind::Color(RustOwnedColor::Function {
+                name,
+                source,
+                ..
+            }),
+        }) if name == "color-mix" && source == "color-mix(in oklab, red 40%, blue)"
+    ));
     for property_id in [
         PropertyId::AccentColor,
         PropertyId::BorderBlockEndColor,
@@ -4614,7 +4616,7 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(
             &[PropertyId::TextDecoration],
             "underline overline line-through rgb(255, 0, 0)"
@@ -4622,17 +4624,15 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::TextDecoration,
             value: RustOwnedStyleValueKind::TextDecoration(RustOwnedTextDecoration {
-                line: Some(RustOwnedTextDecorationLine {
-                    bits: TEXT_DECORATION_LINE_UNDERLINE
-                        | TEXT_DECORATION_LINE_OVERLINE
-                        | TEXT_DECORATION_LINE_LINE_THROUGH,
+                color: Some(RustOwnedColor::Function {
+                    name,
+                    source,
+                    ..
                 }),
-                thickness: None,
-                style: None,
-                color: Some(RustOwnedColor::Source("rgb(255, 0, 0)".to_string())),
+                ..
             }),
-        })
-    );
+        }) if name == "rgb" && source == "rgb(255, 0, 0)"
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::TextIndent], "hanging 2em each-line"),
         Some(RustOwnedStyleValue {

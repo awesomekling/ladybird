@@ -1091,7 +1091,11 @@ pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
         {
             return RustOwnedStyleValue {
                 property_id,
-                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Source(source)),
+                value: RustOwnedStyleValueKind::Color(RustOwnedColor::Function {
+                    name: function.name.clone(),
+                    arguments: function.value.clone(),
+                    source,
+                }),
             };
         }
     }
