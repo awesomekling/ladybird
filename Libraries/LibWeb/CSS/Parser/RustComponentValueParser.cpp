@@ -3481,10 +3481,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.value_type = value_type.release_value();
                 value.text_indent_has_hanging = color_red != 0;
                 value.text_indent_has_each_line = color_green != 0;
-                if (has_numeric_value)
-                    value.numeric_value = numeric_value;
-                if (primitive_kind == FFI::CssPrimitiveValueKind::Length)
-                    value.dimension_unit = fly_string_from_ffi_bytes(value_ptr, value_len);
+                value.text_indent = nested_primitive_value_from_callback_payload();
+                value.last_calculation_node_target = RustCalculationNodeTarget::TextIndent;
             } else if (kind == FFI::CssStyleValueKind::TextUnderlinePosition) {
                 value.text_underline_position_horizontal = static_cast<FFI::CssTextUnderlinePositionHorizontal>(color_red);
                 value.text_underline_position_vertical = static_cast<FFI::CssTextUnderlinePositionVertical>(color_green);
@@ -3906,6 +3904,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 case RustCalculationNodeTarget::GridTrackSecondaryValue:
                     style_value->grid_track_size_list_events.last().secondary_value.calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::TextIndent) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::TextIndent:
+                    VERIFY(style_value->text_indent.has_value());
+                    style_value->text_indent->calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

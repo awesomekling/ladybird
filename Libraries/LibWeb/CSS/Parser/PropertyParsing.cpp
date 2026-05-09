@@ -6476,11 +6476,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             case FFI::CssStyleValueKind::TextIndent: {
-                RefPtr<StyleValue const> length_percentage;
-                if (rust_style_value->numeric_value.has_value())
-                    length_percentage = materialize_rust_numeric_value();
-                else
-                    length_percentage = parse_length_percentage_value(tokens, infinite_range, infinite_range);
+                if (!rust_style_value->text_indent.has_value())
+                    break;
+                auto length_percentage = materialize_rust_nested_length_percentage(*rust_style_value->text_indent, infinite_range);
                 if (!length_percentage)
                     break;
                 discard_rust_owned_property_value_tokens();

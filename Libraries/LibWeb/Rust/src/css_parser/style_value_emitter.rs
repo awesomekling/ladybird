@@ -1724,6 +1724,9 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 unit_or_source.as_bytes(),
                 property_value_type_name(value_type),
             );
+            if let RustOwnedNestedPrimitiveValue::MathFunction(value) = &value.length_percentage {
+                emit_rust_owned_calculation_tree(&value.calculation, calculation_callback);
+            }
         }
         RustOwnedStyleValueKind::TextUnderlinePosition(value) => callback(
             CssStyleValueKind::TextUnderlinePosition,
