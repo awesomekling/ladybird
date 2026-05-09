@@ -1388,7 +1388,8 @@ pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
             RustOwnedStyleValueKind::Primitive(_) => true,
             RustOwnedStyleValueKind::Anchor(_) => true,
             RustOwnedStyleValueKind::AnchorSize(_) => true,
-            RustOwnedStyleValueKind::Color(_) => primitive_value_options.allow_quirky_color,
+            RustOwnedStyleValueKind::Color(_) => true,
+            RustOwnedStyleValueKind::CornerShape(_) => true,
             RustOwnedStyleValueKind::MathFunction(_) => true,
             RustOwnedStyleValueKind::TreeCountingFunction(_) => true,
             RustOwnedStyleValueKind::Identifier(RustOwnedIdentifierValue::Keyword(keyword)) => {

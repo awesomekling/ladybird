@@ -6442,6 +6442,30 @@ fn parses_positional_value_list_shorthands() {
         parse_positional_shorthand(PropertyId::BorderBlockWidth, "thin 2px"),
         Some(vec![(0, "thin".to_string()), (1, "2px".to_string())])
     );
+    assert_eq!(
+        parse_rust_owned_positional_shorthand(PropertyId::BorderBlockColor, "#234 transparent").map(|items| {
+            items
+                .iter()
+                .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![
+            (0, PropertyId::BorderBlockStartColor, "#234".to_string()),
+            (1, PropertyId::BorderBlockEndColor, "transparent".to_string()),
+        ])
+    );
+    assert_eq!(
+        parse_rust_owned_positional_shorthand(PropertyId::CornerShape, "round superellipse(2)").map(|items| {
+            items
+                .iter()
+                .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![
+            (0, PropertyId::CornerTopLeftShape, "round".to_string()),
+            (1, PropertyId::CornerTopRightShape, "superellipse(2)".to_string()),
+        ])
+    );
     let rust_items =
         parse_rust_owned_positional_shorthand(PropertyId::Inset, "anchor(--target bottom, calc(1px + 2%)) 2% auto 4px")
             .unwrap();
