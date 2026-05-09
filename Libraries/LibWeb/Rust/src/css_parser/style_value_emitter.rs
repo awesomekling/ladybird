@@ -110,7 +110,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_counter_function_style_value(callback, CssStyleValueKind::Counter, property_id, value);
         }
         RustOwnedStyleValueKind::CornerShape(value) => {
-            callback_corner_shape_style_value(callback, property_id, &value.value);
+            callback_corner_shape_style_value(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                &value.value,
+            );
         }
         RustOwnedStyleValueKind::ImageSet(image_set) => callback_image_set_style_value(
             callback,
@@ -291,6 +300,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     RustOwnedStyleValueKind::GridTrackSizeList(value) => {
                         callback_grid_track_size_list_style_value(
                             callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
                             CssStyleValueKind::GridTemplateShorthand,
                             item.property_id as u16,
                             value,
@@ -299,6 +313,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     RustOwnedStyleValueKind::GridAutoTrackSizes(value) => {
                         callback_grid_track_size_list_style_value(
                             callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
                             CssStyleValueKind::GridTemplateShorthand,
                             item.property_id as u16,
                             value,
@@ -383,6 +402,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 (CssPrimitiveValueKind::Invalid, 0.0, ""),
                 nested_primitive_callback_payload,
             );
+            if let Some(angle) = &value.angle {
+                emit_nested_primitive_source_component_values(
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    angle,
+                );
+            }
             callback(
                 CssStyleValueKind::FontStyle,
                 property_id,
@@ -457,7 +486,19 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(numerator) = &value.numerator {
-                callback_nested_primitive(callback, CssStyleValueKind::AspectRatio, property_id, 0, 0, numerator);
+                callback_nested_primitive_with_source_component_values(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::AspectRatio,
+                    property_id,
+                    0,
+                    0,
+                    numerator,
+                );
             }
             if value.has_auto && value.numerator.is_some() {
                 callback(
@@ -477,7 +518,19 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(denominator) = &value.denominator {
-                callback_nested_primitive(callback, CssStyleValueKind::AspectRatio, property_id, 1, 0, denominator);
+                callback_nested_primitive_with_source_component_values(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::AspectRatio,
+                    property_id,
+                    1,
+                    0,
+                    denominator,
+                );
             }
         }
         RustOwnedStyleValueKind::BackgroundSize(value) => {
@@ -487,10 +540,34 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         }
         RustOwnedStyleValueKind::BorderRadius(value) => {
             for radius in &value.horizontal_radii {
-                callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 0, 0, radius);
+                callback_nested_primitive_with_source_component_values(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::BorderRadius,
+                    property_id,
+                    0,
+                    0,
+                    radius,
+                );
             }
             for radius in &value.vertical_radii {
-                callback_nested_primitive(callback, CssStyleValueKind::BorderRadius, property_id, 1, 0, radius);
+                callback_nested_primitive_with_source_component_values(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::BorderRadius,
+                    property_id,
+                    1,
+                    0,
+                    radius,
+                );
             }
         }
         RustOwnedStyleValueKind::BorderImageOutset(value) => {
@@ -643,9 +720,39 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             );
         }
         RustOwnedStyleValueKind::Columns(value) => {
-            callback_optional_column_integer(callback, property_id, 0, value.column_count.as_ref());
-            callback_optional_column_length(callback, property_id, 1, value.column_width.as_ref());
-            callback_optional_column_length(callback, property_id, 2, value.column_height.as_ref());
+            callback_optional_column_integer(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                0,
+                value.column_count.as_ref(),
+            );
+            callback_optional_column_length(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                1,
+                value.column_width.as_ref(),
+            );
+            callback_optional_column_length(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                2,
+                value.column_height.as_ref(),
+            );
         }
         RustOwnedStyleValueKind::Content(value) => callback_content_style_value(
             callback,
@@ -799,16 +906,26 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             flex_shrink,
             flex_basis,
         }) => {
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::Flex,
                 property_id,
                 FLEX_SHORTHAND_CALLBACK_GROW,
                 0,
                 flex_grow,
             );
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::Flex,
                 property_id,
                 FLEX_SHORTHAND_CALLBACK_SHRINK,
@@ -892,6 +1009,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::GridAutoTrackSizes(value) => {
             callback_grid_track_size_list_style_value(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::GridAutoTrackSizes,
                 property_id,
                 value,
@@ -911,6 +1033,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::GridTrackSizeList(value) => {
             callback_grid_track_size_list_style_value(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::GridTrackSizeList,
                 property_id,
                 value,
@@ -966,12 +1093,32 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 &[],
                 "",
             ),
-            RustOwnedMathDepth::Add { integer } => {
-                callback_nested_primitive(callback, CssStyleValueKind::MathDepth, property_id, 1, 0, integer);
-            }
-            RustOwnedMathDepth::Integer { integer } => {
-                callback_nested_primitive(callback, CssStyleValueKind::MathDepth, property_id, 2, 0, integer);
-            }
+            RustOwnedMathDepth::Add { integer } => callback_nested_primitive_with_source_component_values(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                CssStyleValueKind::MathDepth,
+                property_id,
+                1,
+                0,
+                integer,
+            ),
+            RustOwnedMathDepth::Integer { integer } => callback_nested_primitive_with_source_component_values(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                CssStyleValueKind::MathDepth,
+                property_id,
+                2,
+                0,
+                integer,
+            ),
         },
         RustOwnedStyleValueKind::Paint(value) => {
             callback_paint_style_value(
@@ -1149,8 +1296,13 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             }
         }
         RustOwnedStyleValueKind::OverflowClipMargin(value) => {
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::OverflowClipMargin,
                 property_id,
                 0,
@@ -1262,7 +1414,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(thickness) = &value.thickness {
-                callback_text_decoration_thickness_style_value(callback, property_id, thickness);
+                callback_text_decoration_thickness_style_value(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    property_id,
+                    thickness,
+                );
             }
             if let Some(style) = value.style {
                 callback(
@@ -1460,6 +1621,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::TransformOrigin(value) => {
             callback_transform_origin_component(callback, calculation_callback, property_id, 0, &value.x);
             callback_transform_origin_component(callback, calculation_callback, property_id, 1, &value.y);
+            emit_nested_primitive_source_component_values(
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                &value.z,
+            );
             callback_nested_primitive_with_calculation(
                 callback,
                 calculation_callback,
@@ -1654,13 +1823,37 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             ),
             RustOwnedStrokeDasharray::Values(values) => {
                 for value in values {
-                    callback_nested_primitive(callback, CssStyleValueKind::StrokeDasharray, property_id, 0, 0, value);
+                    callback_nested_primitive_with_source_component_values(
+                        callback,
+                        &mut SourceComponentValueEmitter {
+                            filtered_input,
+                            list_callback: source_component_value_list_callback,
+                            component_value_callback: source_component_value_callback,
+                        },
+                        CssStyleValueKind::StrokeDasharray,
+                        property_id,
+                        0,
+                        0,
+                        value,
+                    );
                 }
             }
         },
         RustOwnedStyleValueKind::BorderSpacing(value) => {
             for value in &value.values {
-                callback_nested_primitive(callback, CssStyleValueKind::BorderSpacing, property_id, 0, 0, value);
+                callback_nested_primitive_with_source_component_values(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::BorderSpacing,
+                    property_id,
+                    0,
+                    0,
+                    value,
+                );
             }
         }
         RustOwnedStyleValueKind::MathFunction(value) => {
@@ -1774,7 +1967,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             );
         }
         RustOwnedStyleValueKind::Rect(value) => {
-            callback_rect_style_value(callback, property_id, value);
+            callback_rect_style_value(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::ScrollFunction(value) => callback(
             CssStyleValueKind::ScrollFunction,
@@ -1811,7 +2013,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             for inset in &value.insets {
                 callback_view_timeline_inset_count(callback, CssStyleValueKind::ViewTimeline, property_id, inset.len());
                 for value in inset {
-                    callback_view_timeline_inset_value(callback, CssStyleValueKind::ViewTimeline, property_id, value);
+                    callback_view_timeline_inset_value(
+                        callback,
+                        &mut SourceComponentValueEmitter {
+                            filtered_input,
+                            list_callback: source_component_value_list_callback,
+                            component_value_callback: source_component_value_callback,
+                        },
+                        CssStyleValueKind::ViewTimeline,
+                        property_id,
+                        value,
+                    );
                 }
             }
         }
@@ -1826,6 +2038,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 for value in inset {
                     callback_view_timeline_inset_value(
                         callback,
+                        &mut SourceComponentValueEmitter {
+                            filtered_input,
+                            list_callback: source_component_value_list_callback,
+                            component_value_callback: source_component_value_callback,
+                        },
                         CssStyleValueKind::ViewTimelineInset,
                         property_id,
                         value,
@@ -2569,12 +2786,15 @@ fn callback_fit_content_style_value<C, D>(
     }
 }
 
-fn callback_text_decoration_thickness_style_value<C>(
+fn callback_text_decoration_thickness_style_value<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => callback(
@@ -2608,7 +2828,15 @@ fn callback_text_decoration_thickness_style_value<C>(
             "",
         ),
         _ => {
-            callback_nested_primitive(callback, CssStyleValueKind::TextDecoration, property_id, 1, 2, value);
+            callback_nested_primitive_with_source_component_values(
+                callback,
+                source_component_value_emitter,
+                CssStyleValueKind::TextDecoration,
+                property_id,
+                1,
+                2,
+                value,
+            );
         }
     }
 }
@@ -3033,13 +3261,20 @@ fn basic_shape_callback_payload(value: &RustOwnedBasicShape) -> (u8, String) {
     (kind, payload)
 }
 
-fn callback_rect_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedRect)
-where
+fn callback_rect_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedRect,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for side in &value.sides {
-        callback_nested_primitive(
+        callback_nested_primitive_with_source_component_values(
             callback,
+            source_component_value_emitter,
             CssStyleValueKind::Rect,
             property_id,
             u8::from(value.requires_commas),
@@ -3173,13 +3408,16 @@ fn callback_grid_template_areas_style_value<C>(
     }
 }
 
-fn callback_grid_track_size_list_style_value<C>(
+fn callback_grid_track_size_list_style_value<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     value: &RustOwnedGridTrackSizeList,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedGridTrackSizeList::None => callback(
@@ -3198,18 +3436,21 @@ fn callback_grid_track_size_list_style_value<C>(
             "",
         ),
         RustOwnedGridTrackSizeList::List(items) => {
-            callback_grid_track_size_list_items(callback, kind, property_id, items);
+            callback_grid_track_size_list_items(callback, source_component_value_emitter, kind, property_id, items);
         }
     }
 }
 
-fn callback_grid_track_size_list_items<C>(
+fn callback_grid_track_size_list_items<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     items: &[RustOwnedGridTrackSizeListItem],
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for item in items {
         match item {
@@ -3232,24 +3473,28 @@ fn callback_grid_track_size_list_items<C>(
                 );
             }
             RustOwnedGridTrackSizeListItem::Track(track) => {
-                callback_explicit_grid_track(callback, kind, property_id, track);
+                callback_explicit_grid_track(callback, source_component_value_emitter, kind, property_id, track);
             }
         }
     }
 }
 
-fn callback_explicit_grid_track<C>(
+fn callback_explicit_grid_track<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     track: &RustOwnedExplicitGridTrack,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match track {
         RustOwnedExplicitGridTrack::Size(size) => match size {
             RustOwnedGridTrackSize::Breadth(breadth) => {
                 let payload = grid_track_breadth_callback_payload(breadth);
+                emit_nested_primitive_source_component_values(source_component_value_emitter, breadth);
                 callback(
                     kind,
                     property_id,
@@ -3269,6 +3514,7 @@ fn callback_explicit_grid_track<C>(
             RustOwnedGridTrackSize::MinMax { min, max } => {
                 let min_payload = grid_track_breadth_callback_payload(min);
                 let max_payload = grid_track_breadth_callback_payload(max);
+                emit_nested_primitive_source_component_values(source_component_value_emitter, min);
                 callback(
                     kind,
                     property_id,
@@ -3287,6 +3533,7 @@ fn callback_explicit_grid_track<C>(
             }
             RustOwnedGridTrackSize::FitContent(value) => {
                 let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+                emit_nested_primitive_source_component_values(source_component_value_emitter, value);
                 callback(
                     kind,
                     property_id,
@@ -3312,6 +3559,7 @@ fn callback_explicit_grid_track<C>(
             };
             let (primitive_kind, has_numeric_value, numeric_value, source_or_unit) = if let Some(count) = count {
                 let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(count);
+                emit_nested_primitive_source_component_values(source_component_value_emitter, count);
                 (
                     primitive_kind,
                     nested_primitive_callback_has_numeric_value(count),
@@ -3337,7 +3585,13 @@ fn callback_explicit_grid_track<C>(
                 source_or_unit.as_bytes(),
                 "",
             );
-            callback_grid_track_size_list_items(callback, kind, property_id, &repeat.track_list);
+            callback_grid_track_size_list_items(
+                callback,
+                source_component_value_emitter,
+                kind,
+                property_id,
+                &repeat.track_list,
+            );
             callback(
                 kind,
                 property_id,
@@ -3728,12 +3982,15 @@ fn callback_paint_style_value<C, S, E>(
     }
 }
 
-fn callback_corner_shape_style_value<C>(
+fn callback_corner_shape_style_value<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     corner_shape: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = corner_shape {
         callback(
@@ -3752,8 +4009,9 @@ fn callback_corner_shape_style_value<C>(
             property_value_type_name(PropertyValueType::CornerShape),
         );
     } else {
-        callback_nested_primitive(
+        callback_nested_primitive_with_source_component_values(
             callback,
+            source_component_value_emitter,
             CssStyleValueKind::CornerShape,
             property_id,
             1,
@@ -3873,16 +4131,18 @@ fn callback_cursor_style_value<C, S, E>(
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.image.component_values);
         }
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                source_component_value_emitter,
                 CssStyleValueKind::Cursor,
                 property_id,
                 CURSOR_CALLBACK_IMAGE_COORDINATE_X,
                 0,
                 x,
             );
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                source_component_value_emitter,
                 CssStyleValueKind::Cursor,
                 property_id,
                 CURSOR_CALLBACK_IMAGE_COORDINATE_Y,
@@ -4388,8 +4648,13 @@ fn callback_flex_basis<C, S, E>(
                 source_component_value_list_callback(SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS);
                 emit_component_values(component_values, filtered_input, source_component_value_callback);
             }
-            _ => callback_nested_primitive(
+            _ => callback_nested_primitive_with_source_component_values(
                 callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::Flex,
                 property_id,
                 FLEX_SHORTHAND_CALLBACK_BASIS,
@@ -4397,8 +4662,13 @@ fn callback_flex_basis<C, S, E>(
                 value,
             ),
         },
-        RustOwnedFlexBasis::FitContentFunction(value) => callback_nested_primitive(
+        RustOwnedFlexBasis::FitContentFunction(value) => callback_nested_primitive_with_source_component_values(
             callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
             CssStyleValueKind::Flex,
             property_id,
             FLEX_SHORTHAND_CALLBACK_BASIS,
@@ -5046,13 +5316,16 @@ fn callback_optional_filter_nested_primitive<C, D>(
     }
 }
 
-fn callback_optional_column_integer<C>(
+fn callback_optional_column_integer<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: Option<&RustOwnedNestedPrimitiveValue>,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         Some(RustOwnedNestedPrimitiveValue::Keyword(keyword)) if keyword == "auto" => callback(
@@ -5070,20 +5343,29 @@ fn callback_optional_column_integer<C>(
             &[],
             "",
         ),
-        Some(value) => {
-            callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
-        }
+        Some(value) => callback_nested_primitive_with_source_component_values(
+            callback,
+            source_component_value_emitter,
+            CssStyleValueKind::Columns,
+            property_id,
+            kind,
+            0,
+            value,
+        ),
         None => {}
     }
 }
 
-fn callback_optional_column_length<C>(
+fn callback_optional_column_length<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: Option<&RustOwnedNestedPrimitiveValue>,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         Some(RustOwnedNestedPrimitiveValue::Keyword(keyword)) if keyword == "auto" => callback(
@@ -5101,9 +5383,15 @@ fn callback_optional_column_length<C>(
             &[],
             "",
         ),
-        Some(value) => {
-            callback_nested_primitive(callback, CssStyleValueKind::Columns, property_id, kind, 0, value);
-        }
+        Some(value) => callback_nested_primitive_with_source_component_values(
+            callback,
+            source_component_value_emitter,
+            CssStyleValueKind::Columns,
+            property_id,
+            kind,
+            0,
+            value,
+        ),
         None => {}
     }
 }
@@ -5169,6 +5457,23 @@ fn callback_nested_primitive<C>(
     );
 }
 
+fn callback_nested_primitive_with_source_component_values<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    emit_nested_primitive_source_component_values(source_component_value_emitter, value);
+    callback_nested_primitive(callback, style_value_kind, property_id, kind, secondary_kind, value);
+}
+
 fn callback_nested_primitive_with_calculation<C, D>(
     callback: &mut C,
     calculation_callback: &mut D,
@@ -5187,13 +5492,16 @@ fn callback_nested_primitive_with_calculation<C, D>(
     }
 }
 
-fn callback_view_timeline_inset_value<C>(
+fn callback_view_timeline_inset_value<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     style_value_kind: CssStyleValueKind,
     property_id: u16,
     value: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedNestedPrimitiveValue::Keyword(keyword) if keyword == "auto" => {
@@ -5224,8 +5532,9 @@ fn callback_view_timeline_inset_value<C>(
             } else {
                 1
             };
-            callback_nested_primitive(
+            callback_nested_primitive_with_source_component_values(
                 callback,
+                source_component_value_emitter,
                 style_value_kind,
                 property_id,
                 length_percentage_kind,
