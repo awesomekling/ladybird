@@ -410,6 +410,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!rust_style_value->value_type.has_value() || rust_style_value->calculation_node_events.is_empty())
                     return nullptr;
 
+                // AD-HOC: Rust calculation events are available, but this
+                // materializer is not yet equivalent to the existing
+                // property-aware numeric parser for all calculation contexts.
+                return nullptr;
+
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, *rust_style_value->value_type);
                 if (!metadata.has_value()) {
                     if (*rust_style_value->value_type != ValueType::OpacityValue)
@@ -429,9 +434,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Integer, metadata->range);
                     break;
                 case ValueType::Number:
-                case ValueType::OpacityValue:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Number, metadata->range);
                     break;
+                case ValueType::OpacityValue:
+                    return nullptr;
                 case ValueType::Percentage:
                     calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
                     break;
@@ -530,12 +536,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return nullptr;
                         return NumericCalculationNode::create(Time { *event.numeric_value, unit.release_value() }, calculation_context);
                     }
-                    case FFI::CssPrimitiveValueKind::Keyword: {
-                        auto keyword = keyword_from_string(event.metadata);
-                        if (!keyword.has_value())
-                            return nullptr;
-                        return NumericCalculationNode::from_keyword(keyword.release_value(), calculation_context);
-                    }
                     default:
                         return nullptr;
                     }
@@ -578,89 +578,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         stack.append(InvertCalculationNode::create(children->first()));
                         break;
                     }
-                    case FFI::CssCalculationNodeKind::Function: {
-                        auto children = pop_children(event.child_count);
-                        if (!children.has_value())
-                            return nullptr;
-
-                        if (event.metadata.equals_ignoring_ascii_case("min"sv)) {
-                            stack.append(MinCalculationNode::create(children.release_value()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("max"sv)) {
-                            stack.append(MaxCalculationNode::create(children.release_value()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("hypot"sv)) {
-                            stack.append(HypotCalculationNode::create(children.release_value()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("clamp"sv) && children->size() == 3) {
-                            stack.append(ClampCalculationNode::create(children->at(0), children->at(1), children->at(2)));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("abs"sv) && children->size() == 1) {
-                            stack.append(AbsCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("sign"sv) && children->size() == 1) {
-                            stack.append(SignCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("sin"sv) && children->size() == 1) {
-                            stack.append(SinCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("cos"sv) && children->size() == 1) {
-                            stack.append(CosCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("tan"sv) && children->size() == 1) {
-                            stack.append(TanCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("asin"sv) && children->size() == 1) {
-                            stack.append(AsinCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("acos"sv) && children->size() == 1) {
-                            stack.append(AcosCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("atan"sv) && children->size() == 1) {
-                            stack.append(AtanCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("atan2"sv) && children->size() == 2) {
-                            stack.append(Atan2CalculationNode::create(children->at(0), children->at(1)));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("pow"sv) && children->size() == 2) {
-                            stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("sqrt"sv) && children->size() == 1) {
-                            stack.append(SqrtCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("log"sv) && children->size() == 2) {
-                            stack.append(LogCalculationNode::create(children->at(0), children->at(1)));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
-                            stack.append(ExpCalculationNode::create(children->first()));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("mod"sv) && children->size() == 2) {
-                            stack.append(ModCalculationNode::create(children->at(0), children->at(1)));
-                            break;
-                        }
-                        if (event.metadata.equals_ignoring_ascii_case("rem"sv) && children->size() == 2) {
-                            stack.append(RemCalculationNode::create(children->at(0), children->at(1)));
-                            break;
-                        }
-                        return nullptr;
-                    }
+                    case FFI::CssCalculationNodeKind::Function:
                     case FFI::CssCalculationNodeKind::TreeCountingFunction:
                         return nullptr;
                     }
@@ -5900,6 +5818,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     } else {
                         maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
                     }
+
+                    if (!maybe_parsed_value
+                        && rust_style_value->kind == FFI::CssStyleValueKind::MathFunction
+                        && first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue))
+                        maybe_parsed_value = parse_rust_numeric_value();
 
                     if (maybe_parsed_value) {
                         generated_transaction.commit();
