@@ -1707,6 +1707,14 @@ fn generated_property_metadata_knows_longhands() {
 }
 
 #[test]
+fn ordinary_properties_use_rust_owned_whole_grammar() {
+    assert!(super::property_uses_rust_owned_whole_grammar(PropertyId::Width));
+    assert!(super::property_uses_rust_owned_whole_grammar(PropertyId::Outline));
+    assert!(!super::property_uses_rust_owned_whole_grammar(PropertyId::All));
+    assert!(!super::property_uses_rust_owned_whole_grammar(PropertyId::Custom));
+}
+
+#[test]
 fn generated_property_metadata_knows_accepted_keywords_and_types() {
     assert!(property_accepts_keyword(PropertyId::Display, "block"));
     assert!(property_accepts_keyword(

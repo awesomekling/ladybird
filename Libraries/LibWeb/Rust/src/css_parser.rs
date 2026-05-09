@@ -98,6 +98,7 @@ use style_value_parser::{
 #[cfg(test)]
 use style_value_parser::{
     component_values_parse_as_property_value_type_with_options, parse_rust_owned_generated_longhand_value,
+    property_uses_rust_owned_whole_grammar,
 };
 use style_value_shorthands::parse_rust_owned_grid_template_areas_value;
 #[cfg(test)]
