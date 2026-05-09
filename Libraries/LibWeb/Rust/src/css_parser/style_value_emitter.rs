@@ -592,6 +592,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_border_image_outset_style_value(
                 callback,
                 calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::BorderImageOutset,
                 property_id,
                 &value.values,
@@ -638,6 +643,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 callback_border_image_slice_style_value(
                     callback,
                     calculation_callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
                     CssStyleValueKind::BorderImage,
                     property_id,
                     slice,
@@ -647,6 +657,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 callback_border_image_width_style_value(
                     callback,
                     calculation_callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
                     CssStyleValueKind::BorderImage,
                     property_id,
                     width,
@@ -656,6 +671,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 callback_border_image_outset_style_value(
                     callback,
                     calculation_callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
                     CssStyleValueKind::BorderImage,
                     property_id,
                     outset,
@@ -723,6 +743,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_border_image_slice_style_value(
                 callback,
                 calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::BorderImageSlice,
                 property_id,
                 value,
@@ -732,6 +757,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_border_image_width_style_value(
                 callback,
                 calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 CssStyleValueKind::BorderImageWidth,
                 property_id,
                 &value.values,
@@ -2580,20 +2610,24 @@ fn rust_owned_step_position_callback_payload(position: RustOwnedStepPosition) ->
     }
 }
 
-fn callback_border_image_slice_style_value<C, D>(
+fn callback_border_image_slice_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     value: &RustOwnedBorderImageSlice,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for slice_value in &value.values {
-        callback_nested_primitive_with_calculation(
+        callback_nested_primitive_with_source_component_values_and_calculation(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             kind,
             property_id,
             1,
@@ -2760,15 +2794,18 @@ fn callback_color_style_value<C, S, E>(
     }
 }
 
-fn callback_border_image_width_style_value<C, D>(
+fn callback_border_image_width_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     values: &[RustOwnedNestedPrimitiveValue],
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for value in values {
         match value {
@@ -2788,9 +2825,10 @@ fn callback_border_image_width_style_value<C, D>(
                 "",
             ),
             _ => {
-                callback_nested_primitive_with_calculation(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     kind,
                     property_id,
                     2,
@@ -2802,20 +2840,24 @@ fn callback_border_image_width_style_value<C, D>(
     }
 }
 
-fn callback_border_image_outset_style_value<C, D>(
+fn callback_border_image_outset_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     values: &[RustOwnedBorderImageOutset],
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for value in values {
-        callback_nested_primitive_with_calculation(
+        callback_nested_primitive_with_source_component_values_and_calculation(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             kind,
             property_id,
             3,

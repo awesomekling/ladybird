@@ -2617,18 +2617,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parse_rust_component_values_as_unresolved(source, component_values);
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_border_image_outset = [&](String const& source) -> RefPtr<StyleValue const> {
-                if (auto value = parse_rust_source_as_non_negative_number(source))
-                    return value;
-                return parse_rust_source_as_non_negative_length(source);
-            };
-            auto parse_rust_source_as_border_image_width = [&](String const& source) -> RefPtr<StyleValue const> {
-                if (source.equals_ignoring_ascii_case("auto"sv))
-                    return KeywordStyleValue::create(Keyword::Auto);
-                if (auto value = parse_rust_source_as_non_negative_number(source))
-                    return value;
-                return parse_rust_source_as_non_negative_length_percentage(source);
-            };
             auto materialize_rust_style_value_list = [&](auto const& sources, auto parse_source) -> RefPtr<StyleValue const> {
                 if (sources.is_empty())
                     return nullptr;
@@ -3238,7 +3226,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return value;
                         return parse_rust_component_values_as_non_negative_length(outset.value.source_or_unit, outset.value.source_component_values);
                     }
-                    return parse_rust_source_as_border_image_outset(outset.value.source_or_unit);
+                    return nullptr;
                 }
                 return materialize_rust_nested_length(outset.value, non_negative_range);
             };
@@ -3258,7 +3246,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return value;
                         return parse_rust_component_values_as_non_negative_length_percentage(width.value.source_or_unit, width.value.source_component_values);
                     }
-                    return parse_rust_source_as_border_image_width(width.value.source_or_unit);
+                    return nullptr;
                 }
                 return materialize_rust_nested_length_percentage(width.value, non_negative_range);
             };
