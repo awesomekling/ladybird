@@ -90,6 +90,7 @@ pub use parser_types::*;
 use parser_urls_fonts::*;
 use style_value_emitter::emit_rust_owned_style_value;
 use style_value_longhands::*;
+pub(crate) use style_value_parser::component_values_match_syntax;
 use style_value_parser::{
     component_values_parse_as_generated_property_value_type, component_values_parse_as_property_value_type,
     generated_property_value_type_order, parse_rust_owned_style_value_for_property,

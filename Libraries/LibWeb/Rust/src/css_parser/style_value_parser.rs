@@ -2086,6 +2086,176 @@ pub(super) fn component_values_parse_as_generated_property_value_type(
     parse_a_value_type(filtered_input, value_type_id as u8) != CssValueTypeSyntaxKind::Invalid
 }
 
+pub(crate) fn component_values_match_syntax(
+    filtered_input: &[u8],
+    syntax: &str,
+    limit_single_component_ident_to_custom_ident: bool,
+) -> bool {
+    let Some(syntax_node) = parse_as_syntax_string(syntax, limit_single_component_ident_to_custom_ident) else {
+        return false;
+    };
+
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    if !syntax_node_matches_component_values(&mut parser, &syntax_node, filtered_input_string) {
+        return false;
+    }
+
+    parser.discard_whitespace();
+    !parser.has_next_component_value()
+}
+
+fn syntax_node_matches_component_values(
+    parser: &mut ComponentValueParser,
+    syntax_node: &SyntaxNode,
+    filtered_input_string: &str,
+) -> bool {
+    parser.discard_whitespace();
+    match syntax_node {
+        SyntaxNode::Universal => {
+            if !parser.has_next_component_value() {
+                return false;
+            }
+            parser.index = parser.component_values.len();
+            true
+        }
+        SyntaxNode::Ident(expected_ident) => parser.consume_ident_matching(expected_ident),
+        SyntaxNode::Type(type_name) => syntax_type_matches_component_values(parser, type_name, filtered_input_string),
+        SyntaxNode::Multiplier(child) => {
+            let mut matched_any = false;
+            while syntax_node_matches_component_values(parser, child, filtered_input_string) {
+                matched_any = true;
+                parser.discard_whitespace();
+            }
+            matched_any
+        }
+        SyntaxNode::CommaSeparatedMultiplier(child) => {
+            if !syntax_node_matches_component_values(parser, child, filtered_input_string) {
+                return false;
+            }
+
+            loop {
+                parser.discard_whitespace();
+                if !parser.consume_a_comma() {
+                    break;
+                }
+
+                if !syntax_node_matches_component_values(parser, child, filtered_input_string) {
+                    return false;
+                }
+            }
+            true
+        }
+        SyntaxNode::Alternatives(children) => {
+            for child in children {
+                let parser_index = parser.index;
+                if syntax_node_matches_component_values(parser, child, filtered_input_string) {
+                    return true;
+                }
+                parser.index = parser_index;
+            }
+            false
+        }
+    }
+}
+
+fn syntax_type_matches_component_values(
+    parser: &mut ComponentValueParser,
+    type_name: &str,
+    filtered_input_string: &str,
+) -> bool {
+    if type_name.eq_ignore_ascii_case("custom-ident") {
+        let Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        })) = parser.next_component_value()
+        else {
+            return false;
+        };
+        if matches_css_wide_keyword(value) || value.eq_ignore_ascii_case("default") {
+            return false;
+        }
+        parser.index += 1;
+        return true;
+    }
+
+    if type_name.eq_ignore_ascii_case("transform-list") {
+        let Some(serialized_input) =
+            serialize_component_values_for_reparsing(parser.remaining_component_values(), filtered_input_string)
+        else {
+            return false;
+        };
+        if !parse_transform_list_value(serialized_input.as_bytes()) {
+            return false;
+        }
+        parser.index = parser.component_values.len();
+        return true;
+    }
+
+    let Some(component_value) = parser.next_component_value() else {
+        return false;
+    };
+    let Some(serialized_input) =
+        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
+    else {
+        return false;
+    };
+
+    let matches = if type_name.eq_ignore_ascii_case("transform-function") {
+        parse_transform_function_value(serialized_input.as_bytes()) != CssTransformFunctionValueKind::Invalid
+    } else if type_name.eq_ignore_ascii_case("url") {
+        parse_a_url_function(serialized_input.as_bytes(), |_| {}, |_| {})
+    } else if let Some(value_type) = syntax_type_name_to_property_value_type(type_name) {
+        let primitive_value_options = CssPrimitiveValueOptions::default();
+        match value_type {
+            PropertyValueType::Image => {
+                rust_owned_image_style_value_kind(serialized_input.as_bytes(), &serialized_input).is_some()
+            }
+            _ => component_values_parse_as_property_value_type_with_options(
+                value_type,
+                serialized_input.as_bytes(),
+                primitive_value_options,
+            ),
+        }
+    } else {
+        false
+    };
+
+    if !matches {
+        return false;
+    }
+
+    parser.index += 1;
+    true
+}
+
+fn syntax_type_name_to_property_value_type(type_name: &str) -> Option<PropertyValueType> {
+    match type_name {
+        "angle" => Some(PropertyValueType::Angle),
+        "color" => Some(PropertyValueType::Color),
+        "custom-ident" => Some(PropertyValueType::CustomIdent),
+        "image" => Some(PropertyValueType::Image),
+        "integer" => Some(PropertyValueType::Integer),
+        "length" => Some(PropertyValueType::Length),
+        "length-percentage" => Some(PropertyValueType::LengthPercentage),
+        "number" => Some(PropertyValueType::Number),
+        "percentage" => Some(PropertyValueType::Percentage),
+        "resolution" => Some(PropertyValueType::Resolution),
+        "string" => Some(PropertyValueType::String),
+        "time" => Some(PropertyValueType::Time),
+        _ => None,
+    }
+}
+
+fn matches_css_wide_keyword(value: &str) -> bool {
+    value.eq_ignore_ascii_case("inherit")
+        || value.eq_ignore_ascii_case("initial")
+        || value.eq_ignore_ascii_case("unset")
+        || value.eq_ignore_ascii_case("revert")
+        || value.eq_ignore_ascii_case("revert-layer")
+}
+
 fn parse_transform_list_value(filtered_input: &[u8]) -> bool {
     // https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
     // <transform-list> = <transform-function>+

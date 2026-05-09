@@ -603,17 +603,17 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
     }
 
     if (initial_value_maybe) {
-        initial_value_maybe = Web::CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_maybe->tokenize(), *maybe_syntax);
+        auto serialized_initial_value = serialize_component_values_for_reparsing(initial_value_maybe->tokenize());
+        if (!RustComponentValueParser::syntax_matches(serialized_initial_value, maybe_syntax->to_string(), LimitSingleComponentIdentToCustomIdent::Yes))
+            return {};
 
-        // Otherwise, if the value of the syntax descriptor is not the universal syntax definition,
-        // the following conditions must be met for the @property rule to be valid:
+        auto initial_value_tokens = initial_value_maybe->tokenize();
+        auto parsed_initial_value = CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_tokens, *maybe_syntax);
         if (maybe_syntax->type() != CSS::Parser::SyntaxNode::NodeType::Universal) {
-            //  - The initial-value descriptor must be present.
-            //  - The initial-value descriptor’s value must parse successfully according to the grammar specified by the syntax definition.
-            //  - The initial-value must be computationally independent.
-            if (!initial_value_maybe || initial_value_maybe->is_guaranteed_invalid() || !initial_value_maybe->is_computationally_independent())
+            if (parsed_initial_value->type() == CSS::StyleValue::Type::Unresolved || !parsed_initial_value->is_computationally_independent())
                 return {};
         }
+        initial_value_maybe = move(parsed_initial_value);
     }
 
     return CSSPropertyRule::create(realm(), name.release_value(), syntax_maybe.value(), inherits_maybe.value(), move(initial_value_maybe));

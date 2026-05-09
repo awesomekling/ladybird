@@ -6347,6 +6347,10 @@ fn parse_limited_syntax(input: &str) -> Option<SyntaxNode> {
     component_values_parse_as_syntax(&parse(input), true)
 }
 
+fn matches_syntax(input: &str, syntax: &str) -> bool {
+    super::component_values_match_syntax(input.as_bytes(), syntax, false)
+}
+
 #[test]
 fn parses_preserved_tokens() {
     let values = parse("a, b");
@@ -6489,6 +6493,19 @@ fn limits_single_component_ident_to_custom_ident_for_syntax() {
     assert!(parse_limited_syntax("revert").is_none());
     assert!(parse_limited_syntax("revert-layer").is_none());
     assert!(parse_limited_syntax("default").is_none());
+}
+
+#[test]
+fn matches_syntax_against_component_values() {
+    assert!(matches_syntax("thing", "thing"));
+    assert!(matches_syntax("10px", "<length>"));
+    assert!(matches_syntax("red", "<color>"));
+    assert!(matches_syntax("green", "<color> | none"));
+    assert!(matches_syntax("foo(){}", "*"));
+    assert!(matches_syntax("foo, bar", "<custom-ident>#"));
+    assert!(matches_syntax("foo", "foo"));
+    assert!(!matches_syntax("inherit", "<custom-ident>"));
+    assert!(!matches_syntax("auto", "<length>"));
 }
 
 #[test]

@@ -929,6 +929,7 @@ public:
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
     static ViewFunction parse_view_function(StringView input, StringView encoding);
+    static bool syntax_matches(StringView input, StringView syntax, LimitSingleComponentIdentToCustomIdent);
     static FFI::CssRectValueKind parse_rect(StringView input, StringView encoding);
     static FFI::CssRatioValue parse_ratio_prefix(StringView input, StringView encoding);
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
