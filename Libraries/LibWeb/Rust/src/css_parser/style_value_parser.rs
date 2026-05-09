@@ -241,6 +241,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderImageOutset
             | PropertyId::BorderImageRepeat
             | PropertyId::BorderImageSlice
+            | PropertyId::BorderImageSource
             | PropertyId::BorderImageWidth
             | PropertyId::BorderInline
             | PropertyId::BorderBottomStyle
@@ -337,6 +338,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::LetterSpacing
             | PropertyId::Left
             | PropertyId::ListStyle
+            | PropertyId::ListStyleImage
             | PropertyId::ListStylePosition
             | PropertyId::MarginBlockEnd
             | PropertyId::MarginBlockStart
@@ -479,6 +481,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::WhiteSpaceTrim
             | PropertyId::Widows
             | PropertyId::Width
+            | PropertyId::WebkitTextFillColor
             | PropertyId::WillChange
             | PropertyId::WordBreak
             | PropertyId::WordSpacing
@@ -553,6 +556,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
         PropertyId::AccentColor
         | PropertyId::CaretColor
+        | PropertyId::WebkitTextFillColor
         | PropertyId::Fill
         | PropertyId::FillOpacity
         | PropertyId::FloodColor
@@ -667,6 +671,13 @@ fn parse_rust_owned_property_specific_longhand_value(
             rust_owned_grid_track_size_list_style_value_kind(filtered_input)
         }
         PropertyId::ListStyle => rust_owned_list_style_style_value_kind(filtered_input),
+        PropertyId::BorderImageSource | PropertyId::ListStyleImage => {
+            rust_owned_generated_property_specific_style_value_kind(
+                property_id,
+                filtered_input,
+                primitive_value_options,
+            )
+        }
         PropertyId::ObjectPosition | PropertyId::PerspectiveOrigin => {
             rust_owned_position_style_value_kind(PropertyValueType::Position, filtered_input_to_string(filtered_input))
         }

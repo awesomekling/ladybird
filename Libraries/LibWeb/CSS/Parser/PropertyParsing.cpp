@@ -110,6 +110,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderImageOutset:
     case PropertyID::BorderImageRepeat:
     case PropertyID::BorderImageSlice:
+    case PropertyID::BorderImageSource:
     case PropertyID::BorderImageWidth:
     case PropertyID::BorderInline:
     case PropertyID::BorderBottomStyle:
@@ -206,6 +207,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::LetterSpacing:
     case PropertyID::Left:
     case PropertyID::ListStyle:
+    case PropertyID::ListStyleImage:
     case PropertyID::ListStylePosition:
     case PropertyID::MarginBlockEnd:
     case PropertyID::MarginBlockStart:
@@ -348,6 +350,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::WhiteSpaceTrim:
     case PropertyID::Widows:
     case PropertyID::Width:
+    case PropertyID::WebkitTextFillColor:
     case PropertyID::WillChange:
     case PropertyID::WordBreak:
     case PropertyID::WordSpacing:
