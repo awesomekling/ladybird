@@ -229,6 +229,11 @@ min-width: auto
 mix-blend-mode: normal
 object-fit: fill
 object-position: 50% 50%
+offset-anchor: auto
+offset-distance: 0%
+offset-path: none
+offset-position: auto
+offset-rotate: auto
 opacity: 1
 order: 0
 outline-color: rgb(0, 0, 0)

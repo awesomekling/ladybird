@@ -2,8 +2,8 @@ Harness status: OK
 
 Found 150 tests
 
-127 Pass
-23 Fail
+128 Pass
+22 Fail
 Pass	Property scale value 'random(1, 11)'
 Pass	Property scale value 'random(--foo, 2, 12)'
 Pass	Property scale value 'random(--foo element-shared, 3, 13)'
@@ -70,7 +70,7 @@ Pass	Property translate value 'random(10%, 1%)'
 Pass	Property translate value 'random(--identifier element-shared, 10%, 100%)'
 Pass	Property text-indent value 'random(10%, 30%)'
 Pass	Property flex-basis value 'random(10%, 30%)'
-Fail	Property offset-distance value 'random(10%, 30%)'
+Pass	Property offset-distance value 'random(10%, 30%)'
 Pass	Property shape-margin value 'random(10%, 30%)'
 Pass	Property stroke-dasharray value 'random(10%, 30%)'
 Pass	Property stroke-dashoffset value 'random(10%, 30%)'
