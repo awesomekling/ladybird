@@ -1115,7 +1115,7 @@ Optional<RustComponentValueParser::GeneratedPropertyValue> RustComponentValuePar
 }
 
 Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::parse_style_value_for_property(ReadonlySpan<PropertyID> property_ids, StringView input,
-    bool allow_quirky_length, bool allow_svg_unitless_length, bool allow_svg_unitless_angle)
+    bool allow_quirky_length, bool allow_quirky_color, bool allow_svg_unitless_length, bool allow_svg_unitless_angle)
 {
     Vector<u16, 4> ffi_property_ids;
     for (auto property_id : property_ids)
@@ -1129,6 +1129,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         input_bytes.data(),
         input_bytes.size(),
         allow_quirky_length,
+        allow_quirky_color,
         allow_svg_unitless_length,
         allow_svg_unitless_angle,
         &style_value,

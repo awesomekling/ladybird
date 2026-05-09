@@ -1062,6 +1062,7 @@ pub enum CssPrimitiveValueKind {
 #[repr(C)]
 pub struct CssPrimitiveValueOptions {
     pub allow_quirky_length: bool,
+    pub allow_quirky_color: bool,
     pub allow_svg_unitless_length: bool,
     pub allow_svg_unitless_angle: bool,
 }

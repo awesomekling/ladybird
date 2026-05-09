@@ -235,6 +235,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BackgroundPositionX
             | PropertyId::BackgroundPositionY
             | PropertyId::BackgroundSize
+            | PropertyId::BackgroundColor
             | PropertyId::Border
             | PropertyId::BorderBlock
             | PropertyId::BorderImage
@@ -244,6 +245,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderImageSource
             | PropertyId::BorderImageWidth
             | PropertyId::BorderInline
+            | PropertyId::BorderBottomColor
             | PropertyId::BorderBottomStyle
             | PropertyId::BorderCollapse
             | PropertyId::BorderBottomLeftRadius
@@ -255,15 +257,18 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderEndStartRadius
             | PropertyId::BorderInlineEndWidth
             | PropertyId::BorderInlineStartWidth
+            | PropertyId::BorderLeftColor
             | PropertyId::BorderLeftStyle
             | PropertyId::BorderLeftWidth
             | PropertyId::BorderRadius
+            | PropertyId::BorderRightColor
             | PropertyId::BorderRightStyle
             | PropertyId::BorderRightWidth
             | PropertyId::BorderStartEndRadius
             | PropertyId::BorderStartStartRadius
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
+            | PropertyId::BorderTopColor
             | PropertyId::BorderTopStyle
             | PropertyId::BorderTopWidth
             | PropertyId::Bottom
@@ -276,6 +281,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ClipRule
             | PropertyId::ColorInterpolation
             | PropertyId::ColorScheme
+            | PropertyId::Color
             | PropertyId::ColumnCount
             | PropertyId::ColumnSpan
             | PropertyId::ColumnWidth
@@ -555,7 +561,13 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
         PropertyId::AccentColor
+        | PropertyId::BackgroundColor
+        | PropertyId::BorderBottomColor
+        | PropertyId::BorderLeftColor
+        | PropertyId::BorderRightColor
+        | PropertyId::BorderTopColor
         | PropertyId::CaretColor
+        | PropertyId::Color
         | PropertyId::WebkitTextFillColor
         | PropertyId::Fill
         | PropertyId::FillOpacity
@@ -1093,7 +1105,8 @@ pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
 ) -> RustOwnedStyleValue {
     if value_type == PropertyValueType::Color
         && let [component_value] = component_values
-        && let Some(color) = simple_color_from_component_value(component_value, false)
+        && let Some(color) =
+            simple_color_from_component_value(component_value, primitive_value_options.allow_quirky_color)
     {
         return match color {
             ParsedSimpleColor::Rgba {
@@ -1454,7 +1467,7 @@ fn rust_owned_source_backed_style_value_kind(value_type: PropertyValueType, sour
         PropertyValueType::FontVariantNumeric => {
             rust_owned_font_variant_numeric_style_value_kind(source).unwrap_or_else(|| unreachable!())
         }
-        _ => unreachable!("valid generated longhand value type should have a Rust-owned representation"),
+        _ => RustOwnedStyleValueKind::GuaranteedInvalid,
     }
 }
 
@@ -1950,7 +1963,9 @@ pub(super) fn component_values_parse_as_property_value_type_with_options(
 ) -> bool {
     match value_type {
         PropertyValueType::Anchor => rust_owned_anchor_function_style_value_kind(filtered_input).is_some(),
-        PropertyValueType::Color => parse_color_value(filtered_input, false) == CssColorValueKind::Valid,
+        PropertyValueType::Color => {
+            parse_color_value(filtered_input, primitive_value_options.allow_quirky_color) == CssColorValueKind::Valid
+        }
         PropertyValueType::Counter => rust_owned_counter_function_style_value_kind(filtered_input).is_some(),
         PropertyValueType::CornerShape => rust_owned_corner_shape_style_value_kind(filtered_input).is_some(),
         PropertyValueType::DashedIdent => parse_a_dashed_ident(filtered_input, |_| {}),

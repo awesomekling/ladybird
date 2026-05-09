@@ -652,6 +652,7 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
     input: *const u8,
     input_len: usize,
     allow_quirky_length: bool,
+    allow_quirky_color: bool,
     allow_svg_unitless_length: bool,
     allow_svg_unitless_angle: bool,
     ctx: *mut c_void,
@@ -688,6 +689,7 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                 input,
                 css_parser::CssPrimitiveValueOptions {
                     allow_quirky_length,
+                    allow_quirky_color,
                     allow_svg_unitless_length,
                     allow_svg_unitless_angle,
                 },

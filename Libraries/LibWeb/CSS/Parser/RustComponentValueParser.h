@@ -872,7 +872,7 @@ public:
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input,
-        bool allow_quirky_length = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
+        bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
     static Optional<Vector<CoordinatingValueListShorthandItem>> parse_coordinating_value_list_shorthand(ReadonlySpan<PropertyID>, StringView input);
     static Optional<Vector<LayerShorthandItem>> parse_layer_shorthand(PropertyID, StringView input);

@@ -866,6 +866,31 @@ bool Parser::context_allows_quirky_length() const
     return unitless_length_allowed;
 }
 
+bool Parser::context_allows_quirky_color() const
+{
+    if (!in_quirks_mode())
+        return false;
+
+    // https://drafts.csswg.org/css-color-4/#quirky-color
+    // "When CSS is being parsed in quirks mode, <quirky-color> is a type of <color> that is only valid in certain properties:"
+    // (NOTE: List skipped for brevity; quirks data is assigned in Properties.json)
+    // "It is not valid in properties that include or reference these properties, such as the background shorthand,
+    // or inside functional notations such as color-mix()"
+    bool quirky_color_allowed = false;
+    if (!m_value_context.is_empty()) {
+        quirky_color_allowed = m_value_context.first().visit(
+            [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::HashlessHexColor); },
+            [](auto const&) { return false; });
+    }
+    for (auto i = 1u; i < m_value_context.size() && quirky_color_allowed; i++) {
+        quirky_color_allowed = m_value_context[i].visit(
+            [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::HashlessHexColor); },
+            [](auto const&) { return false; });
+    }
+
+    return quirky_color_allowed;
+}
+
 bool Parser::context_allows_tree_counting_functions() const
 {
     for (auto context : m_value_context) {

@@ -100,7 +100,7 @@ static bool rust_primitive_value_matches(TokenStream<ComponentValue>& tokens, si
 
 static FFI::CssPrimitiveValueOptions primitive_value_options(bool allow_quirky_length = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false)
 {
-    return { allow_quirky_length, allow_svg_unitless_length, allow_svg_unitless_angle };
+    return { allow_quirky_length, false, allow_svg_unitless_length, allow_svg_unitless_angle };
 }
 
 RefPtr<StyleValueList const> Parser::parse_comma_separated_value_list(TokenStream<ComponentValue>& tokens, ParseFunction parse_one_value)
@@ -1972,30 +1972,6 @@ RefPtr<StyleValue const> Parser::parse_light_dark_color_value(TokenStream<Compon
 // https://www.w3.org/TR/css-color-4/#color-syntax
 RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& tokens)
 {
-    auto quirky_color_allowed = [&] {
-        if (!in_quirks_mode())
-            return false;
-
-        // https://drafts.csswg.org/css-color-4/#quirky-color
-        // "When CSS is being parsed in quirks mode, <quirky-color> is a type of <color> that is only valid in certain properties:"
-        // (NOTE: List skipped for brevity; quirks data is assigned in Properties.json)
-        // "It is not valid in properties that include or reference these properties, such as the background shorthand,
-        // or inside functional notations such as color-mix()"
-        bool quirky_color_allowed = false;
-        if (!m_value_context.is_empty()) {
-            quirky_color_allowed = m_value_context.first().visit(
-                [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::HashlessHexColor); },
-                [](auto const&) { return false; });
-        }
-        for (auto i = 1u; i < m_value_context.size() && quirky_color_allowed; i++) {
-            quirky_color_allowed = m_value_context[i].visit(
-                [](PropertyID const& property_id) { return property_has_quirk(property_id, Quirk::HashlessHexColor); },
-                [](auto const&) { return false; });
-        }
-
-        return quirky_color_allowed;
-    };
-
     {
         auto transaction = tokens.begin_transaction();
         auto start = tokens.current_index();
@@ -2003,7 +1979,7 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
         if (tokens.has_next_token()) {
             tokens.discard_a_token();
             auto serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto rust_color = RustComponentValueParser::parse_simple_color(serialized_color.bytes_as_string_view(), "utf-8"sv, quirky_color_allowed());
+            auto rust_color = RustComponentValueParser::parse_simple_color(serialized_color.bytes_as_string_view(), "utf-8"sv, context_allows_quirky_color());
             if (rust_color.has_value()) {
                 switch (rust_color.value().kind) {
                 case FFI::CssParsedColorKind::Invalid:
@@ -2102,7 +2078,7 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
     }
 
     // https://drafts.csswg.org/css-color-4/#quirky-color
-    if (quirky_color_allowed()) {
+    if (context_allows_quirky_color()) {
         // NOTE: This algorithm is no longer in the spec, since the concept got moved and renamed. However, it works,
         //       and so we might as well keep using it.
 

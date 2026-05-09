@@ -104,6 +104,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BackgroundPositionY:
     case PropertyID::BackgroundRepeat:
     case PropertyID::BackgroundSize:
+    case PropertyID::BackgroundColor:
     case PropertyID::Border:
     case PropertyID::BorderBlock:
     case PropertyID::BorderImage:
@@ -113,6 +114,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderImageSource:
     case PropertyID::BorderImageWidth:
     case PropertyID::BorderInline:
+    case PropertyID::BorderBottomColor:
     case PropertyID::BorderBottomStyle:
     case PropertyID::BorderCollapse:
     case PropertyID::BorderBottomLeftRadius:
@@ -124,15 +126,18 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderEndStartRadius:
     case PropertyID::BorderInlineEndWidth:
     case PropertyID::BorderInlineStartWidth:
+    case PropertyID::BorderLeftColor:
     case PropertyID::BorderLeftStyle:
     case PropertyID::BorderLeftWidth:
     case PropertyID::BorderRadius:
+    case PropertyID::BorderRightColor:
     case PropertyID::BorderRightStyle:
     case PropertyID::BorderRightWidth:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
+    case PropertyID::BorderTopColor:
     case PropertyID::BorderTopStyle:
     case PropertyID::BorderTopWidth:
     case PropertyID::Bottom:
@@ -145,6 +150,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ClipRule:
     case PropertyID::ColorInterpolation:
     case PropertyID::ColorScheme:
+    case PropertyID::Color:
     case PropertyID::ColumnCount:
     case PropertyID::ColumnSpan:
     case PropertyID::ColumnWidth:
@@ -581,6 +587,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 property_ids,
                 source.bytes_as_string_view(),
                 context_allows_quirky_length(),
+                context_allows_quirky_color(),
                 is_parsing_svg_presentation_attribute(),
                 is_parsing_svg_presentation_attribute());
             rust_style_value.has_value()) {

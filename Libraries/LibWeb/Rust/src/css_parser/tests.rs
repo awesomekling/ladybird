@@ -4359,6 +4359,29 @@ fn parses_style_values_with_rust_owned_ast() {
             value_type: String::new(),
         })
     );
+    assert_eq!(parse_style_value(&[PropertyId::Color], "123abc"), None);
+    assert_eq!(
+        parse_style_value_with_options(
+            &[PropertyId::Color],
+            "123abc",
+            CssPrimitiveValueOptions {
+                allow_quirky_length: false,
+                allow_quirky_color: true,
+                allow_svg_unitless_length: false,
+                allow_svg_unitless_angle: false,
+            }
+        ),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Color,
+            property_id: PropertyId::Color,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: Some((0x12, 0x3a, 0xbc, 255)),
+            value: String::new(),
+            value_type: String::new(),
+        })
+    );
     assert_eq!(
         parse_style_value(&[PropertyId::BorderTopColor], "#336699cc"),
         Some(ParsedStyleValue {
@@ -8521,6 +8544,7 @@ fn parses_primitive_value_prefix_options() {
             CssPrimitiveValueType::Length,
             CssPrimitiveValueOptions {
                 allow_quirky_length: true,
+                allow_quirky_color: false,
                 allow_svg_unitless_length: false,
                 allow_svg_unitless_angle: false,
             }
@@ -8533,6 +8557,7 @@ fn parses_primitive_value_prefix_options() {
             CssPrimitiveValueType::Angle,
             CssPrimitiveValueOptions {
                 allow_quirky_length: false,
+                allow_quirky_color: false,
                 allow_svg_unitless_length: false,
                 allow_svg_unitless_angle: true,
             }
@@ -8621,6 +8646,7 @@ fn parses_primitive_value_options() {
             CssPrimitiveValueType::Length,
             CssPrimitiveValueOptions {
                 allow_quirky_length: true,
+                allow_quirky_color: false,
                 allow_svg_unitless_length: false,
                 allow_svg_unitless_angle: false,
             }
@@ -8633,6 +8659,7 @@ fn parses_primitive_value_options() {
             CssPrimitiveValueType::Angle,
             CssPrimitiveValueOptions {
                 allow_quirky_length: false,
+                allow_quirky_color: false,
                 allow_svg_unitless_length: false,
                 allow_svg_unitless_angle: true,
             }
@@ -8724,6 +8751,7 @@ fn parses_primitive_generated_property_value_types() {
         b"64",
         CssPrimitiveValueOptions {
             allow_quirky_length: false,
+            allow_quirky_color: false,
             allow_svg_unitless_length: true,
             allow_svg_unitless_angle: false,
         }
@@ -8890,6 +8918,7 @@ fn emits_svg_unitless_length_style_values_with_parser_options() {
             "64",
             CssPrimitiveValueOptions {
                 allow_quirky_length: false,
+                allow_quirky_color: false,
                 allow_svg_unitless_length: true,
                 allow_svg_unitless_angle: false,
             }
