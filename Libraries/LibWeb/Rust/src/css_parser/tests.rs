@@ -7,13 +7,13 @@
 use super::{
     BooleanExpression, BooleanExpressionTestKind, ComponentValue, ComponentValueParser, CounterStyle,
     CssAnchorNameOrScopeValueKind, CssAnimationNameItemKind, CssAnimationNameValueKind, CssBackgroundSizeValueKind,
-    CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssColorFunctionValueKind, CssColorSchemeValue,
-    CssColorSchemeValueKind, CssColorValueKind, CssContainValue, CssContainValueKind, CssContainerTypeValueKind,
-    CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind, CssCounterStyleSymbolsType,
-    CssCounterStyleSystemKind, CssCropOrCrossKind, CssDescriptorResultKind, CssDescriptorValueType, CssDisplayBox,
-    CssDisplayInside, CssDisplayInternal, CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind,
-    CssEasingValueKind, CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech,
-    CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
+    CssBasicShapeValueKind, CssBooleanExpressionEventKind, CssCalculationNodeKind, CssColorFunctionValueKind,
+    CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssContainValue, CssContainValueKind,
+    CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
+    CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDescriptorResultKind,
+    CssDescriptorValueType, CssDisplayBox, CssDisplayInside, CssDisplayInternal, CssDisplayListItem, CssDisplayOutside,
+    CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
+    CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
     CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis,
     CssGridAutoFlowDense, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind,
     CssImageSetValueKind, CssMediaFeatureValueKind, CssMediaFeatureValuePayloadKind, CssMediaFeatureValueSyntaxKind,
@@ -176,7 +176,8 @@ use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::ValueTypeId;
 
 use super::parser_math::{
-    RustOwnedCalculationNode, RustOwnedCalculationNumericValue, parse_rust_owned_calculation_function,
+    RustOwnedCalculationNode, RustOwnedCalculationNumericValue, emit_rust_owned_calculation_tree,
+    parse_rust_owned_calculation_function,
 };
 
 fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
@@ -6840,6 +6841,72 @@ fn rust_owned_math_functions_carry_calculation_trees() {
     };
 
     assert_eq!(*calculation, parse_math_ast("calc(1px + 2px)").unwrap());
+}
+
+#[test]
+fn emits_rust_owned_calculation_trees_in_postorder() {
+    let calculation = parse_math_ast("calc(1px + 2px * 3)").unwrap();
+    let mut events = Vec::new();
+
+    emit_rust_owned_calculation_tree(
+        &calculation,
+        &mut |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+            events.push((
+                kind,
+                primitive_kind,
+                has_numeric_value,
+                numeric_value,
+                child_count,
+                String::from_utf8_lossy(metadata).to_string(),
+            ));
+        },
+    );
+
+    assert_eq!(
+        events,
+        vec![
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                1.0,
+                0,
+                "px".to_string(),
+            ),
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Length,
+                true,
+                2.0,
+                0,
+                "px".to_string(),
+            ),
+            (
+                CssCalculationNodeKind::Numeric,
+                CssPrimitiveValueKind::Number,
+                true,
+                3.0,
+                0,
+                String::new(),
+            ),
+            (
+                CssCalculationNodeKind::Product,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                2,
+                String::new(),
+            ),
+            (
+                CssCalculationNodeKind::Sum,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                2,
+                String::new(),
+            ),
+        ]
+    );
 }
 
 #[test]

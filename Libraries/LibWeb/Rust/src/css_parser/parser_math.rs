@@ -76,6 +76,127 @@ pub(crate) fn parse_rust_owned_calculation(values: &[ComponentValue]) -> Option<
     collect_sum_and_negate_nodes(values)
 }
 
+pub(crate) fn emit_rust_owned_calculation_tree<C>(node: &RustOwnedCalculationNode, callback: &mut C)
+where
+    C: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
+    match node {
+        RustOwnedCalculationNode::Numeric(value) => emit_rust_owned_calculation_numeric_value(value, callback),
+        RustOwnedCalculationNode::Function { name, arguments } => {
+            for argument in arguments {
+                emit_rust_owned_calculation_tree(argument, callback);
+            }
+            callback(
+                CssCalculationNodeKind::Function,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                arguments.len() as u32,
+                name.as_bytes(),
+            );
+        }
+        RustOwnedCalculationNode::Sum(children) => {
+            for child in children {
+                emit_rust_owned_calculation_tree(child, callback);
+            }
+            callback(
+                CssCalculationNodeKind::Sum,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                children.len() as u32,
+                &[],
+            );
+        }
+        RustOwnedCalculationNode::Product(children) => {
+            for child in children {
+                emit_rust_owned_calculation_tree(child, callback);
+            }
+            callback(
+                CssCalculationNodeKind::Product,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                children.len() as u32,
+                &[],
+            );
+        }
+        RustOwnedCalculationNode::Negate(child) => {
+            emit_rust_owned_calculation_tree(child, callback);
+            callback(
+                CssCalculationNodeKind::Negate,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                1,
+                &[],
+            );
+        }
+        RustOwnedCalculationNode::Invert(child) => {
+            emit_rust_owned_calculation_tree(child, callback);
+            callback(
+                CssCalculationNodeKind::Invert,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                1,
+                &[],
+            );
+        }
+    }
+}
+
+fn emit_rust_owned_calculation_numeric_value<C>(value: &RustOwnedCalculationNumericValue, callback: &mut C)
+where
+    C: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
+    let (primitive_kind, numeric_value, metadata) = match value {
+        RustOwnedCalculationNumericValue::Number(value) => (CssPrimitiveValueKind::Number, *value, ""),
+        RustOwnedCalculationNumericValue::Percentage(value) => (CssPrimitiveValueKind::Percentage, *value, ""),
+        RustOwnedCalculationNumericValue::Dimension { value, unit } => (
+            calculation_dimension_kind(unit).unwrap_or(CssPrimitiveValueKind::Invalid),
+            *value,
+            unit.as_str(),
+        ),
+        RustOwnedCalculationNumericValue::Keyword(value) => (CssPrimitiveValueKind::Keyword, 0.0, value.as_str()),
+        RustOwnedCalculationNumericValue::TreeCountingFunction(value) => {
+            let metadata = match value.function {
+                RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count",
+                RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index",
+            };
+            callback(
+                CssCalculationNodeKind::TreeCountingFunction,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                0,
+                metadata.as_bytes(),
+            );
+            return;
+        }
+    };
+
+    callback(
+        CssCalculationNodeKind::Numeric,
+        primitive_kind,
+        true,
+        numeric_value,
+        0,
+        metadata.as_bytes(),
+    );
+}
+
+fn calculation_dimension_kind(unit: &str) -> Option<CssPrimitiveValueKind> {
+    match dimension_for_unit(unit)? {
+        DimensionType::Angle => Some(CssPrimitiveValueKind::Angle),
+        DimensionType::Flex => Some(CssPrimitiveValueKind::Flex),
+        DimensionType::Frequency => Some(CssPrimitiveValueKind::Frequency),
+        DimensionType::Length => Some(CssPrimitiveValueKind::Length),
+        DimensionType::Resolution => Some(CssPrimitiveValueKind::Resolution),
+        DimensionType::Time => Some(CssPrimitiveValueKind::Time),
+    }
+}
+
 fn collect_calculation_values(values: &[ComponentValue]) -> Option<Vec<CalculationComponent>> {
     let mut calculation_values = Vec::new();
     for value in values {

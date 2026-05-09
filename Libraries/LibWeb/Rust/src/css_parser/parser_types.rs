@@ -1091,6 +1091,18 @@ pub enum CssPrimitiveValueKind {
     Ratio,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum CssCalculationNodeKind {
+    Numeric,
+    Function,
+    Sum,
+    Product,
+    Negate,
+    Invert,
+    TreeCountingFunction,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C)]
 pub struct CssPrimitiveValueOptions {
