@@ -39,6 +39,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FlexFlow(RustOwnedFlexFlow),
     FilterValueList(RustOwnedFilterValueList),
     FontShorthand(Vec<RustOwnedFontShorthandItem>),
+    ComponentShorthand(Vec<RustOwnedComponentShorthandItem>),
     FontStyle(RustOwnedFontStyle),
     FontVariantLonghand(RustOwnedFontVariantLonghand),
     GridPlacementShorthand(Vec<RustOwnedGridPlacementShorthandItem>),
@@ -256,6 +257,12 @@ pub(crate) struct RustOwnedLayerShorthandItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedFontShorthandItem {
+    pub(crate) property_id: PropertyId,
+    pub(crate) source: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedComponentShorthandItem {
     pub(crate) property_id: PropertyId,
     pub(crate) source: String,
 }

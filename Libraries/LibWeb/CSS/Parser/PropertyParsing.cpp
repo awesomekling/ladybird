@@ -145,6 +145,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderInlineStartStyle:
     case PropertyID::BorderInlineStyle:
     case PropertyID::BorderInlineWidth:
+    case PropertyID::BorderBottom:
     case PropertyID::BorderBottomColor:
     case PropertyID::BorderBottomStyle:
     case PropertyID::BorderCollapse:
@@ -158,16 +159,19 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderEndStartRadius:
     case PropertyID::BorderInlineEndWidth:
     case PropertyID::BorderInlineStartWidth:
+    case PropertyID::BorderLeft:
     case PropertyID::BorderLeftColor:
     case PropertyID::BorderLeftStyle:
     case PropertyID::BorderLeftWidth:
     case PropertyID::BorderRadius:
+    case PropertyID::BorderRight:
     case PropertyID::BorderRightColor:
     case PropertyID::BorderRightStyle:
     case PropertyID::BorderRightWidth:
     case PropertyID::BorderStyle:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
+    case PropertyID::BorderTop:
     case PropertyID::BorderTopLeftRadius:
     case PropertyID::BorderTopRightRadius:
     case PropertyID::BorderTopColor:
@@ -330,6 +334,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ObjectFit:
     case PropertyID::ObjectPosition:
     case PropertyID::OverflowWrap:
+    case PropertyID::OverflowBlock:
     case PropertyID::OverflowClipMargin:
     case PropertyID::OverflowClipMarginBlock:
     case PropertyID::OverflowClipMarginBlockEnd:
@@ -342,10 +347,12 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
     case PropertyID::Overflow:
+    case PropertyID::OverflowInline:
     case PropertyID::OverflowX:
     case PropertyID::OverflowY:
     case PropertyID::Opacity:
     case PropertyID::Order:
+    case PropertyID::Outline:
     case PropertyID::OutlineColor:
     case PropertyID::OutlineOffset:
     case PropertyID::OutlineStyle:
@@ -3427,6 +3434,34 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             // FIXME: font-size-adjust,
                             property_initial_value(PropertyID::FontVariationSettings),
                         }) };
+            }
+            case FFI::CssStyleValueKind::ComponentShorthand: {
+                HashMap<PropertyID, ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
+                for (auto const& item : rust_style_value->component_shorthand_items) {
+                    auto parsed_value = parse_rust_source_as_property(item.property_id, item.value);
+                    if (!parsed_value) {
+                        parsed_values.clear();
+                        break;
+                    }
+                    parsed_values.set(item.property_id, parsed_value.release_nonnull());
+                }
+                if (parsed_values.size() != rust_style_value->component_shorthand_items.size())
+                    break;
+
+                auto const& longhands = longhands_for_shorthand(rust_style_value->property_id);
+                StyleValueVector longhand_values;
+                longhand_values.ensure_capacity(longhands.size());
+                for (auto longhand : longhands) {
+                    if (auto parsed_value = parsed_values.get(longhand); parsed_value.has_value())
+                        longhand_values.append(parsed_value.release_value());
+                    else
+                        longhand_values.append(property_initial_value(longhand));
+                }
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id,
+                    ShorthandStyleValue::create(rust_style_value->property_id, longhands, move(longhand_values)) };
             }
             case FFI::CssStyleValueKind::FontFeatureSettings:
                 if (rust_style_value->open_type_settings_kind == FFI::CssOpenTypeSettingsKind::Normal) {

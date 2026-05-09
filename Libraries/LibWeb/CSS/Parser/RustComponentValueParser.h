@@ -132,6 +132,7 @@ public:
 
     using GridPlacementShorthandItem = FontShorthandItem;
     using GridTemplateShorthandItem = FontShorthandItem;
+    using ComponentShorthandItem = FontShorthandItem;
 
     struct CoordinatingValueListShorthandItem {
         size_t layer_index { 0 };
@@ -646,6 +647,7 @@ public:
         Vector<String> color_scheme_schemes;
         Vector<FontFamilyValue> font_family;
         Vector<FontShorthandItem> font_shorthand_items;
+        Vector<ComponentShorthandItem> component_shorthand_items;
         FFI::CssFontLanguageOverrideKind font_language_override_kind { FFI::CssFontLanguageOverrideKind::Normal };
         Optional<FlyString> font_language_override;
         FontStyle font_style;

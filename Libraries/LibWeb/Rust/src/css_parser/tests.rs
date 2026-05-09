@@ -42,9 +42,9 @@ use super::{
     RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
     RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
     RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
-    RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
-    RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
-    RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
+    RustOwnedColumns, RustOwnedComponentShorthandItem, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
+    RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
+    RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
     RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay,
     RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
@@ -1688,6 +1688,22 @@ fn generated_property_metadata_knows_longhands() {
             PropertyId::TransitionBehavior,
         ]
     );
+    assert_eq!(
+        longhands_for_shorthand(PropertyId::Outline),
+        &[
+            PropertyId::OutlineColor,
+            PropertyId::OutlineStyle,
+            PropertyId::OutlineWidth
+        ]
+    );
+    assert_eq!(
+        longhands_for_shorthand(PropertyId::BorderBottom),
+        &[
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderBottomColor,
+        ]
+    );
 }
 
 #[test]
@@ -2942,6 +2958,47 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BorderBottom], "1px solid #123456"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BorderBottom,
+            value: RustOwnedStyleValueKind::ComponentShorthand(vec![
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::BorderBottomWidth,
+                    source: "1px".to_string(),
+                },
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::BorderBottomStyle,
+                    source: "solid".to_string(),
+                },
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::BorderBottomColor,
+                    source: "#123456".to_string(),
+                },
+            ]),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Outline], "auto red thick"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Outline,
+            value: RustOwnedStyleValueKind::ComponentShorthand(vec![
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::OutlineStyle,
+                    source: "auto".to_string(),
+                },
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::OutlineColor,
+                    source: "red".to_string(),
+                },
+                RustOwnedComponentShorthandItem {
+                    property_id: PropertyId::OutlineWidth,
+                    source: "thick".to_string(),
+                },
+            ]),
+        })
+    );
+    assert_eq!(parse_rust_owned_style_value(&[PropertyId::Outline], "auto auto"), None);
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BorderInline], "solid solid"),
         None
@@ -4800,6 +4857,45 @@ fn parses_style_values_with_rust_owned_ast() {
             secondary_numeric_value: None,
             color: Some((0x33, 0x66, 0x99, 0xcc)),
             value: String::new(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::Outline], "auto red thick"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::ComponentShorthand,
+            property_id: PropertyId::OutlineWidth,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "thick".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OverflowBlock], "overlay"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::OverflowBlock,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "auto".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::OverflowInline], "clip"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::OverflowInline,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "clip".to_string(),
             value_type: String::new(),
         })
     );

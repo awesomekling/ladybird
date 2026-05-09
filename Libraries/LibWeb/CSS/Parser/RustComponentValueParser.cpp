@@ -1505,6 +1505,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });
                 return;
+            } else if (kind == FFI::CssStyleValueKind::ComponentShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::ComponentShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                style_value->component_shorthand_items.append(ComponentShorthandItem {
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand) {
                 if (!style_value.has_value()) {
                     style_value = move(value);

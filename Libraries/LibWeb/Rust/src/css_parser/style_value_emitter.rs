@@ -81,6 +81,26 @@ where
                 );
             }
         }
+        RustOwnedStyleValueKind::ComponentShorthand(items) => {
+            let shorthand_property_id = property_id;
+            for item in items {
+                callback(
+                    CssStyleValueKind::ComponentShorthand,
+                    item.property_id as u16,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    0,
+                    0,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::GridPlacementShorthand(items) => {
             let shorthand_property_id = property_id;
             for item in items {

@@ -1565,6 +1565,58 @@ pub(super) fn border_shorthand_component_properties(
     }
 }
 
+pub(super) fn rust_owned_component_shorthand_style_value_kind(
+    property_id: PropertyId,
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<RustOwnedStyleValueKind> {
+    let longhands = longhands_for_shorthand(property_id);
+    if longhands.is_empty() {
+        return None;
+    }
+
+    let source = filtered_input_to_string(filtered_input);
+    let (mut input_parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = input_parser.parse_a_list_of_component_values();
+    let mut parser = ComponentValueParser::new(component_values);
+    let mut remaining_longhands = longhands.to_vec();
+    let mut items = Vec::new();
+
+    while parser.has_next_component_value() {
+        parser.discard_whitespace();
+        if !parser.has_next_component_value() {
+            break;
+        }
+
+        let start = parser.index;
+        parser.index += 1;
+
+        let component_source = serialize_consumed_component_values(&parser, start, &source)?;
+        let matching_longhand_index = remaining_longhands.iter().position(|longhand| {
+            let property_ids = [*longhand as u16];
+            matches!(
+                parse_rust_owned_style_value_for_property_with_options(
+                    &property_ids,
+                    component_source.as_bytes(),
+                    primitive_value_options,
+                ),
+                RustOwnedStyleValueParseResult::Parsed(_)
+            )
+        })?;
+
+        items.push(RustOwnedComponentShorthandItem {
+            property_id: remaining_longhands.remove(matching_longhand_index),
+            source: component_source,
+        });
+    }
+
+    if items.is_empty() {
+        return None;
+    }
+
+    Some(RustOwnedStyleValueKind::ComponentShorthand(items))
+}
+
 pub(super) fn rust_owned_border_shorthand_style_value_kind(
     property_id: PropertyId,
     filtered_input: &[u8],

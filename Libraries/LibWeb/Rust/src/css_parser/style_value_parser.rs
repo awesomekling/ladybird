@@ -289,6 +289,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderBlockStart
             | PropertyId::BorderBlockStartColor
             | PropertyId::BorderBlockStartStyle
+            | PropertyId::BorderBottom
             | PropertyId::BorderImage
             | PropertyId::BorderImageOutset
             | PropertyId::BorderImageRepeat
@@ -322,16 +323,19 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderInlineStyle
             | PropertyId::BorderInlineWidth
             | PropertyId::BorderInlineStartWidth
+            | PropertyId::BorderLeft
             | PropertyId::BorderLeftColor
             | PropertyId::BorderLeftStyle
             | PropertyId::BorderLeftWidth
             | PropertyId::BorderRadius
+            | PropertyId::BorderRight
             | PropertyId::BorderRightColor
             | PropertyId::BorderRightStyle
             | PropertyId::BorderRightWidth
             | PropertyId::BorderStyle
             | PropertyId::BorderStartEndRadius
             | PropertyId::BorderStartStartRadius
+            | PropertyId::BorderTop
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
             | PropertyId::BorderTopColor
@@ -493,7 +497,9 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MixBlendMode
             | PropertyId::ObjectFit
             | PropertyId::ObjectPosition
+            | PropertyId::Outline
             | PropertyId::OverflowWrap
+            | PropertyId::OverflowBlock
             | PropertyId::OverflowClipMargin
             | PropertyId::OverflowClipMarginBlock
             | PropertyId::OverflowClipMarginBlockEnd
@@ -505,6 +511,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowClipMarginLeft
             | PropertyId::OverflowClipMarginRight
             | PropertyId::OverflowClipMarginTop
+            | PropertyId::OverflowInline
             | PropertyId::OverflowX
             | PropertyId::Overflow
             | PropertyId::OverflowY
@@ -703,6 +710,13 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::BorderInline
         | PropertyId::BorderInlineEnd
         | PropertyId::BorderInlineStart => rust_owned_border_shorthand_style_value_kind(property_id, filtered_input),
+        PropertyId::BorderBottom
+        | PropertyId::BorderLeft
+        | PropertyId::BorderRight
+        | PropertyId::BorderTop
+        | PropertyId::Outline => {
+            rust_owned_component_shorthand_style_value_kind(property_id, filtered_input, primitive_value_options)
+        }
         PropertyId::BorderRadius => rust_owned_border_radius_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImage => rust_owned_border_image_shorthand_style_value_kind(filtered_input),
         PropertyId::BorderImageOutset => rust_owned_border_image_outset_style_value_kind(filtered_input),

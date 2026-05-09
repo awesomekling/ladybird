@@ -1943,6 +1943,7 @@ pub enum CssStyleValueKind {
     TreeCountingFunction,
     BorderSpacing,
     FontShorthand,
+    ComponentShorthand,
     GridPlacementShorthand,
     GridTemplateShorthand,
     GeneratedValueList,
