@@ -12,6 +12,7 @@ const SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS: u8 = 1;
 const SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR: u8 = 2;
 const SOURCE_COMPONENT_VALUE_LIST_IMAGE: u8 = 3;
 const SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION: u8 = 4;
+const SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE: u8 = 5;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -27,6 +28,20 @@ where
     fn emit(&mut self, kind: u8, component_values: &[ComponentValue]) {
         (self.list_callback)(kind);
         emit_component_values(component_values, self.filtered_input, self.component_value_callback);
+    }
+}
+
+fn emit_nested_primitive_source_component_values<S, E>(
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    if let RustOwnedNestedPrimitiveValue::Source { component_values, .. } = value
+        && !component_values.is_empty()
+    {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, component_values);
     }
 }
 
@@ -1372,6 +1387,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 RustOwnedNestedPrimitiveValue::Percentage(_) => PropertyValueType::Percentage,
                 _ => PropertyValueType::Length,
             };
+            emit_nested_primitive_source_component_values(
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                &value.length_percentage,
+            );
             callback(
                 CssStyleValueKind::TextIndent,
                 property_id,
@@ -1569,7 +1592,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
         }
-        RustOwnedStyleValueKind::Primitive(value) => callback_rust_owned_primitive_value(callback, property_id, value),
+        RustOwnedStyleValueKind::Primitive(value) => callback_rust_owned_primitive_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            value,
+        ),
         RustOwnedStyleValueKind::Identifier(value) => {
             callback_rust_owned_identifier_value(callback, property_id, value);
         }
@@ -1698,7 +1730,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             callback_font_variant_style_value(callback, property_id, value);
         }
         RustOwnedStyleValueKind::BasicShape(value) => {
-            callback_basic_shape_style_value(callback, calculation_callback, property_id, value);
+            callback_basic_shape_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::Rect(value) => {
             callback_rect_style_value(callback, property_id, value);
@@ -1806,13 +1848,20 @@ fn callback_primitive_style_value<C>(
     );
 }
 
-fn callback_rust_owned_primitive_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedPrimitiveValue)
-where
+fn callback_rust_owned_primitive_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedPrimitiveValue,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedPrimitiveValue::Nested { value, value_type } => {
             let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
+            emit_nested_primitive_source_component_values(source_component_value_emitter, value);
             callback_primitive_style_value(
                 callback,
                 property_id,
@@ -2533,14 +2582,17 @@ fn callback_text_decoration_thickness_style_value<C>(
     }
 }
 
-fn callback_basic_shape_style_value<C, D>(
+fn callback_basic_shape_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedBasicShape,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (kind, path_data) = basic_shape_callback_payload(value);
 
@@ -2558,6 +2610,7 @@ fn callback_basic_shape_style_value<C, D>(
         callback_basic_shape_rectangle_components(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             CssStyleValueKind::BasicShape,
             property_id,
             kind,
@@ -2580,6 +2633,7 @@ fn callback_basic_shape_style_value<C, D>(
         callback_basic_shape_radial_components(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             CssStyleValueKind::BasicShape,
             property_id,
             kind,
@@ -2600,6 +2654,7 @@ fn callback_basic_shape_style_value<C, D>(
             callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 CssStyleValueKind::BasicShape,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2612,6 +2667,7 @@ fn callback_basic_shape_style_value<C, D>(
             callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 CssStyleValueKind::BasicShape,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2642,9 +2698,10 @@ fn callback_basic_shape_style_value<C, D>(
     );
 }
 
-fn callback_basic_shape_radial_components<C, D>(
+fn callback_basic_shape_radial_components<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     style_value_kind: CssStyleValueKind,
     property_id: u16,
     kind: u8,
@@ -2652,6 +2709,8 @@ fn callback_basic_shape_radial_components<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for component in &value.radial_shape_radius {
         if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = component {
@@ -2677,6 +2736,7 @@ fn callback_basic_shape_radial_components<C, D>(
             callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 style_value_kind,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2693,49 +2753,62 @@ fn callback_basic_shape_radial_components<C, D>(
         callback_basic_shape_position_component(
             callback,
             calculation_callback,
-            style_value_kind,
-            property_id,
-            kind,
-            BASIC_SHAPE_COMPONENT_RADIAL_POSITION_X,
+            source_component_value_emitter,
+            BasicShapePositionComponentCallback {
+                style_value_kind,
+                property_id,
+                kind,
+                component_kind: BASIC_SHAPE_COMPONENT_RADIAL_POSITION_X,
+            },
             &position.x,
         );
         callback_basic_shape_position_component(
             callback,
             calculation_callback,
-            style_value_kind,
-            property_id,
-            kind,
-            BASIC_SHAPE_COMPONENT_RADIAL_POSITION_Y,
+            source_component_value_emitter,
+            BasicShapePositionComponentCallback {
+                style_value_kind,
+                property_id,
+                kind,
+                component_kind: BASIC_SHAPE_COMPONENT_RADIAL_POSITION_Y,
+            },
             &position.y,
         );
     }
 }
 
-fn callback_basic_shape_position_component<C, D>(
-    callback: &mut C,
-    calculation_callback: &mut D,
+struct BasicShapePositionComponentCallback {
     style_value_kind: CssStyleValueKind,
     property_id: u16,
     kind: u8,
     component_kind: u8,
+}
+
+fn callback_basic_shape_position_component<C, D, S, E>(
+    callback: &mut C,
+    calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    payload: BasicShapePositionComponentCallback,
     component: &RustOwnedPositionComponent,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let edge = component.edge.map_or(0, rust_owned_position_edge_to_callback_value);
     let Some(offset) = component.offset.as_ref() else {
         callback(
-            style_value_kind,
-            property_id,
+            payload.style_value_kind,
+            payload.property_id,
             CssPrimitiveValueKind::Invalid,
             false,
             0.0,
             false,
             0.0,
-            kind,
+            payload.kind,
             edge,
-            component_kind,
+            payload.component_kind,
             0,
             &[],
             "",
@@ -2744,17 +2817,18 @@ fn callback_basic_shape_position_component<C, D>(
     };
 
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(offset);
+    emit_nested_primitive_source_component_values(source_component_value_emitter, offset);
     callback(
-        style_value_kind,
-        property_id,
+        payload.style_value_kind,
+        payload.property_id,
         primitive_kind,
         nested_primitive_callback_has_numeric_value(offset),
         numeric_value,
         false,
         0.0,
-        kind,
+        payload.kind,
         edge,
-        component_kind,
+        payload.component_kind,
         1,
         unit_or_source.as_bytes(),
         "",
@@ -2764,9 +2838,10 @@ fn callback_basic_shape_position_component<C, D>(
     }
 }
 
-fn callback_basic_shape_rectangle_components<C, D>(
+fn callback_basic_shape_rectangle_components<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     style_value_kind: CssStyleValueKind,
     property_id: u16,
     kind: u8,
@@ -2774,6 +2849,8 @@ fn callback_basic_shape_rectangle_components<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for component in &value.rectangle_components {
         match component {
@@ -2795,6 +2872,7 @@ fn callback_basic_shape_rectangle_components<C, D>(
             _ => callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 style_value_kind,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2812,6 +2890,7 @@ fn callback_basic_shape_rectangle_components<C, D>(
             callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 style_value_kind,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2826,6 +2905,7 @@ fn callback_basic_shape_rectangle_components<C, D>(
             callback_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 style_value_kind,
                 property_id,
                 BasicShapeNestedPrimitiveCallback {
@@ -2871,9 +2951,10 @@ struct BasicShapeNestedPrimitiveCallback {
     component: u8,
 }
 
-fn callback_basic_shape_nested_primitive<C, D>(
+fn callback_basic_shape_nested_primitive<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     style_value_kind: CssStyleValueKind,
     property_id: u16,
     payload: BasicShapeNestedPrimitiveCallback,
@@ -2881,9 +2962,12 @@ fn callback_basic_shape_nested_primitive<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
 
+    emit_nested_primitive_source_component_values(source_component_value_emitter, value);
     callback(
         style_value_kind,
         property_id,

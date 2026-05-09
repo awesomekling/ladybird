@@ -1199,6 +1199,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             FlexBasis,
             Image,
             ImageSetResolution,
+            NestedPrimitive,
             StyleColor,
         };
 
@@ -1207,6 +1208,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListStyleColor = 2,
             SourceComponentValueListImage = 3,
             SourceComponentValueListImageSetResolution = 4,
+            SourceComponentValueListNestedPrimitive = 5,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1214,6 +1216,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         SourceComponentValueTarget source_component_value_target { SourceComponentValueTarget::None };
         RustStyleColor* style_color_source_component_value_target { nullptr };
         Vector<ComponentValue>* source_component_values_target { nullptr };
+        Vector<ComponentValue> pending_nested_primitive_source_component_values;
 
         void flush_source_component_values()
         {
@@ -1241,6 +1244,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(style_value->image_kind == RustImageKind::ImageSet);
                 VERIFY(!style_value->image_set_options.is_empty());
                 style_value->image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::NestedPrimitive:
+                pending_nested_primitive_source_component_values = move(source_component_value_builder.root_values);
                 break;
             case SourceComponentValueTarget::StyleColor:
                 if (style_color_source_component_value_target) {
@@ -1280,6 +1286,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             case SourceComponentValueListImageSetResolution:
                 source_component_value_target = SourceComponentValueTarget::ImageSetResolution;
                 return;
+            case SourceComponentValueListNestedPrimitive:
+                source_component_value_target = SourceComponentValueTarget::NestedPrimitive;
+                return;
             default:
                 VERIFY_NOT_REACHED();
             }
@@ -1315,6 +1324,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 RustNestedPrimitiveValue nested_value {
                     .primitive_kind = primitive_kind,
                     .source_or_unit = string_from_ffi_bytes(value_ptr, value_len),
+                    .source_component_values = move(context.pending_nested_primitive_source_component_values),
                 };
                 if (has_numeric_value)
                     nested_value.numeric_value = numeric_value;
@@ -3588,6 +3598,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 } else if (primitive_kind == FFI::CssPrimitiveValueKind::Ratio) {
                     value.ratio_has_denominator = StringView { value_ptr, value_len } == "has-denominator"sv;
                 }
+                value.source_component_values = move(context.pending_nested_primitive_source_component_values);
             }
 
             style_value = move(value);

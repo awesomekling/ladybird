@@ -296,6 +296,7 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> numeric_value;
         String source_or_unit;
+        Vector<ComponentValue> source_component_values;
         Vector<RustCalculationNodeEvent> calculation_node_events;
     };
 
@@ -691,6 +692,7 @@ public:
         u8 color_alpha { 0 };
         Optional<FlyString> dimension_unit;
         Optional<FlyString> string;
+        Vector<ComponentValue> source_component_values;
         FFI::CssScrollFunctionScrollerKind scroll_function_scroller { FFI::CssScrollFunctionScrollerKind::None };
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
         bool stroke_dasharray_none { false };
