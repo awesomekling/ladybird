@@ -812,12 +812,6 @@ public:
         bool is_string { false };
     };
 
-    struct FontSource {
-        Variant<FamilyName, URL> source;
-        Optional<FlyString> format;
-        Vector<FontTech> tech;
-    };
-
     struct ScrollFunction {
         FFI::CssScrollFunctionValueKind kind;
         FFI::CssScrollFunctionScrollerKind scroller;
@@ -930,7 +924,6 @@ public:
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<URL> parse_an_import_url(StringView input, StringView encoding);
     static Optional<ImportRulePrelude> parse_an_import_rule_prelude(StringView input, StringView encoding);
-    static Optional<FontSource> parse_a_font_source(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
     static Optional<Vector<FontVariantAlternatesValue>> parse_a_font_variant_alternates(StringView input, StringView encoding);
