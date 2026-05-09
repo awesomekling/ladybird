@@ -248,6 +248,17 @@ public:
         BorderImageSlice,
         BorderImageWidth,
         BorderImageOutset,
+        TransformOriginX,
+        TransformOriginY,
+        TransformOriginZ,
+        TransformLonghandArgument,
+        TransformationArgument,
+        ShadowOffsetX,
+        ShadowOffsetY,
+        ShadowBlurRadius,
+        ShadowSpreadDistance,
+        FilterValue,
+        FilterDropShadowRadius,
     };
 
     enum class RustTreeCountingFunction : u8 {

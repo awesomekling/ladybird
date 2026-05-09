@@ -2413,13 +2413,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::TransformOrigin);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
-                if (color_red == 0)
+                if (color_red == 0) {
                     style_value->transform_origin_x = nested_primitive_value_from_callback_payload();
-                else if (color_red == 1)
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::TransformOriginX;
+                } else if (color_red == 1) {
                     style_value->transform_origin_y = nested_primitive_value_from_callback_payload();
-                else
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::TransformOriginY;
+                } else {
                     style_value->transform_origin_z = nested_primitive_value_from_callback_payload();
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::TransformOriginZ;
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::TransformLonghand) {
                 if (!style_value.has_value())
@@ -2428,6 +2433,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::TransformLonghand);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 enum : u8 {
                     None,
@@ -2445,6 +2451,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .parameter_type = static_cast<TransformFunctionParameterType>(color_blue),
                     .value = nested_primitive_value_from_callback_payload(),
                 });
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::TransformLonghandArgument;
                 return;
             } else if (kind == FFI::CssStyleValueKind::Transformation) {
                 if (!style_value.has_value())
@@ -2453,6 +2460,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Transformation);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 enum : u8 {
                     BeginFunction,
@@ -2473,6 +2481,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .parameter_type = static_cast<TransformFunctionParameterType>(color_blue),
                     .value = nested_primitive_value_from_callback_payload(),
                 });
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::TransformationArgument;
                 return;
             } else if (kind == FFI::CssStyleValueKind::Shadow) {
                 enum : u8 {
@@ -2495,6 +2504,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Shadow);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
                 if (component_kind == None) {
@@ -2513,14 +2523,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 auto& shadow = style_value->shadows.last();
                 if (component_kind == Color)
                     shadow.color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
-                else if (component_kind == OffsetX)
+                else if (component_kind == OffsetX) {
                     shadow.offset_x = nested_primitive_value_from_callback_payload();
-                else if (component_kind == OffsetY)
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::ShadowOffsetX;
+                } else if (component_kind == OffsetY) {
                     shadow.offset_y = nested_primitive_value_from_callback_payload();
-                else if (component_kind == BlurRadius)
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::ShadowOffsetY;
+                } else if (component_kind == BlurRadius) {
                     shadow.blur_radius = nested_primitive_value_from_callback_payload();
-                else if (component_kind == SpreadDistance)
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::ShadowBlurRadius;
+                } else if (component_kind == SpreadDistance) {
                     shadow.spread_distance = nested_primitive_value_from_callback_payload();
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::ShadowSpreadDistance;
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ShapeOutside) {
                 if (!style_value.has_value())
@@ -2738,6 +2753,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::FilterValueList);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
                 if (component_kind == None) {
@@ -2750,6 +2766,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
                     style_value->filter_value_list_events.last().drop_shadow_radius = nested_primitive_value_from_callback_payload();
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::FilterDropShadowRadius;
                     return;
                 }
                 if (filter_event_kind == RustFilterValueListEventKind::DropShadowColor) {
@@ -2771,6 +2788,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         ? image_url_from_callback_payload()
                         : OptionalNone {},
                 });
+                if (!style_value->filter_value_list_events.last().has_secondary_value && style_value->filter_value_list_events.last().has_value)
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::FilterValue;
                 return;
             } else if (kind == FFI::CssStyleValueKind::Cursor) {
                 enum : u8 {
@@ -3492,6 +3511,60 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case RustCalculationNodeTarget::BorderImageOutset:
                     VERIFY(!style_value->border_image_outsets.is_empty());
                     style_value->border_image_outsets.last().value.calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::TransformOrigin, FFI::CssStyleValueKind::TransformLonghand, FFI::CssStyleValueKind::Transformation, FFI::CssStyleValueKind::Shadow, FFI::CssStyleValueKind::FilterValueList)) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::TransformOriginX:
+                    VERIFY(style_value->transform_origin_x.has_value());
+                    style_value->transform_origin_x->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::TransformOriginY:
+                    VERIFY(style_value->transform_origin_y.has_value());
+                    style_value->transform_origin_y->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::TransformOriginZ:
+                    VERIFY(style_value->transform_origin_z.has_value());
+                    style_value->transform_origin_z->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::TransformLonghandArgument:
+                    VERIFY(!style_value->transform_longhand_arguments.is_empty());
+                    style_value->transform_longhand_arguments.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::TransformationArgument:
+                    VERIFY(!style_value->transformations.is_empty());
+                    VERIFY(!style_value->transformations.last().arguments.is_empty());
+                    style_value->transformations.last().arguments.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::ShadowOffsetX:
+                    VERIFY(!style_value->shadows.is_empty());
+                    style_value->shadows.last().offset_x.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::ShadowOffsetY:
+                    VERIFY(!style_value->shadows.is_empty());
+                    style_value->shadows.last().offset_y.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::ShadowBlurRadius:
+                    VERIFY(!style_value->shadows.is_empty());
+                    VERIFY(style_value->shadows.last().blur_radius.has_value());
+                    style_value->shadows.last().blur_radius->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::ShadowSpreadDistance:
+                    VERIFY(!style_value->shadows.is_empty());
+                    VERIFY(style_value->shadows.last().spread_distance.has_value());
+                    style_value->shadows.last().spread_distance->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::FilterValue:
+                    VERIFY(!style_value->filter_value_list_events.is_empty());
+                    style_value->filter_value_list_events.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::FilterDropShadowRadius:
+                    VERIFY(!style_value->filter_value_list_events.is_empty());
+                    VERIFY(style_value->filter_value_list_events.last().drop_shadow_radius.has_value());
+                    style_value->filter_value_list_events.last().drop_shadow_radius->calculation_node_events.append(move(event));
                     return;
                 default:
                     break;
