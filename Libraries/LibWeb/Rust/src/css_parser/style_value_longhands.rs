@@ -581,8 +581,7 @@ pub(super) fn rust_owned_flex_basis_from_component_value(
             .map(RustOwnedFlexBasis::FitContentFunction);
     }
 
-    serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)
-        .map(RustOwnedNestedPrimitiveValue::Source)
+    rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), filtered_input_string)
         .map(RustOwnedFlexBasis::Value)
 }
 

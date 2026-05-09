@@ -3392,15 +3392,13 @@ pub(super) fn consume_integer_component_value_payload(
         return None;
     }
 
-    let source =
-        serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?;
     let value = number.value();
-    parser.index += 1;
     let integer = if value >= i32::MIN as f64 && value <= i32::MAX as f64 {
         RustOwnedNestedPrimitiveValue::Integer(value as i32)
     } else {
-        RustOwnedNestedPrimitiveValue::Source(source)
+        rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), filtered_input_string)?
     };
+    parser.index += 1;
     Some((integer, value))
 }
 
@@ -8240,12 +8238,19 @@ pub(super) fn component_value_parse_as_nested_length(
             parse_rust_owned_tree_counting_function(PropertyValueType::Length, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
+}
+
+pub(super) fn rust_owned_nested_source_from_component_values(
+    component_values: &[ComponentValue],
+    source: &str,
+) -> Option<RustOwnedNestedPrimitiveValue> {
+    Some(RustOwnedNestedPrimitiveValue::Source {
+        source: serialize_component_values_for_reparsing(component_values, source)?,
+        component_values: component_values.to_vec(),
+    })
 }
 
 pub(super) fn zero_pixel_length() -> RustOwnedNestedPrimitiveValue {
@@ -8291,10 +8296,7 @@ pub(super) fn component_value_parse_as_nested_number(
             parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }
@@ -8323,10 +8325,7 @@ pub(super) fn component_value_parse_as_nested_angle(
             parse_rust_owned_tree_counting_function(PropertyValueType::Angle, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }
@@ -8354,10 +8353,7 @@ pub(super) fn component_value_parse_as_nested_number_percentage(
             parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }
@@ -8417,10 +8413,7 @@ pub(super) fn component_value_parse_as_nested_dasharray_value(
             )
             .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => component_value_parse_as_nested_length_percentage(component_value, source),
     }
 }
@@ -8444,10 +8437,7 @@ pub(super) fn component_value_parse_as_nested_integer(
             parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }
@@ -8471,10 +8461,7 @@ pub(super) fn component_value_parse_as_nested_percentage(
             parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }
@@ -8498,10 +8485,7 @@ pub(super) fn component_value_parse_as_nested_non_negative_number(
             parse_rust_owned_tree_counting_function(PropertyValueType::Number, std::slice::from_ref(component_value))
                 .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
         })
-        .or_else(|| {
-            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
-                .map(RustOwnedNestedPrimitiveValue::Source)
-        }),
+        .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         _ => None,
     }
 }

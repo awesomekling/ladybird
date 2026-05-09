@@ -787,16 +787,37 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Integer(i32),
     Number(f64),
     Percentage(f64),
-    Length { value: f64, unit: String },
-    Angle { value: f64, unit: String },
-    Flex { value: f64, unit: String },
-    Frequency { value: f64, unit: String },
-    Resolution { value: f64, unit: String },
-    Time { value: f64, unit: String },
+    Length {
+        value: f64,
+        unit: String,
+    },
+    Angle {
+        value: f64,
+        unit: String,
+    },
+    Flex {
+        value: f64,
+        unit: String,
+    },
+    Frequency {
+        value: f64,
+        unit: String,
+    },
+    Resolution {
+        value: f64,
+        unit: String,
+    },
+    Time {
+        value: f64,
+        unit: String,
+    },
     Keyword(String),
     MathFunction(RustOwnedMathFunction),
     TreeCountingFunction(RustOwnedTreeCountingFunction),
-    Source(String),
+    Source {
+        source: String,
+        component_values: Vec<ComponentValue>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

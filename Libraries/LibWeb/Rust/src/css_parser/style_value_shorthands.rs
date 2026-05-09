@@ -448,7 +448,7 @@ fn serialize_rust_owned_grid_track_placement(value: &RustOwnedGridTrackPlacement
             RustOwnedTreeCountingFunctionKind::SiblingCount => "sibling-count()".to_string(),
             RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()".to_string(),
         },
-        RustOwnedNestedPrimitiveValue::Source(source) => source.clone(),
+        RustOwnedNestedPrimitiveValue::Source { source, .. } => source.clone(),
         _ => unreachable!("grid track placement line numbers are integer-like values"),
     };
 

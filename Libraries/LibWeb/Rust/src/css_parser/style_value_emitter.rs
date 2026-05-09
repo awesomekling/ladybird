@@ -586,7 +586,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U>(
                     RustOwnedNestedPrimitiveValue::Integer(value) => {
                         (CssPrimitiveValueKind::Integer, true, *value as f64, "")
                     }
-                    RustOwnedNestedPrimitiveValue::Source(source) => {
+                    RustOwnedNestedPrimitiveValue::Source { source, .. } => {
                         (CssPrimitiveValueKind::Invalid, false, 0.0, source.as_str())
                     }
                     RustOwnedNestedPrimitiveValue::MathFunction(value) => {
@@ -3050,7 +3050,7 @@ fn grid_track_breadth_callback_payload(breadth: &RustOwnedNestedPrimitiveValue) 
         RustOwnedNestedPrimitiveValue::Number(_)
         | RustOwnedNestedPrimitiveValue::Length { .. }
         | RustOwnedNestedPrimitiveValue::Percentage(_)
-        | RustOwnedNestedPrimitiveValue::Source(_) => {
+        | RustOwnedNestedPrimitiveValue::Source { .. } => {
             let (primitive_kind, numeric_value, source_or_unit) = nested_primitive_callback_payload(breadth);
             GridTrackBreadthCallbackPayload {
                 breadth_kind: GRID_TRACK_BREADTH_LENGTH_PERCENTAGE,
@@ -3971,7 +3971,7 @@ where
                     "",
                 );
             }
-            RustOwnedNestedPrimitiveValue::Source(source) => callback(
+            RustOwnedNestedPrimitiveValue::Source { source, .. } => callback(
                 CssStyleValueKind::Flex,
                 property_id,
                 CssPrimitiveValueKind::Invalid,
@@ -5018,7 +5018,7 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
                 RustOwnedTreeCountingFunctionKind::SiblingIndex => "sibling-index()",
             },
         ),
-        RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
+        RustOwnedNestedPrimitiveValue::Source { source, .. } => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
 }
 
@@ -5028,7 +5028,7 @@ fn nested_primitive_callback_has_numeric_value(value: &RustOwnedNestedPrimitiveV
         RustOwnedNestedPrimitiveValue::Keyword(_)
             | RustOwnedNestedPrimitiveValue::MathFunction(_)
             | RustOwnedNestedPrimitiveValue::TreeCountingFunction(_)
-            | RustOwnedNestedPrimitiveValue::Source(_)
+            | RustOwnedNestedPrimitiveValue::Source { .. }
     )
 }
 
