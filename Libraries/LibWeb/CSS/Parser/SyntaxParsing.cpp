@@ -138,16 +138,22 @@ RefPtr<StyleValue const> Parser::parse_according_to_syntax_node(TokenStream<Comp
     auto transaction = tokens.begin_transaction();
 
     switch (syntax_node.type()) {
-    case SyntaxNode::NodeType::Universal:
-        if (auto declaration_value = parse_declaration_value(tokens); declaration_value.has_value()) {
-            SubstitutionFunctionsPresence substitution_functions_presence;
-            if (collect_arbitrary_substitution_function_presence(declaration_value.value(), substitution_functions_presence).is_error())
-                return nullptr;
+    case SyntaxNode::NodeType::Universal: {
+        auto declaration_value = Vector<ComponentValue> { tokens.remaining_tokens() };
+        auto serialized_declaration_value = serialize_component_values_for_reparsing(declaration_value);
+        if (!RustComponentValueParser::syntax_matches(serialized_declaration_value, "*"sv, LimitSingleComponentIdentToCustomIdent::No))
+            return nullptr;
 
-            transaction.commit();
-            return UnresolvedStyleValue::create(declaration_value.release_value(), substitution_functions_presence);
-        }
-        return nullptr;
+        SubstitutionFunctionsPresence substitution_functions_presence;
+        if (collect_arbitrary_substitution_function_presence(declaration_value, substitution_functions_presence).is_error())
+            return nullptr;
+
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+
+        transaction.commit();
+        return UnresolvedStyleValue::create(move(declaration_value), substitution_functions_presence);
+    }
     case SyntaxNode::NodeType::Ident: {
         auto const& ident_node = as<IdentSyntaxNode>(syntax_node);
         tokens.discard_whitespace();
