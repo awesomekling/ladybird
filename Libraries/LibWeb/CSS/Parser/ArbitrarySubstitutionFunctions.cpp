@@ -6,6 +6,7 @@
 
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/PropertyName.h>
@@ -14,6 +15,7 @@
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
 
@@ -100,6 +102,170 @@ static Vector<ComponentValue> mark_as_attr_tainted(Vector<ComponentValue> values
         value.set_attr_tainted();
     return values;
 }
+
+struct ComponentValueBuilder {
+    struct Frame {
+        enum class Type : u8 {
+            Function,
+            SimpleBlock,
+        };
+
+        Type type;
+        Token start_token;
+        Vector<ComponentValue> values;
+    };
+
+    Vector<ComponentValue> root_values;
+    Vector<Frame> stack;
+
+    void append(ComponentValue component_value)
+    {
+        if (stack.is_empty()) {
+            root_values.append(move(component_value));
+            return;
+        }
+        stack.last().values.append(move(component_value));
+    }
+
+    void start_function(Token token)
+    {
+        stack.append({ Frame::Type::Function, move(token), {} });
+    }
+
+    void end_function(Token end_token)
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == Frame::Type::Function);
+
+        FlyString name = frame.start_token.function();
+        append(ComponentValue { Function { move(name), move(frame.values), move(frame.start_token), move(end_token) } });
+    }
+
+    void start_simple_block(Token token)
+    {
+        stack.append({ Frame::Type::SimpleBlock, move(token), {} });
+    }
+
+    void end_simple_block(Token end_token)
+    {
+        VERIFY(!stack.is_empty());
+        auto frame = stack.take_last();
+        VERIFY(frame.type == Frame::Type::SimpleBlock);
+
+        append(ComponentValue { SimpleBlock { move(frame.start_token), move(frame.values), move(end_token) } });
+    }
+};
+
+static void append_component_value_token(ComponentValueBuilder& builder, FFI::CssComponentValue const* component_value)
+{
+    auto token = RustTokenizer::token_from_ffi(component_value->token);
+    switch (component_value->kind) {
+    case FFI::CssComponentValueKind::Token:
+        builder.append(ComponentValue { move(token) });
+        break;
+    case FFI::CssComponentValueKind::FunctionStart:
+        builder.start_function(move(token));
+        break;
+    case FFI::CssComponentValueKind::FunctionEnd:
+        builder.end_function(move(token));
+        break;
+    case FFI::CssComponentValueKind::SimpleBlockStart:
+        builder.start_simple_block(move(token));
+        break;
+    case FFI::CssComponentValueKind::SimpleBlockEnd:
+        builder.end_simple_block(move(token));
+        break;
+    }
+}
+
+struct DeclarationValueListBuilder {
+    DeclarationValueList groups;
+    ComponentValueBuilder current_group;
+    bool has_active_group { false };
+
+    void start_group()
+    {
+        if (has_active_group) {
+            VERIFY(current_group.stack.is_empty());
+            groups.append(move(current_group.root_values));
+            current_group = {};
+        }
+        has_active_group = true;
+    }
+
+    void append_component_value(FFI::CssComponentValue const* component_value)
+    {
+        VERIFY(has_active_group);
+        append_component_value_token(current_group, component_value);
+    }
+
+    void finish()
+    {
+        if (!has_active_group)
+            return;
+        VERIFY(current_group.stack.is_empty());
+        groups.append(move(current_group.root_values));
+        current_group = {};
+        has_active_group = false;
+    }
+};
+
+struct IfArgsBuilder {
+    IfArgs branches;
+    IfArgsBranch current_branch;
+    ComponentValueBuilder condition_builder;
+    ComponentValueBuilder value_builder;
+    bool in_value { false };
+    bool has_active_branch { false };
+    bool value_started { false };
+
+    void start_branch()
+    {
+        VERIFY(!has_active_branch);
+        current_branch = {};
+        condition_builder = {};
+        value_builder = {};
+        in_value = false;
+        value_started = false;
+        has_active_branch = true;
+    }
+
+    void append_component_value(FFI::CssComponentValue const* component_value)
+    {
+        VERIFY(has_active_branch);
+        if (in_value)
+            append_component_value_token(value_builder, component_value);
+        else
+            append_component_value_token(condition_builder, component_value);
+    }
+
+    void finish_condition()
+    {
+        VERIFY(has_active_branch);
+        VERIFY(!in_value);
+        VERIFY(condition_builder.stack.is_empty());
+        current_branch.condition = move(condition_builder.root_values);
+        current_branch.value = Vector<ComponentValue> {};
+        in_value = true;
+        value_started = true;
+    }
+
+    void finish_branch()
+    {
+        VERIFY(has_active_branch);
+        VERIFY(value_started);
+        VERIFY(value_builder.stack.is_empty());
+        current_branch.value = move(value_builder.root_values);
+        branches.append(move(current_branch));
+        current_branch = {};
+        condition_builder = {};
+        value_builder = {};
+        in_value = false;
+        has_active_branch = false;
+        value_started = false;
+    }
+};
 
 // https://drafts.csswg.org/css-values-5/#replace-an-attr-function
 static Vector<ComponentValue> replace_an_attr_function(DOM::AbstractElement& element, GuardedSubstitutionContexts& guarded_contexts, ArbitrarySubstitutionFunctionArguments const& arguments)
@@ -560,77 +726,97 @@ Vector<ComponentValue> substitute_arbitrary_substitution_functions(DOM::Abstract
 
 Optional<ArbitrarySubstitutionFunctionArguments> parse_according_to_argument_grammar(ArbitrarySubstitutionFunction function, Vector<ComponentValue> const& values)
 {
-    // Equivalent to `<declaration-value> , <declaration-value>?`, used by multiple argument grammars.
-    auto parse_declaration_value_then_optional_declaration_value = [](TokenStream<ComponentValue>& tokens, Token::Type separator) -> Optional<DeclarationValueList> {
-        auto first_argument = Parser::parse_declaration_value(tokens, separator);
-        if (!first_argument.has_value())
-            return OptionalNone {};
+    auto serialized_values = Parser::serialize_component_values_for_reparsing(values);
+    auto serialized_bytes = serialized_values.bytes();
 
-        if (!tokens.has_next_token())
-            return DeclarationValueList { first_argument.release_value() };
+    auto parse_declaration_value_arguments = [&](ArbitrarySubstitutionFunction function_id) -> Optional<DeclarationValueList> {
+        struct CallbackContext {
+            DeclarationValueListBuilder builder;
+        };
+        CallbackContext callback_context;
 
-        if (!tokens.next_token().is(separator))
+        auto success = FFI::rust_css_parse_arbitrary_substitution_function_declaration_value_arguments(
+            serialized_bytes.data(),
+            serialized_bytes.size(),
+            static_cast<u8>(function_id),
+            &callback_context,
+            [](void* context) {
+                static_cast<CallbackContext*>(context)->builder.start_group();
+            },
+            [](void* context, FFI::CssComponentValue const* component_value) {
+                static_cast<CallbackContext*>(context)->builder.append_component_value(component_value);
+            });
+
+        if (!success)
             return {};
 
-        tokens.discard_a_token(); // separator
-
-        auto second_argument = Parser::parse_declaration_value(tokens);
-
-        return DeclarationValueList { first_argument.release_value(), second_argument.value_or({}) };
+        callback_context.builder.finish();
+        return move(callback_context.builder.groups);
     };
 
-    TokenStream tokens { values };
+    auto parse_if_arguments = [&]() -> Optional<IfArgs> {
+        struct CallbackContext {
+            IfArgsBuilder builder;
+        };
+        CallbackContext callback_context;
 
-    auto return_if_no_remaining_tokens = [&](Optional<ArbitrarySubstitutionFunctionArguments> value) -> Optional<ArbitrarySubstitutionFunctionArguments> {
-        if (tokens.has_next_token())
+        auto success = FFI::rust_css_parse_arbitrary_substitution_function_if_arguments(
+            serialized_bytes.data(),
+            serialized_bytes.size(),
+            &callback_context,
+            [](void* context) {
+                static_cast<CallbackContext*>(context)->builder.start_branch();
+            },
+            [](void* context) {
+                static_cast<CallbackContext*>(context)->builder.finish_condition();
+            },
+            [](void* context) {
+                static_cast<CallbackContext*>(context)->builder.finish_branch();
+            },
+            [](void* context, FFI::CssComponentValue const* component_value) {
+                static_cast<CallbackContext*>(context)->builder.append_component_value(component_value);
+            });
+
+        if (!success)
             return {};
-        return value;
+
+        return move(callback_context.builder.branches);
     };
 
     switch (function) {
     case ArbitrarySubstitutionFunction::Attr:
         // https://drafts.csswg.org/css-values-5/#attr-notation
         // <attr-args> = attr( <declaration-value> , <declaration-value>? )
-        // FIXME: It would be nice if we had a nice way to create an Optional<Variant<T>> from Optional<T> without these maps.
-        return return_if_no_remaining_tokens(parse_declaration_value_then_optional_declaration_value(tokens, Token::Type::Comma).map([](DeclarationValueList const& list) -> ArbitrarySubstitutionFunctionArguments { return list; }));
+        if (auto parsed_arguments = parse_declaration_value_arguments(function); parsed_arguments.has_value())
+            return ArbitrarySubstitutionFunctionArguments { parsed_arguments.release_value() };
+        return {};
     case ArbitrarySubstitutionFunction::Env:
         // https://drafts.csswg.org/css-env/#env-function
         // AD-HOC: This doesn't have an argument-grammar definition.
         //         However, it follows the same format of "some CVs, then an optional comma and a fallback".
-        return return_if_no_remaining_tokens(parse_declaration_value_then_optional_declaration_value(tokens, Token::Type::Comma).map([](DeclarationValueList const& list) -> ArbitrarySubstitutionFunctionArguments { return list; }));
+        if (auto parsed_arguments = parse_declaration_value_arguments(function); parsed_arguments.has_value())
+            return ArbitrarySubstitutionFunctionArguments { parsed_arguments.release_value() };
+        return {};
     case ArbitrarySubstitutionFunction::If: {
         // https://drafts.csswg.org/css-values-5/#if-notation
         // <if-args> = if( [ <if-args-branch> ; ]* <if-args-branch> ;? )
         // <if-args-branch> = <declaration-value> : <declaration-value>?
-        IfArgs args;
-
-        while (tokens.has_next_token()) {
-            auto if_args_branch = parse_declaration_value_then_optional_declaration_value(tokens, Token::Type::Colon);
-
-            if (!if_args_branch.has_value())
-                break;
-
-            args.append({ if_args_branch->first(), if_args_branch->get(1).map([](auto const& value) { return value; }) });
-
-            if (!tokens.next_token().is(Token::Type::Semicolon))
-                break;
-
-            tokens.discard_a_token(); // ;
-        }
-
-        if (args.is_empty())
-            return {};
-
-        return return_if_no_remaining_tokens(args);
+        if (auto parsed_arguments = parse_if_arguments(); parsed_arguments.has_value())
+            return ArbitrarySubstitutionFunctionArguments { parsed_arguments.release_value() };
+        return {};
     }
     case ArbitrarySubstitutionFunction::Inherit:
         // https://drafts.csswg.org/css-values-5/#inherit-notation
         // <inherit-args> = inherit( <declaration-value>, <declaration-value>? )
-        return return_if_no_remaining_tokens(parse_declaration_value_then_optional_declaration_value(tokens, Token::Type::Comma).map([](DeclarationValueList const& list) -> ArbitrarySubstitutionFunctionArguments { return list; }));
+        if (auto parsed_arguments = parse_declaration_value_arguments(function); parsed_arguments.has_value())
+            return ArbitrarySubstitutionFunctionArguments { parsed_arguments.release_value() };
+        return {};
     case ArbitrarySubstitutionFunction::Var:
         // https://drafts.csswg.org/css-variables/#funcdef-var
         // <var-args> = var( <declaration-value> , <declaration-value>? )
-        return return_if_no_remaining_tokens(parse_declaration_value_then_optional_declaration_value(tokens, Token::Type::Comma).map([](DeclarationValueList const& list) -> ArbitrarySubstitutionFunctionArguments { return list; }));
+        if (auto parsed_arguments = parse_declaration_value_arguments(function); parsed_arguments.has_value())
+            return ArbitrarySubstitutionFunctionArguments { parsed_arguments.release_value() };
+        return {};
     }
     VERIFY_NOT_REACHED();
 }

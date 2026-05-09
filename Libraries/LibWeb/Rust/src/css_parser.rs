@@ -42,6 +42,8 @@ use crate::generated_value_types::{
     generated_value_type_style_value, value_type_id_from_u8,
 };
 
+#[path = "css_parser/parser_arbitrary_substitutions.rs"]
+mod parser_arbitrary_substitutions;
 #[path = "css_parser/parser_component_values.rs"]
 mod parser_component_values;
 #[path = "css_parser/parser_descriptors.rs"]
@@ -73,6 +75,10 @@ mod style_value_shorthands;
 #[path = "css_parser/style_values.rs"]
 mod style_values;
 
+pub(crate) use parser_arbitrary_substitutions::{
+    parse_arbitrary_substitution_function_declaration_value_arguments,
+    parse_arbitrary_substitution_function_if_arguments,
+};
 pub(crate) use parser_descriptors::*;
 use parser_emitters::*;
 pub(crate) use parser_entrypoints::*;
@@ -109,6 +115,15 @@ pub(crate) use style_value_shorthands::{
     parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
 };
 use style_values::*;
+
+pub(crate) fn emit_component_values<F>(component_values: &[ComponentValue], filtered_input: &str, callback: &mut F)
+where
+    F: FnMut(CssComponentValue),
+{
+    for component_value in component_values {
+        emit_component_value(component_value, filtered_input, callback);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]

@@ -995,6 +995,86 @@ pub unsafe extern "C" fn rust_css_parse_if_condition(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_arbitrary_substitution_function_declaration_value_arguments(
+    input: *const u8,
+    input_len: usize,
+    function: u8,
+    ctx: *mut c_void,
+    group_callback: unsafe extern "C" fn(ctx: *mut c_void),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+            let filtered_input = std::str::from_utf8(input).expect("rust_css_parse_* received non-UTF-8 input");
+
+            let Some(groups) =
+                css_parser::parse_arbitrary_substitution_function_declaration_value_arguments(input, function)
+            else {
+                return false;
+            };
+
+            for group in groups {
+                group_callback(ctx);
+                css_parser::emit_component_values(&group, filtered_input, &mut |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                });
+            }
+
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_arbitrary_substitution_function_if_arguments(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    branch_callback: unsafe extern "C" fn(ctx: *mut c_void),
+    condition_end_callback: unsafe extern "C" fn(ctx: *mut c_void),
+    branch_end_callback: unsafe extern "C" fn(ctx: *mut c_void),
+    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+            let filtered_input = std::str::from_utf8(input).expect("rust_css_parse_* received non-UTF-8 input");
+
+            let Some(branches) = css_parser::parse_arbitrary_substitution_function_if_arguments(input) else {
+                return false;
+            };
+
+            for branch in branches {
+                branch_callback(ctx);
+                css_parser::emit_component_values(&branch.condition, filtered_input, &mut |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                });
+                condition_end_callback(ctx);
+                css_parser::emit_component_values(&branch.value, filtered_input, &mut |component_value| {
+                    component_value_callback(ctx, &raw const component_value);
+                });
+                branch_end_callback(ctx);
+            }
+
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_page_selector_list(
     input: *const u8,
     input_len: usize,
