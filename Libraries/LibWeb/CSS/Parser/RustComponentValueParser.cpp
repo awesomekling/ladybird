@@ -1198,6 +1198,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             Discard,
             FlexBasis,
             Image,
+            ImageSetResolution,
             StyleColor,
         };
 
@@ -1205,6 +1206,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListFlexBasis = 1,
             SourceComponentValueListStyleColor = 2,
             SourceComponentValueListImage = 3,
+            SourceComponentValueListImageSetResolution = 4,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1232,6 +1234,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(source_component_values_target);
                 *source_component_values_target = move(source_component_value_builder.root_values);
                 source_component_values_target = nullptr;
+                break;
+            case SourceComponentValueTarget::ImageSetResolution:
+                VERIFY(style_value.has_value());
+                VERIFY(style_value->kind == FFI::CssStyleValueKind::Image);
+                VERIFY(style_value->image_kind == RustImageKind::ImageSet);
+                VERIFY(!style_value->image_set_options.is_empty());
+                style_value->image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
                 break;
             case SourceComponentValueTarget::StyleColor:
                 if (style_color_source_component_value_target) {
@@ -1267,6 +1276,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 source_component_value_target = source_component_values_target
                     ? SourceComponentValueTarget::Image
                     : SourceComponentValueTarget::Discard;
+                return;
+            case SourceComponentValueListImageSetResolution:
+                source_component_value_target = SourceComponentValueTarget::ImageSetResolution;
                 return;
             default:
                 VERIFY_NOT_REACHED();

@@ -11,6 +11,7 @@ const POSITIONAL_VALUE_LIST_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
 const SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS: u8 = 1;
 const SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR: u8 = 2;
 const SOURCE_COMPONENT_VALUE_LIST_IMAGE: u8 = 3;
+const SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION: u8 = 4;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -3708,6 +3709,12 @@ fn callback_image_set_style_value<C, S, E>(
         );
         if !option.image.component_values.is_empty() {
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+        }
+        if !option.resolution_component_values.is_empty() {
+            source_component_value_emitter.emit(
+                SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                &option.resolution_component_values,
+            );
         }
     }
 }

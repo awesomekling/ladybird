@@ -3704,6 +3704,7 @@ pub(super) fn rust_owned_image_set_option(
     parser.index += 1;
 
     let mut resolution = None;
+    let mut resolution_component_values = vec![];
     let mut mime_type = None;
     loop {
         parser.discard_whitespace();
@@ -3716,6 +3717,7 @@ pub(super) fn rust_owned_image_set_option(
                 std::slice::from_ref(component_value),
                 filtered_input_string,
             )?);
+            resolution_component_values.push(component_value.clone());
             parser.index += 1;
             continue;
         }
@@ -3734,6 +3736,7 @@ pub(super) fn rust_owned_image_set_option(
     Some(RustOwnedImageSetOption {
         image,
         resolution,
+        resolution_component_values,
         mime_type,
     })
 }

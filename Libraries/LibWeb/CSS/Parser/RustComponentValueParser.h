@@ -484,6 +484,7 @@ public:
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
         Optional<String> resolution;
+        Vector<ComponentValue> resolution_component_values;
         Optional<String> type;
     };
 

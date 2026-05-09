@@ -1794,7 +1794,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
 
                     RefPtr<StyleValue const> resolution;
-                    if (option.resolution.has_value()) {
+                    if (!option.resolution_component_values.is_empty()) {
+                        TokenStream resolution_tokens { option.resolution_component_values };
+                        resolution = parse_resolution_value(resolution_tokens, infinite_range);
+                        resolution_tokens.discard_whitespace();
+                        if (!resolution || resolution_tokens.has_next_token())
+                            return nullptr;
+                    } else if (option.resolution.has_value()) {
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(*option.resolution, "utf-8"sv);
                         TokenStream resolution_tokens { component_values };
                         resolution = parse_resolution_value(resolution_tokens, infinite_range);

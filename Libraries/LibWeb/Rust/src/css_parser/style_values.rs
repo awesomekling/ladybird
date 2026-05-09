@@ -452,6 +452,7 @@ pub(crate) struct RustOwnedImageSet {
 pub(crate) struct RustOwnedImageSetOption {
     pub(crate) image: RustOwnedImage,
     pub(crate) resolution: Option<String>,
+    pub(crate) resolution_component_values: Vec<ComponentValue>,
     pub(crate) mime_type: Option<String>,
 }
 
