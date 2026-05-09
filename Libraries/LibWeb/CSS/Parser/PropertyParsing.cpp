@@ -2921,6 +2921,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return TransformationStyleValue::create(property_id, transformation.function, move(arguments));
             };
             auto materialize_rust_nested_non_negative_number_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto number_value = materialize_rust_nested_non_negative_number(value))
+                        return number_value;
+                    return materialize_rust_nested_length_percentage(value, non_negative_range);
+                }
                 if (!value.numeric_value.has_value()) {
                     if (auto number_value = parse_rust_source_as_non_negative_number(value.source_or_unit))
                         return number_value;
