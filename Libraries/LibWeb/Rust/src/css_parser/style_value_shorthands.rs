@@ -78,6 +78,7 @@ pub(crate) fn parse_rust_owned_coordinating_value_list_shorthand(
                     &remaining_property_ids,
                     serialized_value.as_bytes(),
                     true,
+                    CssPrimitiveValueOptions::default(),
                 )
             else {
                 return None;

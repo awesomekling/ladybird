@@ -75,28 +75,28 @@ use super::{
     SimpleSelectorSyntax, SyntaxNode, TEXT_DECORATION_LINE_BLINK, TEXT_DECORATION_LINE_LINE_THROUGH,
     TEXT_DECORATION_LINE_OVERLINE, TEXT_DECORATION_LINE_UNDERLINE, TransformFunction, TransformFunctionParameterType,
     auto_keyword, component_values_parse_as_media_feature, component_values_parse_as_mf_value_syntax,
-    component_values_parse_as_property_value_type, component_values_parse_as_syntax,
-    component_values_parse_as_syntax_with_source, component_values_parse_as_value_type, emit_rust_owned_style_value,
-    parse_a_counter_style, parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name,
-    parse_a_dashed_ident, parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings,
-    parse_a_font_language_override, parse_a_font_source, parse_a_font_style, parse_a_font_variant,
-    parse_a_font_variant_alternates, parse_a_font_variant_east_asian, parse_a_font_variant_ligatures,
-    parse_a_font_variant_numeric, parse_a_font_variation_settings, parse_a_keyframe_selector_list,
-    parse_a_keyframes_name, parse_a_layer_name, parse_a_layer_name_list, parse_a_media_query, parse_a_media_test,
-    parse_a_namespace_rule_prelude, parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list,
-    parse_a_supports_feature, parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function,
-    parse_a_value_type, parse_an_if_condition, parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag,
-    parse_anchor_name_or_scope_value, parse_animation_name_value, parse_aspect_ratio_value,
-    parse_background_position_longhand_value, parse_background_size_value, parse_basic_shape_value,
-    parse_border_radius_shorthand_value, parse_border_radius_value, parse_color_function_value,
-    parse_color_scheme_value, parse_color_value, parse_columns_value, parse_contain_value,
-    parse_container_rule_prelude, parse_container_type_value, parse_content_value,
-    parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols, parse_counter_style_negative,
-    parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols, parse_counter_style_system,
-    parse_crop_or_cross, parse_cursor_value, parse_display_value, parse_easing_value, parse_empty_prelude,
-    parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
-    parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
-    parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
+    component_values_parse_as_property_value_type, component_values_parse_as_property_value_type_with_options,
+    component_values_parse_as_syntax, component_values_parse_as_syntax_with_source,
+    component_values_parse_as_value_type, emit_rust_owned_style_value, parse_a_counter_style,
+    parse_a_counter_style_name, parse_a_custom_ident, parse_a_custom_property_name, parse_a_dashed_ident,
+    parse_a_family_name, parse_a_font_family_value, parse_a_font_feature_settings, parse_a_font_language_override,
+    parse_a_font_source, parse_a_font_style, parse_a_font_variant, parse_a_font_variant_alternates,
+    parse_a_font_variant_east_asian, parse_a_font_variant_ligatures, parse_a_font_variant_numeric,
+    parse_a_font_variation_settings, parse_a_keyframe_selector_list, parse_a_keyframes_name, parse_a_layer_name,
+    parse_a_layer_name_list, parse_a_media_query, parse_a_media_test, parse_a_namespace_rule_prelude,
+    parse_a_nonnegative_integer_symbol_pair, parse_a_page_selector_list, parse_a_supports_feature,
+    parse_a_unicode_range, parse_a_unicode_range_list, parse_a_url_function, parse_a_value_type, parse_an_if_condition,
+    parse_an_import_layer, parse_an_import_url, parse_an_opentype_tag, parse_anchor_name_or_scope_value,
+    parse_animation_name_value, parse_aspect_ratio_value, parse_background_position_longhand_value,
+    parse_background_size_value, parse_basic_shape_value, parse_border_radius_shorthand_value,
+    parse_border_radius_value, parse_color_function_value, parse_color_scheme_value, parse_color_value,
+    parse_columns_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
+    parse_content_value, parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols,
+    parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols,
+    parse_counter_style_system, parse_crop_or_cross, parse_cursor_value, parse_display_value, parse_easing_value,
+    parse_empty_prelude, parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value,
+    parse_flex_shorthand_value, parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value,
+    parse_font_shorthand, parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
     parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_template_shorthand,
     parse_grid_track_placement_value, parse_grid_track_size_list_value, parse_image_set_value, parse_layer_shorthand,
     parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
@@ -117,13 +117,14 @@ use super::{
     parse_rust_owned_positive_percentage_descriptor, parse_rust_owned_string_descriptor,
     parse_rust_owned_style_value_for_property, parse_rust_owned_view_timeline_inset_value, parse_scale_value,
     parse_scroll_function_value, parse_scrollbar_gutter_value, parse_shadow_value, parse_shape_outside_value,
-    parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value, parse_style_value_for_property,
-    parse_text_decoration_line_value, parse_text_decoration_value, parse_text_underline_position_value,
-    parse_text_wrap_mode_value, parse_text_wrap_style_value, parse_text_wrap_value, parse_timeline_name_value,
-    parse_timeline_scope_value, parse_touch_action_value, parse_transform_function_value, parse_transform_origin_value,
-    parse_transition_behavior_value, parse_transition_property_value, parse_translate_value, parse_view_function_value,
-    parse_view_timeline_inset_value, parse_view_timeline_inset_value_prefix, parse_view_transition_name_value,
-    parse_white_space_trim_value, parse_will_change_value, strip_whitespace,
+    parse_simple_color_value, parse_string_descriptor, parse_stroke_dasharray_value,
+    parse_style_value_for_property_with_options, parse_text_decoration_line_value, parse_text_decoration_value,
+    parse_text_underline_position_value, parse_text_wrap_mode_value, parse_text_wrap_style_value,
+    parse_text_wrap_value, parse_timeline_name_value, parse_timeline_scope_value, parse_touch_action_value,
+    parse_transform_function_value, parse_transform_origin_value, parse_transition_behavior_value,
+    parse_transition_property_value, parse_translate_value, parse_view_function_value, parse_view_timeline_inset_value,
+    parse_view_timeline_inset_value_prefix, parse_view_transition_name_value, parse_white_space_trim_value,
+    parse_will_change_value, strip_whitespace,
 };
 use crate::css_tokenizer::{self, TokenType};
 use crate::generated_descriptors::{
@@ -1182,11 +1183,20 @@ struct ParsedStyleValue {
 }
 
 fn parse_style_value(property_ids: &[PropertyId], input: &str) -> Option<ParsedStyleValue> {
+    parse_style_value_with_options(property_ids, input, CssPrimitiveValueOptions::default())
+}
+
+fn parse_style_value_with_options(
+    property_ids: &[PropertyId],
+    input: &str,
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<ParsedStyleValue> {
     let property_ids: Vec<u16> = property_ids.iter().map(|property_id| *property_id as u16).collect();
     let mut parsed_value = None;
-    parse_style_value_for_property(
+    parse_style_value_for_property_with_options(
         &property_ids,
         input.as_bytes(),
+        primitive_value_options,
         |kind,
          property_id,
          primitive_kind,
@@ -8705,6 +8715,19 @@ fn parses_primitive_generated_property_value_types() {
         PropertyValueType::TimePercentage,
         b"50%"
     ));
+    assert!(!component_values_parse_as_property_value_type(
+        PropertyValueType::Length,
+        b"64"
+    ));
+    assert!(component_values_parse_as_property_value_type_with_options(
+        PropertyValueType::Length,
+        b"64",
+        CssPrimitiveValueOptions {
+            allow_quirky_length: false,
+            allow_svg_unitless_length: true,
+            allow_svg_unitless_angle: false,
+        }
+    ));
 }
 
 #[test]
@@ -8855,6 +8878,66 @@ fn emits_primitive_generated_dimension_property_value_types() {
             "dpi",
             PropertyValueType::Resolution
         ))
+    );
+}
+
+#[test]
+fn emits_svg_unitless_length_style_values_with_parser_options() {
+    assert_eq!(parse_style_value(&[PropertyId::Width], "64"), None);
+    assert_eq!(
+        parse_style_value_with_options(
+            &[PropertyId::Width],
+            "64",
+            CssPrimitiveValueOptions {
+                allow_quirky_length: false,
+                allow_svg_unitless_length: true,
+                allow_svg_unitless_angle: false,
+            }
+        ),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Primitive,
+            property_id: PropertyId::Width,
+            primitive_kind: CssPrimitiveValueKind::Length,
+            numeric_value: Some(64.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: "px".to_string(),
+            value_type: "Length".to_string(),
+        })
+    );
+}
+
+#[test]
+fn emits_dimension_containing_calc_as_length_when_number_is_also_accepted() {
+    assert_eq!(
+        parse_style_value(&[PropertyId::StrokeWidth], "calc(2px)"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::MathFunction,
+            property_id: PropertyId::StrokeWidth,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "calc(2px)".to_string(),
+            value_type: "Length".to_string(),
+        })
+    );
+}
+
+#[test]
+fn emits_percentage_containing_math_as_length_when_percentages_resolve_to_length() {
+    assert_eq!(
+        parse_style_value(&[PropertyId::StrokeWidth], "random(10%, 30%)"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::MathFunction,
+            property_id: PropertyId::StrokeWidth,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "random(10%, 30%)".to_string(),
+            value_type: "Length".to_string(),
+        })
     );
 }
 

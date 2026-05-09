@@ -1114,7 +1114,8 @@ Optional<RustComponentValueParser::GeneratedPropertyValue> RustComponentValuePar
     return generated_property_value;
 }
 
-Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::parse_style_value_for_property(ReadonlySpan<PropertyID> property_ids, StringView input)
+Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::parse_style_value_for_property(ReadonlySpan<PropertyID> property_ids, StringView input,
+    bool allow_quirky_length, bool allow_svg_unitless_length, bool allow_svg_unitless_angle)
 {
     Vector<u16, 4> ffi_property_ids;
     for (auto property_id : property_ids)
@@ -1127,6 +1128,9 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         ffi_property_ids.size(),
         input_bytes.data(),
         input_bytes.size(),
+        allow_quirky_length,
+        allow_svg_unitless_length,
+        allow_svg_unitless_angle,
         &style_value,
         [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, bool has_secondary_numeric_value, double secondary_numeric_value, u8 color_red, u8 color_green, u8 color_blue, u8 color_alpha, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
             auto& style_value = *static_cast<Optional<RustStyleValue>*>(raw_style_value);

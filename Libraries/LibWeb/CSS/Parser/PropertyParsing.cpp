@@ -172,6 +172,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FontFamily:
     case PropertyID::FontFeatureSettings:
     case PropertyID::FontLanguageOverride:
+    case PropertyID::FontSize:
     case PropertyID::FontVariant:
     case PropertyID::FontVariationSettings:
     case PropertyID::FontWeight:
@@ -191,6 +192,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::GridTemplateAreas:
     case PropertyID::GridTemplateColumns:
     case PropertyID::GridTemplateRows:
+    case PropertyID::Height:
     case PropertyID::InlineSize:
     case PropertyID::InsetBlockEnd:
     case PropertyID::InsetBlockStart:
@@ -287,10 +289,12 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::StopOpacity:
     case PropertyID::Stroke:
     case PropertyID::StrokeDasharray:
+    case PropertyID::StrokeDashoffset:
     case PropertyID::StrokeLinecap:
     case PropertyID::StrokeLinejoin:
     case PropertyID::StrokeMiterlimit:
     case PropertyID::StrokeOpacity:
+    case PropertyID::StrokeWidth:
     case PropertyID::TabSize:
     case PropertyID::TableLayout:
     case PropertyID::TextAlign:
@@ -333,8 +337,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::WhiteSpaceCollapse:
     case PropertyID::WhiteSpaceTrim:
     case PropertyID::Widows:
+    case PropertyID::Width:
     case PropertyID::WillChange:
     case PropertyID::WordBreak:
+    case PropertyID::WordSpacing:
     case PropertyID::WritingMode:
     case PropertyID::ZIndex:
         return true;
@@ -556,7 +562,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                   auto component_value_source = peek_token.original_source_text();
                   return component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
               }();
-        if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property(property_ids, source.bytes_as_string_view()); rust_style_value.has_value()) {
+        if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property(
+                property_ids,
+                source.bytes_as_string_view(),
+                context_allows_quirky_length(),
+                is_parsing_svg_presentation_attribute(),
+                is_parsing_svg_presentation_attribute());
+            rust_style_value.has_value()) {
             auto parse_rust_numeric_value = [&]() -> RefPtr<StyleValue const> {
                 if (!rust_style_value->value_type.has_value())
                     return nullptr;

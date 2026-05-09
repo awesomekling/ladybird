@@ -10,13 +10,26 @@ pub(crate) fn parse_rust_owned_style_value_for_property(
     property_ids: &[u16],
     filtered_input: &[u8],
 ) -> RustOwnedStyleValueParseResult {
-    parse_rust_owned_style_value_for_property_with_mode(property_ids, filtered_input, false)
+    parse_rust_owned_style_value_for_property_with_options(
+        property_ids,
+        filtered_input,
+        CssPrimitiveValueOptions::default(),
+    )
+}
+
+pub(crate) fn parse_rust_owned_style_value_for_property_with_options(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> RustOwnedStyleValueParseResult {
+    parse_rust_owned_style_value_for_property_with_mode(property_ids, filtered_input, false, primitive_value_options)
 }
 
 pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
     property_ids: &[u16],
     filtered_input: &[u8],
     is_coordinating_shorthand_item: bool,
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> RustOwnedStyleValueParseResult {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -54,7 +67,9 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
         {
             continue;
         }
-        if let Some(value) = parse_rust_owned_property_specific_longhand_value(property_id, filtered_input) {
+        if let Some(value) =
+            parse_rust_owned_property_specific_longhand_value(property_id, filtered_input, primitive_value_options)
+        {
             return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue { property_id, value });
         }
     }
@@ -140,17 +155,22 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                     _ => false,
                 }
             } else {
-                component_values_parse_as_property_value_type(*value_type, filtered_input)
+                component_values_parse_as_property_value_type_with_options(
+                    *value_type,
+                    filtered_input,
+                    primitive_value_options,
+                )
             };
             if !value_type_matches {
                 continue;
             }
 
-            return RustOwnedStyleValueParseResult::Parsed(parse_rust_owned_generated_longhand_value(
+            return RustOwnedStyleValueParseResult::Parsed(parse_rust_owned_generated_longhand_value_with_options(
                 property_id,
                 *value_type,
                 filtered_input,
                 component_values,
+                primitive_value_options,
             ));
         }
     }
@@ -283,6 +303,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
             | PropertyId::FontLanguageOverride
+            | PropertyId::FontSize
             | PropertyId::FontVariant
             | PropertyId::FontVariationSettings
             | PropertyId::FontWeight
@@ -302,6 +323,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            | PropertyId::Height
             | PropertyId::InlineSize
             | PropertyId::InsetBlockEnd
             | PropertyId::InsetBlockStart
@@ -398,10 +420,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::StopOpacity
             | PropertyId::Stroke
             | PropertyId::StrokeDasharray
+            | PropertyId::StrokeDashoffset
             | PropertyId::StrokeLinecap
             | PropertyId::StrokeLinejoin
             | PropertyId::StrokeMiterlimit
             | PropertyId::StrokeOpacity
+            | PropertyId::StrokeWidth
             | PropertyId::TabSize
             | PropertyId::TableLayout
             | PropertyId::TextAlign
@@ -444,8 +468,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::WhiteSpaceCollapse
             | PropertyId::WhiteSpaceTrim
             | PropertyId::Widows
+            | PropertyId::Width
             | PropertyId::WillChange
             | PropertyId::WordBreak
+            | PropertyId::WordSpacing
             | PropertyId::WritingMode
             | PropertyId::ZIndex
     )
@@ -454,6 +480,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
 fn parse_rust_owned_property_specific_longhand_value(
     property_id: PropertyId,
     filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> Option<RustOwnedStyleValueKind> {
     match property_id {
         PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
@@ -468,7 +495,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::InsetBlockEnd
         | PropertyId::InsetInline
         | PropertyId::InsetInlineStart
-        | PropertyId::InsetInlineEnd => rust_owned_inset_property_style_value_kind(property_id, filtered_input),
+        | PropertyId::InsetInlineEnd => {
+            rust_owned_inset_property_style_value_kind(property_id, filtered_input, primitive_value_options)
+        }
         PropertyId::BackgroundSize | PropertyId::MaskSize => {
             rust_owned_background_size_style_value_kind(filtered_input)
         }
@@ -529,8 +558,10 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::FlexBasis
         | PropertyId::FlexGrow
         | PropertyId::FlexShrink
+        | PropertyId::FontSize
         | PropertyId::FontWeight
         | PropertyId::FontWidth
+        | PropertyId::Height
         | PropertyId::InlineSize
         | PropertyId::LetterSpacing
         | PropertyId::MarginBlockEnd
@@ -571,14 +602,22 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::StopColor
         | PropertyId::StopOpacity
         | PropertyId::Stroke
+        | PropertyId::StrokeDashoffset
         | PropertyId::StrokeMiterlimit
         | PropertyId::StrokeOpacity
+        | PropertyId::StrokeWidth
         | PropertyId::TabSize
         | PropertyId::TextDecorationColor
         | PropertyId::TextDecorationThickness
         | PropertyId::TextUnderlineOffset
         | PropertyId::Widows
-        | PropertyId::ZIndex => rust_owned_generated_property_specific_style_value_kind(property_id, filtered_input),
+        | PropertyId::Width
+        | PropertyId::WordSpacing
+        | PropertyId::ZIndex => rust_owned_generated_property_specific_style_value_kind(
+            property_id,
+            filtered_input,
+            primitive_value_options,
+        ),
         PropertyId::Columns => rust_owned_columns_style_value_kind(filtered_input),
         PropertyId::Content => rust_owned_content_style_value_kind(filtered_input),
         PropertyId::CounterIncrement => rust_owned_counter_definitions_style_value_kind(filtered_input, false, 1),
@@ -671,6 +710,7 @@ fn parse_rust_owned_property_specific_longhand_value(
 fn rust_owned_inset_property_style_value_kind(
     property_id: PropertyId,
     filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> Option<RustOwnedStyleValueKind> {
     // https://drafts.csswg.org/css-position-3/#insets
     // Value: auto | <length-percentage>
@@ -707,11 +747,22 @@ fn rust_owned_inset_property_style_value_kind(
         if !property_accepts_value_type(property_id, value_type) {
             continue;
         }
-        if !component_values_parse_as_property_value_type(value_type, filtered_input) {
+        if !component_values_parse_as_property_value_type_with_options(
+            value_type,
+            filtered_input,
+            primitive_value_options,
+        ) {
             continue;
         }
         return Some(
-            parse_rust_owned_generated_longhand_value(property_id, value_type, filtered_input, component_values).value,
+            parse_rust_owned_generated_longhand_value_with_options(
+                property_id,
+                value_type,
+                filtered_input,
+                component_values,
+                primitive_value_options,
+            )
+            .value,
         );
     }
 
@@ -721,43 +772,98 @@ fn rust_owned_inset_property_style_value_kind(
 fn rust_owned_generated_property_specific_style_value_kind(
     property_id: PropertyId,
     filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> Option<RustOwnedStyleValueKind> {
     let (mut parser, _) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let component_values = strip_whitespace(&component_values);
 
-    // AD-HOC: Prefer the <length> arm for tab-size math expressions containing a dimension.
-    // The generated grammar accepts calc(10px) as <number>, but the CSS parser has
-    // historically materialized it as a length.
-    if property_id == PropertyId::TabSize
-        && component_values_contain_dimension(component_values)
-        && component_values_parse_as_property_value_type(PropertyValueType::Length, filtered_input)
-        && component_values_satisfy_property_numeric_range(property_id, PropertyValueType::Length, component_values)
+    // AD-HOC: Prefer the <length> arm for math expressions containing a dimension.
+    // The generated grammar accepts calc(10px) as <number> for properties that
+    // accept both <number> and <length>, but the CSS parser has historically
+    // materialized it as a length.
+    if matches!(
+        property_id,
+        PropertyId::StrokeDashoffset | PropertyId::StrokeWidth | PropertyId::TabSize
+    ) && component_values_contain_dimension(component_values)
+        && component_values_parse_as_property_value_type_with_options(
+            PropertyValueType::Length,
+            filtered_input,
+            primitive_value_options,
+        )
+        && component_values_satisfy_property_numeric_range(
+            property_id,
+            PropertyValueType::Length,
+            component_values,
+            primitive_value_options,
+        )
     {
         return Some(
-            parse_rust_owned_generated_longhand_value(
+            parse_rust_owned_generated_longhand_value_with_options(
                 property_id,
                 PropertyValueType::Length,
                 filtered_input,
                 component_values,
+                primitive_value_options,
+            )
+            .value,
+        );
+    }
+
+    // AD-HOC: Prefer the <length> arm for math expressions containing a
+    // percentage when the property's percentages resolve against a length.
+    // The generated grammar accepts random(10%, 30%) as <number> for
+    // properties that accept both <number> and <percentage>, but the CSS parser
+    // has historically materialized it through length-percentage parsing.
+    if matches!(property_id, PropertyId::StrokeDashoffset | PropertyId::StrokeWidth)
+        && component_values_contain_percentage(component_values)
+        && component_values_parse_as_property_value_type_with_options(
+            PropertyValueType::Length,
+            filtered_input,
+            primitive_value_options,
+        )
+        && component_values_satisfy_property_numeric_range(
+            property_id,
+            PropertyValueType::Length,
+            component_values,
+            primitive_value_options,
+        )
+    {
+        return Some(
+            parse_rust_owned_generated_longhand_value_with_options(
+                property_id,
+                PropertyValueType::Length,
+                filtered_input,
+                component_values,
+                primitive_value_options,
             )
             .value,
         );
     }
 
     if property_id == PropertyId::FontWeight
-        && component_values_parse_as_property_value_type(PropertyValueType::Number, filtered_input)
-        && component_values_satisfy_property_numeric_range(property_id, PropertyValueType::Number, component_values)
+        && component_values_parse_as_property_value_type_with_options(
+            PropertyValueType::Number,
+            filtered_input,
+            primitive_value_options,
+        )
+        && component_values_satisfy_property_numeric_range(
+            property_id,
+            PropertyValueType::Number,
+            component_values,
+            primitive_value_options,
+        )
     {
         // AD-HOC: Keep calculated font-weight numbers on the plain <number>
         // path so variable-dependent math keeps the same computed-value
         // behavior as the existing C++ parser.
         return Some(
-            parse_rust_owned_generated_longhand_value(
+            parse_rust_owned_generated_longhand_value_with_options(
                 property_id,
                 PropertyValueType::Number,
                 filtered_input,
                 component_values,
+                primitive_value_options,
             )
             .value,
         );
@@ -767,14 +873,30 @@ fn rust_owned_generated_property_specific_style_value_kind(
         if !property_accepts_value_type(property_id, *value_type) {
             continue;
         }
-        if !component_values_parse_as_property_value_type(*value_type, filtered_input) {
+        if !component_values_parse_as_property_value_type_with_options(
+            *value_type,
+            filtered_input,
+            primitive_value_options,
+        ) {
             continue;
         }
-        if !component_values_satisfy_property_numeric_range(property_id, *value_type, component_values) {
+        if !component_values_satisfy_property_numeric_range(
+            property_id,
+            *value_type,
+            component_values,
+            primitive_value_options,
+        ) {
             continue;
         }
         return Some(
-            parse_rust_owned_generated_longhand_value(property_id, *value_type, filtered_input, component_values).value,
+            parse_rust_owned_generated_longhand_value_with_options(
+                property_id,
+                *value_type,
+                filtered_input,
+                component_values,
+                primitive_value_options,
+            )
+            .value,
         );
     }
 
@@ -823,7 +945,12 @@ fn rust_owned_generated_value_list_style_value_kind(
             if !component_values_parse_as_property_value_type(*value_type, source.as_bytes()) {
                 continue;
             }
-            if !component_values_satisfy_property_numeric_range(property_id, *value_type, component_values) {
+            if !component_values_satisfy_property_numeric_range(
+                property_id,
+                *value_type,
+                component_values,
+                CssPrimitiveValueOptions::default(),
+            ) {
                 continue;
             }
             matching_value_type = Some(*value_type);
@@ -845,8 +972,10 @@ fn component_values_satisfy_property_numeric_range(
     property_id: PropertyId,
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> bool {
-    let Some(mut numeric_value) = style_value_numeric_value(value_type, component_values) else {
+    let Some(mut numeric_value) = style_value_numeric_value(value_type, component_values, primitive_value_options)
+    else {
         return true;
     };
     numeric_value = normalize_css_numeric_token_value(value_type, numeric_value);
@@ -870,6 +999,18 @@ fn component_values_contain_dimension(component_values: &[ComponentValue]) -> bo
     })
 }
 
+fn component_values_contain_percentage(component_values: &[ComponentValue]) -> bool {
+    component_values.iter().any(|component_value| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Percentage { .. },
+            ..
+        }) => true,
+        ComponentValue::Function(function) => component_values_contain_percentage(&function.value),
+        ComponentValue::SimpleBlock(block) => component_values_contain_percentage(&block.value),
+        _ => false,
+    })
+}
+
 fn normalize_css_numeric_token_value(value_type: PropertyValueType, numeric_value: f64) -> f64 {
     // CSS numeric token payloads are ultimately materialized through C++ float-backed value types.
     // Keep Rust-owned primitive payloads inside the same boundary before range checks and FFI.
@@ -885,6 +1026,22 @@ pub(super) fn parse_rust_owned_generated_longhand_value(
     value_type: PropertyValueType,
     filtered_input: &[u8],
     component_values: &[ComponentValue],
+) -> RustOwnedStyleValue {
+    parse_rust_owned_generated_longhand_value_with_options(
+        property_id,
+        value_type,
+        filtered_input,
+        component_values,
+        CssPrimitiveValueOptions::default(),
+    )
+}
+
+pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
+    property_id: PropertyId,
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+    component_values: &[ComponentValue],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> RustOwnedStyleValue {
     if value_type == PropertyValueType::Color
         && let [component_value] = component_values
@@ -1158,12 +1315,12 @@ pub(super) fn parse_rust_owned_generated_longhand_value(
             GeneratedValueTypeStyleValueKind::CustomIdent => CssPrimitiveValueKind::CustomIdent,
         }
     } else {
-        style_value_primitive_kind(value_type, component_values)
+        style_value_primitive_kind(value_type, component_values, primitive_value_options)
     };
     let numeric_value = generated_style_value
         .as_ref()
         .and_then(|style_value| style_value.numeric_value)
-        .or_else(|| style_value_numeric_value(value_type, component_values))
+        .or_else(|| style_value_numeric_value(value_type, component_values, primitive_value_options))
         .map(|numeric_value| normalize_css_numeric_token_value(value_type, numeric_value));
     let secondary_numeric_value = style_value_secondary_numeric_value(value_type, component_values);
     let value = if let Some(generated_style_value) = generated_style_value.as_ref()
@@ -1187,7 +1344,7 @@ pub(super) fn parse_rust_owned_generated_longhand_value(
             | CssPrimitiveValueKind::Resolution
             | CssPrimitiveValueKind::Time
     ) {
-        style_value_dimension_unit(value_type, component_values)
+        style_value_dimension_unit(value_type, component_values, primitive_value_options)
             .unwrap_or("")
             .to_string()
     } else {
@@ -1447,7 +1604,11 @@ fn component_values_parse_as_anchor_fallback(component_values: &[ComponentValue]
         )
 }
 
-fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<f64> {
+fn style_value_numeric_value(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<f64> {
     if value_type == PropertyValueType::Ratio {
         return style_value_ratio_values(value_type, component_values).map(|(numerator, _)| numerator);
     }
@@ -1486,9 +1647,11 @@ fn style_value_numeric_value(value_type: PropertyValueType, component_values: &[
             | PropertyValueType::TimePercentage,
         ) => Some(number.value()),
         (TokenType::Number { number }, PropertyValueType::Length | PropertyValueType::LengthPercentage)
-            if number.value() == 0.0 =>
+            if number.value() == 0.0
+                || primitive_value_options.allow_quirky_length
+                || primitive_value_options.allow_svg_unitless_length =>
         {
-            Some(0.0)
+            Some(number.value())
         }
         _ => None,
     }
@@ -1560,7 +1723,11 @@ fn style_value_ratio_has_denominator(value_type: PropertyValueType, component_va
         && component_values_parse_as_ratio_with_denominator(component_values)
 }
 
-fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &[ComponentValue]) -> Option<&str> {
+fn style_value_dimension_unit(
+    value_type: PropertyValueType,
+    component_values: &[ComponentValue],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<&str> {
     let [ComponentValue::PreservedToken(token)] = component_values else {
         return None;
     };
@@ -1580,7 +1747,9 @@ fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &
             | PropertyValueType::TimePercentage,
         ) => Some(unit),
         (TokenType::Number { number }, PropertyValueType::Length | PropertyValueType::LengthPercentage)
-            if number.value() == 0.0 =>
+            if number.value() == 0.0
+                || primitive_value_options.allow_quirky_length
+                || primitive_value_options.allow_svg_unitless_length =>
         {
             Some("px")
         }
@@ -1591,6 +1760,7 @@ fn style_value_dimension_unit(value_type: PropertyValueType, component_values: &
 fn style_value_primitive_kind(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> CssPrimitiveValueKind {
     if value_type == PropertyValueType::Ratio {
         return if style_value_ratio_values(value_type, component_values).is_some() {
@@ -1607,9 +1777,9 @@ fn style_value_primitive_kind(
     match value_type {
         PropertyValueType::Integer => parse_integer_value_prefix(component_value),
         PropertyValueType::Number => parse_number_value_prefix(component_value),
-        PropertyValueType::Angle => parse_angle_value_prefix(component_value, CssPrimitiveValueOptions::default()),
+        PropertyValueType::Angle => parse_angle_value_prefix(component_value, primitive_value_options),
         PropertyValueType::AnglePercentage => {
-            match parse_angle_value_prefix(component_value, CssPrimitiveValueOptions::default()) {
+            match parse_angle_value_prefix(component_value, primitive_value_options) {
                 CssPrimitiveValueKind::Angle => CssPrimitiveValueKind::Angle,
                 _ => parse_percentage_value_prefix(component_value),
             }
@@ -1620,9 +1790,9 @@ fn style_value_primitive_kind(
             CssPrimitiveValueKind::Frequency => CssPrimitiveValueKind::Frequency,
             _ => parse_percentage_value_prefix(component_value),
         },
-        PropertyValueType::Length => parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default()),
+        PropertyValueType::Length => parse_length_value_prefix(component_value, primitive_value_options),
         PropertyValueType::LengthPercentage => {
-            match parse_length_value_prefix(component_value, CssPrimitiveValueOptions::default()) {
+            match parse_length_value_prefix(component_value, primitive_value_options) {
                 CssPrimitiveValueKind::Length => CssPrimitiveValueKind::Length,
                 _ => parse_percentage_value_prefix(component_value),
             }
@@ -1718,6 +1888,18 @@ pub(super) fn component_values_parse_as_property_value_type(
     value_type: PropertyValueType,
     filtered_input: &[u8],
 ) -> bool {
+    component_values_parse_as_property_value_type_with_options(
+        value_type,
+        filtered_input,
+        CssPrimitiveValueOptions::default(),
+    )
+}
+
+pub(super) fn component_values_parse_as_property_value_type_with_options(
+    value_type: PropertyValueType,
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> bool {
     match value_type {
         PropertyValueType::Anchor => rust_owned_anchor_function_style_value_kind(filtered_input).is_some(),
         PropertyValueType::Color => parse_color_value(filtered_input, false) == CssColorValueKind::Valid,
@@ -1739,11 +1921,8 @@ pub(super) fn component_values_parse_as_property_value_type(
         }
         PropertyValueType::Ratio => parse_ratio_value_prefix(filtered_input).kind == CssRatioValueKind::Valid,
         PropertyValueType::OpacityValue => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Opacity,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Opacity
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Opacity, primitive_value_options)
+                == CssPrimitiveValueKind::Opacity
         }
         PropertyValueType::OpentypeTag => parse_an_opentype_tag(filtered_input, |_| {}),
         PropertyValueType::Rect => parse_rect_value(filtered_input) == CssRectValueKind::Valid,
@@ -1751,11 +1930,8 @@ pub(super) fn component_values_parse_as_property_value_type(
             parse_scroll_function_value(filtered_input).kind == CssScrollFunctionValueKind::Valid
         }
         PropertyValueType::String => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::String,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::String
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::String, primitive_value_options)
+                == CssPrimitiveValueKind::String
         }
         PropertyValueType::TransformList => parse_transform_list_value(filtered_input),
         // AD-HOC: Keep <url> on the C++ fallback path until Rust owns <image>
@@ -1769,114 +1945,87 @@ pub(super) fn component_values_parse_as_property_value_type(
             parse_view_timeline_inset_value(filtered_input).kind == CssViewTimelineInsetValueKind::Valid
         }
         PropertyValueType::Integer => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Integer,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Integer
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Integer, primitive_value_options)
+                == CssPrimitiveValueKind::Integer
         }
         PropertyValueType::Number => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Number,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Number
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Number, primitive_value_options)
+                == CssPrimitiveValueKind::Number
         }
         PropertyValueType::Angle => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Angle,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Angle
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Angle, primitive_value_options)
+                == CssPrimitiveValueKind::Angle
         }
         PropertyValueType::AnglePercentage => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Angle,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Angle
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Angle, primitive_value_options)
+                == CssPrimitiveValueKind::Angle
                 || parse_primitive_value(
                     filtered_input,
                     CssPrimitiveValueType::Percentage,
-                    CssPrimitiveValueOptions::default(),
+                    primitive_value_options,
                 ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::Flex => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Flex,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Flex
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Flex, primitive_value_options)
+                == CssPrimitiveValueKind::Flex
         }
         PropertyValueType::Frequency => {
             parse_primitive_value(
                 filtered_input,
                 CssPrimitiveValueType::Frequency,
-                CssPrimitiveValueOptions::default(),
+                primitive_value_options,
             ) == CssPrimitiveValueKind::Frequency
         }
         PropertyValueType::FrequencyPercentage => {
             parse_primitive_value(
                 filtered_input,
                 CssPrimitiveValueType::Frequency,
-                CssPrimitiveValueOptions::default(),
+                primitive_value_options,
             ) == CssPrimitiveValueKind::Frequency
                 || parse_primitive_value(
                     filtered_input,
                     CssPrimitiveValueType::Percentage,
-                    CssPrimitiveValueOptions::default(),
+                    primitive_value_options,
                 ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::Length => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Length,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Length
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Length, primitive_value_options)
+                == CssPrimitiveValueKind::Length
         }
         PropertyValueType::LengthPercentage => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Length,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Length
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Length, primitive_value_options)
+                == CssPrimitiveValueKind::Length
                 || parse_primitive_value(
                     filtered_input,
                     CssPrimitiveValueType::Percentage,
-                    CssPrimitiveValueOptions::default(),
+                    primitive_value_options,
                 ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::Resolution => {
             parse_primitive_value(
                 filtered_input,
                 CssPrimitiveValueType::Resolution,
-                CssPrimitiveValueOptions::default(),
+                primitive_value_options,
             ) == CssPrimitiveValueKind::Resolution
         }
         PropertyValueType::Time => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Time,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Time
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Time, primitive_value_options)
+                == CssPrimitiveValueKind::Time
         }
         PropertyValueType::TimePercentage => {
-            parse_primitive_value(
-                filtered_input,
-                CssPrimitiveValueType::Time,
-                CssPrimitiveValueOptions::default(),
-            ) == CssPrimitiveValueKind::Time
+            parse_primitive_value(filtered_input, CssPrimitiveValueType::Time, primitive_value_options)
+                == CssPrimitiveValueKind::Time
                 || parse_primitive_value(
                     filtered_input,
                     CssPrimitiveValueType::Percentage,
-                    CssPrimitiveValueOptions::default(),
+                    primitive_value_options,
                 ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::Percentage => {
             parse_primitive_value(
                 filtered_input,
                 CssPrimitiveValueType::Percentage,
-                CssPrimitiveValueOptions::default(),
+                primitive_value_options,
             ) == CssPrimitiveValueKind::Percentage
         }
         PropertyValueType::FontKerningValue => {

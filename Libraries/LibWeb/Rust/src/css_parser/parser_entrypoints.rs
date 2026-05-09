@@ -87,8 +87,25 @@ pub(crate) fn parse_style_value_for_property<C>(property_ids: &[u16], filtered_i
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
+    parse_style_value_for_property_with_options(
+        property_ids,
+        filtered_input,
+        CssPrimitiveValueOptions::default(),
+        &mut callback,
+    )
+}
+
+pub(crate) fn parse_style_value_for_property_with_options<C>(
+    property_ids: &[u16],
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+    mut callback: C,
+) -> bool
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
     let RustOwnedStyleValueParseResult::Parsed(style_value) =
-        parse_rust_owned_style_value_for_property(property_ids, filtered_input)
+        parse_rust_owned_style_value_for_property_with_options(property_ids, filtered_input, primitive_value_options)
     else {
         return false;
     };

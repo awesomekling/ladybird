@@ -651,6 +651,9 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
     property_ids_len: usize,
     input: *const u8,
     input_len: usize,
+    allow_quirky_length: bool,
+    allow_svg_unitless_length: bool,
+    allow_svg_unitless_angle: bool,
     ctx: *mut c_void,
     callback: unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -680,9 +683,14 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                 return false;
             };
 
-            css_parser::parse_style_value_for_property(
+            css_parser::parse_style_value_for_property_with_options(
                 property_ids,
                 input,
+                css_parser::CssPrimitiveValueOptions {
+                    allow_quirky_length,
+                    allow_svg_unitless_length,
+                    allow_svg_unitless_angle,
+                },
                 |kind,
                  property_id,
                  primitive_kind,
