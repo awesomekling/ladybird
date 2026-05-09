@@ -581,7 +581,14 @@ where
                 RustOwnedPageSizeDescriptor::Lengths(lengths) => {
                     kind_callback(CssDescriptorResultKind::PageSizeLengths);
                     for length in &lengths {
-                        source_callback(default_order, length, false, CssPrimitiveValueKind::Invalid, false, 0.0);
+                        source_callback(
+                            default_order,
+                            length.source_or_unit(),
+                            false,
+                            length.primitive_kind(),
+                            length.has_numeric_value(),
+                            length.numeric_value(),
+                        );
                     }
                 }
                 RustOwnedPageSizeDescriptor::PageSizeAndOrientation { page_size, orientation } => {

@@ -46,8 +46,8 @@ use super::{
     RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
     RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
-    RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDisplay,
-    RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
+    RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDescriptorPrimitiveValue,
+    RustOwnedDisplay, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
     RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
     RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontShorthandItem, RustOwnedFontStyle,
     RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGradientKind,
@@ -8309,8 +8309,16 @@ fn parses_rust_owned_page_size_descriptors() {
     assert_eq!(
         parse_rust_owned_page_size_descriptor("8.5in 11in".as_bytes()),
         Some(RustOwnedPageSizeDescriptor::Lengths(vec![
-            "8.5in".to_string(),
-            "11in".to_string(),
+            RustOwnedDescriptorPrimitiveValue {
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(8.5),
+                source_or_unit: "in".to_string(),
+            },
+            RustOwnedDescriptorPrimitiveValue {
+                primitive_kind: CssPrimitiveValueKind::Length,
+                numeric_value: Some(11.0),
+                source_or_unit: "in".to_string(),
+            },
         ]))
     );
     assert_eq!(

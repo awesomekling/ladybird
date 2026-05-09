@@ -585,19 +585,45 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     if (page_size_descriptor->kind == FFI::CssDescriptorResultKind::PageSizeLengths) {
                         VERIFY(page_size_descriptor->items.size() == 1 || page_size_descriptor->items.size() == 2);
 
-                        auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->items[0].source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> first_tokens { first_component_values };
-                        auto first_length = parse_length_value(first_tokens, non_negative_range);
-                        first_tokens.discard_whitespace();
-                        if (!first_length || first_tokens.has_next_token())
+                        auto const& first_source = page_size_descriptor->items[0];
+                        auto first_length = [&]() -> RefPtr<StyleValue const> {
+                            if (first_source.primitive_kind == FFI::CssPrimitiveValueKind::Length && first_source.has_numeric_value) {
+                                auto length_unit = string_to_length_unit(first_source.source);
+                                if (!length_unit.has_value())
+                                    return nullptr;
+                                return LengthStyleValue::create(Length(first_source.numeric_value, *length_unit));
+                            }
+
+                            auto first_component_values = RustComponentValueParser::parse_a_list_of_component_values(first_source.source.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream<ComponentValue> first_tokens { first_component_values };
+                            auto first_length = parse_length_value(first_tokens, non_negative_range);
+                            first_tokens.discard_whitespace();
+                            if (!first_length || first_tokens.has_next_token())
+                                return nullptr;
+                            return first_length.release_nonnull();
+                        }();
+                        if (!first_length)
                             return nullptr;
 
                         if (page_size_descriptor->items.size() == 2) {
-                            auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(page_size_descriptor->items[1].source.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream<ComponentValue> second_tokens { second_component_values };
-                            auto second_length = parse_length_value(second_tokens, non_negative_range);
-                            second_tokens.discard_whitespace();
-                            if (!second_length || second_tokens.has_next_token())
+                            auto const& second_source = page_size_descriptor->items[1];
+                            auto second_length = [&]() -> RefPtr<StyleValue const> {
+                                if (second_source.primitive_kind == FFI::CssPrimitiveValueKind::Length && second_source.has_numeric_value) {
+                                    auto length_unit = string_to_length_unit(second_source.source);
+                                    if (!length_unit.has_value())
+                                        return nullptr;
+                                    return LengthStyleValue::create(Length(second_source.numeric_value, *length_unit));
+                                }
+
+                                auto second_component_values = RustComponentValueParser::parse_a_list_of_component_values(second_source.source.bytes_as_string_view(), "utf-8"sv);
+                                TokenStream<ComponentValue> second_tokens { second_component_values };
+                                auto second_length = parse_length_value(second_tokens, non_negative_range);
+                                second_tokens.discard_whitespace();
+                                if (!second_length || second_tokens.has_next_token())
+                                    return nullptr;
+                                return second_length.release_nonnull();
+                            }();
+                            if (!second_length)
                                 return nullptr;
                             return StyleValueList::create(StyleValueVector { first_length.release_nonnull(), second_length.release_nonnull() }, StyleValueList::Separator::Space);
                         }
