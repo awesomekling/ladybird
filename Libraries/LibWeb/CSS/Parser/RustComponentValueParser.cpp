@@ -2716,6 +2716,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 enum : u8 {
                     Auto,
                     LengthPercentage,
+                    InsetCount,
                 };
 
                 if (!style_value.has_value())
@@ -2725,9 +2726,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == Auto)
+                if (color_red == InsetCount) {
+                    style_value->view_timeline_inset_counts.append(color_green);
+                } else if (color_red == Auto) {
                     style_value->view_timeline_insets.append({ .is_auto = true });
-                else {
+                } else {
                     VERIFY(color_red == LengthPercentage);
                     style_value->view_timeline_insets.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
                 }

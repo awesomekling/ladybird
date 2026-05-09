@@ -183,7 +183,7 @@ pub(crate) struct RustOwnedScrollFunction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedViewTimelineInset {
-    pub(crate) values: Vec<RustOwnedNestedPrimitiveValue>,
+    pub(crate) insets: Vec<Vec<RustOwnedNestedPrimitiveValue>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

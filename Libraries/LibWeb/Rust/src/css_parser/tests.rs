@@ -3287,7 +3287,7 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::ViewTimelineInset,
             value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
-                values: vec![
+                insets: vec![vec![
                     RustOwnedNestedPrimitiveValue::Length {
                         value: 1.0,
                         unit: "px".to_string(),
@@ -3296,6 +3296,27 @@ fn parses_style_values_with_rust_owned_ast() {
                         value: 2.0,
                         unit: "px".to_string(),
                     },
+                ]],
+            }),
+        })
+    );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::ViewTimelineInset], "1px 2px, auto"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::ViewTimelineInset,
+            value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
+                insets: vec![
+                    vec![
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 1.0,
+                            unit: "px".to_string(),
+                        },
+                        RustOwnedNestedPrimitiveValue::Length {
+                            value: 2.0,
+                            unit: "px".to_string(),
+                        },
+                    ],
+                    vec![auto_keyword()],
                 ],
             }),
         })
@@ -3326,7 +3347,7 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::ViewTimelineInset,
             value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
-                values: vec![
+                insets: vec![vec![
                     RustOwnedNestedPrimitiveValue::Length {
                         value: 1.0,
                         unit: "px".to_string(),
@@ -3335,7 +3356,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         value: 2.0,
                         unit: "px".to_string(),
                     },
-                ],
+                ]],
             }),
         })
     );
@@ -8273,14 +8294,27 @@ fn parses_view_timeline_inset_values() {
     assert_eq!(parse_view_timeline_inset("calc(1px + 2px) 5%").count, 2);
     assert_eq!(
         parse_rust_owned_view_timeline_inset_value("calc(1px + 2px) 5%".as_bytes()),
-        Some(vec![
+        Some(vec![vec![
             RustOwnedNestedPrimitiveValue::Source("calc(1px + 2px)".to_string()),
             RustOwnedNestedPrimitiveValue::Percentage(5.0),
-        ])
+        ]])
     );
     assert_eq!(
         parse_rust_owned_view_timeline_inset_value("10% auto".as_bytes()),
-        Some(vec![RustOwnedNestedPrimitiveValue::Percentage(10.0), auto_keyword(),])
+        Some(vec![vec![
+            RustOwnedNestedPrimitiveValue::Percentage(10.0),
+            auto_keyword(),
+        ]])
+    );
+    assert_eq!(
+        parse_rust_owned_view_timeline_inset_value("10% auto, 2px".as_bytes()),
+        Some(vec![
+            vec![RustOwnedNestedPrimitiveValue::Percentage(10.0), auto_keyword(),],
+            vec![RustOwnedNestedPrimitiveValue::Length {
+                value: 2.0,
+                unit: "px".to_string(),
+            },],
+        ])
     );
 }
 

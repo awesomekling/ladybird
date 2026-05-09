@@ -143,7 +143,9 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                 if let Some(values) = parse_rust_owned_view_timeline_inset_value_prefix(filtered_input) {
                     return RustOwnedStyleValueParseResult::Parsed(RustOwnedStyleValue {
                         property_id,
-                        value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
+                        value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset {
+                            insets: vec![values],
+                        }),
                     });
                 }
                 continue;
@@ -542,6 +544,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::VerticalAlign
             | PropertyId::ViewTimeline
             | PropertyId::ViewTimelineAxis
+            | PropertyId::ViewTimelineInset
             | PropertyId::ViewTimelineName
             | PropertyId::ViewTransitionName
             | PropertyId::Visibility
@@ -894,6 +897,8 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::TransitionBehavior => rust_owned_transition_behavior_style_value_kind(filtered_input),
         PropertyId::TransitionProperty => rust_owned_transition_property_style_value_kind(filtered_input),
         PropertyId::ViewTimeline => rust_owned_view_timeline_style_value_kind(filtered_input),
+        PropertyId::ViewTimelineInset => parse_rust_owned_view_timeline_inset_value(filtered_input)
+            .map(|insets| RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { insets })),
         PropertyId::ViewTransitionName => rust_owned_view_transition_name_style_value_kind(filtered_input),
         PropertyId::WhiteSpace => rust_owned_white_space_style_value_kind(filtered_input),
         PropertyId::WhiteSpaceTrim => rust_owned_white_space_trim_style_value_kind(filtered_input),
@@ -1511,10 +1516,10 @@ pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
             }
         }
         PropertyValueType::ViewTimelineInset => {
-            if let Some(values) = parse_rust_owned_view_timeline_inset_value(filtered_input) {
+            if let Some(insets) = parse_rust_owned_view_timeline_inset_value(filtered_input) {
                 return RustOwnedStyleValue {
                     property_id,
-                    value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { values }),
+                    value: RustOwnedStyleValueKind::ViewTimelineInset(RustOwnedViewTimelineInset { insets }),
                 };
             }
         }

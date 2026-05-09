@@ -1762,14 +1762,27 @@ pub(crate) fn parse_view_timeline_inset_value_prefix(filtered_input: &[u8]) -> C
 
 pub(super) fn parse_rust_owned_view_timeline_inset_value(
     filtered_input: &[u8],
-) -> Option<Vec<RustOwnedNestedPrimitiveValue>> {
-    let (values, has_remaining_component_values) =
-        parse_rust_owned_view_timeline_inset_value_prefix_impl(filtered_input)?;
-    if has_remaining_component_values {
-        return None;
+) -> Option<Vec<Vec<RustOwnedNestedPrimitiveValue>>> {
+    let filtered_input_string = filtered_input_to_string(filtered_input);
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let groups = split_component_values_on_comma(&component_values);
+    let mut insets = Vec::with_capacity(groups.len());
+
+    // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+    // Value: [ [ auto | <length-percentage> ]{1,2} ]#
+    for group in groups {
+        let mut parser = ComponentValueParser::new(group.to_vec());
+        let inset = parse_view_timeline_inset_prefix(&mut parser, Some(&filtered_input_string))?;
+        parser.discard_whitespace();
+        if parser.has_next_component_value() {
+            return None;
+        }
+        insets.push(inset.values);
     }
 
-    Some(values)
+    Some(insets)
 }
 
 pub(super) fn parse_rust_owned_view_timeline_inset_value_prefix(

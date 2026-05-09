@@ -1246,29 +1246,28 @@ where
                 &String::from_utf8(value.axes.iter().map(|axis| *axis as u8).collect()).unwrap(),
             );
             for inset in &value.insets {
-                callback(
-                    CssStyleValueKind::ViewTimeline,
-                    property_id,
-                    CssPrimitiveValueKind::Invalid,
-                    false,
-                    0.0,
-                    false,
-                    0.0,
-                    1,
-                    inset.len() as u8,
-                    0,
-                    0,
-                    &[],
-                    "",
-                );
+                callback_view_timeline_inset_count(callback, CssStyleValueKind::ViewTimeline, property_id, inset.len());
                 for value in inset {
                     callback_view_timeline_inset_value(callback, CssStyleValueKind::ViewTimeline, property_id, value);
                 }
             }
         }
         RustOwnedStyleValueKind::ViewTimelineInset(value) => {
-            for inset in &value.values {
-                callback_view_timeline_inset_value(callback, CssStyleValueKind::ViewTimelineInset, property_id, inset);
+            for inset in &value.insets {
+                callback_view_timeline_inset_count(
+                    callback,
+                    CssStyleValueKind::ViewTimelineInset,
+                    property_id,
+                    inset.len(),
+                );
+                for value in inset {
+                    callback_view_timeline_inset_value(
+                        callback,
+                        CssStyleValueKind::ViewTimelineInset,
+                        property_id,
+                        value,
+                    );
+                }
             }
         }
         RustOwnedStyleValueKind::ViewFunction(value) => callback(
@@ -4246,6 +4245,36 @@ fn callback_view_timeline_inset_value<C>(
             );
         }
     }
+}
+
+fn callback_view_timeline_inset_count<C>(
+    callback: &mut C,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    count: usize,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let count_kind = if style_value_kind == CssStyleValueKind::ViewTimeline {
+        1
+    } else {
+        2
+    };
+    callback(
+        style_value_kind,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        false,
+        0.0,
+        false,
+        0.0,
+        count_kind,
+        count as u8,
+        0,
+        0,
+        &[],
+        "",
+    );
 }
 
 fn callback_position_component<C>(

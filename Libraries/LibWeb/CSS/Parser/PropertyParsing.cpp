@@ -411,6 +411,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::VerticalAlign:
     case PropertyID::ViewTimeline:
     case PropertyID::ViewTimelineAxis:
+    case PropertyID::ViewTimelineInset:
     case PropertyID::ViewTimelineName:
     case PropertyID::ViewTransitionName:
     case PropertyID::Visibility:
@@ -2298,22 +2299,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 StyleValueVector inset_values;
                 inset_values.ensure_capacity(insets.size());
+                bool all_auto = true;
                 for (auto const& inset : insets) {
                     if (inset.is_auto) {
                         inset_values.append(KeywordStyleValue::create(Keyword::Auto));
                         continue;
                     }
 
+                    all_auto = false;
                     auto value = materialize_rust_nested_length_percentage(inset.length_percentage, infinite_range);
                     if (!value)
                         return nullptr;
                     inset_values.append(value.release_nonnull());
                 }
 
-                // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
-                // If the second value is omitted, it is set to the first.
+                if (all_auto)
+                    return KeywordStyleValue::create(Keyword::Auto);
+
                 if (inset_values.size() == 1)
-                    return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
+                    return inset_values[0];
 
                 return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
             };
@@ -4981,12 +4985,28 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             StyleValueList::create(move(insets), StyleValueList::Separator::Comma) }) };
             }
             case FFI::CssStyleValueKind::ViewTimelineInset:
-                if (auto value = materialize_rust_view_timeline_insets(rust_style_value->view_timeline_insets)) {
+                if (rust_style_value->view_timeline_inset_counts.is_empty())
+                    break;
+
+                {
+                    StyleValueVector insets;
+                    insets.ensure_capacity(rust_style_value->view_timeline_inset_counts.size());
+                    size_t inset_offset = 0;
+                    for (auto inset_count : rust_style_value->view_timeline_inset_counts) {
+                        auto inset = materialize_rust_view_timeline_insets(rust_style_value->view_timeline_insets.span().slice(inset_offset, inset_count));
+                        if (!inset)
+                            break;
+                        insets.unchecked_append(inset.release_nonnull());
+                        inset_offset += inset_count;
+                    }
+                    if (insets.size() != rust_style_value->view_timeline_inset_counts.size())
+                        break;
+                    VERIFY(inset_offset == rust_style_value->view_timeline_insets.size());
+
                     discard_rust_view_timeline_inset_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, value };
+                    return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(insets), StyleValueList::Separator::Comma) };
                 }
-                break;
             case FFI::CssStyleValueKind::ViewFunction:
                 if (auto value = materialize_rust_view_function_value()) {
                     tokens.discard_a_token();
