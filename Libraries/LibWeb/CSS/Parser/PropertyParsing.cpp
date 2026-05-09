@@ -1805,6 +1805,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return {};
                 };
                 auto materialize_rust_basic_shape_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.calculation_node_events.is_empty()) {
+                        if (auto calculation = materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::LengthPercentage, value.calculation_node_events, DiscardCalculationToken::No))
+                            return calculation;
+                    }
                     if (!value.numeric_value.has_value()) {
                         auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
                         TokenStream value_tokens { component_values };

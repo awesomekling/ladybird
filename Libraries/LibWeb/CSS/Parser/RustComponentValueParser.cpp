@@ -1707,6 +1707,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         VERIFY(style_value->kind == FFI::CssStyleValueKind::BasicShape);
                         VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                     }
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                     style_value->basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
                     style_value->basic_shape_radial_shape_is_typed = true;
@@ -1717,14 +1718,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         });
                     } else if (color_blue == BasicShapeComponentRadialLengthPercentage) {
                         style_value->basic_shape_radial_shape_radius.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRadius;
                     } else if (color_blue == BasicShapeComponentRadialPositionX) {
                         if (!style_value->basic_shape_radial_shape_position.has_value())
                             style_value->basic_shape_radial_shape_position = RustPosition {};
                         style_value->basic_shape_radial_shape_position->x = radial_position_component_from_callback_payload();
+                        if (style_value->basic_shape_radial_shape_position->x.offset.has_value())
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePositionX;
                     } else if (color_blue == BasicShapeComponentRadialPositionY) {
                         if (!style_value->basic_shape_radial_shape_position.has_value())
                             style_value->basic_shape_radial_shape_position = RustPosition {};
                         style_value->basic_shape_radial_shape_position->y = radial_position_component_from_callback_payload();
+                        if (style_value->basic_shape_radial_shape_position->y.offset.has_value())
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePositionY;
                     } else {
                         VERIFY(color_blue == BasicShapeComponentHeader);
                     }
@@ -1737,16 +1743,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         VERIFY(style_value->kind == FFI::CssStyleValueKind::BasicShape);
                         VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                     }
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                     style_value->basic_shape_kind = static_cast<RustBasicShapeKind>(color_red);
                     if (color_blue == BasicShapeComponentRectangleLengthPercentage) {
                         style_value->basic_shape_rectangle_components.append({ .value = nested_primitive_value_from_callback_payload() });
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleComponent;
                     } else if (color_blue == BasicShapeComponentRectangleAuto) {
                         style_value->basic_shape_rectangle_components.append({ .is_auto = true });
                     } else if (color_blue == BasicShapeComponentRectangleBorderRadiusHorizontal) {
                         style_value->basic_shape_rectangle_border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleRadiusHorizontal;
                     } else if (color_blue == BasicShapeComponentRectangleBorderRadiusVertical) {
                         style_value->basic_shape_rectangle_border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleRadiusVertical;
                     } else {
                         VERIFY(color_blue == BasicShapeComponentHeader);
                     }
@@ -1760,12 +1770,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                         VERIFY(style_value->basic_shape_kind == RustBasicShapeKind::Polygon);
                     }
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                     style_value->basic_shape_fill_rule = color_green;
-                    if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY)
+                    if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY) {
                         style_value->basic_shape_polygon_coordinates.append(nested_primitive_value_from_callback_payload());
-                    else
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePolygonCoordinate;
+                    } else {
                         VERIFY(color_blue == BasicShapeComponentHeader);
+                    }
                     return;
                 }
                 if (value.basic_shape_kind == RustBasicShapeKind::Path) {
@@ -1774,8 +1787,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
             } else if (kind == FFI::CssStyleValueKind::FitContent) {
                 value.fit_content_kind = static_cast<RustFitContentKind>(color_red);
-                if (value.fit_content_kind == RustFitContentKind::Function)
+                if (value.fit_content_kind == RustFitContentKind::Function) {
                     value.fit_content_argument = nested_primitive_value_from_callback_payload();
+                    value.last_calculation_node_target = RustCalculationNodeTarget::FitContentArgument;
+                }
             } else if (kind == FFI::CssStyleValueKind::Rect) {
                 if (!style_value.has_value())
                     style_value = move(value);
@@ -2544,6 +2559,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::ShapeOutside);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 switch (static_cast<RustShapeOutsideEventKind>(color_red)) {
                 case RustShapeOutsideEventKind::None:
@@ -2586,35 +2602,45 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                             });
                         } else if (color_blue == BasicShapeComponentRadialLengthPercentage) {
                             style_value->shape_outside_basic_shape_radial_shape_radius.append({ .length_percentage = nested_primitive_value_from_callback_payload() });
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRadius;
                         } else if (color_blue == BasicShapeComponentRadialPositionX) {
                             if (!style_value->shape_outside_basic_shape_radial_shape_position.has_value())
                                 style_value->shape_outside_basic_shape_radial_shape_position = RustPosition {};
                             style_value->shape_outside_basic_shape_radial_shape_position->x = shape_outside_radial_position_component_from_callback_payload();
+                            if (style_value->shape_outside_basic_shape_radial_shape_position->x.offset.has_value())
+                                style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePositionX;
                         } else if (color_blue == BasicShapeComponentRadialPositionY) {
                             if (!style_value->shape_outside_basic_shape_radial_shape_position.has_value())
                                 style_value->shape_outside_basic_shape_radial_shape_position = RustPosition {};
                             style_value->shape_outside_basic_shape_radial_shape_position->y = shape_outside_radial_position_component_from_callback_payload();
+                            if (style_value->shape_outside_basic_shape_radial_shape_position->y.offset.has_value())
+                                style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePositionY;
                         } else {
                             VERIFY(color_blue == BasicShapeComponentHeader);
                         }
                     } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Inset || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Xywh || *style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Rect) {
                         if (color_blue == BasicShapeComponentRectangleLengthPercentage) {
                             style_value->shape_outside_basic_shape_rectangle_components.append({ .value = nested_primitive_value_from_callback_payload() });
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleComponent;
                         } else if (color_blue == BasicShapeComponentRectangleAuto) {
                             style_value->shape_outside_basic_shape_rectangle_components.append({ .is_auto = true });
                         } else if (color_blue == BasicShapeComponentRectangleBorderRadiusHorizontal) {
                             style_value->shape_outside_basic_shape_rectangle_border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleRadiusHorizontal;
                         } else if (color_blue == BasicShapeComponentRectangleBorderRadiusVertical) {
                             style_value->shape_outside_basic_shape_rectangle_border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapeRectangleRadiusVertical;
                         } else {
                             VERIFY(color_blue == BasicShapeComponentHeader);
                         }
                     } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Polygon) {
                         style_value->shape_outside_basic_shape_fill_rule = color_alpha;
-                        if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY)
+                        if (color_blue == BasicShapeComponentPolygonPointX || color_blue == BasicShapeComponentPolygonPointY) {
                             style_value->shape_outside_basic_shape_polygon_coordinates.append(nested_primitive_value_from_callback_payload());
-                        else
+                            style_value->last_calculation_node_target = RustCalculationNodeTarget::BasicShapePolygonCoordinate;
+                        } else {
                             VERIFY(color_blue == BasicShapeComponentHeader);
+                        }
                     } else if (*style_value->shape_outside_basic_shape_kind == RustBasicShapeKind::Path) {
                         style_value->shape_outside_basic_shape_fill_rule = color_blue;
                         style_value->shape_outside_basic_shape_path_data = string_from_ffi_bytes(value_ptr, value_len);
@@ -3565,6 +3591,83 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().drop_shadow_radius.has_value());
                     style_value->filter_value_list_events.last().drop_shadow_radius->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::BasicShape, FFI::CssStyleValueKind::ShapeOutside, FFI::CssStyleValueKind::FitContent)) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::BasicShapeRadius:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(!style_value->shape_outside_basic_shape_radial_shape_radius.is_empty());
+                        style_value->shape_outside_basic_shape_radial_shape_radius.last().length_percentage.calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(!style_value->basic_shape_radial_shape_radius.is_empty());
+                        style_value->basic_shape_radial_shape_radius.last().length_percentage.calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapePositionX:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(style_value->shape_outside_basic_shape_radial_shape_position.has_value());
+                        VERIFY(style_value->shape_outside_basic_shape_radial_shape_position->x.offset.has_value());
+                        style_value->shape_outside_basic_shape_radial_shape_position->x.offset->calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(style_value->basic_shape_radial_shape_position.has_value());
+                        VERIFY(style_value->basic_shape_radial_shape_position->x.offset.has_value());
+                        style_value->basic_shape_radial_shape_position->x.offset->calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapePositionY:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(style_value->shape_outside_basic_shape_radial_shape_position.has_value());
+                        VERIFY(style_value->shape_outside_basic_shape_radial_shape_position->y.offset.has_value());
+                        style_value->shape_outside_basic_shape_radial_shape_position->y.offset->calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(style_value->basic_shape_radial_shape_position.has_value());
+                        VERIFY(style_value->basic_shape_radial_shape_position->y.offset.has_value());
+                        style_value->basic_shape_radial_shape_position->y.offset->calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapeRectangleComponent:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(!style_value->shape_outside_basic_shape_rectangle_components.is_empty());
+                        style_value->shape_outside_basic_shape_rectangle_components.last().value.calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(!style_value->basic_shape_rectangle_components.is_empty());
+                        style_value->basic_shape_rectangle_components.last().value.calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapeRectangleRadiusHorizontal:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(!style_value->shape_outside_basic_shape_rectangle_border_radius_horizontal_radii.is_empty());
+                        style_value->shape_outside_basic_shape_rectangle_border_radius_horizontal_radii.last().calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(!style_value->basic_shape_rectangle_border_radius_horizontal_radii.is_empty());
+                        style_value->basic_shape_rectangle_border_radius_horizontal_radii.last().calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapeRectangleRadiusVertical:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(!style_value->shape_outside_basic_shape_rectangle_border_radius_vertical_radii.is_empty());
+                        style_value->shape_outside_basic_shape_rectangle_border_radius_vertical_radii.last().calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(!style_value->basic_shape_rectangle_border_radius_vertical_radii.is_empty());
+                        style_value->basic_shape_rectangle_border_radius_vertical_radii.last().calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::BasicShapePolygonCoordinate:
+                    if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                        VERIFY(!style_value->shape_outside_basic_shape_polygon_coordinates.is_empty());
+                        style_value->shape_outside_basic_shape_polygon_coordinates.last().calculation_node_events.append(move(event));
+                    } else {
+                        VERIFY(!style_value->basic_shape_polygon_coordinates.is_empty());
+                        style_value->basic_shape_polygon_coordinates.last().calculation_node_events.append(move(event));
+                    }
+                    return;
+                case RustCalculationNodeTarget::FitContentArgument:
+                    VERIFY(style_value->fit_content_argument.has_value());
+                    style_value->fit_content_argument->calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

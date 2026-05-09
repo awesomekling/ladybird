@@ -259,6 +259,14 @@ public:
         ShadowSpreadDistance,
         FilterValue,
         FilterDropShadowRadius,
+        BasicShapeRadius,
+        BasicShapePositionX,
+        BasicShapePositionY,
+        BasicShapeRectangleComponent,
+        BasicShapeRectangleRadiusHorizontal,
+        BasicShapeRectangleRadiusVertical,
+        BasicShapePolygonCoordinate,
+        FitContentArgument,
     };
 
     enum class RustTreeCountingFunction : u8 {
