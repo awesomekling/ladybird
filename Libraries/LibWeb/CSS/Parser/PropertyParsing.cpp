@@ -411,7 +411,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 No,
                 Yes,
             };
-            auto materialize_rust_calculation_tree_values_with_range = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, Optional<NumericRange> range_override, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
+            enum class AllowPercentageResolution {
+                No,
+                Yes,
+            };
+            auto materialize_rust_calculation_tree_values_with_range_and_percentage_resolution = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, Optional<NumericRange> range_override, DiscardCalculationToken discard_token, AllowPercentageResolution allow_percentage_resolution) -> RefPtr<StyleValue const> {
                 if (calculation_node_events.is_empty())
                     return nullptr;
 
@@ -457,7 +461,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->range);
                     break;
                 case ValueType::Angle:
-                    if (metadata->percentages_resolve_to_value_type) {
+                    if (allow_percentage_resolution == AllowPercentageResolution::Yes && metadata->percentages_resolve_to_value_type) {
                         calculation_context.percentages_resolve_as = ValueType::Angle;
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
@@ -474,7 +478,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Flex, metadata->range);
                     break;
                 case ValueType::Frequency:
-                    if (metadata->percentages_resolve_to_value_type) {
+                    if (allow_percentage_resolution == AllowPercentageResolution::Yes && metadata->percentages_resolve_to_value_type) {
                         calculation_context.percentages_resolve_as = ValueType::Frequency;
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
@@ -488,7 +492,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Frequency, metadata->range);
                     break;
                 case ValueType::Length:
-                    if (metadata->percentages_resolve_to_value_type) {
+                    if (allow_percentage_resolution == AllowPercentageResolution::Yes && metadata->percentages_resolve_to_value_type) {
                         calculation_context.percentages_resolve_as = ValueType::Length;
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
@@ -519,7 +523,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     calculation_context.accepted_ranges_by_type.set(ValueType::Resolution, metadata->range);
                     break;
                 case ValueType::Time:
-                    if (metadata->percentages_resolve_to_value_type) {
+                    if (allow_percentage_resolution == AllowPercentageResolution::Yes && metadata->percentages_resolve_to_value_type) {
                         calculation_context.percentages_resolve_as = ValueType::Time;
                         if (metadata->percentage_range.has_value())
                             calculation_context.accepted_ranges_by_type.set(ValueType::Percentage, metadata->percentage_range.value());
@@ -687,16 +691,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         auto preserve_fixed_calculation = metadata_parts[3] == "calc"sv;
                         if (!metadata_parts[3].is_empty() && !preserve_fixed_calculation)
                             return false;
-                        auto fixed_calculation_tree = simplify_a_calculation_tree(*children.at(0), calculation_context, CalculationResolutionContext {});
+                        CalculationContext fixed_value_sharing_context {
+                            .accepted_ranges_by_type = { { ValueType::Number, NumericRange { .min = 0, .max = 0.999999 } } },
+                        };
+                        CalculationContext fixed_value_sharing_validation_context;
+                        auto fixed_calculation_tree = simplify_a_calculation_tree(*children.at(0), fixed_value_sharing_validation_context, CalculationResolutionContext {});
                         auto fixed_calculation_type = fixed_calculation_tree->numeric_type();
-                        if (!fixed_calculation_type.has_value() || !fixed_calculation_type->matches_number(calculation_context.percentages_resolve_as))
+                        if (!fixed_calculation_type.has_value() || !fixed_calculation_type->matches_number(fixed_value_sharing_validation_context.percentages_resolve_as))
                             return false;
-                        auto fixed_value = CalculatedStyleValue::create(fixed_calculation_tree, fixed_calculation_type.release_value(), calculation_context);
+                        auto fixed_value = CalculatedStyleValue::create(fixed_calculation_tree, fixed_calculation_type.release_value(), fixed_value_sharing_context);
                         if (!fixed_value->resolves_to_number())
                             return false;
-                        auto resolved_fixed_number = fixed_value->resolve_number(CalculationResolutionContext {});
-                        if (resolved_fixed_number.has_value() && (*resolved_fixed_number < 0 || *resolved_fixed_number > 0.999999))
-                            return false;
+                        if (is<NumericCalculationNode>(*fixed_calculation_tree)) {
+                            auto const* fixed_number = as<NumericCalculationNode>(*fixed_calculation_tree).value().get_pointer<Number>();
+                            if (!fixed_number || fixed_number->value() < 0 || fixed_number->value() > 0.999999)
+                                return false;
+                        }
                         if (is<NumericCalculationNode>(*children.at(0)) && !preserve_fixed_calculation) {
                             auto const* fixed_number = as<NumericCalculationNode>(*children.at(0)).value().get_pointer<Number>();
                             if (!fixed_number)
@@ -982,6 +992,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (value_type == ValueType::OpacityValue)
                     return OpacityValueStyleValue::create(move(calculated_value));
                 return calculated_value;
+            };
+            auto materialize_rust_calculation_tree_values_with_range = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, Optional<NumericRange> range_override, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
+                return materialize_rust_calculation_tree_values_with_range_and_percentage_resolution(property_id, value_type, calculation_node_events, range_override, discard_token, AllowPercentageResolution::Yes);
             };
             auto materialize_rust_calculation_tree_values = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
                 return materialize_rust_calculation_tree_values_with_range(property_id, value_type, calculation_node_events, {}, discard_token);
@@ -2445,7 +2458,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_length_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Length, value.calculation_node_events, range, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range_and_percentage_resolution(property_id, ValueType::Length, value.calculation_node_events, range, DiscardCalculationToken::No, AllowPercentageResolution::No);
                 if (!value.numeric_value.has_value()) {
                     if (range.min >= 0)
                         return parse_rust_source_as_non_negative_length(value.source_or_unit);
@@ -2774,7 +2787,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Angle, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Angle, value.calculation_node_events, accepted_range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_angle(value.source_or_unit, accepted_range);
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Angle)
@@ -2797,7 +2810,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Integer))
                         return tree_counting_function;
@@ -2813,7 +2826,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
@@ -2861,9 +2874,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_nested_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
                 if (!value.calculation_node_events.is_empty()) {
-                    if (auto number = materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No))
+                    if (auto number = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, infinite_range, DiscardCalculationToken::No))
                         return number;
-                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, DiscardCalculationToken::No);
+                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
                 }
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_number_percentage(value.source_or_unit);
