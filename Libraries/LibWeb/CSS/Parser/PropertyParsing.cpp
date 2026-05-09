@@ -164,6 +164,10 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ContainerType:
     case PropertyID::Content:
     case PropertyID::ContentVisibility:
+    case PropertyID::CornerBottomLeftShape:
+    case PropertyID::CornerBottomRightShape:
+    case PropertyID::CornerTopLeftShape:
+    case PropertyID::CornerTopRightShape:
     case PropertyID::CounterIncrement:
     case PropertyID::CounterReset:
     case PropertyID::CounterSet:
@@ -186,9 +190,19 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::Float:
     case PropertyID::FontFamily:
     case PropertyID::FontFeatureSettings:
+    case PropertyID::FontKerning:
     case PropertyID::FontLanguageOverride:
+    case PropertyID::FontOpticalSizing:
     case PropertyID::FontSize:
+    case PropertyID::FontStyle:
     case PropertyID::FontVariant:
+    case PropertyID::FontVariantAlternates:
+    case PropertyID::FontVariantCaps:
+    case PropertyID::FontVariantEastAsian:
+    case PropertyID::FontVariantEmoji:
+    case PropertyID::FontVariantLigatures:
+    case PropertyID::FontVariantNumeric:
+    case PropertyID::FontVariantPosition:
     case PropertyID::FontVariationSettings:
     case PropertyID::FontWeight:
     case PropertyID::FontWidth:

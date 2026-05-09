@@ -295,6 +295,10 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ContainerType
             | PropertyId::Content
             | PropertyId::ContentVisibility
+            | PropertyId::CornerBottomLeftShape
+            | PropertyId::CornerBottomRightShape
+            | PropertyId::CornerTopLeftShape
+            | PropertyId::CornerTopRightShape
             | PropertyId::CounterIncrement
             | PropertyId::CounterReset
             | PropertyId::CounterSet
@@ -317,9 +321,19 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Float
             | PropertyId::FontFamily
             | PropertyId::FontFeatureSettings
+            | PropertyId::FontKerning
             | PropertyId::FontLanguageOverride
+            | PropertyId::FontOpticalSizing
             | PropertyId::FontSize
+            | PropertyId::FontStyle
             | PropertyId::FontVariant
+            | PropertyId::FontVariantAlternates
+            | PropertyId::FontVariantCaps
+            | PropertyId::FontVariantEastAsian
+            | PropertyId::FontVariantEmoji
+            | PropertyId::FontVariantLigatures
+            | PropertyId::FontVariantNumeric
+            | PropertyId::FontVariantPosition
             | PropertyId::FontVariationSettings
             | PropertyId::FontWeight
             | PropertyId::FontWidth
@@ -584,6 +598,14 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::ColorScheme => rust_owned_color_scheme_style_value_kind(filtered_input),
         PropertyId::Contain => rust_owned_contain_style_value_kind(filtered_input),
         PropertyId::ContainerType => rust_owned_container_type_style_value_kind(filtered_input),
+        PropertyId::CornerBottomLeftShape
+        | PropertyId::CornerBottomRightShape
+        | PropertyId::CornerTopLeftShape
+        | PropertyId::CornerTopRightShape => rust_owned_generated_property_specific_style_value_kind(
+            property_id,
+            filtered_input,
+            primitive_value_options,
+        ),
         PropertyId::AccentColor
         | PropertyId::BackgroundColor
         | PropertyId::BorderBottomColor
@@ -692,6 +714,20 @@ fn parse_rust_owned_property_specific_longhand_value(
         }
         PropertyId::FontFamily => rust_owned_font_family_style_value_kind(filtered_input),
         PropertyId::FontFeatureSettings => rust_owned_font_feature_settings_style_value_kind(filtered_input),
+        PropertyId::FontKerning
+        | PropertyId::FontOpticalSizing
+        | PropertyId::FontStyle
+        | PropertyId::FontVariantAlternates
+        | PropertyId::FontVariantCaps
+        | PropertyId::FontVariantEastAsian
+        | PropertyId::FontVariantEmoji
+        | PropertyId::FontVariantLigatures
+        | PropertyId::FontVariantNumeric
+        | PropertyId::FontVariantPosition => rust_owned_generated_property_specific_style_value_kind(
+            property_id,
+            filtered_input,
+            primitive_value_options,
+        ),
         PropertyId::FontLanguageOverride => rust_owned_font_language_override_style_value_kind(filtered_input),
         PropertyId::FontVariant => rust_owned_font_variant_style_value_kind(filtered_input),
         PropertyId::FontVariationSettings => rust_owned_font_variation_settings_style_value_kind(filtered_input),
