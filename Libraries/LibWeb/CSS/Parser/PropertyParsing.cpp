@@ -3738,15 +3738,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             }
             case FFI::CssStyleValueKind::ComponentShorthand: {
                 auto materialize_component_shorthand_item = [&](RustComponentValueParser::ComponentShorthandItem const& item) -> RefPtr<StyleValue const> {
+                    auto wrap_single_value_shorthand_if_needed = [](PropertyID property_id, ValueComparingNonnullRefPtr<StyleValue const> value) -> ValueComparingNonnullRefPtr<StyleValue const> {
+                        if (!property_is_shorthand(property_id))
+                            return value;
+
+                        auto const& longhands = longhands_for_shorthand(property_id);
+                        Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+                        longhand_values.resize_with_default_value(longhands.size(), value);
+                        return ShorthandStyleValue::create(property_id, longhands, move(longhand_values));
+                    };
+
                     if (item.keyword.has_value())
-                        return KeywordStyleValue::create(*item.keyword);
+                        return wrap_single_value_shorthand_if_needed(item.property_id, KeywordStyleValue::create(*item.keyword));
 
                     if (item.has_color) {
                         if (item.color_is_simple) {
                             Optional<FlyString> name;
                             if (item.color_name_or_source.has_value())
                                 name = FlyString::from_utf8_without_validation(item.color_name_or_source->bytes());
-                            return ColorStyleValue::create_from_color({ item.color_red, item.color_green, item.color_blue, item.color_alpha }, ColorSyntax::Legacy, move(name));
+                            return wrap_single_value_shorthand_if_needed(item.property_id, ColorStyleValue::create_from_color({ item.color_red, item.color_green, item.color_blue, item.color_alpha }, ColorSyntax::Legacy, move(name)));
                         }
 
                         if (!item.color_name_or_source.has_value())
@@ -3759,7 +3769,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             auto keyword = keyword_from_string(item.primitive_source_or_unit);
                             if (!keyword.has_value())
                                 return nullptr;
-                            return KeywordStyleValue::create(*keyword);
+                            return wrap_single_value_shorthand_if_needed(item.property_id, KeywordStyleValue::create(*keyword));
                         }
 
                         RustComponentValueParser::RustNestedPrimitiveValue value {
@@ -3769,11 +3779,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (item.primitive_numeric_value.has_value())
                             value.numeric_value = *item.primitive_numeric_value;
 
+                        RefPtr<StyleValue const> parsed_value;
                         if (*item.primitive_value_type == ValueType::Length)
-                            return materialize_rust_nested_length(value, non_negative_range);
+                            parsed_value = materialize_rust_nested_length(value, non_negative_range);
+                        else if (*item.primitive_value_type == ValueType::LengthPercentage)
+                            parsed_value = materialize_rust_nested_length_percentage(value, non_negative_range);
 
-                        if (*item.primitive_value_type == ValueType::LengthPercentage)
-                            return materialize_rust_nested_length_percentage(value, non_negative_range);
+                        if (parsed_value)
+                            return wrap_single_value_shorthand_if_needed(item.property_id, parsed_value.release_nonnull());
                     }
 
                     return nullptr;
@@ -4979,6 +4992,52 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!first_is_one_of(longhands.size(), 2uz, 4uz))
                     break;
 
+                auto materialize_positional_value_list_item = [&](RustComponentValueParser::PositionalValueListShorthandItem const& item, PropertyID property_id) -> RefPtr<StyleValue const> {
+                    auto wrap_single_value_shorthand_if_needed = [](PropertyID property_id, ValueComparingNonnullRefPtr<StyleValue const> value) -> ValueComparingNonnullRefPtr<StyleValue const> {
+                        if (!property_is_shorthand(property_id))
+                            return value;
+
+                        auto const& longhands = longhands_for_shorthand(property_id);
+                        Vector<ValueComparingNonnullRefPtr<StyleValue const>> longhand_values;
+                        longhand_values.resize_with_default_value(longhands.size(), value);
+                        return ShorthandStyleValue::create(property_id, longhands, move(longhand_values));
+                    };
+
+                    if (item.keyword.has_value())
+                        return wrap_single_value_shorthand_if_needed(property_id, KeywordStyleValue::create(*item.keyword));
+
+                    if (item.primitive_value_type.has_value()) {
+                        if (item.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                            auto keyword = keyword_from_string(item.primitive_source_or_unit);
+                            if (!keyword.has_value())
+                                return nullptr;
+                            return wrap_single_value_shorthand_if_needed(property_id, KeywordStyleValue::create(*keyword));
+                        }
+
+                        RustComponentValueParser::RustNestedPrimitiveValue value {
+                            .primitive_kind = item.primitive_kind,
+                            .source_or_unit = item.primitive_source_or_unit,
+                        };
+                        if (item.primitive_numeric_value.has_value())
+                            value.numeric_value = *item.primitive_numeric_value;
+
+                        auto range = first_is_one_of(property_id, PropertyID::PaddingTop, PropertyID::PaddingRight, PropertyID::PaddingBottom, PropertyID::PaddingLeft)
+                            ? non_negative_range
+                            : infinite_range;
+
+                        RefPtr<StyleValue const> parsed_value;
+                        if (*item.primitive_value_type == ValueType::Length)
+                            parsed_value = materialize_rust_nested_length(value, range);
+                        else if (*item.primitive_value_type == ValueType::LengthPercentage)
+                            parsed_value = materialize_rust_nested_length_percentage(value, range);
+
+                        if (parsed_value)
+                            return wrap_single_value_shorthand_if_needed(property_id, parsed_value.release_nonnull());
+                    }
+
+                    return parse_rust_source_as_property(property_id, item.value);
+                };
+
                 Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
                 for (auto const& item : rust_style_value->positional_value_list_shorthand_items) {
                     if (item.index != parsed_values.size() || item.index >= longhands.size()) {
@@ -4986,7 +5045,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         break;
                     }
 
-                    auto parsed_value = parse_rust_source_as_property(longhands[item.index], item.value);
+                    auto parsed_value = materialize_positional_value_list_item(item, longhands[item.index]);
                     if (!parsed_value) {
                         parsed_values.clear();
                         break;

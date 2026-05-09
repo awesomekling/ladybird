@@ -7,6 +7,7 @@
 use super::*;
 
 const COMPONENT_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
+const POSITIONAL_VALUE_LIST_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
 
 pub(super) fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, callback: &mut C)
 where
@@ -220,7 +221,7 @@ where
             for item in items {
                 callback(
                     CssStyleValueKind::PositionalValueListShorthand,
-                    property_id,
+                    item.style_value.property_id as u16,
                     CssPrimitiveValueKind::Invalid,
                     false,
                     0.0,
@@ -229,10 +230,11 @@ where
                     (shorthand_property_id & 0xff) as u8,
                     (shorthand_property_id >> 8) as u8,
                     (item.index & 0xff) as u8,
-                    ((item.index >> 8) & 0xff) as u8,
+                    POSITIONAL_VALUE_LIST_SHORTHAND_CALLBACK_ITEM_START,
                     item.source.as_bytes(),
                     "",
                 );
+                emit_rust_owned_style_value(&item.style_value, callback);
             }
         }
         RustOwnedStyleValueKind::FontStyle(value) => {

@@ -1262,7 +1262,6 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto layer_index_from_callback_payload = [&]() {
                 return static_cast<size_t>(static_cast<u16>(color_blue) | (static_cast<u16>(color_alpha) << 8));
             };
-            auto item_index_from_callback_payload = layer_index_from_callback_payload;
 
             if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::ComponentShorthand && kind != FFI::CssStyleValueKind::ComponentShorthand) {
                 VERIFY(!style_value->component_shorthand_items.is_empty());
@@ -1307,6 +1306,34 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     item.primitive_value_type = value_type.release_value();
                     return;
                 }
+            }
+
+            if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::PositionalValueListShorthand && kind != FFI::CssStyleValueKind::PositionalValueListShorthand) {
+                VERIFY(!style_value->positional_value_list_shorthand_items.is_empty());
+                auto& item = style_value->positional_value_list_shorthand_items.last();
+                VERIFY(item.property_id == static_cast<PropertyID>(property_id));
+
+                if (kind == FFI::CssStyleValueKind::Keyword) {
+                    auto keyword = keyword_from_string({ value_ptr, value_len });
+                    if (!keyword.has_value())
+                        return;
+                    item.keyword = keyword.release_value();
+                    return;
+                }
+
+                if (first_is_one_of(kind, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction)) {
+                    auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                    if (!value_type.has_value())
+                        return;
+                    item.primitive_kind = primitive_kind;
+                    if (has_numeric_value)
+                        item.primitive_numeric_value = numeric_value;
+                    item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                    item.primitive_value_type = value_type.release_value();
+                    return;
+                }
+
+                return;
             }
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
@@ -1670,6 +1697,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::PositionalValueListShorthand) {
+                enum : u8 {
+                    ItemStart = 255,
+                };
+
                 if (!style_value.has_value()) {
                     style_value = move(value);
                     style_value->property_id = shorthand_property_id_from_callback_payload();
@@ -1678,8 +1709,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
                 }
 
+                VERIFY(color_alpha == ItemStart);
                 style_value->positional_value_list_shorthand_items.append(PositionalValueListShorthandItem {
-                    .index = item_index_from_callback_payload(),
+                    .index = color_blue,
+                    .property_id = static_cast<PropertyID>(property_id),
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });
                 return;

@@ -159,7 +159,13 @@ public:
 
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
+        PropertyID property_id;
         String value;
+        Optional<Keyword> keyword;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> primitive_numeric_value;
+        String primitive_source_or_unit;
+        Optional<ValueType> primitive_value_type;
     };
 
     struct OpenTypeTaggedValue {
