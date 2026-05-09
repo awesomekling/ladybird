@@ -2294,14 +2294,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Border);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 auto component_kind = primitive_kind == FFI::CssPrimitiveValueKind::Invalid && has_numeric_value && has_secondary_numeric_value ? static_cast<u8>(numeric_value) : color_red;
                 switch (component_kind) {
                 case 0:
-                    if (color_blue != 0)
+                    if (color_blue != 0) {
                         style_value->border_width_length = nested_primitive_value_from_callback_payload();
-                    else
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderWidthLength;
+                    } else {
                         style_value->border_width_keyword = static_cast<LineWidth>(color_green);
+                    }
                     break;
                 case 1:
                     style_value->border_style = static_cast<LineStyle>(color_green);
@@ -2321,6 +2324,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::BorderImageSlice);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageSlice;
                 style_value->border_image_slices.append(nested_primitive_value_from_callback_payload());
                 return;
             } else if (kind == FFI::CssStyleValueKind::BorderImage) {
@@ -2330,6 +2334,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::BorderImage);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
 
                 switch (color_red) {
                 case 0:
@@ -2344,6 +2349,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->border_image_shorthand_has_slice = true;
                     style_value->border_image_slice_fill = color_green != 0;
                     style_value->border_image_slices.append(nested_primitive_value_from_callback_payload());
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageSlice;
                     break;
                 case 2:
                     style_value->border_image_shorthand_has_width = true;
@@ -2351,12 +2357,15 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         .is_auto = color_green != 0,
                         .value = color_green == 0 ? nested_primitive_value_from_callback_payload() : RustNestedPrimitiveValue {},
                     });
+                    if (color_green == 0)
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageWidth;
                     break;
                 case 3:
                     style_value->border_image_shorthand_has_outset = true;
                     style_value->border_image_outsets.append(RustBorderImageOutset {
                         .value = nested_primitive_value_from_callback_payload(),
                     });
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageOutset;
                     break;
                 case 4:
                     style_value->border_image_shorthand_has_repeat = true;
@@ -2382,15 +2391,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->kind == kind);
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
-                if (kind == FFI::CssStyleValueKind::BorderImageOutset)
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
+                if (kind == FFI::CssStyleValueKind::BorderImageOutset) {
                     style_value->border_image_outsets.append(RustBorderImageOutset {
                         .value = nested_primitive_value_from_callback_payload(),
                     });
-                else
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageOutset;
+                } else {
                     style_value->border_image_widths.append(RustBorderImageWidth {
                         .is_auto = color_green != 0,
                         .value = color_green == 0 ? nested_primitive_value_from_callback_payload() : RustNestedPrimitiveValue {},
                     });
+                    if (color_green == 0)
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderImageWidth;
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::TransformOrigin) {
                 if (!style_value.has_value())
@@ -3456,6 +3470,28 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->position_components.is_empty());
                     VERIFY(style_value->position_components.last().offset.has_value());
                     style_value->position_components.last().offset->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::Border, FFI::CssStyleValueKind::BorderImage, FFI::CssStyleValueKind::BorderImageSlice, FFI::CssStyleValueKind::BorderImageOutset, FFI::CssStyleValueKind::BorderImageWidth)) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::BorderWidthLength:
+                    VERIFY(style_value->border_width_length.has_value());
+                    style_value->border_width_length->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BorderImageSlice:
+                    VERIFY(!style_value->border_image_slices.is_empty());
+                    style_value->border_image_slices.last().calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BorderImageWidth:
+                    VERIFY(!style_value->border_image_widths.is_empty());
+                    style_value->border_image_widths.last().value.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BorderImageOutset:
+                    VERIFY(!style_value->border_image_outsets.is_empty());
+                    style_value->border_image_outsets.last().value.calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

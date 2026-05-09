@@ -244,6 +244,10 @@ public:
         PositionXOffset,
         PositionYOffset,
         PositionComponentOffset,
+        BorderWidthLength,
+        BorderImageSlice,
+        BorderImageWidth,
+        BorderImageOutset,
     };
 
     enum class RustTreeCountingFunction : u8 {

@@ -2773,6 +2773,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
             };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Angle, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_angle(value.source_or_unit, accepted_range);
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Angle)
@@ -2794,6 +2796,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return nullptr;
             };
             auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Integer))
                         return tree_counting_function;
@@ -2808,6 +2812,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
             };
             auto materialize_rust_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
@@ -2817,7 +2823,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return NumberStyleValue::create(*value.numeric_value);
             };
-            auto materialize_rust_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_non_negative_number_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty())
+                    return materialize_rust_calculation_tree_values(property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No);
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
@@ -2829,7 +2837,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return NumberStyleValue::create(*value.numeric_value);
             };
-            auto materialize_rust_nested_non_negative_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+            auto materialize_rust_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                return materialize_rust_nested_non_negative_number_for_property(rust_style_value->property_id, value);
+            };
+            auto materialize_rust_nested_non_negative_number_percentage_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto number = materialize_rust_calculation_tree_values(property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No))
+                        return number;
+                    return materialize_rust_calculation_tree_values(property_id, ValueType::Percentage, value.calculation_node_events, DiscardCalculationToken::No);
+                }
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_non_negative_number_percentage(value.source_or_unit);
                 if (*value.numeric_value < 0)
@@ -2840,7 +2856,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 return nullptr;
             };
+            auto materialize_rust_nested_non_negative_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                return materialize_rust_nested_non_negative_number_percentage_for_property(rust_style_value->property_id, value);
+            };
             auto materialize_rust_nested_number_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto number = materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, DiscardCalculationToken::No))
+                        return number;
+                    return materialize_rust_calculation_tree_values(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, DiscardCalculationToken::No);
+                }
                 if (!value.numeric_value.has_value())
                     return parse_rust_source_as_number_percentage(value.source_or_unit);
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
@@ -2913,24 +2937,29 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (values.is_empty() || values.size() > 4)
                     return nullptr;
 
-                auto top = materialize_rust_nested_non_negative_number_percentage(values[0]);
+                auto top = materialize_rust_nested_non_negative_number_percentage_for_property(PropertyID::BorderImageSlice, values[0]);
                 if (!top)
                     return nullptr;
 
-                auto right = values.size() >= 2 ? materialize_rust_nested_non_negative_number_percentage(values[1]) : top;
+                auto right = values.size() >= 2 ? materialize_rust_nested_non_negative_number_percentage_for_property(PropertyID::BorderImageSlice, values[1]) : top;
                 if (!right)
                     return nullptr;
 
-                auto bottom = values.size() >= 3 ? materialize_rust_nested_non_negative_number_percentage(values[2]) : top;
+                auto bottom = values.size() >= 3 ? materialize_rust_nested_non_negative_number_percentage_for_property(PropertyID::BorderImageSlice, values[2]) : top;
                 if (!bottom)
                     return nullptr;
 
-                auto left = values.size() >= 4 ? materialize_rust_nested_non_negative_number_percentage(values[3]) : right;
+                auto left = values.size() >= 4 ? materialize_rust_nested_non_negative_number_percentage_for_property(PropertyID::BorderImageSlice, values[3]) : right;
                 if (!top || !right || !bottom || !left)
                     return nullptr;
                 return BorderImageSliceStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull(), rust_style_value->border_image_slice_fill);
             };
             auto materialize_rust_border_image_outset = [&](RustComponentValueParser::RustBorderImageOutset const& outset) -> RefPtr<StyleValue const> {
+                if (!outset.value.calculation_node_events.is_empty()) {
+                    if (auto number = materialize_rust_nested_non_negative_number_for_property(PropertyID::BorderImageOutset, outset.value))
+                        return number;
+                    return materialize_rust_nested_length_for_property(PropertyID::BorderImageOutset, outset.value, non_negative_range);
+                }
                 if (outset.value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
                     return materialize_rust_nested_non_negative_number(outset.value);
                 if (outset.value.primitive_kind == FFI::CssPrimitiveValueKind::Invalid)
@@ -2940,6 +2969,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             auto materialize_rust_border_image_width = [&](RustComponentValueParser::RustBorderImageWidth const& width) -> RefPtr<StyleValue const> {
                 if (width.is_auto)
                     return KeywordStyleValue::create(Keyword::Auto);
+                if (!width.value.calculation_node_events.is_empty()) {
+                    if (auto number = materialize_rust_nested_non_negative_number_for_property(PropertyID::BorderImageWidth, width.value))
+                        return number;
+                    return materialize_rust_nested_length_percentage_for_property(PropertyID::BorderImageWidth, width.value, non_negative_range);
+                }
                 if (width.value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
                     return materialize_rust_nested_non_negative_number(width.value);
                 if (width.value.primitive_kind == FFI::CssPrimitiveValueKind::Invalid)
@@ -4112,7 +4146,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->border_width_keyword.has_value())
                     width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), KeywordStyleValue::create(to_keyword(*rust_style_value->border_width_keyword)));
                 else if (rust_style_value->border_width_length.has_value()) {
-                    auto width_value = materialize_rust_nested_length(*rust_style_value->border_width_length, non_negative_range);
+                    auto width_value = materialize_rust_nested_length_for_property(width_property, *rust_style_value->border_width_length, non_negative_range);
                     if (!width_value)
                         break;
                     width = make_single_value_shorthand(width_property, longhands_for_shorthand(width_property), width_value.release_nonnull());
