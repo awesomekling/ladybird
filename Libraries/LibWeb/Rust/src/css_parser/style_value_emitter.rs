@@ -1284,8 +1284,11 @@ where
                 callback_nested_primitive(callback, CssStyleValueKind::BorderSpacing, property_id, 0, 0, value);
             }
         }
-        RustOwnedStyleValueKind::SourceBacked(value) => {
-            callback_rust_owned_source_backed_value(callback, property_id, value);
+        RustOwnedStyleValueKind::MathFunction(value) => {
+            callback_rust_owned_math_function(callback, property_id, value);
+        }
+        RustOwnedStyleValueKind::TreeCountingFunction(value) => {
+            callback_rust_owned_tree_counting_function(callback, property_id, value);
         }
         RustOwnedStyleValueKind::CounterStyle(value) => {
             callback_counter_style(callback, CssStyleValueKind::CounterStyle, property_id, value);
@@ -1575,15 +1578,34 @@ where
     }
 }
 
-fn callback_rust_owned_source_backed_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedSourceBackedValue)
+fn callback_rust_owned_math_function<C>(callback: &mut C, property_id: u16, value: &RustOwnedMathFunction)
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
-    let kind = match &value.kind {
-        RustOwnedSourceBackedValueKind::MathFunction { .. } => CssStyleValueKind::MathFunction,
-        RustOwnedSourceBackedValueKind::TreeCountingFunction => CssStyleValueKind::TreeCountingFunction,
-    };
-    callback_source_backed_value_type_kind_style_value(callback, kind, property_id, &value.source, value.value_type);
+    callback_source_backed_value_type_kind_style_value(
+        callback,
+        CssStyleValueKind::MathFunction,
+        property_id,
+        &value.source,
+        value.value_type,
+    );
+}
+
+fn callback_rust_owned_tree_counting_function<C>(
+    callback: &mut C,
+    property_id: u16,
+    value: &RustOwnedTreeCountingFunction,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+{
+    let _ = value.function;
+    callback_source_backed_value_type_kind_style_value(
+        callback,
+        CssStyleValueKind::TreeCountingFunction,
+        property_id,
+        &value.source,
+        value.value_type,
+    );
 }
 
 fn callback_style_value_type<C>(

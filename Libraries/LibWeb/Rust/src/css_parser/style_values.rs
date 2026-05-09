@@ -98,7 +98,6 @@ pub(crate) enum RustOwnedStyleValueKind {
     TransformLonghand(RustOwnedTransformLonghand),
     TransformOrigin(RustOwnedTransformOrigin),
     Transformation(RustOwnedTransformation),
-    SourceBacked(RustOwnedSourceBackedValue),
     TransitionBehavior(RustOwnedTransitionBehavior),
     TransitionProperty(RustOwnedTransitionProperty),
     ViewTimeline(RustOwnedViewTimeline),
@@ -122,6 +121,8 @@ pub(crate) enum RustOwnedStyleValueKind {
     ViewTransitionName(RustOwnedViewTransitionName),
     WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
+    MathFunction(RustOwnedMathFunction),
+    TreeCountingFunction(RustOwnedTreeCountingFunction),
     GeneratedValueList(RustOwnedGeneratedValueList),
 }
 
@@ -308,16 +309,24 @@ pub(crate) struct RustOwnedAnchorSizeFunction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RustOwnedSourceBackedValue {
-    pub(crate) kind: RustOwnedSourceBackedValueKind,
+pub(crate) struct RustOwnedMathFunction {
+    pub(crate) name: String,
+    pub(crate) arguments: Vec<ComponentValue>,
     pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RustOwnedSourceBackedValueKind {
-    MathFunction { name: String },
-    TreeCountingFunction,
+pub(crate) struct RustOwnedTreeCountingFunction {
+    pub(crate) function: RustOwnedTreeCountingFunctionKind,
+    pub(crate) source: String,
+    pub(crate) value_type: PropertyValueType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedTreeCountingFunctionKind {
+    SiblingCount,
+    SiblingIndex,
 }
 
 #[derive(Clone, Debug, PartialEq)]

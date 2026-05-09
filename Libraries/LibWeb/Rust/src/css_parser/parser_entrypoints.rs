@@ -10,7 +10,7 @@ pub(super) fn parse_rust_owned_math_function(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
     filtered_input: &[u8],
-) -> Option<RustOwnedSourceBackedValue> {
+) -> Option<RustOwnedMathFunction> {
     // https://drafts.csswg.org/css-values-4/#math
     // A math function represents a numeric value.
     let [ComponentValue::Function(function)] = component_values else {
@@ -24,10 +24,9 @@ pub(super) fn parse_rust_owned_math_function(
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
 
-    Some(RustOwnedSourceBackedValue {
-        kind: RustOwnedSourceBackedValueKind::MathFunction {
-            name: function.name.clone(),
-        },
+    Some(RustOwnedMathFunction {
+        name: function.name.clone(),
+        arguments: function.value.clone(),
         source,
         value_type,
     })
@@ -37,7 +36,7 @@ pub(super) fn parse_rust_owned_tree_counting_function(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
     filtered_input: &[u8],
-) -> Option<RustOwnedSourceBackedValue> {
+) -> Option<RustOwnedTreeCountingFunction> {
     // https://drafts.csswg.org/css-values-5/#tree-counting
     // <tree-counting-function> = <sibling-index()> | <sibling-count()>
     let [ComponentValue::Function(function)] = component_values else {
@@ -53,8 +52,12 @@ pub(super) fn parse_rust_owned_tree_counting_function(
     let filtered_input = std::str::from_utf8(filtered_input)
         .expect("rust_css_parse_component_values received non-UTF-8 input after C++ decoding");
     let source = serialize_component_values_for_reparsing(component_values, filtered_input)?;
-    Some(RustOwnedSourceBackedValue {
-        kind: RustOwnedSourceBackedValueKind::TreeCountingFunction,
+    Some(RustOwnedTreeCountingFunction {
+        function: if function.name.eq_ignore_ascii_case("sibling-index") {
+            RustOwnedTreeCountingFunctionKind::SiblingIndex
+        } else {
+            RustOwnedTreeCountingFunctionKind::SiblingCount
+        },
         source,
         value_type,
     })
