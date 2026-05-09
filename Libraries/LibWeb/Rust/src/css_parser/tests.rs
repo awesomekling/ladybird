@@ -2652,6 +2652,19 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
+    assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::Left], "4.2535287499999996e+38px"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::Left,
+            value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
+                value: RustOwnedNestedPrimitiveValue::Length {
+                    value: f32::MAX as f64,
+                    unit: "px".to_string(),
+                },
+                value_type: PropertyValueType::Length,
+            }),
+        })
+    );
     assert_eq!(parse_rust_owned_style_value(&[PropertyId::Top], "red"), None);
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::PaddingTop], "10%"),

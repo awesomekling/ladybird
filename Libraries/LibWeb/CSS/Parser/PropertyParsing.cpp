@@ -199,6 +199,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ImageRendering:
     case PropertyID::Isolation:
     case PropertyID::LetterSpacing:
+    case PropertyID::Left:
     case PropertyID::ListStyle:
     case PropertyID::ListStylePosition:
     case PropertyID::MarginBlockEnd:

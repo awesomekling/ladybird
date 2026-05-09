@@ -310,6 +310,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ImageRendering
             | PropertyId::Isolation
             | PropertyId::LetterSpacing
+            | PropertyId::Left
             | PropertyId::ListStyle
             | PropertyId::ListStylePosition
             | PropertyId::MarginBlockEnd
@@ -848,9 +849,7 @@ fn component_values_satisfy_property_numeric_range(
     let Some(mut numeric_value) = style_value_numeric_value(value_type, component_values) else {
         return true;
     };
-    if value_type == PropertyValueType::Integer {
-        numeric_value = numeric_value.clamp(i32::MIN as f64, i32::MAX as f64);
-    }
+    numeric_value = normalize_css_numeric_token_value(value_type, numeric_value);
     let Some(range) = property_accepted_range_by_value_type(property_id, value_type) else {
         return true;
     };
@@ -869,6 +868,16 @@ fn component_values_contain_dimension(component_values: &[ComponentValue]) -> bo
         ComponentValue::SimpleBlock(block) => component_values_contain_dimension(&block.value),
         _ => false,
     })
+}
+
+fn normalize_css_numeric_token_value(value_type: PropertyValueType, numeric_value: f64) -> f64 {
+    // CSS numeric token payloads are ultimately materialized through C++ float-backed value types.
+    // Keep Rust-owned primitive payloads inside the same boundary before range checks and FFI.
+    if value_type == PropertyValueType::Integer {
+        numeric_value.clamp(i32::MIN as f64, i32::MAX as f64)
+    } else {
+        numeric_value.clamp(f32::MIN as f64, f32::MAX as f64)
+    }
 }
 
 pub(super) fn parse_rust_owned_generated_longhand_value(
@@ -1154,7 +1163,8 @@ pub(super) fn parse_rust_owned_generated_longhand_value(
     let numeric_value = generated_style_value
         .as_ref()
         .and_then(|style_value| style_value.numeric_value)
-        .or_else(|| style_value_numeric_value(value_type, component_values));
+        .or_else(|| style_value_numeric_value(value_type, component_values))
+        .map(|numeric_value| normalize_css_numeric_token_value(value_type, numeric_value));
     let secondary_numeric_value = style_value_secondary_numeric_value(value_type, component_values);
     let value = if let Some(generated_style_value) = generated_style_value.as_ref()
         && let Some(value) = generated_style_value.value
