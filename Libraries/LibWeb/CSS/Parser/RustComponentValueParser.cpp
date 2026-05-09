@@ -1384,6 +1384,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 if (kind == FFI::CssStyleValueKind::EasingFunction) {
                     item.easing_function_kind = color_red;
+                    item.last_calculation_node_target = RustCalculationNodeTarget::None;
                     enum : u8 {
                         Keyword,
                         Linear,
@@ -1408,6 +1409,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                             item.linear_easing_stops.append({
                                 .output = nested_primitive_value_from_callback_payload(),
                             });
+                            item.last_calculation_node_target = RustCalculationNodeTarget::LinearEasingOutput;
                         } else {
                             VERIFY(!item.linear_easing_stops.is_empty());
                             if (color_green == LinearFirstStopLength)
@@ -1416,13 +1418,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                                 VERIFY(color_green == LinearSecondStopLength);
                                 item.linear_easing_stops.last().second_stop_length = nested_primitive_value_from_callback_payload();
                             }
+                            item.last_calculation_node_target = color_green == LinearFirstStopLength
+                                ? RustCalculationNodeTarget::LinearEasingFirstStopLength
+                                : RustCalculationNodeTarget::LinearEasingSecondStopLength;
                         }
                     } else if (color_red == CubicBezier) {
                         item.easing_function_values.append(nested_primitive_value_from_callback_payload());
+                        item.last_calculation_node_target = RustCalculationNodeTarget::EasingFunctionValue;
                     } else {
                         VERIFY(color_red == Steps);
                         item.easing_function_step_position = static_cast<StepPosition>(color_green);
                         item.easing_function_values.append(nested_primitive_value_from_callback_payload());
+                        item.last_calculation_node_target = RustCalculationNodeTarget::EasingFunctionValue;
                     }
                     return;
                 }
@@ -1636,6 +1643,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 style_value->easing_function_kind = color_red;
+                style_value->last_calculation_node_target = RustCalculationNodeTarget::None;
                 enum : u8 {
                     Keyword,
                     Linear,
@@ -1660,6 +1668,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->linear_easing_stops.append({
                             .output = nested_primitive_value_from_callback_payload(),
                         });
+                        style_value->last_calculation_node_target = RustCalculationNodeTarget::LinearEasingOutput;
                     } else {
                         VERIFY(!style_value->linear_easing_stops.is_empty());
                         if (color_green == LinearFirstStopLength)
@@ -1668,13 +1677,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                             VERIFY(color_green == LinearSecondStopLength);
                             style_value->linear_easing_stops.last().second_stop_length = nested_primitive_value_from_callback_payload();
                         }
+                        style_value->last_calculation_node_target = color_green == LinearFirstStopLength
+                            ? RustCalculationNodeTarget::LinearEasingFirstStopLength
+                            : RustCalculationNodeTarget::LinearEasingSecondStopLength;
                     }
                 } else if (color_red == CubicBezier) {
                     style_value->easing_function_values.append(nested_primitive_value_from_callback_payload());
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::EasingFunctionValue;
                 } else {
                     VERIFY(color_red == Steps);
                     style_value->easing_function_step_position = static_cast<StepPosition>(color_green);
                     style_value->easing_function_values.append(nested_primitive_value_from_callback_payload());
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::EasingFunctionValue;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::BasicShape) {
@@ -3466,6 +3480,29 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             };
             if (style_value->kind == FFI::CssStyleValueKind::CoordinatingValueListShorthand) {
                 VERIFY(!style_value->coordinating_value_list_shorthand_items.is_empty());
+                auto& item = style_value->coordinating_value_list_shorthand_items.last();
+                switch (item.last_calculation_node_target) {
+                case RustCalculationNodeTarget::EasingFunctionValue:
+                    VERIFY(!item.easing_function_values.is_empty());
+                    item.easing_function_values.last().calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingOutput:
+                    VERIFY(!item.linear_easing_stops.is_empty());
+                    item.linear_easing_stops.last().output.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingFirstStopLength:
+                    VERIFY(!item.linear_easing_stops.is_empty());
+                    VERIFY(item.linear_easing_stops.last().first_stop_length.has_value());
+                    item.linear_easing_stops.last().first_stop_length->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingSecondStopLength:
+                    VERIFY(!item.linear_easing_stops.is_empty());
+                    VERIFY(item.linear_easing_stops.last().second_stop_length.has_value());
+                    item.linear_easing_stops.last().second_stop_length->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
                 style_value->coordinating_value_list_shorthand_items.last().calculation_node_events.append(move(event));
                 return;
             }
@@ -3591,6 +3628,30 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().drop_shadow_radius.has_value());
                     style_value->filter_value_list_events.last().drop_shadow_radius->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::EasingFunction) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::EasingFunctionValue:
+                    VERIFY(!style_value->easing_function_values.is_empty());
+                    style_value->easing_function_values.last().calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingOutput:
+                    VERIFY(!style_value->linear_easing_stops.is_empty());
+                    style_value->linear_easing_stops.last().output.calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingFirstStopLength:
+                    VERIFY(!style_value->linear_easing_stops.is_empty());
+                    VERIFY(style_value->linear_easing_stops.last().first_stop_length.has_value());
+                    style_value->linear_easing_stops.last().first_stop_length->calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::LinearEasingSecondStopLength:
+                    VERIFY(!style_value->linear_easing_stops.is_empty());
+                    VERIFY(style_value->linear_easing_stops.last().second_stop_length.has_value());
+                    style_value->linear_easing_stops.last().second_stop_length->calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

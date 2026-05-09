@@ -411,19 +411,21 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 No,
                 Yes,
             };
-            auto materialize_rust_calculation_tree_values = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
+            auto materialize_rust_calculation_tree_values_with_range = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, Optional<NumericRange> range_override, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
                 if (calculation_node_events.is_empty())
                     return nullptr;
 
                 auto metadata = RustComponentValueParser::property_numeric_metadata({ &property_id, 1 }, value_type);
                 if (!metadata.has_value()) {
-                    if (value_type != ValueType::OpacityValue)
+                    if (value_type != ValueType::OpacityValue && !range_override.has_value())
                         return nullptr;
                     metadata = RustComponentValueParser::PropertyNumericMetadata {
                         .property_id = property_id,
-                        .range = infinite_range,
+                        .range = range_override.value_or(infinite_range),
                     };
                 }
+                if (range_override.has_value())
+                    metadata->range = *range_override;
 
                 CalculationContext calculation_context {
                     .resolve_numbers_as_integers = value_type == ValueType::Integer,
@@ -980,6 +982,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (value_type == ValueType::OpacityValue)
                     return OpacityValueStyleValue::create(move(calculated_value));
                 return calculated_value;
+            };
+            auto materialize_rust_calculation_tree_values = [&](PropertyID property_id, ValueType value_type, ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, DiscardCalculationToken discard_token) -> RefPtr<StyleValue const> {
+                return materialize_rust_calculation_tree_values_with_range(property_id, value_type, calculation_node_events, {}, discard_token);
             };
             auto materialize_rust_calculation_tree = [&]() -> RefPtr<StyleValue const> {
                 if (!rust_style_value->value_type.has_value())
@@ -1636,6 +1641,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             };
             auto materialize_rust_easing_function_values = [&](u8 easing_function_kind, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& easing_function_values, Vector<RustComponentValueParser::RustLinearEasingStop> const& linear_easing_stops, StepPosition easing_function_step_position) -> RefPtr<StyleValue const> {
                 auto materialize_easing_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.calculation_node_events.is_empty())
+                        return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, range, DiscardCalculationToken::No);
                     if (!value.numeric_value.has_value())
                         return parse_rust_source_as_number_in_range(value.source_or_unit, range);
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || !range.contains(*value.numeric_value))
@@ -1643,6 +1650,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return NumberStyleValue::create(*value.numeric_value);
                 };
                 auto materialize_easing_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+                    if (!value.calculation_node_events.is_empty())
+                        return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
                     if (!value.numeric_value.has_value())
                         return parse_rust_source_as_percentage(value.source_or_unit);
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Percentage)
@@ -1650,6 +1659,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PercentageStyleValue::create(Percentage { *value.numeric_value });
                 };
                 auto materialize_easing_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+                    if (!value.calculation_node_events.is_empty())
+                        return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, range, DiscardCalculationToken::No);
                     if (!value.numeric_value.has_value())
                         return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer || !range.contains(*value.numeric_value))

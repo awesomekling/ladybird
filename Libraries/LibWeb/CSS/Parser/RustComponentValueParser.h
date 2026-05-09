@@ -267,6 +267,10 @@ public:
         BasicShapeRectangleRadiusVertical,
         BasicShapePolygonCoordinate,
         FitContentArgument,
+        EasingFunctionValue,
+        LinearEasingOutput,
+        LinearEasingFirstStopLength,
+        LinearEasingSecondStopLength,
     };
 
     enum class RustTreeCountingFunction : u8 {
@@ -653,6 +657,7 @@ public:
         Vector<RustNestedPrimitiveValue> easing_function_values;
         Vector<RustLinearEasingStop> linear_easing_stops;
         StepPosition easing_function_step_position { StepPosition::End };
+        RustCalculationNodeTarget last_calculation_node_target { RustCalculationNodeTarget::None };
         FFI::CssAnimationNameValueKind animation_name_kind { FFI::CssAnimationNameValueKind::Invalid };
         Vector<FFI::CssAnimationNameItemKind> animation_name_item_kinds;
         Vector<FlyString> animation_names;

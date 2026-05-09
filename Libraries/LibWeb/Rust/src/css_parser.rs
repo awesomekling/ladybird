@@ -98,7 +98,7 @@ pub(crate) use parser_syntax_media::{
 use parser_token_stream::*;
 pub use parser_types::*;
 use parser_urls_fonts::*;
-use style_value_emitter::emit_rust_owned_style_value;
+use style_value_emitter::emit_rust_owned_style_value_with_calculation_callback;
 use style_value_longhands::*;
 pub(crate) use style_value_parser::component_values_match_syntax;
 use style_value_parser::{

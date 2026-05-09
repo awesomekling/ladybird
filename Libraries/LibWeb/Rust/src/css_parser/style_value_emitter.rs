@@ -13,6 +13,17 @@ pub(super) fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, 
 where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
+    emit_rust_owned_style_value_with_calculation_callback(style_value, callback, &mut |_, _, _, _, _, _| {});
+}
+
+pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D>(
+    style_value: &RustOwnedStyleValue,
+    callback: &mut C,
+    calculation_callback: &mut D,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
     let property_id = style_value.property_id as u16;
     match &style_value.value {
         RustOwnedStyleValueKind::Image(image) => {
@@ -63,7 +74,11 @@ where
                     item.source.as_bytes(),
                     "",
                 );
-                emit_rust_owned_style_value(&item.style_value, callback);
+                emit_rust_owned_style_value_with_calculation_callback(
+                    &item.style_value,
+                    callback,
+                    calculation_callback,
+                );
             }
         }
         RustOwnedStyleValueKind::FontShorthand(items) => {
@@ -103,7 +118,11 @@ where
                     &[],
                     "",
                 );
-                emit_rust_owned_style_value(&item.style_value, callback);
+                emit_rust_owned_style_value_with_calculation_callback(
+                    &item.style_value,
+                    callback,
+                    calculation_callback,
+                );
             }
         }
         RustOwnedStyleValueKind::GridPlacementShorthand(items) => {
@@ -215,7 +234,11 @@ where
                     item.source.as_bytes(),
                     "",
                 );
-                emit_rust_owned_style_value(&item.style_value, callback);
+                emit_rust_owned_style_value_with_calculation_callback(
+                    &item.style_value,
+                    callback,
+                    calculation_callback,
+                );
             }
         }
         RustOwnedStyleValueKind::PositionalValueListShorthand(items) => {
@@ -236,7 +259,11 @@ where
                     item.source.as_bytes(),
                     "",
                 );
-                emit_rust_owned_style_value(&item.style_value, callback);
+                emit_rust_owned_style_value_with_calculation_callback(
+                    &item.style_value,
+                    callback,
+                    calculation_callback,
+                );
             }
         }
         RustOwnedStyleValueKind::FontStyle(value) => {
@@ -1382,7 +1409,7 @@ where
         RustOwnedStyleValueKind::Color(color) => callback_color_style_value(callback, property_id, color),
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::EasingFunction(value) => {
-            callback_easing_function_style_value(callback, property_id, value);
+            callback_easing_function_style_value(callback, calculation_callback, property_id, value);
         }
         RustOwnedStyleValueKind::FitContent(value) => {
             callback_fit_content_style_value(callback, property_id, &value.value);
@@ -1815,9 +1842,14 @@ const BASIC_SHAPE_COMPONENT_RADIAL_POSITION_Y: u8 = 10;
 const FIT_CONTENT_CALLBACK_KEYWORD: u8 = 0;
 const FIT_CONTENT_CALLBACK_FUNCTION: u8 = 1;
 
-fn callback_easing_function_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedEasingFunction)
-where
+fn callback_easing_function_style_value<C, D>(
+    callback: &mut C,
+    calculation_callback: &mut D,
+    property_id: u16,
+    value: &RustOwnedEasingFunction,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
 {
     const LINEAR_OUTPUT: u8 = 0;
     const LINEAR_FIRST_STOP_LENGTH: u8 = 1;
@@ -1841,8 +1873,9 @@ where
         ),
         RustOwnedEasingFunctionValue::Linear(stops) => {
             for stop in stops {
-                callback_nested_primitive(
+                callback_nested_primitive_with_calculation(
                     callback,
+                    calculation_callback,
                     CssStyleValueKind::EasingFunction,
                     property_id,
                     EASING_FUNCTION_CALLBACK_LINEAR,
@@ -1850,8 +1883,9 @@ where
                     &stop.output,
                 );
                 if let Some(first_stop_length) = &stop.first_stop_length {
-                    callback_nested_primitive(
+                    callback_nested_primitive_with_calculation(
                         callback,
+                        calculation_callback,
                         CssStyleValueKind::EasingFunction,
                         property_id,
                         EASING_FUNCTION_CALLBACK_LINEAR,
@@ -1860,8 +1894,9 @@ where
                     );
                 }
                 if let Some(second_stop_length) = &stop.second_stop_length {
-                    callback_nested_primitive(
+                    callback_nested_primitive_with_calculation(
                         callback,
+                        calculation_callback,
                         CssStyleValueKind::EasingFunction,
                         property_id,
                         EASING_FUNCTION_CALLBACK_LINEAR,
@@ -1873,8 +1908,9 @@ where
         }
         RustOwnedEasingFunctionValue::CubicBezier { x1, y1, x2, y2 } => {
             for (index, value) in [x1, y1, x2, y2].iter().enumerate() {
-                callback_nested_primitive(
+                callback_nested_primitive_with_calculation(
                     callback,
+                    calculation_callback,
                     CssStyleValueKind::EasingFunction,
                     property_id,
                     EASING_FUNCTION_CALLBACK_CUBIC_BEZIER,
@@ -1883,8 +1919,9 @@ where
                 );
             }
         }
-        RustOwnedEasingFunctionValue::Steps { intervals, position } => callback_nested_primitive(
+        RustOwnedEasingFunctionValue::Steps { intervals, position } => callback_nested_primitive_with_calculation(
             callback,
+            calculation_callback,
             CssStyleValueKind::EasingFunction,
             property_id,
             EASING_FUNCTION_CALLBACK_STEPS,
@@ -4503,6 +4540,24 @@ fn callback_nested_primitive<C>(
         unit_or_source.as_bytes(),
         "",
     );
+}
+
+fn callback_nested_primitive_with_calculation<C, D>(
+    callback: &mut C,
+    calculation_callback: &mut D,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
+    callback_nested_primitive(callback, style_value_kind, property_id, kind, secondary_kind, value);
+    if let RustOwnedNestedPrimitiveValue::MathFunction(value) = value {
+        emit_rust_owned_calculation_tree(&value.calculation, calculation_callback);
+    }
 }
 
 fn callback_view_timeline_inset_value<C>(

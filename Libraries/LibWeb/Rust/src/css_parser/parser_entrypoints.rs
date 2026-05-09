@@ -131,7 +131,7 @@ where
         return false;
     };
 
-    emit_rust_owned_style_value(&style_value, &mut callback);
+    emit_rust_owned_style_value_with_calculation_callback(&style_value, &mut callback, &mut calculation_callback);
     if let RustOwnedStyleValueKind::MathFunction(value) = &style_value.value {
         emit_rust_owned_calculation_tree(&value.calculation, &mut calculation_callback);
     }
