@@ -8,7 +8,7 @@ use super::*;
 use crate::css_parser::style_value_shorthands::{
     parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_font_shorthand,
     parse_rust_owned_grid_placement_shorthand, parse_rust_owned_grid_template_shorthand,
-    parse_rust_owned_layer_shorthand,
+    parse_rust_owned_layer_shorthand, parse_rust_owned_positional_value_list_shorthand,
 };
 
 pub(crate) fn parse_rust_owned_style_value_for_property(
@@ -84,7 +84,7 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
     // their longhand keywords as the whole shorthand.
     if property_ids.len() == 1
         && let Some(property_id) = property_id_from_u16(property_ids[0])
-        && matches!(
+        && (matches!(
             property_id,
             PropertyId::Grid
                 | PropertyId::GridArea
@@ -95,7 +95,7 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                 | PropertyId::Transition
                 | PropertyId::Background
                 | PropertyId::Mask
-        )
+        ) || property_is_positional_value_list_shorthand(property_id))
     {
         return RustOwnedStyleValueParseResult::Invalid;
     }
@@ -309,11 +309,18 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderBottomLeftRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderBlockEndWidth
+            | PropertyId::BorderBlockColor
+            | PropertyId::BorderBlockStyle
+            | PropertyId::BorderBlockWidth
             | PropertyId::BorderBlockStartWidth
             | PropertyId::BorderBottomWidth
+            | PropertyId::BorderColor
             | PropertyId::BorderEndEndRadius
             | PropertyId::BorderEndStartRadius
             | PropertyId::BorderInlineEndWidth
+            | PropertyId::BorderInlineColor
+            | PropertyId::BorderInlineStyle
+            | PropertyId::BorderInlineWidth
             | PropertyId::BorderInlineStartWidth
             | PropertyId::BorderLeftColor
             | PropertyId::BorderLeftStyle
@@ -322,6 +329,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderRightColor
             | PropertyId::BorderRightStyle
             | PropertyId::BorderRightWidth
+            | PropertyId::BorderStyle
             | PropertyId::BorderStartEndRadius
             | PropertyId::BorderStartStartRadius
             | PropertyId::BorderTopLeftRadius
@@ -329,6 +337,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderTopColor
             | PropertyId::BorderTopStyle
             | PropertyId::BorderTopWidth
+            | PropertyId::BorderWidth
             | PropertyId::Bottom
             | PropertyId::BoxShadow
             | PropertyId::BoxSizing
@@ -352,11 +361,20 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::Content
             | PropertyId::ContentVisibility
             | PropertyId::CornerBottomLeftShape
+            | PropertyId::CornerBottomShape
             | PropertyId::CornerBottomRightShape
+            | PropertyId::CornerBlockEndShape
+            | PropertyId::CornerBlockStartShape
             | PropertyId::CornerEndEndShape
             | PropertyId::CornerEndStartShape
+            | PropertyId::CornerInlineEndShape
+            | PropertyId::CornerInlineStartShape
+            | PropertyId::CornerLeftShape
+            | PropertyId::CornerRightShape
+            | PropertyId::CornerShape
             | PropertyId::CornerStartEndShape
             | PropertyId::CornerStartStartShape
+            | PropertyId::CornerTopShape
             | PropertyId::CornerTopLeftShape
             | PropertyId::CornerTopRightShape
             | PropertyId::CounterIncrement
@@ -418,11 +436,15 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::GridTemplateAreas
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            | PropertyId::Gap
             | PropertyId::Height
             | PropertyId::InlineSize
             | PropertyId::InsetBlockEnd
             | PropertyId::InsetBlockStart
+            | PropertyId::Inset
+            | PropertyId::InsetBlock
             | PropertyId::InsetInlineEnd
+            | PropertyId::InsetInline
             | PropertyId::InsetInlineStart
             | PropertyId::ImageRendering
             | PropertyId::Isolation
@@ -437,9 +459,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::ListStylePosition
             | PropertyId::ListStyleType
             | PropertyId::MarginBlockEnd
+            | PropertyId::Margin
+            | PropertyId::MarginBlock
             | PropertyId::MarginBlockStart
             | PropertyId::MarginBottom
             | PropertyId::MarginInlineEnd
+            | PropertyId::MarginInline
             | PropertyId::MarginInlineStart
             | PropertyId::MarginLeft
             | PropertyId::MarginRight
@@ -481,6 +506,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OverflowClipMarginRight
             | PropertyId::OverflowClipMarginTop
             | PropertyId::OverflowX
+            | PropertyId::Overflow
             | PropertyId::OverflowY
             | PropertyId::Opacity
             | PropertyId::Order
@@ -490,9 +516,12 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::OutlineWidth
             | PropertyId::Orphans
             | PropertyId::PaddingBlockEnd
+            | PropertyId::Padding
+            | PropertyId::PaddingBlock
             | PropertyId::PaddingBlockStart
             | PropertyId::PaddingBottom
             | PropertyId::PaddingInlineEnd
+            | PropertyId::PaddingInline
             | PropertyId::PaddingInlineStart
             | PropertyId::PaddingLeft
             | PropertyId::PaddingRight
@@ -605,6 +634,15 @@ fn parse_rust_owned_property_specific_longhand_value(
     filtered_input: &[u8],
     primitive_value_options: CssPrimitiveValueOptions,
 ) -> Option<RustOwnedStyleValueKind> {
+    if property_is_positional_value_list_shorthand(property_id) {
+        return parse_rust_owned_positional_value_list_shorthand(
+            property_id as u16,
+            filtered_input,
+            primitive_value_options,
+        )
+        .map(RustOwnedStyleValueKind::PositionalValueListShorthand);
+    }
+
     match property_id {
         PropertyId::AnchorName => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, false),
         PropertyId::AnchorScope => rust_owned_anchor_name_or_scope_style_value_kind(filtered_input, true),

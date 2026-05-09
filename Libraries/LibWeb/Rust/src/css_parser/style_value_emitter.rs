@@ -159,6 +159,26 @@ where
                 );
             }
         }
+        RustOwnedStyleValueKind::PositionalValueListShorthand(items) => {
+            let shorthand_property_id = property_id;
+            for item in items {
+                callback(
+                    CssStyleValueKind::PositionalValueListShorthand,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    (shorthand_property_id & 0xff) as u8,
+                    (shorthand_property_id >> 8) as u8,
+                    (item.index & 0xff) as u8,
+                    ((item.index >> 8) & 0xff) as u8,
+                    item.source.as_bytes(),
+                    "",
+                );
+            }
+        }
         RustOwnedStyleValueKind::FontStyle(value) => callback(
             CssStyleValueKind::FontStyle,
             property_id,

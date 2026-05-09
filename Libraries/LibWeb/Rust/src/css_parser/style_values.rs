@@ -47,6 +47,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     PlaceContent(RustOwnedPlaceShorthand),
     PlaceItems(RustOwnedPlaceShorthand),
     PlaceSelf(RustOwnedPlaceShorthand),
+    PositionalValueListShorthand(Vec<RustOwnedPositionalValueListShorthandItem>),
     GridAutoFlow(RustOwnedGridAutoFlow),
     GridAutoTrackSizes(RustOwnedGridTrackSizeList),
     GridTemplateAreas(RustOwnedGridTemplateAreas),

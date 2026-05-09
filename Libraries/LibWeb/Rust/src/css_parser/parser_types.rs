@@ -1900,6 +1900,7 @@ pub enum CssStyleValueKind {
     PlaceContent,
     PlaceItems,
     PlaceSelf,
+    PositionalValueListShorthand,
     Position,
     PositionArea,
     PositionAnchor,

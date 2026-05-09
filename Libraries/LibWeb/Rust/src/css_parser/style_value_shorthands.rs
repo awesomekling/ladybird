@@ -1297,7 +1297,11 @@ pub(crate) fn parse_positional_value_list_shorthand<C>(property_id: u16, filtere
 where
     C: FnMut(usize, &str),
 {
-    let Some(items) = parse_rust_owned_positional_value_list_shorthand(property_id, filtered_input) else {
+    let Some(items) = parse_rust_owned_positional_value_list_shorthand(
+        property_id,
+        filtered_input,
+        CssPrimitiveValueOptions::default(),
+    ) else {
         return false;
     };
 
@@ -1311,6 +1315,7 @@ where
 pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
     property_id: u16,
     filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
 ) -> Option<Vec<RustOwnedPositionalValueListShorthandItem>> {
     let property_id = property_id_from_u16(property_id)?;
     if !property_is_positional_value_list_shorthand(property_id) {
@@ -1322,7 +1327,6 @@ pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
         return None;
     }
 
-    let property_ids = [property_id as u16];
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
     let mut parser = ComponentValueParser::new(component_values);
@@ -1344,8 +1348,13 @@ pub(crate) fn parse_rust_owned_positional_value_list_shorthand(
             filtered_input_string,
         )?;
 
+        let property_ids = [longhands[values.len()] as u16];
         let RustOwnedStyleValueParseResult::Parsed(style_value) =
-            parse_rust_owned_style_value_for_property(&property_ids, serialized_value.as_bytes())
+            parse_rust_owned_style_value_for_property_with_options(
+                &property_ids,
+                serialized_value.as_bytes(),
+                primitive_value_options,
+            )
         else {
             return None;
         };

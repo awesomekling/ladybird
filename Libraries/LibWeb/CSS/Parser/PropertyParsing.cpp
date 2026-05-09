@@ -124,6 +124,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BackgroundOrigin:
     case PropertyID::Border:
     case PropertyID::BorderBlock:
+    case PropertyID::BorderBlockColor:
     case PropertyID::BorderBlockEnd:
     case PropertyID::BorderBlockEndColor:
     case PropertyID::BorderBlockEndStyle:
@@ -137,13 +138,18 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderBlockStart:
     case PropertyID::BorderBlockStartColor:
     case PropertyID::BorderBlockStartStyle:
+    case PropertyID::BorderBlockStyle:
+    case PropertyID::BorderBlockWidth:
     case PropertyID::BorderInline:
+    case PropertyID::BorderInlineColor:
     case PropertyID::BorderInlineEnd:
     case PropertyID::BorderInlineEndColor:
     case PropertyID::BorderInlineEndStyle:
     case PropertyID::BorderInlineStart:
     case PropertyID::BorderInlineStartColor:
     case PropertyID::BorderInlineStartStyle:
+    case PropertyID::BorderInlineStyle:
+    case PropertyID::BorderInlineWidth:
     case PropertyID::BorderBottomColor:
     case PropertyID::BorderBottomStyle:
     case PropertyID::BorderCollapse:
@@ -152,6 +158,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderBlockEndWidth:
     case PropertyID::BorderBlockStartWidth:
     case PropertyID::BorderBottomWidth:
+    case PropertyID::BorderColor:
     case PropertyID::BorderEndEndRadius:
     case PropertyID::BorderEndStartRadius:
     case PropertyID::BorderInlineEndWidth:
@@ -163,6 +170,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderRightColor:
     case PropertyID::BorderRightStyle:
     case PropertyID::BorderRightWidth:
+    case PropertyID::BorderStyle:
     case PropertyID::BorderStartEndRadius:
     case PropertyID::BorderStartStartRadius:
     case PropertyID::BorderTopLeftRadius:
@@ -170,6 +178,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderTopColor:
     case PropertyID::BorderTopStyle:
     case PropertyID::BorderTopWidth:
+    case PropertyID::BorderWidth:
     case PropertyID::Bottom:
     case PropertyID::BoxShadow:
     case PropertyID::BoxSizing:
@@ -192,13 +201,22 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ContainerType:
     case PropertyID::Content:
     case PropertyID::ContentVisibility:
+    case PropertyID::CornerBlockEndShape:
+    case PropertyID::CornerBlockStartShape:
     case PropertyID::CornerBottomLeftShape:
+    case PropertyID::CornerBottomShape:
     case PropertyID::CornerBottomRightShape:
     case PropertyID::CornerEndEndShape:
     case PropertyID::CornerEndStartShape:
+    case PropertyID::CornerInlineEndShape:
+    case PropertyID::CornerInlineStartShape:
+    case PropertyID::CornerLeftShape:
+    case PropertyID::CornerRightShape:
+    case PropertyID::CornerShape:
     case PropertyID::CornerStartEndShape:
     case PropertyID::CornerStartStartShape:
     case PropertyID::CornerTopLeftShape:
+    case PropertyID::CornerTopShape:
     case PropertyID::CornerTopRightShape:
     case PropertyID::CounterIncrement:
     case PropertyID::CounterReset:
@@ -244,6 +262,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::FlexGrow:
     case PropertyID::FlexShrink:
     case PropertyID::ColumnGap:
+    case PropertyID::Gap:
     case PropertyID::Grid:
     case PropertyID::GridAutoColumns:
     case PropertyID::GridAutoFlow:
@@ -261,8 +280,11 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::GridTemplateRows:
     case PropertyID::Height:
     case PropertyID::InlineSize:
+    case PropertyID::Inset:
+    case PropertyID::InsetBlock:
     case PropertyID::InsetBlockEnd:
     case PropertyID::InsetBlockStart:
+    case PropertyID::InsetInline:
     case PropertyID::InsetInlineEnd:
     case PropertyID::InsetInlineStart:
     case PropertyID::ImageRendering:
@@ -277,9 +299,12 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::ListStyleImage:
     case PropertyID::ListStylePosition:
     case PropertyID::ListStyleType:
+    case PropertyID::Margin:
+    case PropertyID::MarginBlock:
     case PropertyID::MarginBlockEnd:
     case PropertyID::MarginBlockStart:
     case PropertyID::MarginBottom:
+    case PropertyID::MarginInline:
     case PropertyID::MarginInlineEnd:
     case PropertyID::MarginInlineStart:
     case PropertyID::MarginLeft:
@@ -321,6 +346,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OverflowClipMarginLeft:
     case PropertyID::OverflowClipMarginRight:
     case PropertyID::OverflowClipMarginTop:
+    case PropertyID::Overflow:
     case PropertyID::OverflowX:
     case PropertyID::OverflowY:
     case PropertyID::Opacity:
@@ -330,9 +356,12 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::OutlineStyle:
     case PropertyID::OutlineWidth:
     case PropertyID::Orphans:
+    case PropertyID::Padding:
+    case PropertyID::PaddingBlock:
     case PropertyID::PaddingBlockEnd:
     case PropertyID::PaddingBlockStart:
     case PropertyID::PaddingBottom:
+    case PropertyID::PaddingInline:
     case PropertyID::PaddingInlineEnd:
     case PropertyID::PaddingInlineStart:
     case PropertyID::PaddingLeft:
@@ -4667,6 +4696,70 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                 mask_mode.release_nonnull() }) };
                 }
                 break;
+            }
+            case FFI::CssStyleValueKind::PositionalValueListShorthand: {
+                auto const& longhands = longhands_for_shorthand(rust_style_value->property_id);
+                if (!first_is_one_of(longhands.size(), 2uz, 4uz))
+                    break;
+
+                Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
+                for (auto const& item : rust_style_value->positional_value_list_shorthand_items) {
+                    if (item.index != parsed_values.size() || item.index >= longhands.size()) {
+                        parsed_values.clear();
+                        break;
+                    }
+
+                    auto parsed_value = parse_rust_source_as_property(longhands[item.index], item.value);
+                    if (!parsed_value) {
+                        parsed_values.clear();
+                        break;
+                    }
+                    parsed_values.append(parsed_value.release_nonnull());
+                }
+                if (parsed_values.is_empty())
+                    break;
+
+                RefPtr<StyleValue const> shorthand_value;
+                switch (longhands.size()) {
+                case 2:
+                    switch (parsed_values.size()) {
+                    case 1:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, { parsed_values[0], parsed_values[0] });
+                        break;
+                    case 2:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, parsed_values);
+                        break;
+                    default:
+                        break;
+                    }
+                    break;
+                case 4:
+                    switch (parsed_values.size()) {
+                    case 1:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, { parsed_values[0], parsed_values[0], parsed_values[0], parsed_values[0] });
+                        break;
+                    case 2:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[0], parsed_values[1] });
+                        break;
+                    case 3:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, { parsed_values[0], parsed_values[1], parsed_values[2], parsed_values[1] });
+                        break;
+                    case 4:
+                        shorthand_value = ShorthandStyleValue::create(rust_style_value->property_id, longhands, parsed_values);
+                        break;
+                    default:
+                        break;
+                    }
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
+                }
+                if (!shorthand_value)
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                return PropertyAndValue { rust_style_value->property_id, shorthand_value.release_nonnull() };
             }
             case FFI::CssStyleValueKind::GridTemplateAreas:
                 if (rust_style_value->grid_template_areas_is_none || !rust_style_value->grid_template_area_rows.is_empty()) {

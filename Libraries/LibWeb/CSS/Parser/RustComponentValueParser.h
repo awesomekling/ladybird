@@ -141,6 +141,11 @@ public:
 
     using LayerShorthandItem = CoordinatingValueListShorthandItem;
 
+    struct PositionalValueListShorthandItem {
+        size_t index { 0 };
+        String value;
+    };
+
     struct FontStyle {
         FFI::CssFontStyleKind kind;
         bool has_angle { false };
@@ -711,6 +716,7 @@ public:
         Optional<FlyString> cursor_predefined;
         Vector<CoordinatingValueListShorthandItem> coordinating_value_list_shorthand_items;
         Vector<LayerShorthandItem> layer_shorthand_items;
+        Vector<PositionalValueListShorthandItem> positional_value_list_shorthand_items;
         bool filter_value_list_is_none { false };
         Vector<RustFilterValueListEvent> filter_value_list_events;
         Vector<GridPlacementShorthandItem> grid_placement_shorthand_items;
@@ -765,11 +771,6 @@ public:
         u8 blue { 0 };
         u8 alpha { 0 };
         Optional<FlyString> name;
-    };
-
-    struct PositionalValueListShorthandItem {
-        size_t index { 0 };
-        String value;
     };
 
     struct PropertyNumericMetadata {

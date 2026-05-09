@@ -1347,7 +1347,19 @@ fn parse_rust_owned_positional_shorthand(
     property_id: PropertyId,
     input: &str,
 ) -> Option<Vec<RustOwnedPositionalValueListShorthandItem>> {
-    parse_rust_owned_positional_value_list_shorthand(property_id as u16, input.as_bytes())
+    parse_rust_owned_positional_value_list_shorthand(
+        property_id as u16,
+        input.as_bytes(),
+        CssPrimitiveValueOptions::default(),
+    )
+}
+
+fn parse_rust_owned_positional_shorthand_with_options(
+    property_id: PropertyId,
+    input: &str,
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<Vec<RustOwnedPositionalValueListShorthandItem>> {
+    parse_rust_owned_positional_value_list_shorthand(property_id as u16, input.as_bytes(), primitive_value_options)
 }
 
 #[derive(Debug, PartialEq)]
@@ -3735,6 +3747,25 @@ fn parses_style_values_with_rust_owned_ast() {
             (0, PropertyId::MaskMode, "alpha"),
         ]
     );
+    let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Margin,
+        value: RustOwnedStyleValueKind::PositionalValueListShorthand(margin_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Margin], "1px 2% auto calc(3px + 4%)")
+    else {
+        panic!("Expected margin to parse as a positional value list shorthand");
+    };
+    assert_eq!(
+        margin_items
+            .iter()
+            .map(|item| (item.index, item.style_value.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::MarginTop, "1px"),
+            (1, PropertyId::MarginRight, "2%"),
+            (2, PropertyId::MarginBottom, "auto"),
+            (3, PropertyId::MarginLeft, "calc(3px + 4%)"),
+        ]
+    );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span 2 main"),
         Some(RustOwnedStyleValue {
@@ -6016,16 +6047,16 @@ fn parses_positional_value_list_shorthands() {
             .map(|item| (item.index, item.style_value.property_id, item.source.clone()))
             .collect::<Vec<_>>(),
         vec![
-            (0, PropertyId::Margin, "1px".to_string()),
-            (1, PropertyId::Margin, "2%".to_string()),
-            (2, PropertyId::Margin, "auto".to_string()),
-            (3, PropertyId::Margin, "calc(3px + 4%)".to_string()),
+            (0, PropertyId::MarginTop, "1px".to_string()),
+            (1, PropertyId::MarginRight, "2%".to_string()),
+            (2, PropertyId::MarginBottom, "auto".to_string()),
+            (3, PropertyId::MarginLeft, "calc(3px + 4%)".to_string()),
         ]
     );
     assert_eq!(
         rust_items[0].style_value,
         RustOwnedStyleValue {
-            property_id: PropertyId::Margin,
+            property_id: PropertyId::MarginTop,
             value: RustOwnedStyleValueKind::Primitive(RustOwnedPrimitiveValue::Nested {
                 value: RustOwnedNestedPrimitiveValue::Length {
                     value: 1.0,
@@ -6050,12 +6081,12 @@ fn parses_positional_value_list_shorthands() {
         vec![
             (
                 0,
-                PropertyId::Inset,
+                PropertyId::Top,
                 "anchor(--target bottom, calc(1px + 2%))".to_string()
             ),
-            (1, PropertyId::Inset, "2%".to_string()),
-            (2, PropertyId::Inset, "auto".to_string()),
-            (3, PropertyId::Inset, "4px".to_string()),
+            (1, PropertyId::Right, "2%".to_string()),
+            (2, PropertyId::Bottom, "auto".to_string()),
+            (3, PropertyId::Left, "4px".to_string()),
         ]
     );
     assert_eq!(parse_positional_shorthand(PropertyId::Margin, ""), None);
@@ -6065,6 +6096,27 @@ fn parses_positional_value_list_shorthands() {
     );
     assert_eq!(parse_positional_shorthand(PropertyId::Margin, "1px red"), None);
     assert_eq!(parse_positional_shorthand(PropertyId::Color, "red"), None);
+    assert_eq!(
+        parse_rust_owned_positional_shorthand(PropertyId::BorderColor, "123"),
+        None
+    );
+    assert_eq!(
+        parse_rust_owned_positional_shorthand_with_options(
+            PropertyId::BorderColor,
+            "123",
+            CssPrimitiveValueOptions {
+                allow_quirky_color: true,
+                ..Default::default()
+            }
+        )
+        .map(|items| {
+            items
+                .into_iter()
+                .map(|item| (item.index, item.style_value.property_id, item.source))
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![(0, PropertyId::BorderTopColor, "123".to_string())])
+    );
 }
 
 #[test]

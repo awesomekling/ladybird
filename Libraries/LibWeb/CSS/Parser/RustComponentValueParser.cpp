@@ -1191,6 +1191,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto layer_index_from_callback_payload = [&]() {
                 return static_cast<size_t>(static_cast<u16>(color_blue) | (static_cast<u16>(color_alpha) << 8));
             };
+            auto item_index_from_callback_payload = layer_index_from_callback_payload;
 
             if (kind == FFI::CssStyleValueKind::Keyword) {
                 auto keyword = keyword_from_string({ value_ptr, value_len });
@@ -1531,6 +1532,20 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->layer_shorthand_items.append(LayerShorthandItem {
                     .layer_index = layer_index_from_callback_payload(),
                     .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
+            } else if (kind == FFI::CssStyleValueKind::PositionalValueListShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::PositionalValueListShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                style_value->positional_value_list_shorthand_items.append(PositionalValueListShorthandItem {
+                    .index = item_index_from_callback_payload(),
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });
                 return;
