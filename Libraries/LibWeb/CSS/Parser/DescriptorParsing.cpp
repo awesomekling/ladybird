@@ -344,14 +344,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     StyleValueVector symbols;
                     for (auto const& item : negative->items) {
                         auto symbol = materialize_descriptor_symbol(item);
-                        if (!symbol) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream<ComponentValue> symbol_tokens { component_values };
-                            symbol = parse_symbol_value(symbol_tokens);
-                            symbol_tokens.discard_whitespace();
-                            if (!symbol || symbol_tokens.has_next_token())
-                                return nullptr;
-                        }
+                        if (!symbol)
+                            return nullptr;
                         symbols.append(symbol.release_nonnull());
                     }
 
@@ -782,26 +776,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                                 return nullptr;
                             continue;
                         }
-
-                        auto const& source = item.source;
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> keyword_tokens { component_values };
-                        auto keyword = parse_keyword_value(keyword_tokens);
-                        keyword_tokens.discard_whitespace();
-                        if (!keyword || keyword_tokens.has_next_token())
-                            return nullptr;
-
-                        if (first_is_one_of(keyword->to_keyword(), Keyword::Landscape, Keyword::Portrait)) {
-                            if (orientation)
-                                return nullptr;
-                            orientation = keyword.release_nonnull();
-                        } else if (keyword_to_page_size(keyword->to_keyword()).has_value()) {
-                            if (page_size)
-                                return nullptr;
-                            page_size = keyword.release_nonnull();
-                        } else {
-                            return nullptr;
-                        }
+                        return nullptr;
                     }
 
                     if (page_size && orientation) {
@@ -875,20 +850,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                         return nullptr;
 
                     auto symbol = materialize_descriptor_symbol(symbol_sources->items.first());
-                    if (!symbol) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(symbol_sources->items.first().source.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream<ComponentValue> symbol_tokens { component_values };
-
-                        symbol = parse_symbol_value(symbol_tokens);
-                        if (!symbol)
-                            return nullptr;
-
-                        symbol_tokens.discard_whitespace();
-                        if (symbol_tokens.has_next_token())
-                            return nullptr;
-                    }
-
-                    return symbol.release_nonnull();
+                    return symbol ? symbol.release_nonnull() : nullptr;
                 }
                 case DescriptorMetadata::ValueType::Symbols: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-symbols
@@ -905,15 +867,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     StyleValueVector symbols;
                     for (auto const& item : symbol_sources->items) {
                         auto symbol = materialize_descriptor_symbol(item);
-                        if (!symbol) {
-                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.source.bytes_as_string_view(), "utf-8"sv);
-                            TokenStream<ComponentValue> symbol_tokens { component_values };
-                            symbol_tokens.discard_whitespace();
-                            symbol = parse_symbol_value(symbol_tokens);
-                            symbol_tokens.discard_whitespace();
-                            if (!symbol || symbol_tokens.has_next_token())
-                                return nullptr;
-                        }
+                        if (!symbol)
+                            return nullptr;
                         symbols.append(symbol.release_nonnull());
                     }
 
