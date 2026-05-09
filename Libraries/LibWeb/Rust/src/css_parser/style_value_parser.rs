@@ -265,6 +265,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::BorderImageSlice
             | PropertyId::BorderImageSource
             | PropertyId::BorderImageWidth
+            | PropertyId::BorderSpacing
             | PropertyId::BorderInline
             | PropertyId::BorderInlineEnd
             | PropertyId::BorderInlineEndColor
@@ -514,6 +515,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::TextDecorationThickness
             | PropertyId::TextIndent
             | PropertyId::TextJustify
+            | PropertyId::TextOverflow
             | PropertyId::TextRendering
             | PropertyId::TextShadow
             | PropertyId::TextTransform
@@ -630,6 +632,9 @@ fn parse_rust_owned_property_specific_longhand_value(
         PropertyId::BorderImageRepeat => rust_owned_border_image_repeat_style_value_kind(filtered_input),
         PropertyId::BorderImageSlice => rust_owned_border_image_slice_style_value_kind(filtered_input),
         PropertyId::BorderImageWidth => rust_owned_border_image_width_style_value_kind(filtered_input),
+        PropertyId::BorderSpacing => {
+            rust_owned_border_spacing_style_value_kind(filtered_input, primitive_value_options)
+        }
         PropertyId::BorderBottomLeftRadius
         | PropertyId::BorderBottomRightRadius
         | PropertyId::BorderEndEndRadius

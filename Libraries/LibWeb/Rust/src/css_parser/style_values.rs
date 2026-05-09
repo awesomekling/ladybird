@@ -105,6 +105,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     FontLanguageOverride(RustOwnedFontLanguageOverride),
     FontVariant(FontVariant),
     BasicShape(Box<RustOwnedBasicShape>),
+    BorderSpacing(RustOwnedBorderSpacing),
     Rect(RustOwnedRect),
     StrokeDasharray(RustOwnedStrokeDasharray),
     WhiteSpaceTrim(RustOwnedWhiteSpaceTrim),
@@ -115,6 +116,11 @@ pub(crate) enum RustOwnedStyleValueKind {
     WhiteSpace(RustOwnedWhiteSpace),
     WillChange(RustOwnedWillChange),
     GeneratedValueList(RustOwnedGeneratedValueList),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedBorderSpacing {
+    pub(crate) values: Vec<RustOwnedNestedPrimitiveValue>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

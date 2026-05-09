@@ -2702,6 +2702,57 @@ pub(super) fn rust_owned_stroke_dasharray_style_value_kind(filtered_input: &[u8]
     ))
 }
 
+pub(super) fn rust_owned_border_spacing_style_value_kind(
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> Option<RustOwnedStyleValueKind> {
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    let component_values = component_values
+        .iter()
+        .filter(|component_value| !is_whitespace_component_value(component_value))
+        .collect::<Vec<_>>();
+
+    // https://drafts.csswg.org/css-tables-3/#border-spacing-property
+    // Value: <length>{1,2}
+    if component_values.is_empty() || component_values.len() > 2 {
+        return None;
+    }
+
+    let mut values = Vec::with_capacity(component_values.len());
+    for component_value in component_values {
+        if let Some(value) = component_value_parse_as_nested_non_negative_length(component_value, filtered_input_string)
+        {
+            values.push(value);
+            continue;
+        }
+
+        if parse_length_value_prefix(component_value, primitive_value_options) != CssPrimitiveValueKind::Length {
+            return None;
+        }
+        let ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) = component_value
+        else {
+            return None;
+        };
+        if number.value() < 0.0
+            || !(primitive_value_options.allow_quirky_length || primitive_value_options.allow_svg_unitless_length)
+        {
+            return None;
+        }
+        values.push(RustOwnedNestedPrimitiveValue::Source(
+            serialize_component_values_for_reparsing(std::slice::from_ref(component_value), filtered_input_string)?,
+        ));
+    }
+
+    Some(RustOwnedStyleValueKind::BorderSpacing(RustOwnedBorderSpacing {
+        values,
+    }))
+}
+
 pub(super) fn rust_owned_text_underline_position_style_value_kind(
     filtered_input: &[u8],
 ) -> Option<RustOwnedStyleValueKind> {

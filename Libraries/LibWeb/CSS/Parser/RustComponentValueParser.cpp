@@ -1530,6 +1530,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->stroke_dasharray_values.append(nested_primitive_value_from_callback_payload());
                 }
                 return;
+            } else if (kind == FFI::CssStyleValueKind::BorderSpacing) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::BorderSpacing);
+                    VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
+                }
+
+                style_value->border_spacing_values.append(nested_primitive_value_from_callback_payload());
+                return;
             } else if (kind == FFI::CssStyleValueKind::KeywordList) {
                 if (!style_value.has_value()) {
                     style_value = move(value);

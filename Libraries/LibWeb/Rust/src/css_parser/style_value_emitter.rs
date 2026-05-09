@@ -1122,6 +1122,11 @@ where
                 }
             }
         },
+        RustOwnedStyleValueKind::BorderSpacing(value) => {
+            for value in &value.values {
+                callback_nested_primitive(callback, CssStyleValueKind::BorderSpacing, property_id, 0, 0, value);
+            }
+        }
         RustOwnedStyleValueKind::SourceBacked(value) => {
             callback_rust_owned_source_backed_value(callback, property_id, value);
         }

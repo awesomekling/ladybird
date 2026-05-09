@@ -131,6 +131,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::BorderImageSlice:
     case PropertyID::BorderImageSource:
     case PropertyID::BorderImageWidth:
+    case PropertyID::BorderSpacing:
     case PropertyID::BorderBlockStart:
     case PropertyID::BorderBlockStartColor:
     case PropertyID::BorderBlockStartStyle:
@@ -383,6 +384,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::TextDecorationThickness:
     case PropertyID::TextIndent:
     case PropertyID::TextJustify:
+    case PropertyID::TextOverflow:
     case PropertyID::TextRendering:
     case PropertyID::TextShadow:
     case PropertyID::TextTransform:
@@ -4599,6 +4601,27 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(dashes), StyleValueList::Separator::Comma) };
                 }
                 break;
+            case FFI::CssStyleValueKind::BorderSpacing: {
+                if (rust_style_value->border_spacing_values.size() != 1 && rust_style_value->border_spacing_values.size() != 2)
+                    break;
+
+                StyleValueVector values;
+                values.ensure_capacity(rust_style_value->border_spacing_values.size());
+                for (auto const& spacing : rust_style_value->border_spacing_values) {
+                    auto value = materialize_rust_nested_length(spacing, non_negative_range);
+                    if (!value)
+                        break;
+                    values.unchecked_append(value.release_nonnull());
+                }
+                if (values.size() != rust_style_value->border_spacing_values.size())
+                    break;
+
+                discard_rust_owned_property_value_tokens();
+                generated_transaction.commit();
+                if (values.size() == 1)
+                    return PropertyAndValue { rust_style_value->property_id, values[0] };
+                return PropertyAndValue { rust_style_value->property_id, StyleValueList::create(move(values), StyleValueList::Separator::Space) };
+            }
             case FFI::CssStyleValueKind::Shadow: {
                 auto shadow_type = rust_style_value->property_id == PropertyID::TextShadow
                     ? ShadowStyleValue::ShadowType::Text

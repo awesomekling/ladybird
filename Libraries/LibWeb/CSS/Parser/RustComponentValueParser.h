@@ -528,6 +528,7 @@ public:
         FFI::CssScrollFunctionAxisKind scroll_function_axis { FFI::CssScrollFunctionAxisKind::None };
         bool stroke_dasharray_none { false };
         Vector<RustNestedPrimitiveValue> stroke_dasharray_values;
+        Vector<RustNestedPrimitiveValue> border_spacing_values;
         Vector<String> keyword_list;
         Vector<String> place_align_keywords;
         Vector<String> place_justify_keywords;

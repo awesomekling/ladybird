@@ -41,8 +41,8 @@ use super::{
     RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
     RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
     RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-    RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns,
-    RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+    RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
+    RustOwnedColumns, RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
     RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
     RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
@@ -3301,6 +3301,24 @@ fn parses_style_values_with_rust_owned_ast() {
         })
     );
     assert_eq!(
+        parse_rust_owned_style_value(&[PropertyId::BorderSpacing], "1px 2px"),
+        Some(RustOwnedStyleValue {
+            property_id: PropertyId::BorderSpacing,
+            value: RustOwnedStyleValueKind::BorderSpacing(RustOwnedBorderSpacing {
+                values: vec![
+                    RustOwnedNestedPrimitiveValue::Length {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    },
+                    RustOwnedNestedPrimitiveValue::Length {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    },
+                ],
+            }),
+        })
+    );
+    assert_eq!(
         parse_rust_owned_style_value(
             &[PropertyId::ViewTimelineAxis, PropertyId::ViewTimelineInset],
             "1px 2px inline"
@@ -4937,6 +4955,32 @@ fn parses_style_values_with_rust_owned_ast() {
             secondary_numeric_value: None,
             color: None,
             value: "px".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::BorderSpacing], "1px 2px"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::BorderSpacing,
+            property_id: PropertyId::BorderSpacing,
+            primitive_kind: CssPrimitiveValueKind::Length,
+            numeric_value: Some(2.0),
+            secondary_numeric_value: None,
+            color: None,
+            value: "px".to_string(),
+            value_type: String::new(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::TextOverflow], "ellipsis"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::Keyword,
+            property_id: PropertyId::TextOverflow,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "ellipsis".to_string(),
             value_type: String::new(),
         })
     );
