@@ -2475,10 +2475,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->property_id == static_cast<PropertyID>(property_id));
                 }
 
-                if (color_red == 0)
+                if (color_red == 0) {
                     style_value->border_radius_horizontal_radii.append(nested_primitive_value_from_callback_payload());
-                else
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderRadiusHorizontal;
+                } else {
                     style_value->border_radius_vertical_radii.append(nested_primitive_value_from_callback_payload());
+                    style_value->last_calculation_node_target = RustCalculationNodeTarget::BorderRadiusVertical;
+                }
                 return;
             } else if (kind == FFI::CssStyleValueKind::Border) {
                 if (!style_value.has_value()) {
@@ -3736,8 +3739,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 }
             }
-            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::Border, FFI::CssStyleValueKind::BorderImage, FFI::CssStyleValueKind::BorderImageSlice, FFI::CssStyleValueKind::BorderImageOutset, FFI::CssStyleValueKind::BorderImageWidth)) {
+            if (first_is_one_of(style_value->kind, FFI::CssStyleValueKind::BorderRadius, FFI::CssStyleValueKind::Border, FFI::CssStyleValueKind::BorderImage, FFI::CssStyleValueKind::BorderImageSlice, FFI::CssStyleValueKind::BorderImageOutset, FFI::CssStyleValueKind::BorderImageWidth)) {
                 switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::BorderRadiusHorizontal:
+                    VERIFY(!style_value->border_radius_horizontal_radii.is_empty());
+                    style_value->border_radius_horizontal_radii.last().calculation_node_events.append(move(event));
+                    return;
+                case RustCalculationNodeTarget::BorderRadiusVertical:
+                    VERIFY(!style_value->border_radius_vertical_radii.is_empty());
+                    style_value->border_radius_vertical_radii.last().calculation_node_events.append(move(event));
+                    return;
                 case RustCalculationNodeTarget::BorderWidthLength:
                     VERIFY(style_value->border_width_length.has_value());
                     style_value->border_width_length->calculation_node_events.append(move(event));

@@ -541,8 +541,9 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         }
         RustOwnedStyleValueKind::BorderRadius(value) => {
             for radius in &value.horizontal_radii {
-                callback_nested_primitive_with_source_component_values(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
+                    calculation_callback,
                     &mut SourceComponentValueEmitter {
                         filtered_input,
                         list_callback: source_component_value_list_callback,
@@ -556,8 +557,9 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             for radius in &value.vertical_radii {
-                callback_nested_primitive_with_source_component_values(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
+                    calculation_callback,
                     &mut SourceComponentValueEmitter {
                         filtered_input,
                         list_callback: source_component_value_list_callback,
@@ -1641,10 +1643,30 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             );
         }
         RustOwnedStyleValueKind::TransformLonghand(value) => {
-            callback_transform_longhand_style_value(callback, calculation_callback, property_id, value);
+            callback_transform_longhand_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::Transformation(value) => {
-            callback_transformation_style_value(callback, calculation_callback, property_id, value);
+            callback_transformation_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::TouchAction(value) => callback(
             CssStyleValueKind::TouchAction,
@@ -1881,6 +1903,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                         callback_transformation_style_value(
                             callback,
                             calculation_callback,
+                            &mut SourceComponentValueEmitter {
+                                filtered_input,
+                                list_callback: source_component_value_list_callback,
+                                component_value_callback: source_component_value_callback,
+                            },
                             property_id,
                             transformation,
                         );
@@ -1903,7 +1930,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         ),
         RustOwnedStyleValueKind::Url(value) => callback_url_style_value(callback, property_id, value),
         RustOwnedStyleValueKind::EasingFunction(value) => {
-            callback_easing_function_style_value(callback, calculation_callback, property_id, value);
+            callback_easing_function_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::FitContent(value) => {
             callback_fit_content_style_value(callback, calculation_callback, property_id, &value.value);
@@ -2395,14 +2432,17 @@ const BASIC_SHAPE_COMPONENT_RADIAL_POSITION_Y: u8 = 10;
 const FIT_CONTENT_CALLBACK_KEYWORD: u8 = 0;
 const FIT_CONTENT_CALLBACK_FUNCTION: u8 = 1;
 
-fn callback_easing_function_style_value<C, D>(
+fn callback_easing_function_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedEasingFunction,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     const LINEAR_OUTPUT: u8 = 0;
     const LINEAR_FIRST_STOP_LENGTH: u8 = 1;
@@ -2426,9 +2466,10 @@ fn callback_easing_function_style_value<C, D>(
         ),
         RustOwnedEasingFunctionValue::Linear(stops) => {
             for stop in stops {
-                callback_nested_primitive_with_calculation(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::EasingFunction,
                     property_id,
                     EASING_FUNCTION_CALLBACK_LINEAR,
@@ -2436,9 +2477,10 @@ fn callback_easing_function_style_value<C, D>(
                     &stop.output,
                 );
                 if let Some(first_stop_length) = &stop.first_stop_length {
-                    callback_nested_primitive_with_calculation(
+                    callback_nested_primitive_with_source_component_values_and_calculation(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         CssStyleValueKind::EasingFunction,
                         property_id,
                         EASING_FUNCTION_CALLBACK_LINEAR,
@@ -2447,9 +2489,10 @@ fn callback_easing_function_style_value<C, D>(
                     );
                 }
                 if let Some(second_stop_length) = &stop.second_stop_length {
-                    callback_nested_primitive_with_calculation(
+                    callback_nested_primitive_with_source_component_values_and_calculation(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         CssStyleValueKind::EasingFunction,
                         property_id,
                         EASING_FUNCTION_CALLBACK_LINEAR,
@@ -2461,9 +2504,10 @@ fn callback_easing_function_style_value<C, D>(
         }
         RustOwnedEasingFunctionValue::CubicBezier { x1, y1, x2, y2 } => {
             for (index, value) in [x1, y1, x2, y2].iter().enumerate() {
-                callback_nested_primitive_with_calculation(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::EasingFunction,
                     property_id,
                     EASING_FUNCTION_CALLBACK_CUBIC_BEZIER,
@@ -2472,15 +2516,18 @@ fn callback_easing_function_style_value<C, D>(
                 );
             }
         }
-        RustOwnedEasingFunctionValue::Steps { intervals, position } => callback_nested_primitive_with_calculation(
-            callback,
-            calculation_callback,
-            CssStyleValueKind::EasingFunction,
-            property_id,
-            EASING_FUNCTION_CALLBACK_STEPS,
-            position.map(rust_owned_step_position_callback_payload).unwrap_or(5),
-            intervals,
-        ),
+        RustOwnedEasingFunctionValue::Steps { intervals, position } => {
+            callback_nested_primitive_with_source_component_values_and_calculation(
+                callback,
+                calculation_callback,
+                source_component_value_emitter,
+                CssStyleValueKind::EasingFunction,
+                property_id,
+                EASING_FUNCTION_CALLBACK_STEPS,
+                position.map(rust_owned_step_position_callback_payload).unwrap_or(5),
+                intervals,
+            );
+        }
     }
 }
 
@@ -4737,7 +4784,13 @@ fn callback_shape_outside_style_value<C, D, S, E>(
         }
         RustOwnedShapeOutside::Shape { basic_shape, shape_box } => {
             if let Some(basic_shape) = basic_shape {
-                callback_shape_outside_basic_shape_event(callback, calculation_callback, property_id, basic_shape);
+                callback_shape_outside_basic_shape_event(
+                    callback,
+                    calculation_callback,
+                    source_component_value_emitter,
+                    property_id,
+                    basic_shape,
+                );
             }
             if let Some(shape_box) = shape_box {
                 callback(
@@ -4812,14 +4865,17 @@ fn callback_shape_outside_image_event<C, S, E>(
     }
 }
 
-fn callback_shape_outside_basic_shape_event<C, D>(
+fn callback_shape_outside_basic_shape_event<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedBasicShape,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (kind, path_data) = basic_shape_callback_payload(value);
 
@@ -4831,6 +4887,7 @@ fn callback_shape_outside_basic_shape_event<C, D>(
         callback_shape_outside_basic_shape_rectangle_components(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             property_id,
             kind,
             value,
@@ -4843,7 +4900,14 @@ fn callback_shape_outside_basic_shape_event<C, D>(
         RustOwnedBasicShapeKind::Circle | RustOwnedBasicShapeKind::Ellipse
     ) {
         callback_shape_outside_basic_shape_header(callback, property_id, kind, value.fill_rule);
-        callback_shape_outside_basic_shape_radial_components(callback, calculation_callback, property_id, kind, value);
+        callback_shape_outside_basic_shape_radial_components(
+            callback,
+            calculation_callback,
+            source_component_value_emitter,
+            property_id,
+            kind,
+            value,
+        );
         return;
     }
 
@@ -4853,6 +4917,7 @@ fn callback_shape_outside_basic_shape_event<C, D>(
             callback_shape_outside_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 property_id,
                 kind,
                 value.fill_rule,
@@ -4862,6 +4927,7 @@ fn callback_shape_outside_basic_shape_event<C, D>(
             callback_shape_outside_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 property_id,
                 kind,
                 value.fill_rule,
@@ -4914,15 +4980,18 @@ fn callback_shape_outside_basic_shape_header<C>(
     );
 }
 
-fn callback_shape_outside_basic_shape_rectangle_components<C, D>(
+fn callback_shape_outside_basic_shape_rectangle_components<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: &RustOwnedBasicShape,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for component in &value.rectangle_components {
         match component {
@@ -4945,6 +5014,7 @@ fn callback_shape_outside_basic_shape_rectangle_components<C, D>(
                 callback_shape_outside_basic_shape_nested_primitive(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     property_id,
                     kind,
                     RustOwnedBasicShapeFillRule::Nonzero,
@@ -4960,6 +5030,7 @@ fn callback_shape_outside_basic_shape_rectangle_components<C, D>(
             callback_shape_outside_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 property_id,
                 kind,
                 RustOwnedBasicShapeFillRule::Nonzero,
@@ -4971,6 +5042,7 @@ fn callback_shape_outside_basic_shape_rectangle_components<C, D>(
             callback_shape_outside_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 property_id,
                 kind,
                 RustOwnedBasicShapeFillRule::Nonzero,
@@ -4981,15 +5053,18 @@ fn callback_shape_outside_basic_shape_rectangle_components<C, D>(
     }
 }
 
-fn callback_shape_outside_basic_shape_radial_components<C, D>(
+fn callback_shape_outside_basic_shape_radial_components<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     value: &RustOwnedBasicShape,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for component in &value.radial_shape_radius {
         if let RustOwnedNestedPrimitiveValue::Keyword(keyword) = component {
@@ -5015,6 +5090,7 @@ fn callback_shape_outside_basic_shape_radial_components<C, D>(
             callback_shape_outside_basic_shape_nested_primitive(
                 callback,
                 calculation_callback,
+                source_component_value_emitter,
                 property_id,
                 kind,
                 RustOwnedBasicShapeFillRule::Nonzero,
@@ -5028,6 +5104,7 @@ fn callback_shape_outside_basic_shape_radial_components<C, D>(
         callback_shape_outside_basic_shape_position_component(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             property_id,
             kind,
             BASIC_SHAPE_COMPONENT_RADIAL_POSITION_X,
@@ -5036,6 +5113,7 @@ fn callback_shape_outside_basic_shape_radial_components<C, D>(
         callback_shape_outside_basic_shape_position_component(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             property_id,
             kind,
             BASIC_SHAPE_COMPONENT_RADIAL_POSITION_Y,
@@ -5044,9 +5122,10 @@ fn callback_shape_outside_basic_shape_radial_components<C, D>(
     }
 }
 
-fn callback_shape_outside_basic_shape_position_component<C, D>(
+fn callback_shape_outside_basic_shape_position_component<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     component_kind: u8,
@@ -5054,6 +5133,8 @@ fn callback_shape_outside_basic_shape_position_component<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let edge = component.edge.map_or(0, rust_owned_position_edge_to_callback_value);
     let Some(offset) = component.offset.as_ref() else {
@@ -5076,6 +5157,7 @@ fn callback_shape_outside_basic_shape_position_component<C, D>(
     };
 
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(offset);
+    emit_nested_primitive_source_component_values(source_component_value_emitter, offset);
     callback(
         CssStyleValueKind::ShapeOutside,
         property_id,
@@ -5096,9 +5178,11 @@ fn callback_shape_outside_basic_shape_position_component<C, D>(
     }
 }
 
-fn callback_shape_outside_basic_shape_nested_primitive<C, D>(
+#[allow(clippy::too_many_arguments)]
+fn callback_shape_outside_basic_shape_nested_primitive<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     fill_rule: RustOwnedBasicShapeFillRule,
@@ -5107,9 +5191,12 @@ fn callback_shape_outside_basic_shape_nested_primitive<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(value);
 
+    emit_nested_primitive_source_component_values(source_component_value_emitter, value);
     callback(
         CssStyleValueKind::ShapeOutside,
         property_id,
@@ -5189,6 +5276,7 @@ fn callback_filter_value_list_style_value<C, D, U, S, E>(
                     RustOwnedFilterValue::Blur { radius } => callback_optional_filter_nested_primitive(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_BLUR,
                         0,
@@ -5213,6 +5301,7 @@ fn callback_filter_value_list_style_value<C, D, U, S, E>(
                             callback_filter_nested_primitive(
                                 callback,
                                 calculation_callback,
+                                source_component_value_emitter,
                                 property_id,
                                 FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_RADIUS,
                                 0,
@@ -5233,6 +5322,7 @@ fn callback_filter_value_list_style_value<C, D, U, S, E>(
                     RustOwnedFilterValue::HueRotate { angle } => callback_optional_filter_nested_primitive(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_HUE_ROTATE,
                         0,
@@ -5241,6 +5331,7 @@ fn callback_filter_value_list_style_value<C, D, U, S, E>(
                     RustOwnedFilterValue::Simple { function, amount } => callback_optional_filter_nested_primitive(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         property_id,
                         FILTER_VALUE_LIST_CALLBACK_SIMPLE,
                         match function {
@@ -5281,9 +5372,10 @@ where
     );
 }
 
-fn callback_filter_nested_primitive<C, D>(
+fn callback_filter_nested_primitive<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     secondary_kind: u8,
@@ -5291,10 +5383,13 @@ fn callback_filter_nested_primitive<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
-    callback_nested_primitive_with_calculation(
+    callback_nested_primitive_with_source_component_values_and_calculation(
         callback,
         calculation_callback,
+        source_component_value_emitter,
         CssStyleValueKind::FilterValueList,
         property_id,
         kind,
@@ -5303,9 +5398,10 @@ fn callback_filter_nested_primitive<C, D>(
     );
 }
 
-fn callback_optional_filter_nested_primitive<C, D>(
+fn callback_optional_filter_nested_primitive<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     kind: u8,
     secondary_kind: u8,
@@ -5313,9 +5409,19 @@ fn callback_optional_filter_nested_primitive<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     if let Some(value) = value {
-        callback_filter_nested_primitive(callback, calculation_callback, property_id, kind, secondary_kind, value);
+        callback_filter_nested_primitive(
+            callback,
+            calculation_callback,
+            source_component_value_emitter,
+            property_id,
+            kind,
+            secondary_kind,
+            value,
+        );
     } else {
         callback(
             CssStyleValueKind::FilterValueList,
@@ -5491,6 +5597,34 @@ fn callback_nested_primitive_with_source_component_values<C, S, E>(
 {
     emit_nested_primitive_source_component_values(source_component_value_emitter, value);
     callback_nested_primitive(callback, style_value_kind, property_id, kind, secondary_kind, value);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn callback_nested_primitive_with_source_component_values_and_calculation<C, D, S, E>(
+    callback: &mut C,
+    calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    style_value_kind: CssStyleValueKind,
+    property_id: u16,
+    kind: u8,
+    secondary_kind: u8,
+    value: &RustOwnedNestedPrimitiveValue,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    emit_nested_primitive_source_component_values(source_component_value_emitter, value);
+    callback_nested_primitive_with_calculation(
+        callback,
+        calculation_callback,
+        style_value_kind,
+        property_id,
+        kind,
+        secondary_kind,
+        value,
+    );
 }
 
 fn callback_nested_primitive_with_calculation<C, D>(
@@ -6198,18 +6332,20 @@ fn callback_shadow_style_value<C, D, S, E>(
                         color,
                     );
                 }
-                callback_nested_primitive_with_calculation(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::Shadow,
                     property_id,
                     SHADOW_CALLBACK_OFFSET_X,
                     0,
                     &shadow.offset_x,
                 );
-                callback_nested_primitive_with_calculation(
+                callback_nested_primitive_with_source_component_values_and_calculation(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::Shadow,
                     property_id,
                     SHADOW_CALLBACK_OFFSET_Y,
@@ -6217,9 +6353,10 @@ fn callback_shadow_style_value<C, D, S, E>(
                     &shadow.offset_y,
                 );
                 if let Some(blur_radius) = &shadow.blur_radius {
-                    callback_nested_primitive_with_calculation(
+                    callback_nested_primitive_with_source_component_values_and_calculation(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         CssStyleValueKind::Shadow,
                         property_id,
                         SHADOW_CALLBACK_BLUR_RADIUS,
@@ -6228,9 +6365,10 @@ fn callback_shadow_style_value<C, D, S, E>(
                     );
                 }
                 if let Some(spread_distance) = &shadow.spread_distance {
-                    callback_nested_primitive_with_calculation(
+                    callback_nested_primitive_with_source_component_values_and_calculation(
                         callback,
                         calculation_callback,
+                        source_component_value_emitter,
                         CssStyleValueKind::Shadow,
                         property_id,
                         SHADOW_CALLBACK_SPREAD_DISTANCE,
@@ -6264,14 +6402,17 @@ where
     );
 }
 
-fn callback_transform_longhand_style_value<C, D>(
+fn callback_transform_longhand_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedTransformLonghand,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedTransformLonghand::None => callback(
@@ -6305,6 +6446,7 @@ fn callback_transform_longhand_style_value<C, D>(
                 callback_transform_function_argument(
                     callback,
                     calculation_callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::TransformLonghand,
                     property_id,
                     TransformFunctionArgumentCallback {
@@ -6319,14 +6461,17 @@ fn callback_transform_longhand_style_value<C, D>(
     }
 }
 
-fn callback_transformation_style_value<C, D>(
+fn callback_transformation_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedTransformation,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     callback(
         CssStyleValueKind::Transformation,
@@ -6348,6 +6493,7 @@ fn callback_transformation_style_value<C, D>(
         callback_transform_function_argument(
             callback,
             calculation_callback,
+            source_component_value_emitter,
             CssStyleValueKind::Transformation,
             property_id,
             TransformFunctionArgumentCallback {
@@ -6366,9 +6512,10 @@ struct TransformFunctionArgumentCallback {
     parameter_type: u8,
 }
 
-fn callback_transform_function_argument<C, D>(
+fn callback_transform_function_argument<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     payload: TransformFunctionArgumentCallback,
@@ -6376,8 +6523,11 @@ fn callback_transform_function_argument<C, D>(
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (primitive_kind, numeric_value, unit_or_source) = nested_primitive_callback_payload(&argument.value);
+    emit_nested_primitive_source_component_values(source_component_value_emitter, &argument.value);
     callback(
         kind,
         property_id,

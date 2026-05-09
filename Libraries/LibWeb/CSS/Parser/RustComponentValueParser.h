@@ -249,6 +249,8 @@ public:
         PositionXOffset,
         PositionYOffset,
         PositionComponentOffset,
+        BorderRadiusHorizontal,
+        BorderRadiusVertical,
         BorderWidthLength,
         BorderImageSlice,
         BorderImageWidth,
