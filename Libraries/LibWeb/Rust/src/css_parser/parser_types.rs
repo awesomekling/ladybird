@@ -1892,6 +1892,7 @@ pub enum CssStyleValueKind {
     GridTemplateAreas,
     GridTrackPlacement,
     GridTrackSizeList,
+    LayerShorthand,
     ListStyle,
     MathDepth,
     Paint,

@@ -710,6 +710,7 @@ public:
         Vector<RustCursorImage> cursor_images;
         Optional<FlyString> cursor_predefined;
         Vector<CoordinatingValueListShorthandItem> coordinating_value_list_shorthand_items;
+        Vector<LayerShorthandItem> layer_shorthand_items;
         bool filter_value_list_is_none { false };
         Vector<RustFilterValueListEvent> filter_value_list_events;
         Vector<GridPlacementShorthandItem> grid_placement_shorthand_items;

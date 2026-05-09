@@ -8,6 +8,7 @@ use super::*;
 use crate::css_parser::style_value_shorthands::{
     parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_font_shorthand,
     parse_rust_owned_grid_placement_shorthand, parse_rust_owned_grid_template_shorthand,
+    parse_rust_owned_layer_shorthand,
 };
 
 pub(crate) fn parse_rust_owned_style_value_for_property(
@@ -92,6 +93,8 @@ pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
                 | PropertyId::GridTemplate
                 | PropertyId::Animation
                 | PropertyId::Transition
+                | PropertyId::Background
+                | PropertyId::Mask
         )
     {
         return RustOwnedStyleValueParseResult::Invalid;
@@ -265,6 +268,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::AnimationTimingFunction
             | PropertyId::Appearance
             | PropertyId::AspectRatio
+            | PropertyId::Background
             | PropertyId::BackgroundAttachment
             | PropertyId::BackgroundBlendMode
             | PropertyId::BackgroundClip
@@ -440,6 +444,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::MarginLeft
             | PropertyId::MarginRight
             | PropertyId::MarginTop
+            | PropertyId::Mask
             | PropertyId::MaskClip
             | PropertyId::MaskComposite
             | PropertyId::MaskImage
@@ -858,6 +863,10 @@ fn parse_rust_owned_property_specific_longhand_value(
             };
             parse_rust_owned_coordinating_value_list_shorthand(property_ids, filtered_input)
                 .map(RustOwnedStyleValueKind::CoordinatingValueListShorthand)
+        }
+        PropertyId::Background | PropertyId::Mask => {
+            parse_rust_owned_layer_shorthand(property_id as u16, filtered_input)
+                .map(RustOwnedStyleValueKind::LayerShorthand)
         }
         PropertyId::GridArea | PropertyId::GridColumn | PropertyId::GridRow => {
             parse_rust_owned_grid_placement_shorthand(property_id, filtered_input)

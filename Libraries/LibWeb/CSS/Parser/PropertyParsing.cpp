@@ -109,6 +109,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::AnimationTimingFunction:
     case PropertyID::Appearance:
     case PropertyID::AspectRatio:
+    case PropertyID::Background:
     case PropertyID::BackgroundAttachment:
     case PropertyID::BackgroundBlendMode:
     case PropertyID::BackgroundClip:
@@ -284,6 +285,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::MarginLeft:
     case PropertyID::MarginRight:
     case PropertyID::MarginTop:
+    case PropertyID::Mask:
     case PropertyID::MaskClip:
     case PropertyID::MaskComposite:
     case PropertyID::MaskImage:
@@ -4311,6 +4313,360 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 discard_rust_owned_property_value_tokens();
                 generated_transaction.commit();
                 return PropertyAndValue { rust_style_value->property_id, ShorthandStyleValue::create(rust_style_value->property_id, move(sub_properties), move(values)) };
+            }
+            case FFI::CssStyleValueKind::LayerShorthand: {
+                auto parse_single_layer_value = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
+                    auto value = parse_rust_source_as_property(property_id, source);
+                    if (!value)
+                        return nullptr;
+                    if (value->is_value_list() && value->as_value_list().size() == 1)
+                        return value->as_value_list().values()[0];
+                    return value.release_nonnull();
+                };
+
+                if (rust_style_value->property_id == PropertyID::Background) {
+                    StyleValueVector background_images;
+                    StyleValueVector background_position_xs;
+                    StyleValueVector background_position_ys;
+                    StyleValueVector background_sizes;
+                    StyleValueVector background_repeats;
+                    StyleValueVector background_attachments;
+                    StyleValueVector background_clips;
+                    StyleValueVector background_origins;
+                    RefPtr<StyleValue const> background_color;
+
+                    auto initial_background_image = property_initial_value(PropertyID::BackgroundImage)->as_value_list().values()[0];
+                    auto initial_background_position_x = property_initial_value(PropertyID::BackgroundPositionX)->as_value_list().values()[0];
+                    auto initial_background_position_y = property_initial_value(PropertyID::BackgroundPositionY)->as_value_list().values()[0];
+                    auto initial_background_size = property_initial_value(PropertyID::BackgroundSize)->as_value_list().values()[0];
+                    auto initial_background_repeat = property_initial_value(PropertyID::BackgroundRepeat)->as_value_list().values()[0];
+                    auto initial_background_attachment = property_initial_value(PropertyID::BackgroundAttachment)->as_value_list().values()[0];
+                    auto initial_background_clip = property_initial_value(PropertyID::BackgroundClip)->as_value_list().values()[0];
+                    auto initial_background_origin = property_initial_value(PropertyID::BackgroundOrigin)->as_value_list().values()[0];
+                    auto initial_background_color = property_initial_value(PropertyID::BackgroundColor);
+
+                    RefPtr<StyleValue const> background_image;
+                    RefPtr<StyleValue const> background_position_x;
+                    RefPtr<StyleValue const> background_position_y;
+                    RefPtr<StyleValue const> background_size;
+                    RefPtr<StyleValue const> background_repeat;
+                    RefPtr<StyleValue const> background_attachment;
+                    RefPtr<StyleValue const> background_clip;
+                    RefPtr<StyleValue const> background_origin;
+
+                    auto background_layer_is_valid = [&](bool allow_background_color) -> bool {
+                        if (allow_background_color) {
+                            if (background_color)
+                                return true;
+                        } else {
+                            if (background_color)
+                                return false;
+                        }
+                        return background_image || background_position_x || background_position_y || background_size || background_repeat || background_attachment || background_clip || background_origin;
+                    };
+
+                    auto complete_background_layer = [&]() {
+                        background_images.append(background_image ? background_image.release_nonnull() : initial_background_image);
+                        background_position_xs.append(background_position_x ? background_position_x.release_nonnull() : initial_background_position_x);
+                        background_position_ys.append(background_position_y ? background_position_y.release_nonnull() : initial_background_position_y);
+                        background_sizes.append(background_size ? background_size.release_nonnull() : initial_background_size);
+                        background_repeats.append(background_repeat ? background_repeat.release_nonnull() : initial_background_repeat);
+                        background_attachments.append(background_attachment ? background_attachment.release_nonnull() : initial_background_attachment);
+
+                        if (!background_origin && !background_clip) {
+                            background_origin = initial_background_origin;
+                            background_clip = initial_background_clip;
+                        } else if (!background_clip) {
+                            background_clip = background_origin;
+                        }
+                        background_origins.append(background_origin.release_nonnull());
+                        background_clips.append(background_clip.release_nonnull());
+
+                        background_image = nullptr;
+                        background_position_x = nullptr;
+                        background_position_y = nullptr;
+                        background_size = nullptr;
+                        background_repeat = nullptr;
+                        background_attachment = nullptr;
+                        background_clip = nullptr;
+                        background_origin = nullptr;
+                    };
+
+                    bool is_valid = true;
+                    size_t current_layer_index = 0;
+                    for (auto const& item : rust_style_value->layer_shorthand_items) {
+                        while (item.layer_index > current_layer_index) {
+                            if (!background_layer_is_valid(false)) {
+                                is_valid = false;
+                                break;
+                            }
+                            complete_background_layer();
+                            ++current_layer_index;
+                        }
+                        if (!is_valid)
+                            break;
+
+                        switch (item.property_id) {
+                        case PropertyID::BackgroundAttachment:
+                            background_attachment = parse_single_layer_value(item.property_id, item.value);
+                            if (!background_attachment)
+                                is_valid = false;
+                            break;
+                        case PropertyID::BackgroundColor:
+                            background_color = parse_single_layer_value(item.property_id, item.value);
+                            if (!background_color)
+                                is_valid = false;
+                            break;
+                        case PropertyID::BackgroundImage:
+                            background_image = parse_single_layer_value(item.property_id, item.value);
+                            if (!background_image)
+                                is_valid = false;
+                            break;
+                        case PropertyID::BackgroundClip:
+                        case PropertyID::BackgroundOrigin: {
+                            auto value = parse_single_layer_value(item.property_id, item.value);
+                            if (!value) {
+                                is_valid = false;
+                                break;
+                            }
+                            if (!background_origin)
+                                background_origin = value.release_nonnull();
+                            else
+                                background_clip = value.release_nonnull();
+                            break;
+                        }
+                        case PropertyID::BackgroundPosition: {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            auto position = parse_position_value(value_tokens, PositionParsingMode::BackgroundPosition);
+                            value_tokens.discard_whitespace();
+                            if (!position || value_tokens.has_next_token()) {
+                                is_valid = false;
+                                break;
+                            }
+                            background_position_x = position->as_position().edge_x();
+                            background_position_y = position->as_position().edge_y();
+                            break;
+                        }
+                        case PropertyID::BackgroundRepeat:
+                            background_repeat = parse_single_layer_value(item.property_id, item.value);
+                            if (!background_repeat)
+                                is_valid = false;
+                            break;
+                        case PropertyID::BackgroundSize:
+                            background_size = parse_single_layer_value(item.property_id, item.value);
+                            if (!background_size)
+                                is_valid = false;
+                            break;
+                        default:
+                            is_valid = false;
+                            break;
+                        }
+                    }
+
+                    if (!is_valid || !background_layer_is_valid(true))
+                        break;
+
+                    complete_background_layer();
+                    if (!background_color)
+                        background_color = initial_background_color;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    return PropertyAndValue { PropertyID::Background,
+                        ShorthandStyleValue::create(PropertyID::Background,
+                            { PropertyID::BackgroundColor, PropertyID::BackgroundImage, PropertyID::BackgroundPosition, PropertyID::BackgroundSize, PropertyID::BackgroundRepeat, PropertyID::BackgroundAttachment, PropertyID::BackgroundOrigin, PropertyID::BackgroundClip },
+                            { background_color.release_nonnull(),
+                                StyleValueList::create(move(background_images), StyleValueList::Separator::Comma),
+                                ShorthandStyleValue::create(PropertyID::BackgroundPosition,
+                                    { PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY },
+                                    { StyleValueList::create(move(background_position_xs), StyleValueList::Separator::Comma),
+                                        StyleValueList::create(move(background_position_ys), StyleValueList::Separator::Comma) }),
+                                StyleValueList::create(move(background_sizes), StyleValueList::Separator::Comma),
+                                StyleValueList::create(move(background_repeats), StyleValueList::Separator::Comma),
+                                StyleValueList::create(move(background_attachments), StyleValueList::Separator::Comma),
+                                StyleValueList::create(move(background_origins), StyleValueList::Separator::Comma),
+                                StyleValueList::create(move(background_clips), StyleValueList::Separator::Comma) }) };
+                }
+
+                if (rust_style_value->property_id == PropertyID::Mask) {
+                    StyleValueVector mask_images;
+                    StyleValueVector mask_positions;
+                    StyleValueVector mask_sizes;
+                    StyleValueVector mask_repeats;
+                    StyleValueVector mask_origins;
+                    StyleValueVector mask_clips;
+                    StyleValueVector mask_composites;
+                    StyleValueVector mask_modes;
+
+                    auto initial_mask_image = property_initial_value(PropertyID::MaskImage)->as_value_list().values()[0];
+                    auto initial_mask_position = property_initial_value(PropertyID::MaskPosition)->as_value_list().values()[0];
+                    auto initial_mask_size = property_initial_value(PropertyID::MaskSize)->as_value_list().values()[0];
+                    auto initial_mask_repeat = property_initial_value(PropertyID::MaskRepeat)->as_value_list().values()[0];
+                    auto initial_mask_origin = property_initial_value(PropertyID::MaskOrigin)->as_value_list().values()[0];
+                    auto initial_mask_clip = property_initial_value(PropertyID::MaskClip)->as_value_list().values()[0];
+                    auto initial_mask_composite = property_initial_value(PropertyID::MaskComposite)->as_value_list().values()[0];
+                    auto initial_mask_mode = property_initial_value(PropertyID::MaskMode)->as_value_list().values()[0];
+
+                    RefPtr<StyleValue const> mask_image;
+                    RefPtr<StyleValue const> mask_position;
+                    RefPtr<StyleValue const> mask_size;
+                    RefPtr<StyleValue const> mask_repeat;
+                    RefPtr<StyleValue const> mask_origin;
+                    RefPtr<StyleValue const> mask_clip;
+                    RefPtr<StyleValue const> mask_composite;
+                    RefPtr<StyleValue const> mask_mode;
+
+                    auto mask_layer_is_valid = [&]() -> bool {
+                        return mask_image || mask_position || mask_size || mask_repeat || mask_origin || mask_clip || mask_composite || mask_mode;
+                    };
+
+                    auto complete_mask_layer = [&]() {
+                        mask_images.append(mask_image ? mask_image.release_nonnull() : initial_mask_image);
+                        mask_positions.append(mask_position ? mask_position.release_nonnull() : initial_mask_position);
+                        mask_sizes.append(mask_size ? mask_size.release_nonnull() : initial_mask_size);
+                        mask_repeats.append(mask_repeat ? mask_repeat.release_nonnull() : initial_mask_repeat);
+                        mask_composites.append(mask_composite ? mask_composite.release_nonnull() : initial_mask_composite);
+                        mask_modes.append(mask_mode ? mask_mode.release_nonnull() : initial_mask_mode);
+
+                        if (!mask_origin)
+                            mask_origin = initial_mask_origin;
+                        if (!mask_clip)
+                            mask_clip = mask_origin;
+                        mask_origins.append(mask_origin.release_nonnull());
+                        mask_clips.append(mask_clip.release_nonnull());
+
+                        mask_image = nullptr;
+                        mask_position = nullptr;
+                        mask_size = nullptr;
+                        mask_repeat = nullptr;
+                        mask_origin = nullptr;
+                        mask_clip = nullptr;
+                        mask_composite = nullptr;
+                        mask_mode = nullptr;
+                    };
+
+                    bool is_valid = true;
+                    size_t current_layer_index = 0;
+                    bool has_multiple_layers = !rust_style_value->layer_shorthand_items.is_empty() && rust_style_value->layer_shorthand_items.last().layer_index > 0;
+                    for (auto const& item : rust_style_value->layer_shorthand_items) {
+                        while (item.layer_index > current_layer_index) {
+                            if (!mask_layer_is_valid()) {
+                                is_valid = false;
+                                break;
+                            }
+                            complete_mask_layer();
+                            ++current_layer_index;
+                        }
+                        if (!is_valid)
+                            break;
+
+                        switch (item.property_id) {
+                        case PropertyID::MaskImage:
+                            mask_image = parse_single_layer_value(item.property_id, item.value);
+                            if (!mask_image)
+                                is_valid = false;
+                            break;
+                        case PropertyID::MaskPosition: {
+                            auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
+                            TokenStream value_tokens { component_values };
+                            mask_position = parse_position_value(value_tokens);
+                            value_tokens.discard_whitespace();
+                            if (!mask_position || value_tokens.has_next_token())
+                                is_valid = false;
+                            break;
+                        }
+                        case PropertyID::MaskSize:
+                            mask_size = parse_single_layer_value(item.property_id, item.value);
+                            if (!mask_size)
+                                is_valid = false;
+                            break;
+                        case PropertyID::MaskRepeat:
+                            mask_repeat = parse_single_layer_value(item.property_id, item.value);
+                            if (!mask_repeat)
+                                is_valid = false;
+                            break;
+                        case PropertyID::MaskOrigin:
+                        case PropertyID::MaskClip: {
+                            auto value = parse_single_layer_value(item.property_id, item.value);
+                            if (!value) {
+                                is_valid = false;
+                                break;
+                            }
+                            if (value->is_keyword() && value->as_keyword().keyword() == Keyword::NoClip)
+                                mask_clip = value.release_nonnull();
+                            else if (!mask_origin)
+                                mask_origin = value.release_nonnull();
+                            else
+                                mask_clip = value.release_nonnull();
+                            break;
+                        }
+                        case PropertyID::MaskComposite:
+                            mask_composite = parse_single_layer_value(item.property_id, item.value);
+                            if (!mask_composite)
+                                is_valid = false;
+                            break;
+                        case PropertyID::MaskMode:
+                            mask_mode = parse_single_layer_value(item.property_id, item.value);
+                            if (!mask_mode)
+                                is_valid = false;
+                            break;
+                        default:
+                            is_valid = false;
+                            break;
+                        }
+                    }
+
+                    if (!is_valid || !mask_layer_is_valid())
+                        break;
+
+                    discard_rust_owned_property_value_tokens();
+                    generated_transaction.commit();
+                    if (has_multiple_layers) {
+                        complete_mask_layer();
+                        return PropertyAndValue { PropertyID::Mask,
+                            ShorthandStyleValue::create(PropertyID::Mask,
+                                { PropertyID::MaskImage, PropertyID::MaskPosition, PropertyID::MaskSize, PropertyID::MaskRepeat, PropertyID::MaskOrigin, PropertyID::MaskClip, PropertyID::MaskComposite, PropertyID::MaskMode },
+                                { StyleValueList::create(move(mask_images), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_positions), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_sizes), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_repeats), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_origins), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_clips), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_composites), StyleValueList::Separator::Comma),
+                                    StyleValueList::create(move(mask_modes), StyleValueList::Separator::Comma) }) };
+                    }
+
+                    if (!mask_image)
+                        mask_image = initial_mask_image;
+                    if (!mask_position)
+                        mask_position = initial_mask_position;
+                    if (!mask_size)
+                        mask_size = initial_mask_size;
+                    if (!mask_repeat)
+                        mask_repeat = initial_mask_repeat;
+                    if (!mask_origin)
+                        mask_origin = initial_mask_origin;
+                    if (!mask_clip)
+                        mask_clip = mask_origin;
+                    if (!mask_composite)
+                        mask_composite = initial_mask_composite;
+                    if (!mask_mode)
+                        mask_mode = initial_mask_mode;
+
+                    return PropertyAndValue { PropertyID::Mask,
+                        ShorthandStyleValue::create(PropertyID::Mask,
+                            { PropertyID::MaskImage, PropertyID::MaskPosition, PropertyID::MaskSize, PropertyID::MaskRepeat, PropertyID::MaskOrigin, PropertyID::MaskClip, PropertyID::MaskComposite, PropertyID::MaskMode },
+                            { mask_image.release_nonnull(),
+                                mask_position.release_nonnull(),
+                                mask_size.release_nonnull(),
+                                mask_repeat.release_nonnull(),
+                                mask_origin.release_nonnull(),
+                                mask_clip.release_nonnull(),
+                                mask_composite.release_nonnull(),
+                                mask_mode.release_nonnull() }) };
+                }
+                break;
             }
             case FFI::CssStyleValueKind::GridTemplateAreas:
                 if (rust_style_value->grid_template_areas_is_none || !rust_style_value->grid_template_area_rows.is_empty()) {

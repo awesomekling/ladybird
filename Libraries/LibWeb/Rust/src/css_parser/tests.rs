@@ -3695,6 +3695,46 @@ fn parses_style_values_with_rust_owned_ast() {
             (0, PropertyId::TransitionBehavior, "allow-discrete"),
         ]
     );
+    let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Background,
+        value: RustOwnedStyleValueKind::LayerShorthand(background_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Background], "url(bg.png) center / cover no-repeat red")
+    else {
+        panic!("Expected background to parse as a layer shorthand");
+    };
+    assert_eq!(
+        background_items
+            .iter()
+            .map(|item| (item.layer_index, item.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::BackgroundImage, "url(bg.png)"),
+            (0, PropertyId::BackgroundPosition, "center"),
+            (0, PropertyId::BackgroundSize, "cover"),
+            (0, PropertyId::BackgroundRepeat, "no-repeat"),
+            (0, PropertyId::BackgroundColor, "red"),
+        ]
+    );
+    let Some(RustOwnedStyleValue {
+        property_id: PropertyId::Mask,
+        value: RustOwnedStyleValueKind::LayerShorthand(mask_items),
+    }) = parse_rust_owned_style_value(&[PropertyId::Mask], "url(mask.png) left / contain no-repeat alpha")
+    else {
+        panic!("Expected mask to parse as a layer shorthand");
+    };
+    assert_eq!(
+        mask_items
+            .iter()
+            .map(|item| (item.layer_index, item.property_id, item.source.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, PropertyId::MaskImage, "url(mask.png)"),
+            (0, PropertyId::MaskPosition, "left"),
+            (0, PropertyId::MaskSize, "contain"),
+            (0, PropertyId::MaskRepeat, "no-repeat"),
+            (0, PropertyId::MaskMode, "alpha"),
+        ]
+    );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span 2 main"),
         Some(RustOwnedStyleValue {

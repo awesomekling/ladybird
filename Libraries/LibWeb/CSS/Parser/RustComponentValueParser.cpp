@@ -1519,6 +1519,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .value = string_from_ffi_bytes(value_ptr, value_len),
                 });
                 return;
+            } else if (kind == FFI::CssStyleValueKind::LayerShorthand) {
+                if (!style_value.has_value()) {
+                    style_value = move(value);
+                    style_value->property_id = shorthand_property_id_from_callback_payload();
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::LayerShorthand);
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
+                }
+
+                style_value->layer_shorthand_items.append(LayerShorthandItem {
+                    .layer_index = layer_index_from_callback_payload(),
+                    .property_id = static_cast<PropertyID>(property_id),
+                    .value = string_from_ffi_bytes(value_ptr, value_len),
+                });
+                return;
             } else if (kind == FFI::CssStyleValueKind::GridPlacementShorthand) {
                 if (!style_value.has_value()) {
                     style_value = move(value);

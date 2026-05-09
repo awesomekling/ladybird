@@ -62,6 +62,7 @@ pub(crate) enum RustOwnedStyleValueKind {
     BorderImageSlice(RustOwnedBorderImageSlice),
     BorderImageWidth(RustOwnedBorderImageWidthList),
     Identifier(RustOwnedIdentifierValue),
+    LayerShorthand(Vec<RustOwnedLayerShorthandItem>),
     ListStyle(RustOwnedListStyle),
     MathDepth(RustOwnedMathDepth),
     Paint(RustOwnedPaint),
