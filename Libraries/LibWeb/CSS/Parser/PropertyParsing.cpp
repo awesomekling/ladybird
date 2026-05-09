@@ -1609,21 +1609,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_number_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, range } } });
-                    if (calc && calc->as_calculated().resolves_to_number())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_number_value(value_tokens, range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_source_as_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
@@ -1644,7 +1629,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!value.calculation_node_events.is_empty())
                         return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, range, DiscardCalculationToken::No);
                     if (!value.numeric_value.has_value())
-                        return parse_rust_source_as_number_in_range(value.source_or_unit, range);
+                        return nullptr;
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || !range.contains(*value.numeric_value))
                         return nullptr;
                     return NumberStyleValue::create(*value.numeric_value);
@@ -1662,7 +1647,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!value.calculation_node_events.is_empty())
                         return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, range, DiscardCalculationToken::No);
                     if (!value.numeric_value.has_value())
-                        return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
+                        return nullptr;
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer || !range.contains(*value.numeric_value))
                         return nullptr;
                     return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
