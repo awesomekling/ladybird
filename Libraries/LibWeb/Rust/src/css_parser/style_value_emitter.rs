@@ -4594,6 +4594,10 @@ fn nested_primitive_callback_payload(value: &RustOwnedNestedPrimitiveValue) -> (
         RustOwnedNestedPrimitiveValue::Resolution { value, unit } => (CssPrimitiveValueKind::Resolution, *value, unit),
         RustOwnedNestedPrimitiveValue::Time { value, unit } => (CssPrimitiveValueKind::Time, *value, unit),
         RustOwnedNestedPrimitiveValue::Keyword(keyword) => (CssPrimitiveValueKind::Keyword, 0.0, keyword),
+        RustOwnedNestedPrimitiveValue::MathFunction(value) => (CssPrimitiveValueKind::Invalid, 0.0, &value.source),
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) => {
+            (CssPrimitiveValueKind::Invalid, 0.0, &value.source)
+        }
         RustOwnedNestedPrimitiveValue::Source(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
         RustOwnedNestedPrimitiveValue::FlexSource(source) => (CssPrimitiveValueKind::Invalid, 0.0, source),
     }
@@ -4603,6 +4607,8 @@ fn nested_primitive_callback_has_numeric_value(value: &RustOwnedNestedPrimitiveV
     !matches!(
         value,
         RustOwnedNestedPrimitiveValue::Keyword(_)
+            | RustOwnedNestedPrimitiveValue::MathFunction(_)
+            | RustOwnedNestedPrimitiveValue::TreeCountingFunction(_)
             | RustOwnedNestedPrimitiveValue::Source(_)
             | RustOwnedNestedPrimitiveValue::FlexSource(_)
     )

@@ -8203,13 +8203,24 @@ pub(super) fn component_value_parse_as_nested_length(
             value: 0.0,
             unit: "px".to_string(),
         }),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions and anchor-size()
-        // still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8247,12 +8258,24 @@ pub(super) fn component_value_parse_as_nested_number(
             token_type: TokenType::Number { number },
             ..
         }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8271,12 +8294,24 @@ pub(super) fn component_value_parse_as_nested_angle(
                 unit: unit.to_string(),
             })
         }
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8294,12 +8329,24 @@ pub(super) fn component_value_parse_as_nested_number_percentage(
             token_type: TokenType::Percentage { number },
             ..
         }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8346,12 +8393,24 @@ pub(super) fn component_value_parse_as_nested_dasharray_value(
             token_type: TokenType::Number { number },
             ..
         }) if number.value() >= 0.0 => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
-        ComponentValue::Function(_) => {
-            // AD-HOC: The Rust side only recognizes the syntactic branch here.
-            // Materializing and range-checking math functions still happens in C++.
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => component_value_parse_as_nested_length_percentage(component_value, source),
     }
 }
@@ -8365,12 +8424,24 @@ pub(super) fn component_value_parse_as_nested_integer(
             token_type: TokenType::Number { number },
             ..
         }) => numeric_value_to_i32(*number).map(RustOwnedNestedPrimitiveValue::Integer),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8384,12 +8455,24 @@ pub(super) fn component_value_parse_as_nested_percentage(
             token_type: TokenType::Percentage { number },
             ..
         }) => Some(RustOwnedNestedPrimitiveValue::Percentage(number.value())),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }
@@ -8403,12 +8486,24 @@ pub(super) fn component_value_parse_as_nested_non_negative_number(
             token_type: TokenType::Number { number },
             ..
         }) if number.value() >= 0.0 => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
-        // AD-HOC: The Rust side only recognizes the syntactic branch here.
-        // Materializing and range-checking math functions still happens in C++.
-        ComponentValue::Function(_) => {
+        ComponentValue::Function(_) => parse_rust_owned_math_function(
+            PropertyValueType::Number,
+            std::slice::from_ref(component_value),
+            source.as_bytes(),
+        )
+        .map(RustOwnedNestedPrimitiveValue::MathFunction)
+        .or_else(|| {
+            parse_rust_owned_tree_counting_function(
+                PropertyValueType::Number,
+                std::slice::from_ref(component_value),
+                source.as_bytes(),
+            )
+            .map(RustOwnedNestedPrimitiveValue::TreeCountingFunction)
+        })
+        .or_else(|| {
             serialize_component_values_for_reparsing(std::slice::from_ref(component_value), source)
                 .map(RustOwnedNestedPrimitiveValue::Source)
-        }
+        }),
         _ => None,
     }
 }

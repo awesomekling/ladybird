@@ -2391,17 +2391,22 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::AspectRatio], "auto calc(16 / 9)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::AspectRatio,
             value: RustOwnedStyleValueKind::AspectRatio(RustOwnedAspectRatio {
                 has_auto: true,
-                numerator: Some(RustOwnedNestedPrimitiveValue::Source("calc(16 / 9)".to_string())),
+                numerator: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    name,
+                    source,
+                    value_type: PropertyValueType::Number,
+                    ..
+                })),
                 denominator: None,
             }),
-        })
-    );
+        }) if name == "calc" && source == "calc(16 / 9)"
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Content], "counter(section, upper-roman)"),
         Some(RustOwnedStyleValue {
@@ -2934,28 +2939,33 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::BackgroundSize], "cover, auto 10px, 2% calc(3px + 4%)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BackgroundSize,
-            value: RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList {
-                values: vec![
-                    RustOwnedBackgroundSize::Cover,
-                    RustOwnedBackgroundSize::Explicit {
-                        width: RustOwnedNestedPrimitiveValue::Keyword("auto".to_string()),
-                        height: Some(RustOwnedNestedPrimitiveValue::Length {
-                            value: 10.0,
-                            unit: "px".to_string(),
-                        }),
-                    },
-                    RustOwnedBackgroundSize::Explicit {
-                        width: RustOwnedNestedPrimitiveValue::Percentage(2.0),
-                        height: Some(RustOwnedNestedPrimitiveValue::Source("calc(3px + 4%)".to_string())),
-                    },
-                ],
-            }),
-        })
-    );
+            value: RustOwnedStyleValueKind::BackgroundSize(RustOwnedBackgroundSizeList { values }),
+        }) if values.len() == 3
+            && matches!(&values[0], RustOwnedBackgroundSize::Cover)
+            && matches!(
+                &values[1],
+                RustOwnedBackgroundSize::Explicit {
+                    width: RustOwnedNestedPrimitiveValue::Keyword(keyword),
+                    height: Some(RustOwnedNestedPrimitiveValue::Length { value, unit }),
+                } if keyword == "auto" && *value == 10.0 && unit == "px"
+            )
+            && matches!(
+                &values[2],
+                RustOwnedBackgroundSize::Explicit {
+                    width: RustOwnedNestedPrimitiveValue::Percentage(value),
+                    height: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                        name,
+                        source,
+                        value_type: PropertyValueType::Number,
+                        ..
+                    })),
+                } if *value == 2.0 && name == "calc" && source == "calc(3px + 4%)"
+            )
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BorderTopLeftRadius], "1px / 2%"),
         Some(RustOwnedStyleValue {
@@ -3660,7 +3670,7 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(
             &[PropertyId::BackgroundPosition],
             "calc(0% + 20px) calc(0% + 20px), calc(0% + 40px) calc(0% + 40px)"
@@ -3669,19 +3679,56 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::BackgroundPosition,
             value: RustOwnedStyleValueKind::PositionList(RustOwnedPositionList {
                 value_type: PropertyValueType::BackgroundPosition,
-                values: vec![
-                    RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
-                        x: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 20px)".to_string(),)),
-                        y: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 20px)".to_string(),)),
-                    }),
-                    RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
-                        x: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 40px)".to_string(),)),
-                        y: position_offset(RustOwnedNestedPrimitiveValue::Source("calc(0% + 40px)".to_string(),)),
-                    }),
-                ],
+                values,
             }),
-        })
-    );
+        }) if values.len() == 2
+            && matches!(
+                &values[0],
+                RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                    x: RustOwnedPositionComponent {
+                        offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                            name,
+                            source,
+                            value_type: PropertyValueType::Number,
+                            ..
+                        })),
+                        ..
+                    },
+                    y: RustOwnedPositionComponent {
+                        offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                            name: name_y,
+                            source: source_y,
+                            value_type: PropertyValueType::Number,
+                            ..
+                        })),
+                        ..
+                    },
+                }) if name == "calc" && source == "calc(0% + 20px)" && name_y == "calc" && source_y == "calc(0% + 20px)"
+            )
+            && matches!(
+                &values[1],
+                RustOwnedPositionListItem::Position(RustOwnedResolvedPosition {
+                    x: RustOwnedPositionComponent {
+                        offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                            name,
+                            source,
+                            value_type: PropertyValueType::Number,
+                            ..
+                        })),
+                        ..
+                    },
+                    y: RustOwnedPositionComponent {
+                        offset: Some(RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                            name: name_y,
+                            source: source_y,
+                            value_type: PropertyValueType::Number,
+                            ..
+                        })),
+                        ..
+                    },
+                }) if name == "calc" && source == "calc(0% + 40px)" && name_y == "calc" && source_y == "calc(0% + 40px)"
+            )
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::BackgroundPositionX], "left 10px, center"),
         Some(RustOwnedStyleValue {
@@ -4157,19 +4204,36 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::StrokeDasharray], "2 3px, calc(4%)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::StrokeDasharray,
-            value: RustOwnedStyleValueKind::StrokeDasharray(RustOwnedStrokeDasharray::Values(vec![
-                RustOwnedNestedPrimitiveValue::Number(2.0),
-                RustOwnedNestedPrimitiveValue::Length {
-                    value: 3.0,
-                    unit: "px".to_string(),
-                },
-                RustOwnedNestedPrimitiveValue::Source("calc(4%)".to_string()),
-            ])),
-        })
+            value: RustOwnedStyleValueKind::StrokeDasharray(RustOwnedStrokeDasharray::Values(values)),
+        }) if values.len() == 3
+            && matches!(&values[0], RustOwnedNestedPrimitiveValue::Number(value) if *value == 2.0)
+            && matches!(
+                &values[1],
+                RustOwnedNestedPrimitiveValue::Length { value, unit } if *value == 3.0 && unit == "px"
+            )
+            && matches!(
+                &values[2],
+                RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    name,
+                    source,
+                    value_type: PropertyValueType::Number,
+                    ..
+                }) if name == "calc" && source == "calc(4%)"
+            )
+    ));
+    assert_eq!(
+        super::component_value_parse_as_nested_number_percentage(&parse("sibling-count()")[0], "sibling-count()"),
+        Some(RustOwnedNestedPrimitiveValue::TreeCountingFunction(
+            RustOwnedTreeCountingFunction {
+                function: RustOwnedTreeCountingFunctionKind::SiblingCount,
+                source: "sibling-count()".to_string(),
+                value_type: PropertyValueType::Number,
+            }
+        ))
     );
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::AnimationName], "foo, \"none\", Both"),
@@ -4779,19 +4843,28 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::Scale], "random(0, 10, 5)"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Scale,
             value: RustOwnedStyleValueKind::TransformLonghand(RustOwnedTransformLonghand::Function {
                 function: RustOwnedTransformLonghandFunction::Scale,
-                arguments: vec![RustOwnedTransformationArgument {
-                    parameter_type: TransformFunctionParameterType::NumberPercentage,
-                    value: RustOwnedNestedPrimitiveValue::Source("random(0, 10, 5)".to_string()),
-                }],
+                arguments,
             }),
-        })
-    );
+        }) if arguments.len() == 1
+            && matches!(
+                &arguments[0],
+                RustOwnedTransformationArgument {
+                    parameter_type: TransformFunctionParameterType::NumberPercentage,
+                    value: RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                        name,
+                        source,
+                        value_type: PropertyValueType::Number,
+                        ..
+                    }),
+                } if name == "random" && source == "random(0, 10, 5)"
+            )
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::Rotate], "1 0 0 45deg"),
         Some(RustOwnedStyleValue {
@@ -8706,13 +8779,21 @@ fn parses_view_timeline_inset_values() {
     assert_eq!(parse_view_timeline_inset("1px").count, 1);
     assert_eq!(parse_view_timeline_inset("10% auto").count, 2);
     assert_eq!(parse_view_timeline_inset("calc(1px + 2px) 5%").count, 2);
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_view_timeline_inset_value("calc(1px + 2px) 5%".as_bytes()),
-        Some(vec![vec![
-            RustOwnedNestedPrimitiveValue::Source("calc(1px + 2px)".to_string()),
-            RustOwnedNestedPrimitiveValue::Percentage(5.0),
-        ]])
-    );
+        Some(values) if values.len() == 1
+            && values[0].len() == 2
+            && matches!(
+                &values[0][0],
+                RustOwnedNestedPrimitiveValue::MathFunction(RustOwnedMathFunction {
+                    name,
+                    source,
+                    value_type: PropertyValueType::Number,
+                    ..
+                }) if name == "calc" && source == "calc(1px + 2px)"
+            )
+            && matches!(&values[0][1], RustOwnedNestedPrimitiveValue::Percentage(value) if *value == 5.0)
+    ));
     assert_eq!(
         parse_rust_owned_view_timeline_inset_value("10% auto".as_bytes()),
         Some(vec![vec![

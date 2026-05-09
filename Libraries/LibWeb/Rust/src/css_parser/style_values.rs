@@ -483,6 +483,7 @@ pub(crate) struct RustOwnedEasingFunction {
     pub(crate) value: RustOwnedEasingFunctionValue,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedEasingFunctionValue {
     Keyword(String),
@@ -758,6 +759,7 @@ pub(crate) enum RustOwnedFilterValueList {
     Filters(Vec<RustOwnedFilterValue>),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedFilterValue {
     Url(RustOwnedUrl),
@@ -791,6 +793,8 @@ pub(crate) enum RustOwnedNestedPrimitiveValue {
     Resolution { value: f64, unit: String },
     Time { value: f64, unit: String },
     Keyword(String),
+    MathFunction(RustOwnedMathFunction),
+    TreeCountingFunction(RustOwnedTreeCountingFunction),
     Source(String),
     FlexSource(String),
 }
@@ -898,6 +902,7 @@ pub(crate) enum RustOwnedFlexWrap {
     WrapReverse,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedFlexShorthand {
     None,
