@@ -2329,7 +2329,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!color.is_simple) {
                     if (!color.source.has_value())
                         return nullptr;
-                    return parse_source(*color.source);
+                    if (color.source_component_values.is_empty()) {
+                        // AD-HOC: Some transitional Rust result containers
+                        // still store only the serialized color source.
+                        return parse_source(*color.source);
+                    }
+                    TokenStream color_tokens { color.source_component_values };
+                    auto value = parse_color_value(color_tokens);
+                    color_tokens.discard_whitespace();
+                    if (!value || color_tokens.has_next_token())
+                        return nullptr;
+                    return value.release_nonnull();
                 }
 
                 switch (color.kind) {

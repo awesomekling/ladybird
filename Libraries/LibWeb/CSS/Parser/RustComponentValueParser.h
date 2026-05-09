@@ -350,6 +350,7 @@ public:
         u8 alpha { 0 };
         Optional<String> name;
         Optional<String> source;
+        Vector<ComponentValue> source_component_values;
     };
 
     struct RustShadow {

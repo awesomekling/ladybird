@@ -8,6 +8,25 @@ use super::*;
 
 const COMPONENT_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
 const POSITIONAL_VALUE_LIST_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
+const SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS: u8 = 1;
+const SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR: u8 = 2;
+
+struct SourceComponentValueEmitter<'a, S, E> {
+    filtered_input: &'a str,
+    list_callback: &'a mut S,
+    component_value_callback: &'a mut E,
+}
+
+impl<S, E> SourceComponentValueEmitter<'_, S, E>
+where
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    fn emit(&mut self, kind: u8, component_values: &[ComponentValue]) {
+        (self.list_callback)(kind);
+        emit_component_values(component_values, self.filtered_input, self.component_value_callback);
+    }
+}
 
 pub(super) fn emit_rust_owned_style_value<C>(style_value: &RustOwnedStyleValue, callback: &mut C)
 where
@@ -19,7 +38,7 @@ where
         callback,
         &mut |_, _, _, _, _, _| {},
         &mut |_| {},
-        &mut || {},
+        &mut |_| {},
         &mut |_| {},
     );
 }
@@ -36,7 +55,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     U: FnMut(&UrlModifier),
-    S: FnMut(),
+    S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
     let property_id = style_value.property_id as u16;
@@ -511,7 +530,18 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(color) = &value.color {
-                callback_rust_owned_color(callback, CssStyleValueKind::Border, property_id, COLOR, color);
+                callback_rust_owned_color(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::Border,
+                    property_id,
+                    COLOR,
+                    color,
+                );
             }
         }
         RustOwnedStyleValueKind::BorderImageRepeat(value) => {
@@ -747,6 +777,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 callback,
                 calculation_callback,
                 url_modifier_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
                 property_id,
                 value,
             );
@@ -842,7 +877,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             }
         },
         RustOwnedStyleValueKind::Paint(value) => {
-            callback_paint_style_value(callback, property_id, value);
+            callback_paint_style_value(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::PaintOrder(value) => callback(
             CssStyleValueKind::PaintOrder,
@@ -1037,8 +1081,30 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 thumb_color,
                 track_color,
             } => {
-                callback_rust_owned_color(callback, CssStyleValueKind::ScrollbarColor, property_id, 2, thumb_color);
-                callback_rust_owned_color(callback, CssStyleValueKind::ScrollbarColor, property_id, 3, track_color);
+                callback_rust_owned_color(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::ScrollbarColor,
+                    property_id,
+                    2,
+                    thumb_color,
+                );
+                callback_rust_owned_color(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::ScrollbarColor,
+                    property_id,
+                    3,
+                    track_color,
+                );
             }
         },
         RustOwnedStyleValueKind::ScrollbarGutter(value) => callback(
@@ -1057,7 +1123,17 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             "",
         ),
         RustOwnedStyleValueKind::Shadow(value) => {
-            callback_shadow_style_value(callback, calculation_callback, property_id, value);
+            callback_shadow_style_value(
+                callback,
+                calculation_callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::ShapeOutside(value) => {
             callback_shape_outside_style_value(callback, calculation_callback, property_id, value);
@@ -1101,7 +1177,18 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                 );
             }
             if let Some(color) = &value.color {
-                callback_rust_owned_color(callback, CssStyleValueKind::TextDecoration, property_id, 3, color);
+                callback_rust_owned_color(
+                    callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    CssStyleValueKind::TextDecoration,
+                    property_id,
+                    3,
+                    color,
+                );
             }
         }
         RustOwnedStyleValueKind::TextDecorationLine(value) => callback(
@@ -2094,14 +2181,17 @@ fn line_width_from_keyword(keyword: &str) -> Option<u8> {
     None
 }
 
-fn callback_rust_owned_color<C>(
+fn callback_rust_owned_color<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     kind: CssStyleValueKind,
     property_id: u16,
     component_kind: u8,
     color: &RustOwnedColor,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match color {
         RustOwnedColor::Simple {
@@ -2126,21 +2216,28 @@ fn callback_rust_owned_color<C>(
             name.as_deref().unwrap_or("").as_bytes(),
             "",
         ),
-        RustOwnedColor::Function { source, .. } => callback(
-            kind,
-            property_id,
-            CssPrimitiveValueKind::Invalid,
-            false,
-            0.0,
-            false,
-            0.0,
-            component_kind,
-            0,
-            0,
-            0,
-            source.as_bytes(),
-            "",
-        ),
+        RustOwnedColor::Function {
+            source,
+            component_values,
+            ..
+        } => {
+            callback(
+                kind,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                component_kind,
+                0,
+                0,
+                0,
+                source.as_bytes(),
+                "",
+            );
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR, component_values);
+        }
     }
 }
 
@@ -3363,9 +3460,15 @@ where
     );
 }
 
-fn callback_paint_style_value<C>(callback: &mut C, property_id: u16, paint: &RustOwnedPaint)
-where
+fn callback_paint_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    paint: &RustOwnedPaint,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     const PAINT_CALLBACK_NONE: f64 = 0.0;
     const PAINT_CALLBACK_COLOR: u8 = 1;
@@ -3391,6 +3494,7 @@ where
         RustOwnedPaint::Color(color) => {
             callback_rust_owned_color(
                 callback,
+                source_component_value_emitter,
                 CssStyleValueKind::Paint,
                 property_id,
                 PAINT_CALLBACK_COLOR,
@@ -3417,6 +3521,7 @@ where
             if let Some(fallback_color) = fallback_color {
                 callback_rust_owned_color(
                     callback,
+                    source_component_value_emitter,
                     CssStyleValueKind::Paint,
                     property_id,
                     PAINT_CALLBACK_FALLBACK_COLOR,
@@ -3981,7 +4086,7 @@ fn callback_flex_basis<C, S, E>(
     value: &RustOwnedFlexBasis,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
-    S: FnMut(),
+    S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
     match value {
@@ -4025,7 +4130,7 @@ fn callback_flex_basis<C, S, E>(
                     source.as_bytes(),
                     "",
                 );
-                source_component_value_list_callback();
+                source_component_value_list_callback(SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS);
                 emit_component_values(component_values, filtered_input, source_component_value_callback);
             }
             _ => callback_nested_primitive(
@@ -4469,16 +4574,19 @@ fn callback_shape_outside_basic_shape_nested_primitive<C, D>(
     }
 }
 
-fn callback_filter_value_list_style_value<C, D, U>(
+fn callback_filter_value_list_style_value<C, D, U, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
     url_modifier_callback: &mut U,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedFilterValueList,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     U: FnMut(&UrlModifier),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedFilterValueList::None => callback(
@@ -4558,6 +4666,7 @@ fn callback_filter_value_list_style_value<C, D, U>(
                         if let Some(color) = color {
                             callback_rust_owned_color(
                                 callback,
+                                source_component_value_emitter,
                                 CssStyleValueKind::FilterValueList,
                                 property_id,
                                 FILTER_VALUE_LIST_CALLBACK_DROP_SHADOW_COLOR,
@@ -5463,14 +5572,17 @@ const SHADOW_CALLBACK_SPREAD_DISTANCE: u8 = 6;
 const SHADOW_PLACEMENT_OUTER: u8 = 0;
 const SHADOW_PLACEMENT_INNER: u8 = 1;
 
-fn callback_shadow_style_value<C, D>(
+fn callback_shadow_style_value<C, D, S, E>(
     callback: &mut C,
     calculation_callback: &mut D,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     value: &RustOwnedShadow,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     match value {
         RustOwnedShadow::None => callback_shadow_source_component(callback, property_id, SHADOW_CALLBACK_NONE, 0, ""),
@@ -5484,6 +5596,7 @@ fn callback_shadow_style_value<C, D>(
                 if let Some(color) = &shadow.color {
                     callback_rust_owned_color(
                         callback,
+                        source_component_value_emitter,
                         CssStyleValueKind::Shadow,
                         property_id,
                         SHADOW_CALLBACK_COLOR,

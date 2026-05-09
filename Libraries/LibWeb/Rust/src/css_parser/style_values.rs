@@ -598,6 +598,7 @@ pub(crate) enum RustOwnedColor {
         name: String,
         arguments: Vec<ComponentValue>,
         source: String,
+        component_values: Vec<ComponentValue>,
     },
 }
 

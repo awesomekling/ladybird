@@ -1718,6 +1718,7 @@ pub(super) fn rust_owned_color_from_component_value(
             name: function.name.clone(),
             arguments: function.value.clone(),
             source,
+            component_values: vec![component_value.clone()],
         })
 }
 

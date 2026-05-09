@@ -746,7 +746,7 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
         metadata_len: usize,
     ),
     url_modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
-    source_component_value_list_callback: unsafe extern "C" fn(ctx: *mut c_void),
+    source_component_value_list_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: u8),
     source_component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) -> bool {
     unsafe {
@@ -816,8 +816,8 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
                     url_modifier_callback(ctx, &raw const modifier);
                 },
                 (
-                    &mut || {
-                        source_component_value_list_callback(ctx);
+                    &mut |kind| {
+                        source_component_value_list_callback(ctx, kind);
                     },
                     &mut |component_value| {
                         source_component_value_callback(ctx, &raw const component_value);

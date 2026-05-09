@@ -1202,6 +1202,7 @@ pub(super) fn parse_rust_owned_generated_longhand_value_with_options(
                     name: function.name.clone(),
                     arguments: function.value.clone(),
                     source,
+                    component_values: component_values.to_vec(),
                 }),
             };
         }

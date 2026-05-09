@@ -112,7 +112,7 @@ where
         &mut callback,
         |_, _, _, _, _, _| {},
         |_| {},
-        (&mut || {}, &mut |_| {}),
+        (&mut |_| {}, &mut |_| {}),
     )
 }
 
@@ -129,7 +129,7 @@ where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
     D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     U: FnMut(&UrlModifier),
-    S: FnMut(),
+    S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
     let RustOwnedStyleValueParseResult::Parsed(style_value) =

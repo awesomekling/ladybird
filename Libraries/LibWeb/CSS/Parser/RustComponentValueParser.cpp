@@ -1193,29 +1193,62 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
 
     struct StyleValueParseContext {
-        Optional<RustStyleValue> style_value;
-        ComponentValueBuilder flex_basis_source_component_value_builder;
-        bool is_collecting_flex_basis_source_component_values { false };
+        enum class SourceComponentValueTarget : u8 {
+            None,
+            FlexBasis,
+            StyleColor,
+        };
 
-        void flush_flex_basis_source_component_values()
+        enum : u8 {
+            SourceComponentValueListFlexBasis = 1,
+            SourceComponentValueListStyleColor = 2,
+        };
+
+        Optional<RustStyleValue> style_value;
+        ComponentValueBuilder source_component_value_builder;
+        SourceComponentValueTarget source_component_value_target { SourceComponentValueTarget::None };
+        RustStyleColor* style_color_source_component_value_target { nullptr };
+
+        void flush_source_component_values()
         {
-            if (!is_collecting_flex_basis_source_component_values)
+            if (source_component_value_target == SourceComponentValueTarget::None)
                 return;
-            VERIFY(style_value.has_value());
-            VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
-            VERIFY(flex_basis_source_component_value_builder.stack.is_empty());
-            style_value->flex_basis_source_component_values = move(flex_basis_source_component_value_builder.root_values);
-            flex_basis_source_component_value_builder = {};
-            is_collecting_flex_basis_source_component_values = false;
+            VERIFY(source_component_value_builder.stack.is_empty());
+            switch (source_component_value_target) {
+            case SourceComponentValueTarget::None:
+                VERIFY_NOT_REACHED();
+            case SourceComponentValueTarget::FlexBasis:
+                VERIFY(style_value.has_value());
+                VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
+                style_value->flex_basis_source_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::StyleColor:
+                VERIFY(style_color_source_component_value_target);
+                style_color_source_component_value_target->source_component_values = move(source_component_value_builder.root_values);
+                style_color_source_component_value_target = nullptr;
+                break;
+            }
+            source_component_value_builder = {};
+            source_component_value_target = SourceComponentValueTarget::None;
         }
 
-        void start_flex_basis_source_component_values()
+        void start_source_component_values(u8 kind)
         {
-            flush_flex_basis_source_component_values();
-            VERIFY(style_value.has_value());
-            VERIFY(style_value->kind == FFI::CssStyleValueKind::Flex);
-            VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
-            is_collecting_flex_basis_source_component_values = true;
+            flush_source_component_values();
+            switch (kind) {
+            case SourceComponentValueListFlexBasis:
+                VERIFY(style_value.has_value());
+                VERIFY(style_value->kind == FFI::CssStyleValueKind::Flex);
+                VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
+                source_component_value_target = SourceComponentValueTarget::FlexBasis;
+                return;
+            case SourceComponentValueListStyleColor:
+                VERIFY(style_color_source_component_value_target);
+                source_component_value_target = SourceComponentValueTarget::StyleColor;
+                return;
+            default:
+                VERIFY_NOT_REACHED();
+            }
         }
     };
 
@@ -1233,7 +1266,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         &context,
         [](void* raw_style_value, FFI::CssStyleValueKind kind, u16 property_id, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, bool has_secondary_numeric_value, double secondary_numeric_value, u8 color_red, u8 color_green, u8 color_blue, u8 color_alpha, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
-            context.flush_flex_basis_source_component_values();
+            context.flush_source_component_values();
             auto& style_value = context.style_value;
             RustStyleValue value {
                 .kind = kind,
@@ -1261,6 +1294,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (has_secondary_numeric_value)
                     nested_value.numeric_value = secondary_numeric_value;
                 return nested_value;
+            };
+            auto note_style_color_source_component_target = [&](Optional<RustStyleColor>& color) {
+                if (color.has_value() && !color->is_simple)
+                    context.style_color_source_component_value_target = &*color;
             };
             auto image_url_from_callback_payload = [&]() -> Optional<URL> {
                 enum : u8 {
@@ -2262,6 +2299,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->text_decoration_style = static_cast<RustTextDecorationStyle>(color_green);
                 } else {
                     style_value->text_decoration_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->text_decoration_color);
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ListStyle) {
@@ -2369,6 +2407,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 case 2:
                     style_value->border_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->border_color);
                     break;
                 default:
                     VERIFY_NOT_REACHED();
@@ -2579,9 +2618,10 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 VERIFY(!style_value->shadows.is_empty());
                 auto& shadow = style_value->shadows.last();
-                if (component_kind == Color)
+                if (component_kind == Color) {
                     shadow.color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
-                else if (component_kind == OffsetX) {
+                    note_style_color_source_component_target(shadow.color);
+                } else if (component_kind == OffsetX) {
                     shadow.offset_x = nested_primitive_value_from_callback_payload();
                     style_value->last_calculation_node_target = RustCalculationNodeTarget::ShadowOffsetX;
                 } else if (component_kind == OffsetY) {
@@ -2842,6 +2882,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->filter_value_list_events.is_empty());
                     VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::DropShadow);
                     style_value->filter_value_list_events.last().drop_shadow_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->filter_value_list_events.last().drop_shadow_color);
                     return;
                 }
 
@@ -3122,6 +3163,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 case Color:
                     style_value->paint_color = style_color_from_callback_payload(has_secondary_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->paint_color);
                     break;
                 case Url:
                     style_value->paint_url_source = string_from_ffi_bytes(value_ptr, value_len);
@@ -3129,6 +3171,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     break;
                 case FallbackColor:
                     style_value->paint_fallback_color = style_color_from_callback_payload(has_secondary_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->paint_fallback_color);
                     break;
                 default:
                     VERIFY_NOT_REACHED();
@@ -3267,9 +3310,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 } else if (component_kind == 2) {
                     style_value->scrollbar_color_kind = 2;
                     style_value->scrollbar_thumb_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->scrollbar_thumb_color);
                 } else if (component_kind == 3) {
                     style_value->scrollbar_color_kind = 2;
                     style_value->scrollbar_track_color = style_color_from_callback_payload(has_numeric_value, secondary_numeric_value, color_red, color_green, color_blue, color_alpha, value_ptr, value_len);
+                    note_style_color_source_component_target(style_value->scrollbar_track_color);
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::ScrollbarGutter) {
@@ -3499,7 +3544,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         },
         [](void* raw_style_value, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
-            context.flush_flex_basis_source_component_values();
+            context.flush_source_component_values();
             auto& style_value = context.style_value;
             VERIFY(style_value.has_value());
             auto event = RustCalculationNodeEvent {
@@ -3802,7 +3847,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         },
         [](void* raw_style_value, FFI::CssUrlModifier const* rust_modifier) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
-            context.flush_flex_basis_source_component_values();
+            context.flush_source_component_values();
             auto& style_value = context.style_value;
             VERIFY(style_value.has_value());
 
@@ -3823,17 +3868,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::Url);
             style_value->filter_value_list_events.last().request_url_modifiers.append(move(modifier));
         },
-        [](void* raw_style_value) {
+        [](void* raw_style_value, u8 kind) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
-            context.start_flex_basis_source_component_values();
+            context.start_source_component_values(kind);
         },
         [](void* raw_style_value, FFI::CssComponentValue const* component_value) {
             auto& context = *static_cast<StyleValueParseContext*>(raw_style_value);
-            VERIFY(context.is_collecting_flex_basis_source_component_values);
-            append_component_value_token(context.flex_basis_source_component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+            VERIFY(context.source_component_value_target != StyleValueParseContext::SourceComponentValueTarget::None);
+            append_component_value_token(context.source_component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
         });
 
-    context.flush_flex_basis_source_component_values();
+    context.flush_source_component_values();
     return context.style_value;
 }
 
