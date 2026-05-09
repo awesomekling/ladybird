@@ -5541,7 +5541,7 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
 
                 auto component_values = RustComponentValueParser::parse_a_list_of_component_values(item.value.bytes_as_string_view(), "utf-8"sv);
                 TokenStream<ComponentValue> value_tokens { component_values };
-                auto parsed_value = parse_css_value_for_property(property_id, value_tokens);
+                auto parsed_value = parse_css_value_for_property(longhands[item.index], value_tokens);
                 value_tokens.discard_whitespace();
                 if (!parsed_value || value_tokens.has_next_token())
                     return {};
@@ -5560,8 +5560,26 @@ RefPtr<StyleValue const> Parser::parse_positional_value_list_shorthand(PropertyI
 
     Vector<ValueComparingNonnullRefPtr<StyleValue const>> parsed_values;
 
-    while (auto parsed_value = parse_css_value_for_property(property_id, tokens))
+    while (parsed_values.size() < longhands.size()) {
+        auto transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+
+        auto const& component_value = tokens.next_token();
+        auto source = component_value.original_source_text();
+        auto serialized_value = source.is_empty() ? component_value.to_string() : source;
+        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(serialized_value.bytes_as_string_view(), "utf-8"sv);
+        TokenStream<ComponentValue> value_tokens { component_values };
+        auto parsed_value = parse_css_value_for_property(longhands[parsed_values.size()], value_tokens);
+        value_tokens.discard_whitespace();
+        if (!parsed_value || value_tokens.has_next_token())
+            break;
+
+        tokens.discard_a_token();
+        transaction.commit();
         parsed_values.append(parsed_value.release_nonnull());
+    }
 
     return create_shorthand_value(parsed_values);
 }
