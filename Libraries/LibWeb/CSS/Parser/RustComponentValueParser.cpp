@@ -1655,19 +1655,66 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::GridTemplateShorthand) {
+                enum : u8 {
+                    Empty = 254,
+                    ItemStart = 255,
+                };
+
                 if (!style_value.has_value()) {
                     style_value = move(value);
                     style_value->property_id = shorthand_property_id_from_callback_payload();
                 } else {
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::GridTemplateShorthand);
-                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
                 }
 
-                if (value_len > 0) {
+                if (color_blue == Empty)
+                    return;
+
+                if (color_blue == ItemStart) {
+                    VERIFY(style_value->property_id == shorthand_property_id_from_callback_payload());
                     style_value->grid_template_shorthand_items.append(GridTemplateShorthandItem {
                         .property_id = static_cast<PropertyID>(property_id),
-                        .value = string_from_ffi_bytes(value_ptr, value_len),
                     });
+                    return;
+                }
+
+                VERIFY(!style_value->grid_template_shorthand_items.is_empty());
+                auto& item = style_value->grid_template_shorthand_items.last();
+                VERIFY(item.property_id == static_cast<PropertyID>(property_id));
+
+                switch (item.property_id) {
+                case PropertyID::GridAutoFlow:
+                    item.grid_auto_flow_axis = color_red;
+                    item.grid_auto_flow_dense = color_green;
+                    break;
+                case PropertyID::GridTemplateAreas:
+                    if (color_red == 0) {
+                        item.grid_template_areas_is_none = true;
+                    } else {
+                        VERIFY(color_red == 1);
+                        item.grid_template_area_rows.append(string_from_ffi_bytes(value_ptr, value_len));
+                    }
+                    break;
+                case PropertyID::GridAutoColumns:
+                case PropertyID::GridAutoRows:
+                case PropertyID::GridTemplateColumns:
+                case PropertyID::GridTemplateRows:
+                    if (color_red == 0) {
+                        item.grid_track_size_list_is_none = true;
+                        break;
+                    }
+                    item.grid_track_size_list_events.append(RustGridTrackSizeListEvent {
+                        .kind = static_cast<RustGridTrackSizeListEventKind>(color_red),
+                        .repeat_type = static_cast<RustGridRepeatType>(color_green),
+                        .breadth_kind = static_cast<RustGridTrackBreadthKind>(color_blue),
+                        .secondary_breadth_kind = static_cast<RustGridTrackBreadthKind>(color_green),
+                        .value = nested_primitive_value_from_callback_payload(),
+                        .secondary_value = secondary_nested_primitive_value_from_callback_payload(),
+                        .source = string_from_ffi_bytes(value_ptr, value_len),
+                    });
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::FontLanguageOverride) {

@@ -125,7 +125,7 @@ where
                     0.0,
                     (shorthand_property_id & 0xff) as u8,
                     (shorthand_property_id >> 8) as u8,
-                    0,
+                    GRID_TEMPLATE_SHORTHAND_CALLBACK_EMPTY,
                     0,
                     &[],
                     "",
@@ -143,11 +143,53 @@ where
                     0.0,
                     (shorthand_property_id & 0xff) as u8,
                     (shorthand_property_id >> 8) as u8,
+                    GRID_TEMPLATE_SHORTHAND_CALLBACK_ITEM_START,
                     0,
-                    0,
-                    item.source.as_bytes(),
+                    &[],
                     "",
                 );
+                match &item.style_value.value {
+                    RustOwnedStyleValueKind::GridAutoFlow(value) => callback(
+                        CssStyleValueKind::GridTemplateShorthand,
+                        item.property_id as u16,
+                        CssPrimitiveValueKind::Invalid,
+                        false,
+                        0.0,
+                        false,
+                        0.0,
+                        value.axis as u8,
+                        value.dense as u8,
+                        0,
+                        0,
+                        &[],
+                        "",
+                    ),
+                    RustOwnedStyleValueKind::GridTemplateAreas(value) => {
+                        callback_grid_template_areas_style_value(
+                            callback,
+                            item.property_id as u16,
+                            CssStyleValueKind::GridTemplateShorthand,
+                            value,
+                        );
+                    }
+                    RustOwnedStyleValueKind::GridTrackSizeList(value) => {
+                        callback_grid_track_size_list_style_value(
+                            callback,
+                            CssStyleValueKind::GridTemplateShorthand,
+                            item.property_id as u16,
+                            value,
+                        );
+                    }
+                    RustOwnedStyleValueKind::GridAutoTrackSizes(value) => {
+                        callback_grid_track_size_list_style_value(
+                            callback,
+                            CssStyleValueKind::GridTemplateShorthand,
+                            item.property_id as u16,
+                            value,
+                        );
+                    }
+                    _ => unreachable!("grid-template shorthand items are grid longhands"),
+                }
             }
         }
         RustOwnedStyleValueKind::LayerShorthand(items) => {
@@ -623,7 +665,12 @@ where
             );
         }
         RustOwnedStyleValueKind::GridTemplateAreas(value) => {
-            callback_grid_template_areas_style_value(callback, property_id, value);
+            callback_grid_template_areas_style_value(
+                callback,
+                property_id,
+                CssStyleValueKind::GridTemplateAreas,
+                value,
+            );
         }
         RustOwnedStyleValueKind::GridTrackPlacement(value) => {
             callback_grid_track_placement_style_value(callback, property_id, value);
@@ -2559,16 +2606,23 @@ const GRID_TRACK_BREADTH_MIN_CONTENT: u8 = 3;
 const GRID_TRACK_BREADTH_MAX_CONTENT: u8 = 4;
 const GRID_TRACK_BREADTH_AUTO: u8 = 5;
 
+const GRID_TEMPLATE_SHORTHAND_CALLBACK_EMPTY: u8 = 254;
+const GRID_TEMPLATE_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
+
 const GRID_TEMPLATE_AREAS_CALLBACK_NONE: u8 = 0;
 const GRID_TEMPLATE_AREAS_CALLBACK_ROW: u8 = 1;
 
-fn callback_grid_template_areas_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedGridTemplateAreas)
-where
+fn callback_grid_template_areas_style_value<C>(
+    callback: &mut C,
+    property_id: u16,
+    kind: CssStyleValueKind,
+    value: &RustOwnedGridTemplateAreas,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
 {
     match value {
         RustOwnedGridTemplateAreas::None => callback(
-            CssStyleValueKind::GridTemplateAreas,
+            kind,
             property_id,
             CssPrimitiveValueKind::Invalid,
             false,
@@ -2586,7 +2640,7 @@ where
             for row in rows {
                 let row = null_separated_string_list_bytes(row);
                 callback(
-                    CssStyleValueKind::GridTemplateAreas,
+                    kind,
                     property_id,
                     CssPrimitiveValueKind::Invalid,
                     false,

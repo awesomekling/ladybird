@@ -133,7 +133,6 @@ public:
         String value;
     };
 
-    using GridTemplateShorthandItem = FontShorthandItem;
     using ComponentShorthandItem = FontShorthandItem;
 
     struct CoordinatingValueListShorthandItem {
@@ -397,6 +396,16 @@ public:
         RustNestedPrimitiveValue value;
         RustNestedPrimitiveValue secondary_value;
         String source;
+    };
+
+    struct GridTemplateShorthandItem {
+        PropertyID property_id;
+        bool grid_track_size_list_is_none { false };
+        Vector<RustGridTrackSizeListEvent> grid_track_size_list_events;
+        bool grid_template_areas_is_none { false };
+        Vector<String> grid_template_area_rows;
+        Optional<u8> grid_auto_flow_axis;
+        Optional<u8> grid_auto_flow_dense;
     };
 
     struct RustCursorImage {

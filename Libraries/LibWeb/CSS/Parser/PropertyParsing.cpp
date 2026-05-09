@@ -4502,19 +4502,62 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 for (auto property_id : sub_properties)
                     values.unchecked_append(property_initial_value(property_id));
 
-                auto materialize_source_as_property = [this](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
-                    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source.bytes_as_string_view(), "utf-8"sv);
-                    TokenStream property_tokens { component_values };
-                    auto value = parse_css_value_for_property(property_id, property_tokens);
-                    property_tokens.discard_whitespace();
-                    if (!value || property_tokens.has_next_token())
-                        return nullptr;
-                    return value;
-                };
-
                 bool is_valid = true;
                 for (auto const& item : rust_style_value->grid_template_shorthand_items) {
-                    auto value = materialize_source_as_property(item.property_id, item.value);
+                    RefPtr<StyleValue const> value;
+                    switch (item.property_id) {
+                    case PropertyID::GridAutoFlow: {
+                        if (!item.grid_auto_flow_axis.has_value() || !item.grid_auto_flow_dense.has_value()) {
+                            is_valid = false;
+                            break;
+                        }
+                        auto axis = *item.grid_auto_flow_axis == 1
+                            ? GridAutoFlowStyleValue::Axis::Column
+                            : GridAutoFlowStyleValue::Axis::Row;
+                        auto dense = *item.grid_auto_flow_dense == 1
+                            ? GridAutoFlowStyleValue::Dense::Yes
+                            : GridAutoFlowStyleValue::Dense::No;
+                        value = GridAutoFlowStyleValue::create(axis, dense);
+                        break;
+                    }
+                    case PropertyID::GridTemplateAreas: {
+                        RustComponentValueParser::RustStyleValue grid_template_areas {
+                            .kind = FFI::CssStyleValueKind::GridTemplateAreas,
+                            .property_id = PropertyID::GridTemplateAreas,
+                            .grid_template_areas_is_none = item.grid_template_areas_is_none,
+                            .grid_template_area_rows = item.grid_template_area_rows,
+                        };
+                        if (!grid_template_areas.grid_template_areas_is_none && grid_template_areas.grid_template_area_rows.is_empty()) {
+                            is_valid = false;
+                            break;
+                        }
+                        value = materialize_rust_grid_template_areas(grid_template_areas);
+                        break;
+                    }
+                    case PropertyID::GridAutoColumns:
+                    case PropertyID::GridAutoRows:
+                    case PropertyID::GridTemplateColumns:
+                    case PropertyID::GridTemplateRows: {
+                        size_t event_index = 0;
+                        Optional<GridTrackSizeList> track_size_list;
+                        if (item.grid_track_size_list_is_none) {
+                            track_size_list = item.property_id == PropertyID::GridAutoColumns || item.property_id == PropertyID::GridAutoRows
+                                ? GridTrackSizeList {}
+                                : GridTrackSizeList::make_none();
+                        } else {
+                            track_size_list = materialize_rust_grid_track_size_list(materialize_rust_grid_track_size_list, item.grid_track_size_list_events, event_index, false);
+                        }
+                        if (!track_size_list.has_value() || event_index != item.grid_track_size_list_events.size()) {
+                            is_valid = false;
+                            break;
+                        }
+                        value = GridTrackSizeListStyleValue::create(track_size_list.release_value());
+                        break;
+                    }
+                    default:
+                        is_valid = false;
+                        break;
+                    }
                     if (!value) {
                         is_valid = false;
                         break;
