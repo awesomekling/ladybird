@@ -1333,6 +1333,22 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 }
 
+                if (kind == FFI::CssStyleValueKind::CornerShape) {
+                    if (primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+                        auto keyword = keyword_from_string({ value_ptr, value_len });
+                        if (!keyword.has_value())
+                            return;
+                        item.corner_shape_keyword = keyword.release_value();
+                    } else {
+                        item.has_corner_shape_superellipse_parameter = true;
+                        item.primitive_kind = primitive_kind;
+                        if (has_numeric_value)
+                            item.primitive_numeric_value = numeric_value;
+                        item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                    }
+                    return;
+                }
+
                 return;
             }
 

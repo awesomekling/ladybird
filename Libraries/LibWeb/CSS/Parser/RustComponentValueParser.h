@@ -158,6 +158,8 @@ public:
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
         Optional<ValueType> primitive_value_type;
+        Optional<Keyword> corner_shape_keyword;
+        bool has_corner_shape_superellipse_parameter { false };
     };
 
     struct OpenTypeTaggedValue {

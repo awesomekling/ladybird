@@ -5158,6 +5158,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return wrap_single_value_shorthand_if_needed(property_id, parsed_value.release_nonnull());
                     }
 
+                    if (item.corner_shape_keyword.has_value())
+                        return wrap_single_value_shorthand_if_needed(property_id, KeywordStyleValue::create(*item.corner_shape_keyword));
+
+                    if (item.has_corner_shape_superellipse_parameter) {
+                        RustComponentValueParser::RustNestedPrimitiveValue parameter_value {
+                            .primitive_kind = item.primitive_kind,
+                            .source_or_unit = item.primitive_source_or_unit,
+                        };
+                        if (item.primitive_numeric_value.has_value())
+                            parameter_value.numeric_value = *item.primitive_numeric_value;
+
+                        auto parameter = materialize_rust_nested_number(parameter_value);
+                        if (!parameter)
+                            return nullptr;
+                        return wrap_single_value_shorthand_if_needed(property_id, SuperellipseStyleValue::create(parameter.release_nonnull()));
+                    }
+
                     return parse_rust_source_as_property(property_id, item.value);
                 };
 
