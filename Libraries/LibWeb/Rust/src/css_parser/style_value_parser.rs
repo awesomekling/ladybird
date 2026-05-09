@@ -1629,17 +1629,13 @@ fn rust_owned_anchor_function_from_function(
         anchor_name,
         anchor_side,
         fallback,
-        source: serialize_component_values_for_reparsing(
-            &[ComponentValue::Function(function.clone())],
-            filtered_input_string,
-        )?,
     }))
 }
 
 fn parse_rust_owned_anchor_size_function(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
-    filtered_input: &[u8],
+    _filtered_input: &[u8],
 ) -> Option<RustOwnedAnchorSizeFunction> {
     if !matches!(
         value_type,
@@ -1658,16 +1654,9 @@ fn parse_rust_owned_anchor_size_function(
         return None;
     }
 
-    let filtered_input_string = filtered_input_to_string(filtered_input);
     // AD-HOC: Rust classifies the function shape here, while C++ still
     // validates the full grammar and property context during materialization.
-    Some(RustOwnedAnchorSizeFunction {
-        source: serialize_component_values_for_reparsing(
-            &[ComponentValue::Function(function.clone())],
-            &filtered_input_string,
-        )?,
-        value_type,
-    })
+    Some(RustOwnedAnchorSizeFunction { value_type })
 }
 
 fn component_value_parse_as_anchor_side(component_value: &ComponentValue) -> bool {

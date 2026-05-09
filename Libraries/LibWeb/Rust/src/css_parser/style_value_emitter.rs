@@ -15,12 +15,12 @@ where
         RustOwnedStyleValueKind::Image(image) => {
             callback_image_style_value(callback, property_id, image);
         }
-        RustOwnedStyleValueKind::Anchor(value) => {
+        RustOwnedStyleValueKind::Anchor(_value) => {
             callback_source_backed_value_type_kind_style_value(
                 callback,
                 CssStyleValueKind::Anchor,
                 property_id,
-                &value.source,
+                "",
                 PropertyValueType::Anchor,
             );
         }
@@ -29,7 +29,7 @@ where
                 callback,
                 CssStyleValueKind::AnchorSize,
                 property_id,
-                &value.source,
+                "",
                 value.value_type,
             );
         }

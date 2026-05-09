@@ -299,12 +299,10 @@ pub(crate) struct RustOwnedAnchorFunction {
     pub(crate) anchor_name: Option<String>,
     pub(crate) anchor_side: String,
     pub(crate) fallback: Option<String>,
-    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RustOwnedAnchorSizeFunction {
-    pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
 }
 

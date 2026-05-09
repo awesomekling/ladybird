@@ -2827,7 +2827,6 @@ fn parses_style_values_with_rust_owned_ast() {
                 anchor_name: Some("--target".to_string()),
                 anchor_side: "bottom".to_string(),
                 fallback: Some("calc(1px + 2%)".to_string()),
-                source: "anchor(--target bottom, calc(1px + 2%))".to_string(),
             }),
         })
     );
@@ -2951,7 +2950,6 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Width,
             value: RustOwnedStyleValueKind::AnchorSize(RustOwnedAnchorSizeFunction {
-                source: "anchor-size(--target width, 10px)".to_string(),
                 value_type: PropertyValueType::Length,
             }),
         })
@@ -5782,7 +5780,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "anchor(--target bottom, calc(1px + 2%))".to_string(),
+            value: "".to_string(),
             value_type: "Anchor".to_string(),
         })
     );
@@ -5835,7 +5833,7 @@ fn parses_style_values_with_rust_owned_ast() {
             numeric_value: None,
             secondary_numeric_value: None,
             color: None,
-            value: "anchor-size(--target width, 10px)".to_string(),
+            value: "".to_string(),
             value_type: "Length".to_string(),
         })
     );
