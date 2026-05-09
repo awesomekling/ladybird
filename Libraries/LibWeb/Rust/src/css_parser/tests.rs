@@ -6722,6 +6722,7 @@ fn universal_syntax_matches_optional_declaration_value() {
     assert!(!matches_syntax("red;", "*"));
     assert!(!matches_syntax("!important", "*"));
     assert!(!matches_syntax("]", "*"));
+    assert!(!matches_syntax("var(, 1px)", "*"));
 }
 
 #[test]

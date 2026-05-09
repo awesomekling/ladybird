@@ -2192,6 +2192,10 @@ pub(crate) fn component_values_match_syntax(
 
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
+    if collect_substitution_function_presence(filtered_input).is_none() {
+        return false;
+    }
+
     let mut parser = ComponentValueParser::new(component_values);
     if !syntax_node_matches_component_values(&mut parser, &syntax_node, filtered_input_string) {
         return false;
