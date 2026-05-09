@@ -1937,6 +1937,7 @@ pub(super) fn consume_border_image_source(
     parser.discard_whitespace();
     let start = parser.index;
     let component_value = parser.next_component_value()?;
+    let image_component_value = component_value.clone();
     if !component_value_parse_as_border_image_source(component_value) {
         return None;
     }
@@ -1952,9 +1953,10 @@ pub(super) fn consume_border_image_source(
         RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(image)),
         RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
-            source: Some(source),
+            source: Some(source.clone()),
             url: None,
             gradient: None,
+            component_values: vec![image_component_value],
         })),
         _ => None,
     }
@@ -3512,6 +3514,7 @@ pub(super) fn rust_owned_image_style_value_kind(
             source: None,
             url: rust_owned_url_payload_from_component_value(component_value),
             gradient: None,
+            component_values: vec![component_value.clone()],
         }));
     }
 
@@ -3525,6 +3528,7 @@ pub(super) fn rust_owned_image_style_value_kind(
             )?),
             url: None,
             gradient: Some(gradient),
+            component_values: vec![component_value.clone()],
         }));
     }
 
@@ -3542,6 +3546,7 @@ pub(super) fn rust_owned_image_from_component_value(
             source: None,
             url: rust_owned_url_payload_from_component_value(component_value),
             gradient: None,
+            component_values: vec![component_value.clone()],
         });
     }
 
@@ -3554,6 +3559,7 @@ pub(super) fn rust_owned_image_from_component_value(
             )?),
             url: None,
             gradient: component_value_parse_as_image_gradient_value(component_value),
+            component_values: vec![component_value.clone()],
         });
     }
 
@@ -3568,6 +3574,7 @@ pub(super) fn rust_owned_image_from_component_value(
             )?),
             url: None,
             gradient: None,
+            component_values: vec![component_value.clone()],
         });
     }
 
@@ -3687,6 +3694,7 @@ pub(super) fn rust_owned_image_set_option(
                 request_url_modifiers: vec![],
             }),
             gradient: None,
+            component_values: vec![image.clone()],
         }
     } else if component_value_parse_as_image_set_image(image) || component_value_parse_as_image_set_gradient(image) {
         rust_owned_image_from_component_value(image, filtered_input_string)?

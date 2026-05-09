@@ -10,6 +10,7 @@ const COMPONENT_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
 const POSITIONAL_VALUE_LIST_SHORTHAND_CALLBACK_ITEM_START: u8 = 255;
 const SOURCE_COMPONENT_VALUE_LIST_FLEX_BASIS: u8 = 1;
 const SOURCE_COMPONENT_VALUE_LIST_STYLE_COLOR: u8 = 2;
+const SOURCE_COMPONENT_VALUE_LIST_IMAGE: u8 = 3;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -60,9 +61,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
 {
     let property_id = style_value.property_id as u16;
     match &style_value.value {
-        RustOwnedStyleValueKind::Image(image) => {
-            callback_image_style_value(callback, property_id, image);
-        }
+        RustOwnedStyleValueKind::Image(image) => callback_image_style_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            image,
+        ),
         RustOwnedStyleValueKind::Anchor(_value) => {
             callback_source_backed_value_type_kind_style_value(
                 callback,
@@ -87,9 +95,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::CornerShape(value) => {
             callback_corner_shape_style_value(callback, property_id, &value.value);
         }
-        RustOwnedStyleValueKind::ImageSet(image_set) => {
-            callback_image_set_style_value(callback, property_id, image_set);
-        }
+        RustOwnedStyleValueKind::ImageSet(image_set) => callback_image_set_style_value(
+            callback,
+            &mut SourceComponentValueEmitter {
+                filtered_input,
+                list_callback: source_component_value_list_callback,
+                component_value_callback: source_component_value_callback,
+            },
+            property_id,
+            image_set,
+        ),
         RustOwnedStyleValueKind::CoordinatingValueListShorthand(items) => {
             let shorthand_property_id = property_id;
             for item in items {
@@ -3589,9 +3604,15 @@ fn callback_corner_shape_style_value<C>(
     }
 }
 
-fn callback_image_style_value<C>(callback: &mut C, property_id: u16, image: &RustOwnedImage)
-where
+fn callback_image_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    image: &RustOwnedImage,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (image_kind, url_function_type, payload) = image_callback_payload(image);
     callback(
@@ -3609,11 +3630,20 @@ where
         payload.as_bytes(),
         "",
     );
+    if !image.component_values.is_empty() {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
 }
 
-fn callback_image_set_style_value<C>(callback: &mut C, property_id: u16, image_set: &RustOwnedImageSet)
-where
+fn callback_image_set_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    image_set: &RustOwnedImageSet,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     for option in &image_set.options {
         let (_, url_function_type, image_source) = image_callback_payload(&option.image);
@@ -3633,6 +3663,9 @@ where
             image_source.as_bytes(),
             &metadata,
         );
+        if !option.image.component_values.is_empty() {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+        }
     }
 }
 

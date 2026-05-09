@@ -345,12 +345,22 @@ pub(crate) enum RustOwnedCounterFunctionKind {
     Counters,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct RustOwnedImage {
     pub(crate) kind: RustOwnedImageKind,
     pub(crate) source: Option<String>,
     pub(crate) url: Option<RustOwnedUrlPayload>,
     pub(crate) gradient: Option<RustOwnedGradient>,
+    pub(crate) component_values: Vec<ComponentValue>,
+}
+
+impl PartialEq for RustOwnedImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.source == other.source
+            && self.url == other.url
+            && self.gradient == other.gradient
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

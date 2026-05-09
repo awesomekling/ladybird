@@ -1197,12 +1197,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             None,
             Discard,
             FlexBasis,
+            Image,
             StyleColor,
         };
 
         enum : u8 {
             SourceComponentValueListFlexBasis = 1,
             SourceComponentValueListStyleColor = 2,
+            SourceComponentValueListImage = 3,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1225,6 +1227,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(style_value.has_value());
                 VERIFY(style_value->flex_basis_kind == RustFlexBasisKind::Source);
                 style_value->flex_basis_source_component_values = move(source_component_value_builder.root_values);
+                break;
+            case SourceComponentValueTarget::Image:
+                VERIFY(source_component_values_target);
+                *source_component_values_target = move(source_component_value_builder.root_values);
+                source_component_values_target = nullptr;
                 break;
             case SourceComponentValueTarget::StyleColor:
                 if (style_color_source_component_value_target) {
@@ -1254,6 +1261,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             case SourceComponentValueListStyleColor:
                 source_component_value_target = (style_color_source_component_value_target || source_component_values_target)
                     ? SourceComponentValueTarget::StyleColor
+                    : SourceComponentValueTarget::Discard;
+                return;
+            case SourceComponentValueListImage:
+                source_component_value_target = source_component_values_target
+                    ? SourceComponentValueTarget::Image
                     : SourceComponentValueTarget::Discard;
                 return;
             default:
@@ -1584,6 +1596,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     item.image_kind = static_cast<RustImageKind>(color_red);
                     item.image_source = string_from_ffi_bytes(value_ptr, value_len);
                     item.image_url = image_url_from_callback_payload();
+                    note_source_component_values_target(item.image_source_component_values);
                     return;
                 }
 
@@ -1703,10 +1716,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         .resolution = move(resolution),
                         .type = move(type),
                     });
+                    note_source_component_values_target(style_value->image_set_options.last().image_source_component_values);
                     return;
                 }
                 value.image_source = string_from_ffi_bytes(value_ptr, value_len);
                 value.image_url = image_url_from_callback_payload();
+                style_value = move(value);
+                note_source_component_values_target(style_value->image_source_component_values);
+                return;
             } else if (kind == FFI::CssStyleValueKind::Color) {
                 if (value_len > 0)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);

@@ -2519,6 +2519,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         request_url_modifiers: vec![],
                     }),
                     gradient: None,
+                    component_values: vec![],
                 })),
                 list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
                     "square".to_string()
@@ -2945,6 +2946,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         request_url_modifiers: vec![],
                     }),
                     gradient: None,
+                    component_values: vec![],
                 })],
                 alt_text: vec![],
             }),
@@ -3498,6 +3500,7 @@ fn parses_style_values_with_rust_owned_ast() {
                         request_url_modifiers: vec![],
                     }),
                     gradient: None,
+                    component_values: vec![],
                 })),
                 slice: Some(RustOwnedBorderImageSlice {
                     values: vec![
@@ -3591,6 +3594,7 @@ fn parses_style_values_with_rust_owned_ast() {
                             request_url_modifiers: vec![],
                         }),
                         gradient: None,
+                        component_values: vec![],
                     },
                     x: Some(RustOwnedNestedPrimitiveValue::Number(1.0)),
                     y: Some(RustOwnedNestedPrimitiveValue::Number(2.0)),

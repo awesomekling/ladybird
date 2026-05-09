@@ -1764,6 +1764,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     RefPtr<AbstractImageStyleValue const> image;
                     if (option.image_kind == RustComponentValueParser::RustImageKind::Url && option.image_url.has_value()) {
                         image = ImageStyleValue::create(*option.image_url);
+                    } else if (!option.image_source_component_values.is_empty()) {
+                        TokenStream image_tokens { option.image_source_component_values };
+                        image = parse_image_value(image_tokens);
+                        image_tokens.discard_whitespace();
+                        if (!image || image_tokens.has_next_token())
+                            return nullptr;
                     } else {
                         image = parse_rust_source_as_image(option.image_source);
                     }
@@ -1792,12 +1798,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return ImageSetStyleValue::create(move(options));
             };
-            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, String const& source, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values = {}) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
                     return materialize_rust_image(kind, source, typed_url);
                 case RustComponentValueParser::RustImageKind::Gradient:
                 case RustComponentValueParser::RustImageKind::ImageSet:
+                    if (!source_component_values.is_empty()) {
+                        TokenStream image_tokens { source_component_values };
+                        auto image = parse_image_value(image_tokens);
+                        image_tokens.discard_whitespace();
+                        if (image && !image_tokens.has_next_token())
+                            return image.release_nonnull();
+                    }
                     // AD-HOC: Re-parsing substituted component values through Rust
                     // would lose C++-side attr() taint metadata until that
                     // metadata is carried over FFI.
@@ -3422,8 +3435,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
                 }
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
-                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url)) {
-                        if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url)
+                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, *rust_style_value->image_source, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
+                        if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url || !rust_style_value->image_source_component_values.is_empty())
                             discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, value };
@@ -4843,7 +4856,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
 
                     if (item.image_kind.has_value() && item.image_source.has_value()) {
-                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, *item.image_source, item.image_url))
+                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, *item.image_source, item.image_url, item.image_source_component_values))
                             return image;
                     }
 

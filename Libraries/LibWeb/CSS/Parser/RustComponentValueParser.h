@@ -481,6 +481,7 @@ public:
         RustImageKind image_kind { RustImageKind::Url };
         String image_source;
         Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
         Optional<String> resolution;
         Optional<String> type;
     };
@@ -507,6 +508,7 @@ public:
         Optional<RustImageKind> image_kind;
         Optional<String> image_source;
         Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
         Vector<RustBackgroundSize> background_sizes;
         Vector<RustPosition> positions;
         Optional<ValueType> position_value_type;
@@ -838,6 +840,7 @@ public:
         Optional<RustImageKind> image_kind;
         Optional<String> image_source;
         Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
         Optional<URL> url;
         Vector<RustPosition> positions;
         Vector<RustPositionComponent> position_components;
