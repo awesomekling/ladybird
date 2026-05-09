@@ -641,17 +641,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
                     auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };
                     TokenStream<ComponentValue> declaration_value_tokens { component_values };
-
                     declaration_value_tokens.discard_whitespace();
                     if (declaration_value_tokens.is_empty())
                         return UnresolvedStyleValue::create({}, {});
 
-                    if (auto parsed_declaration_value = parse_declaration_value(declaration_value_tokens); parsed_declaration_value.has_value() && declaration_value_tokens.is_empty()) {
-                        // NB: We know this contains no substitution functions otherwise we would have returned earlier
-                        return UnresolvedStyleValue::create(parsed_declaration_value.release_value(), {});
-                    }
-
-                    return nullptr;
+                    // NB: We know this contains no substitution functions otherwise we would have returned earlier.
+                    return UnresolvedStyleValue::create(move(component_values), {});
                 }
                 case DescriptorMetadata::ValueType::PageSize: {
                     // https://drafts.csswg.org/css-page-3/#page-size-prop
