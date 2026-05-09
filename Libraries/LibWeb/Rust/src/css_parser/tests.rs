@@ -175,6 +175,10 @@ fn position_edge_offset(edge: PositionEdge, offset: RustOwnedNestedPrimitiveValu
 use crate::generated_units::{DimensionType, dimension_for_unit};
 use crate::generated_value_types::ValueTypeId;
 
+use super::parser_math::{
+    RustOwnedCalculationNode, RustOwnedCalculationNumericValue, parse_rust_owned_calculation_function,
+};
+
 fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
     let mut tokens = Vec::new();
     css_tokenizer::tokenize(input.as_bytes(), |token, _| tokens.push(token.clone()));
@@ -183,6 +187,14 @@ fn parse_with<T>(input: &str, parse: impl FnOnce(&mut Parser) -> T) -> T {
 
 fn parse(input: &str) -> Vec<ComponentValue> {
     parse_with(input, Parser::parse_a_list_of_component_values)
+}
+
+fn parse_math_ast(input: &str) -> Option<RustOwnedCalculationNode> {
+    let component_values = parse(input);
+    let [ComponentValue::Function(function)] = component_values.as_slice() else {
+        return None;
+    };
+    parse_rust_owned_calculation_function(function)
 }
 
 fn parse_selector_list(input: &str) -> Option<Vec<SelectorSyntax>> {
@@ -6723,6 +6735,98 @@ fn universal_syntax_matches_optional_declaration_value() {
     assert!(!matches_syntax("!important", "*"));
     assert!(!matches_syntax("]", "*"));
     assert!(!matches_syntax("var(, 1px)", "*"));
+}
+
+#[test]
+fn parses_rust_owned_calculation_operator_tree() {
+    assert_eq!(
+        parse_math_ast("calc(1px + 2px * 3)"),
+        Some(RustOwnedCalculationNode::Sum(vec![
+            RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                value: 1.0,
+                unit: "px".to_string(),
+            }),
+            RustOwnedCalculationNode::Product(vec![
+                RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                    value: 2.0,
+                    unit: "px".to_string(),
+                }),
+                RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Number(3.0)),
+            ]),
+        ]))
+    );
+}
+
+#[test]
+fn parses_rust_owned_calculation_nested_blocks() {
+    assert_eq!(
+        parse_math_ast("calc((1px + 2px) / 2)"),
+        Some(RustOwnedCalculationNode::Product(vec![
+            RustOwnedCalculationNode::Sum(vec![
+                RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                    value: 1.0,
+                    unit: "px".to_string(),
+                }),
+                RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                    value: 2.0,
+                    unit: "px".to_string(),
+                }),
+            ]),
+            RustOwnedCalculationNode::Invert(Box::new(RustOwnedCalculationNode::Numeric(
+                RustOwnedCalculationNumericValue::Number(2.0)
+            ))),
+        ]))
+    );
+}
+
+#[test]
+fn parses_rust_owned_calculation_math_functions() {
+    assert_eq!(
+        parse_math_ast("min(10px, calc(1px + 2px))"),
+        Some(RustOwnedCalculationNode::Function {
+            name: "min".to_string(),
+            arguments: vec![
+                RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                    value: 10.0,
+                    unit: "px".to_string(),
+                }),
+                RustOwnedCalculationNode::Sum(vec![
+                    RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                        value: 1.0,
+                        unit: "px".to_string(),
+                    }),
+                    RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Dimension {
+                        value: 2.0,
+                        unit: "px".to_string(),
+                    }),
+                ]),
+            ],
+        })
+    );
+}
+
+#[test]
+fn parses_rust_owned_calculation_tree_counting_leaves() {
+    assert!(matches!(
+        parse_math_ast("calc(sibling-count() + 1)"),
+        Some(RustOwnedCalculationNode::Sum(values))
+            if matches!(
+                values.as_slice(),
+                [
+                    RustOwnedCalculationNode::Numeric(
+                        RustOwnedCalculationNumericValue::TreeCountingFunction(_)
+                    ),
+                    RustOwnedCalculationNode::Numeric(RustOwnedCalculationNumericValue::Number(1.0)),
+                ]
+            )
+    ));
+}
+
+#[test]
+fn rejects_invalid_rust_owned_calculations() {
+    assert_eq!(parse_math_ast("calc(1px +)"), None);
+    assert_eq!(parse_math_ast("calc(1px ** 2)"), None);
+    assert_eq!(parse_math_ast("calc(foo(1px))"), None);
 }
 
 #[test]

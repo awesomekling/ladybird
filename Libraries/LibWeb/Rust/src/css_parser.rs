@@ -52,6 +52,8 @@ mod parser_descriptors;
 mod parser_emitters;
 #[path = "css_parser/parser_entrypoints.rs"]
 mod parser_entrypoints;
+#[path = "css_parser/parser_math.rs"]
+mod parser_math;
 #[path = "css_parser/parser_selectors.rs"]
 mod parser_selectors;
 #[path = "css_parser/parser_shared.rs"]
