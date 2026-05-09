@@ -2555,7 +2555,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case RustComponentValueParser::RustFlexBasisKind::FitContentFunction: {
                     if (!value.flex_basis.has_value())
                         return nullptr;
-                    auto argument = materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
+                    auto argument = !value.flex_basis_calculation_node_events.is_empty()
+                        ? materialize_rust_calculation_tree_values(PropertyID::FlexBasis, ValueType::LengthPercentage, value.flex_basis_calculation_node_events, DiscardCalculationToken::No)
+                        : materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
                     if (!argument)
                         return nullptr;
                     return FunctionStyleValue::create("fit-content"_fly_string, argument.release_nonnull());
@@ -2563,6 +2565,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case RustComponentValueParser::RustFlexBasisKind::LengthPercentage:
                     if (!value.flex_basis.has_value())
                         return nullptr;
+                    if (!value.flex_basis_calculation_node_events.is_empty())
+                        return materialize_rust_calculation_tree_values(PropertyID::FlexBasis, ValueType::LengthPercentage, value.flex_basis_calculation_node_events, DiscardCalculationToken::No);
                     return materialize_rust_nested_length_percentage(*value.flex_basis, non_negative_range);
                 case RustComponentValueParser::RustFlexBasisKind::Source:
                     if (!value.flex_basis_source.has_value())
@@ -4457,8 +4461,12 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             { NumberStyleValue::create(0), NumberStyleValue::create(0), KeywordStyleValue::create(Keyword::Auto) }) };
                 }
                 if (rust_style_value->flex_grow.has_value() && rust_style_value->flex_shrink.has_value() && rust_style_value->flex_basis_kind.has_value()) {
-                    auto flex_grow = materialize_rust_nested_non_negative_number(*rust_style_value->flex_grow);
-                    auto flex_shrink = materialize_rust_nested_non_negative_number(*rust_style_value->flex_shrink);
+                    auto flex_grow = !rust_style_value->flex_grow_calculation_node_events.is_empty()
+                        ? materialize_rust_calculation_tree_values(PropertyID::FlexGrow, ValueType::Number, rust_style_value->flex_grow_calculation_node_events, DiscardCalculationToken::No)
+                        : materialize_rust_nested_non_negative_number(*rust_style_value->flex_grow);
+                    auto flex_shrink = !rust_style_value->flex_shrink_calculation_node_events.is_empty()
+                        ? materialize_rust_calculation_tree_values(PropertyID::FlexShrink, ValueType::Number, rust_style_value->flex_shrink_calculation_node_events, DiscardCalculationToken::No)
+                        : materialize_rust_nested_non_negative_number(*rust_style_value->flex_shrink);
                     auto flex_basis = materialize_rust_flex_basis(*rust_style_value);
                     if (!flex_grow || !flex_shrink || !flex_basis)
                         break;

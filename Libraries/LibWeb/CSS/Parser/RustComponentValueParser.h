@@ -221,6 +221,13 @@ public:
         Source,
     };
 
+    enum class RustFlexCalculationComponent : u8 {
+        None,
+        Grow,
+        Shrink,
+        Basis,
+    };
+
     enum class RustTreeCountingFunction : u8 {
         SiblingCount,
         SiblingIndex,
@@ -652,10 +659,14 @@ public:
         bool column_height_is_auto { false };
         bool flex_shorthand_is_none { false };
         Optional<RustNestedPrimitiveValue> flex_grow;
+        Vector<RustCalculationNodeEvent> flex_grow_calculation_node_events;
         Optional<RustNestedPrimitiveValue> flex_shrink;
+        Vector<RustCalculationNodeEvent> flex_shrink_calculation_node_events;
         Optional<RustFlexBasisKind> flex_basis_kind;
         Optional<RustNestedPrimitiveValue> flex_basis;
+        Vector<RustCalculationNodeEvent> flex_basis_calculation_node_events;
         Optional<String> flex_basis_source;
+        RustFlexCalculationComponent last_flex_calculation_component { RustFlexCalculationComponent::None };
         Optional<FlexDirection> flex_direction;
         Optional<FlexWrap> flex_wrap;
         Optional<u8> text_decoration_line_bits;

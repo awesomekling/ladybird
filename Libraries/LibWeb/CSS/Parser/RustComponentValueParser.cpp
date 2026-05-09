@@ -2165,14 +2165,17 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->flex_shorthand_is_none = true;
                 } else if (color_red == 1) {
                     style_value->flex_grow = nested_primitive_value_from_callback_payload();
+                    style_value->last_flex_calculation_component = RustFlexCalculationComponent::Grow;
                 } else if (color_red == 2) {
                     style_value->flex_shrink = nested_primitive_value_from_callback_payload();
+                    style_value->last_flex_calculation_component = RustFlexCalculationComponent::Shrink;
                 } else {
                     style_value->flex_basis_kind = static_cast<RustFlexBasisKind>(color_green);
                     if (*style_value->flex_basis_kind == RustFlexBasisKind::LengthPercentage || *style_value->flex_basis_kind == RustFlexBasisKind::FitContentFunction)
                         style_value->flex_basis = nested_primitive_value_from_callback_payload();
                     else if (*style_value->flex_basis_kind == RustFlexBasisKind::Source)
                         style_value->flex_basis_source = string_from_ffi_bytes(value_ptr, value_len);
+                    style_value->last_flex_calculation_component = RustFlexCalculationComponent::Basis;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::TextDecoration) {
@@ -3389,6 +3392,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(!style_value->coordinating_value_list_shorthand_items.is_empty());
                 style_value->coordinating_value_list_shorthand_items.last().calculation_node_events.append(move(event));
                 return;
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::Flex) {
+                switch (style_value->last_flex_calculation_component) {
+                case RustFlexCalculationComponent::Grow:
+                    style_value->flex_grow_calculation_node_events.append(move(event));
+                    return;
+                case RustFlexCalculationComponent::Shrink:
+                    style_value->flex_shrink_calculation_node_events.append(move(event));
+                    return;
+                case RustFlexCalculationComponent::Basis:
+                    style_value->flex_basis_calculation_node_events.append(move(event));
+                    return;
+                case RustFlexCalculationComponent::None:
+                    break;
+                }
             }
             style_value->calculation_node_events.append(move(event));
         });
