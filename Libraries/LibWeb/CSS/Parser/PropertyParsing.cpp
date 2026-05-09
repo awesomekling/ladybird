@@ -262,6 +262,7 @@ static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
     case PropertyID::JustifyItems:
     case PropertyID::JustifySelf:
     case PropertyID::LetterSpacing:
+    case PropertyID::LineHeight:
     case PropertyID::Left:
     case PropertyID::ListStyle:
     case PropertyID::ListStyleImage:
@@ -697,6 +698,23 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case ValueType::LengthPercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
+                        if (rust_style_value->property_id == PropertyID::LineHeight) {
+                            if (tokens.next_token().is_function()) {
+                                auto transaction = tokens.begin_transaction();
+                                auto number_metadata = RustComponentValueParser::property_numeric_metadata({ &rust_style_value->property_id, 1 }, ValueType::Number);
+                                VERIFY(number_metadata.has_value());
+                                auto calc = parse_calculated_value(tokens.consume_a_token(), { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Number, number_metadata->range }, { ValueType::Length, metadata->range } } });
+                                if (calc && calc->as_calculated().resolves_to_number()) {
+                                    transaction.commit();
+                                    return calc;
+                                }
+                                if (calc && calc->as_calculated().resolves_to_length_percentage()) {
+                                    transaction.commit();
+                                    return calc;
+                                }
+                            }
+                            return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                        }
                         return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
                     }
                     return parse_length_value(tokens, metadata->range);

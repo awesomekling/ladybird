@@ -9192,6 +9192,19 @@ fn emits_dimension_containing_calc_as_length_when_number_is_also_accepted() {
             value_type: "Length".to_string(),
         })
     );
+    assert_eq!(
+        parse_style_value(&[PropertyId::LineHeight], "calc(10px + 0.5em)"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::MathFunction,
+            property_id: PropertyId::LineHeight,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "calc(10px + 0.5em)".to_string(),
+            value_type: "Length".to_string(),
+        })
+    );
 }
 
 #[test]
@@ -9206,6 +9219,19 @@ fn emits_percentage_containing_math_as_length_when_percentages_resolve_to_length
             secondary_numeric_value: None,
             color: None,
             value: "random(10%, 30%)".to_string(),
+            value_type: "Length".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_style_value(&[PropertyId::LineHeight], "calc(200% + 10px)"),
+        Some(ParsedStyleValue {
+            kind: CssStyleValueKind::MathFunction,
+            property_id: PropertyId::LineHeight,
+            primitive_kind: CssPrimitiveValueKind::Invalid,
+            numeric_value: None,
+            secondary_numeric_value: None,
+            color: None,
+            value: "calc(200% + 10px)".to_string(),
             value_type: "Length".to_string(),
         })
     );

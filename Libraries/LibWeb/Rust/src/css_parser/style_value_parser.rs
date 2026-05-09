@@ -393,6 +393,7 @@ fn property_uses_rust_owned_whole_grammar(property_id: PropertyId) -> bool {
             | PropertyId::JustifyItems
             | PropertyId::JustifySelf
             | PropertyId::LetterSpacing
+            | PropertyId::LineHeight
             | PropertyId::Left
             | PropertyId::ListStyle
             | PropertyId::ListStyleImage
@@ -703,6 +704,7 @@ fn parse_rust_owned_property_specific_longhand_value(
         | PropertyId::Height
         | PropertyId::InlineSize
         | PropertyId::LetterSpacing
+        | PropertyId::LineHeight
         | PropertyId::MarginBlockEnd
         | PropertyId::MarginBlockStart
         | PropertyId::MarginBottom
@@ -972,7 +974,7 @@ fn rust_owned_generated_property_specific_style_value_kind(
     // materialized it as a length.
     if matches!(
         property_id,
-        PropertyId::StrokeDashoffset | PropertyId::StrokeWidth | PropertyId::TabSize
+        PropertyId::LineHeight | PropertyId::StrokeDashoffset | PropertyId::StrokeWidth | PropertyId::TabSize
     ) && component_values_contain_dimension(component_values)
         && component_values_parse_as_property_value_type_with_options(
             PropertyValueType::Length,
@@ -1003,8 +1005,10 @@ fn rust_owned_generated_property_specific_style_value_kind(
     // The generated grammar accepts random(10%, 30%) as <number> for
     // properties that accept both <number> and <percentage>, but the CSS parser
     // has historically materialized it through length-percentage parsing.
-    if matches!(property_id, PropertyId::StrokeDashoffset | PropertyId::StrokeWidth)
-        && component_values_contain_percentage(component_values)
+    if matches!(
+        property_id,
+        PropertyId::LineHeight | PropertyId::StrokeDashoffset | PropertyId::StrokeWidth
+    ) && component_values_contain_percentage(component_values)
         && component_values_parse_as_property_value_type_with_options(
             PropertyValueType::Length,
             filtered_input,
