@@ -749,6 +749,9 @@ impl Parser {
         // 8. If decl’s name is a custom property name string, then set decl’s original text to the segment
         // of the original source text string corresponding to the tokens of decl’s value.
         if declaration.name.starts_with("--") {
+            if contains_an_unmatched_closing_token(&declaration.value) {
+                return None;
+            }
             // TODO: Preserve original text once the rule/declaration FFI surface exists.
         }
         // Otherwise, if decl’s value contains a top-level simple block with an associated token of <{-token>,
@@ -1010,6 +1013,18 @@ pub(super) fn contains_a_curly_block_and_non_whitespace(declaration_value: &[Com
         }
     }
     false
+}
+
+pub(super) fn contains_an_unmatched_closing_token(component_values: &[ComponentValue]) -> bool {
+    component_values.iter().any(|component_value| match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::CloseCurly | TokenType::CloseParen | TokenType::CloseSquare,
+            ..
+        }) => true,
+        ComponentValue::Function(function) => contains_an_unmatched_closing_token(&function.value),
+        ComponentValue::SimpleBlock(block) => contains_an_unmatched_closing_token(&block.value),
+        _ => false,
+    })
 }
 
 impl Parser {
