@@ -1799,30 +1799,6 @@ pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_font_feature_values_family_name_list(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    family_name_callback: unsafe extern "C" fn(ctx: *mut c_void, family_name_ptr: *const u8, family_name_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_font_feature_values_family_name_list(input, |family_name| {
-                family_name_callback(ctx, family_name.as_ptr(), family_name.len());
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_font_feature_values_feature_value(
     input: *const u8,

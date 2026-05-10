@@ -1716,6 +1716,7 @@ pub enum CssRuleEventKind {
     PageSelectorStart,
     PageSelectorEnd,
     PagePseudoClass,
+    FontFeatureValuesFamilyName,
 }
 
 #[repr(C)]

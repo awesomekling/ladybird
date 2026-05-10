@@ -490,6 +490,44 @@ pub(super) fn emit_rule<E, C>(
                     event_callback(CssRuleEvent::new(CssRuleEventKind::PageSelectorEnd));
                 }
             }
+            if at_rule.name.eq_ignore_ascii_case("font-feature-values") {
+                let family_names: Option<Vec<_>> = {
+                    let groups = split_component_values_on_comma(&at_rule.prelude);
+                    if groups.is_empty() {
+                        None
+                    } else {
+                        let mut family_names = Vec::with_capacity(groups.len());
+                        for group in groups {
+                            let mut parser = ComponentValueParser::new(group.to_vec());
+                            let Some(family_name) = parser.parse_a_family_name() else {
+                                family_names.clear();
+                                break;
+                            };
+                            parser.discard_whitespace();
+                            if parser.has_next_component_value() {
+                                family_names.clear();
+                                break;
+                            }
+                            family_names.push(family_name.name);
+                        }
+                        (!family_names.is_empty()).then_some(family_names)
+                    }
+                };
+                if let Some(family_names) = family_names {
+                    for family_name in family_names {
+                        let (name_ptr, name_len) = string_parts(&family_name);
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::FontFeatureValuesFamilyName,
+                            name_ptr,
+                            name_len,
+                            keyframe_selector: 0.0,
+                            page_pseudo_class: CssPagePseudoClassKind::Left,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    }
+                }
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,

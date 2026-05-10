@@ -842,13 +842,12 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
         return nullptr;
     }
 
-    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
-    auto family_names = RustComponentValueParser::parse_font_feature_values_family_name_list(serialized_prelude.bytes_as_string_view(), "utf-8"sv);
+    auto family_names = rule.rust_font_feature_values_family_names;
 
     if (!family_names.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@font-feature-values"_fly_string,
-            .prelude = serialized_prelude,
+            .prelude = prelude_stream.dump_string(),
             .description = "Invalid family name list."_string,
         });
         return nullptr;

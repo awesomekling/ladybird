@@ -5891,27 +5891,6 @@ Optional<RustComponentValueParser::SimpleColor> RustComponentValueParser::parse_
     return color;
 }
 
-Optional<Vector<FlyString>> RustComponentValueParser::parse_font_feature_values_family_name_list(StringView input, StringView encoding)
-{
-    Vector<FlyString> family_names;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_font_feature_values_family_name_list(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &family_names,
-        [](void* raw_family_names, u8 const* family_name_ptr, size_t family_name_len) {
-            auto& family_names = *static_cast<Vector<FlyString>*>(raw_family_names);
-            family_names.append(fly_string_from_ffi_bytes(family_name_ptr, family_name_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return family_names;
-}
-
 Optional<Vector<u32>> RustComponentValueParser::parse_font_feature_values_feature_value(StringView input, StringView encoding)
 {
     Vector<u32> values;
@@ -6063,6 +6042,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_custom_property_name = {},
                 .rust_counter_style_name = {},
                 .rust_page_selectors = {},
+                .rust_font_feature_values_family_names = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6251,6 +6231,16 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
     case FFI::CssRuleEventKind::PagePseudoClass:
         builder.current_page_selector_pseudo_classes.append(page_pseudo_class_from_rust(event.page_pseudo_class));
         break;
+    case FFI::CssRuleEventKind::FontFeatureValuesFamilyName: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        if (!at_rule.rust_font_feature_values_family_names.has_value())
+            at_rule.rust_font_feature_values_family_names = Vector<FlyString> {};
+        at_rule.rust_font_feature_values_family_names->append(fly_string_from_ffi_bytes(event.name_ptr, event.name_len));
+        break;
+    }
     }
 }
 
