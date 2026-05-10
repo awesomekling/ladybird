@@ -29,6 +29,7 @@ pub(super) fn parse_rust_owned_math_function(
     Some(RustOwnedMathFunction {
         name: function.name.clone(),
         arguments: function.value.clone(),
+        component_values: component_values.to_vec(),
         calculation: Box::new(calculation),
         source,
         value_type,
@@ -58,6 +59,7 @@ pub(super) fn parse_rust_owned_tree_counting_function(
             RustOwnedTreeCountingFunctionKind::SiblingCount
         },
         value_type,
+        component_values: component_values.to_vec(),
     })
 }
 

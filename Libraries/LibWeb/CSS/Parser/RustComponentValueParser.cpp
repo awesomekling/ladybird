@@ -1469,6 +1469,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (has_numeric_value)
                         item.primitive_numeric_value = numeric_value;
                     item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                    item.primitive_source_component_values = move(context.pending_nested_primitive_source_component_values);
                     item.primitive_value_type = value_type.release_value();
                     return;
                 }
@@ -1495,6 +1496,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     if (has_numeric_value)
                         item.primitive_numeric_value = numeric_value;
                     item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                    item.primitive_source_component_values = move(context.pending_nested_primitive_source_component_values);
                     item.primitive_value_type = value_type.release_value();
                     return;
                 }
@@ -1511,6 +1513,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         if (has_numeric_value)
                             item.primitive_numeric_value = numeric_value;
                         item.primitive_source_or_unit = string_from_ffi_bytes(value_ptr, value_len);
+                        item.primitive_source_component_values = move(context.pending_nested_primitive_source_component_values);
                     }
                     return;
                 }
@@ -3253,6 +3256,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .primitive_kind = primitive_kind,
                     .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
                     .source_or_unit = string_from_ffi_bytes(value_type_ptr, value_type_len),
+                    .source_component_values = move(context.pending_nested_primitive_source_component_values),
                 });
                 return;
             } else if (kind == FFI::CssStyleValueKind::Display) {
@@ -3271,6 +3275,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     value.corner_shape_keyword = keyword.release_value();
                 } else {
                     value.corner_shape_superellipse_parameter = nested_primitive_value_from_callback_payload();
+                    value.last_calculation_node_target = RustCalculationNodeTarget::CornerShapeParameter;
                 }
             } else if (kind == FFI::CssStyleValueKind::Paint) {
                 enum : u8 {
@@ -3712,6 +3717,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 style_value->coordinating_value_list_shorthand_items.last().calculation_node_events.append(move(event));
                 return;
             }
+            if (style_value->kind == FFI::CssStyleValueKind::ComponentShorthand) {
+                VERIFY(!style_value->component_shorthand_items.is_empty());
+                style_value->component_shorthand_items.last().calculation_node_events.append(move(event));
+                return;
+            }
             if (style_value->kind == FFI::CssStyleValueKind::Flex) {
                 switch (style_value->last_flex_calculation_component) {
                 case RustFlexCalculationComponent::Grow:
@@ -3914,6 +3924,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 case RustCalculationNodeTarget::TextIndent:
                     VERIFY(style_value->text_indent.has_value());
                     style_value->text_indent->calculation_node_events.append(move(event));
+                    return;
+                default:
+                    break;
+                }
+            }
+            if (style_value->kind == FFI::CssStyleValueKind::CornerShape) {
+                switch (style_value->last_calculation_node_target) {
+                case RustCalculationNodeTarget::CornerShapeParameter:
+                    VERIFY(style_value->corner_shape_superellipse_parameter.has_value());
+                    style_value->corner_shape_superellipse_parameter->calculation_node_events.append(move(event));
                     return;
                 default:
                     break;

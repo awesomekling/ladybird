@@ -319,6 +319,7 @@ pub(crate) struct RustOwnedAnchorSizeFunction {
 pub(crate) struct RustOwnedMathFunction {
     pub(crate) name: String,
     pub(crate) arguments: Vec<ComponentValue>,
+    pub(crate) component_values: Vec<ComponentValue>,
     pub(crate) calculation: Box<RustOwnedCalculationNode>,
     pub(crate) source: String,
     pub(crate) value_type: PropertyValueType,
@@ -328,6 +329,7 @@ pub(crate) struct RustOwnedMathFunction {
 pub(crate) struct RustOwnedTreeCountingFunction {
     pub(crate) function: RustOwnedTreeCountingFunctionKind,
     pub(crate) value_type: PropertyValueType,
+    pub(crate) component_values: Vec<ComponentValue>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -658,6 +660,7 @@ pub(crate) struct RustOwnedBorderImageOutset {
     pub(crate) value: RustOwnedNestedPrimitiveValue,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBackgroundSize {
     Cover,

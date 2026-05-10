@@ -41,10 +41,17 @@ fn emit_nested_primitive_source_component_values<S, E>(
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
-    if let RustOwnedNestedPrimitiveValue::Source { component_values, .. } = value
-        && !component_values.is_empty()
-    {
-        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, component_values);
+    match value {
+        RustOwnedNestedPrimitiveValue::MathFunction(value) if !value.component_values.is_empty() => {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, &value.component_values);
+        }
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) if !value.component_values.is_empty() => {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, &value.component_values);
+        }
+        RustOwnedNestedPrimitiveValue::Source { component_values, .. } if !component_values.is_empty() => {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE, component_values);
+        }
+        _ => {}
     }
 }
 
@@ -55,10 +62,24 @@ fn emit_secondary_nested_primitive_source_component_values<S, E>(
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
-    if let RustOwnedNestedPrimitiveValue::Source { component_values, .. } = value
-        && !component_values.is_empty()
-    {
-        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE, component_values);
+    match value {
+        RustOwnedNestedPrimitiveValue::MathFunction(value) if !value.component_values.is_empty() => {
+            source_component_value_emitter.emit(
+                SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE,
+                &value.component_values,
+            );
+        }
+        RustOwnedNestedPrimitiveValue::TreeCountingFunction(value) if !value.component_values.is_empty() => {
+            source_component_value_emitter.emit(
+                SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE,
+                &value.component_values,
+            );
+        }
+        RustOwnedNestedPrimitiveValue::Source { component_values, .. } if !component_values.is_empty() => {
+            source_component_value_emitter
+                .emit(SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE, component_values);
+        }
+        _ => {}
     }
 }
 
@@ -128,6 +149,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         RustOwnedStyleValueKind::CornerShape(value) => {
             callback_corner_shape_style_value(
                 callback,
+                calculation_callback,
                 &mut SourceComponentValueEmitter {
                     filtered_input,
                     list_callback: source_component_value_list_callback,
@@ -247,6 +269,11 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             for item in items {
                 callback_grid_placement_shorthand_item(
                     callback,
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
                     shorthand_property_id,
                     item.property_id as u16,
                     &item.value,
@@ -904,6 +931,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     ),
                     _ => unreachable!("counter definitions only use integer-like values"),
                 };
+                emit_nested_primitive_source_component_values(
+                    &mut SourceComponentValueEmitter {
+                        filtered_input,
+                        list_callback: source_component_value_list_callback,
+                        component_value_callback: source_component_value_callback,
+                    },
+                    &definition.value,
+                );
                 callback(
                     CssStyleValueKind::CounterDefinitions,
                     property_id,
@@ -1094,7 +1129,16 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
             );
         }
         RustOwnedStyleValueKind::GridTrackPlacement(value) => {
-            callback_grid_track_placement_style_value(callback, property_id, value);
+            callback_grid_track_placement_style_value(
+                callback,
+                &mut SourceComponentValueEmitter {
+                    filtered_input,
+                    list_callback: source_component_value_list_callback,
+                    component_value_callback: source_component_value_callback,
+                },
+                property_id,
+                value,
+            );
         }
         RustOwnedStyleValueKind::GridTrackSizeList(value) => {
             callback_grid_track_size_list_style_value(
@@ -4006,9 +4050,15 @@ const GRID_TRACK_PLACEMENT_CALLBACK_AUTO: u8 = 0;
 const GRID_TRACK_PLACEMENT_CALLBACK_LINE: u8 = 1;
 const GRID_TRACK_PLACEMENT_CALLBACK_SPAN: u8 = 2;
 
-fn callback_grid_track_placement_style_value<C>(callback: &mut C, property_id: u16, value: &RustOwnedGridTrackPlacement)
-where
+fn callback_grid_track_placement_style_value<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    value: &RustOwnedGridTrackPlacement,
+) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (kind, line_number, name) = match value {
         RustOwnedGridTrackPlacement::Auto => (GRID_TRACK_PLACEMENT_CALLBACK_AUTO, None, None),
@@ -4026,6 +4076,9 @@ where
     let (primitive_kind, numeric_value, source_or_unit) = line_number
         .map(nested_primitive_callback_payload)
         .unwrap_or((CssPrimitiveValueKind::Invalid, 0.0, ""));
+    if let Some(line_number) = line_number {
+        emit_nested_primitive_source_component_values(source_component_value_emitter, line_number);
+    }
 
     callback(
         CssStyleValueKind::GridTrackPlacement,
@@ -4044,13 +4097,16 @@ where
     );
 }
 
-fn callback_grid_placement_shorthand_item<C>(
+fn callback_grid_placement_shorthand_item<C, S, E>(
     callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     shorthand_property_id: u16,
     property_id: u16,
     value: &RustOwnedGridTrackPlacement,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
 {
     let (kind, line_number, name) = match value {
         RustOwnedGridTrackPlacement::Auto => (GRID_TRACK_PLACEMENT_CALLBACK_AUTO, None, None),
@@ -4068,6 +4124,9 @@ fn callback_grid_placement_shorthand_item<C>(
     let (primitive_kind, numeric_value, source_or_unit) = line_number
         .map(nested_primitive_callback_payload)
         .unwrap_or((CssPrimitiveValueKind::Invalid, 0.0, ""));
+    if let Some(line_number) = line_number {
+        emit_nested_primitive_source_component_values(source_component_value_emitter, line_number);
+    }
 
     callback(
         CssStyleValueKind::GridPlacementShorthand,
@@ -4289,13 +4348,15 @@ fn callback_paint_style_value<C, S, E>(
     }
 }
 
-fn callback_corner_shape_style_value<C, S, E>(
+fn callback_corner_shape_style_value<C, D, S, E>(
     callback: &mut C,
+    calculation_callback: &mut D,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     corner_shape: &RustOwnedNestedPrimitiveValue,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -4316,8 +4377,9 @@ fn callback_corner_shape_style_value<C, S, E>(
             property_value_type_name(PropertyValueType::CornerShape),
         );
     } else {
-        callback_nested_primitive_with_source_component_values(
+        callback_nested_primitive_with_source_component_values_and_calculation(
             callback,
+            calculation_callback,
             source_component_value_emitter,
             CssStyleValueKind::CornerShape,
             property_id,

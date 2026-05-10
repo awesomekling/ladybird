@@ -3963,6 +3963,7 @@ fn parses_style_values_with_rust_owned_ast() {
             value: RustOwnedStyleValueKind::TreeCountingFunction(RustOwnedTreeCountingFunction {
                 function: RustOwnedTreeCountingFunctionKind::SiblingCount,
                 value_type: PropertyValueType::Number,
+                ..
             }),
         })
     ));
@@ -4333,7 +4334,7 @@ fn parses_style_values_with_rust_owned_ast() {
             }),
         })
     );
-    assert_eq!(
+    assert!(matches!(
         parse_rust_owned_style_value(&[PropertyId::GridColumnStart], "span sibling-count()"),
         Some(RustOwnedStyleValue {
             property_id: PropertyId::GridColumnStart,
@@ -4342,12 +4343,13 @@ fn parses_style_values_with_rust_owned_ast() {
                     RustOwnedTreeCountingFunction {
                         function: RustOwnedTreeCountingFunctionKind::SiblingCount,
                         value_type: PropertyValueType::Integer,
+                        ..
                     }
                 )),
                 name: None,
             }),
         })
-    );
+    ));
     assert_eq!(
         parse_rust_owned_style_value(&[PropertyId::GridColumn], "main / span 2"),
         Some(RustOwnedStyleValue {
@@ -4633,6 +4635,7 @@ fn parses_style_values_with_rust_owned_ast() {
             RustOwnedTreeCountingFunction {
                 function: RustOwnedTreeCountingFunctionKind::SiblingCount,
                 value_type: PropertyValueType::Number,
+                component_values: parse("sibling-count()"),
             }
         ))
     );

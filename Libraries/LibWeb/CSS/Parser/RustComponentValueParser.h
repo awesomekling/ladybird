@@ -134,13 +134,23 @@ public:
         Vector<ComponentValue> value_component_values;
     };
 
+    struct RustCalculationNodeEvent {
+        FFI::CssCalculationNodeKind kind;
+        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
+        Optional<double> numeric_value;
+        u32 child_count { 0 };
+        String metadata;
+    };
+
     struct ComponentShorthandItem {
         PropertyID property_id;
         Optional<Keyword> keyword;
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
+        Vector<ComponentValue> primitive_source_component_values;
         Optional<ValueType> primitive_value_type;
+        Vector<RustCalculationNodeEvent> calculation_node_events;
         bool has_color { false };
         bool color_is_simple { false };
         u8 color_red { 0 };
@@ -152,14 +162,6 @@ public:
         Vector<ComponentValue> value_component_values;
     };
 
-    struct RustCalculationNodeEvent {
-        FFI::CssCalculationNodeKind kind;
-        FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
-        Optional<double> numeric_value;
-        u32 child_count { 0 };
-        String metadata;
-    };
-
     struct PositionalValueListShorthandItem {
         size_t index { 0 };
         PropertyID property_id;
@@ -169,6 +171,7 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
+        Vector<ComponentValue> primitive_source_component_values;
         Optional<ValueType> primitive_value_type;
         Vector<RustCalculationNodeEvent> calculation_node_events;
         Optional<Keyword> corner_shape_keyword;
@@ -282,6 +285,7 @@ public:
         GridTrackValue,
         GridTrackSecondaryValue,
         TextIndent,
+        CornerShapeParameter,
     };
 
     enum class RustTreeCountingFunction : u8 {
@@ -674,6 +678,7 @@ public:
         FFI::CssPrimitiveValueKind primitive_kind { FFI::CssPrimitiveValueKind::Invalid };
         Optional<double> primitive_numeric_value;
         String primitive_source_or_unit;
+        Vector<ComponentValue> primitive_source_component_values;
         Optional<ValueType> primitive_value_type;
         Vector<RustCalculationNodeEvent> calculation_node_events;
         u8 easing_function_kind { 0 };

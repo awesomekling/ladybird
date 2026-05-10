@@ -1550,15 +1550,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         position_value.release_nonnull(),
                     });
             };
-            auto parse_rust_source_as_property = [&](PropertyID property_id, String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                TokenStream value_tokens { component_values };
-                auto value = parse_css_value(property_id, value_tokens, source);
-                value_tokens.discard_whitespace();
-                if (value.is_error() || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_value();
-            };
             auto parse_rust_component_values_as_property = [&](PropertyID property_id, String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 TokenStream value_tokens { component_values };
                 auto value = parse_css_value(property_id, value_tokens, source);
@@ -1600,21 +1591,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 return filtered_component_values;
             };
-            auto parse_rust_source_as_integer_in_range = [&](String const& source, NumericRange const& range) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .resolve_numbers_as_integers = true, .accepted_ranges_by_type = { { ValueType::Integer, range } } });
-                    if (calc && calc->as_calculated().resolves_to_number())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_integer_value(value_tokens, range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_integer_in_range = [&](Vector<ComponentValue> const& component_values, NumericRange const& range) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -1629,21 +1605,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_number = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, infinite_range } } });
-                    if (calc && calc->as_calculated().resolves_to_number())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_number_value(value_tokens, infinite_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_number = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -1653,21 +1614,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_value(value_tokens, infinite_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
-            auto parse_rust_source_as_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Percentage, infinite_range } } });
-                    if (calc && calc->as_calculated().resolves_to_percentage())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_percentage_value(value_tokens, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -1698,12 +1644,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return NumberStyleValue::create(*value.numeric_value);
                 };
                 auto materialize_easing_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-                    if (!value.calculation_node_events.is_empty())
-                        return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
+                    if (!value.calculation_node_events.is_empty()) {
+                        if (auto calculation = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No))
+                            return calculation;
+                    }
                     if (!value.numeric_value.has_value()) {
                         if (!value.source_component_values.is_empty())
                             return parse_rust_component_values_as_percentage(value.source_component_values);
-                        return parse_rust_source_as_percentage(value.source_or_unit);
+                        return nullptr;
                     }
                     if (value.primitive_kind != FFI::CssPrimitiveValueKind::Percentage)
                         return nullptr;
@@ -1893,8 +1841,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return calculation;
                     }
                     if (!value.numeric_value.has_value()) {
-                        auto component_values = RustComponentValueParser::parse_a_list_of_component_values(value.source_or_unit.bytes_as_string_view(), "utf-8"sv);
-                        TokenStream value_tokens { component_values };
+                        if (value.source_component_values.is_empty())
+                            return nullptr;
+                        TokenStream value_tokens { value.source_component_values };
                         auto parsed_value = parse_length_percentage_value(value_tokens, range, range);
                         value_tokens.discard_whitespace();
                         if (!parsed_value || value_tokens.has_next_token())
@@ -2336,21 +2285,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 return nullptr;
             };
-            auto parse_rust_source_as_non_negative_number = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, non_negative_range } } });
-                    if (calc && calc->as_calculated().resolves_to_number())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_number_value(value_tokens, non_negative_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_non_negative_number = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -2360,21 +2294,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 TokenStream value_tokens { component_values };
                 auto value = parse_number_value(value_tokens, non_negative_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
-            auto parse_rust_source_as_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, infinite_range }, { ValueType::Percentage, infinite_range } } });
-                    if (calc && (calc->as_calculated().resolves_to_number() || calc->as_calculated().resolves_to_percentage()))
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_number_percentage_value(value_tokens, infinite_range, infinite_range);
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return nullptr;
@@ -2394,15 +2313,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_unresolved = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                SubstitutionFunctionsPresence substitution_presence {};
-                if (Parser::collect_arbitrary_substitution_function_presence(component_values, substitution_presence).is_error()
-                    || !substitution_presence.has_any()) {
-                    return nullptr;
-                }
-                return UnresolvedStyleValue::create(move(component_values), substitution_presence, source);
-            };
             auto parse_rust_component_values_as_unresolved = [&](String const& source, Vector<ComponentValue> component_values) -> RefPtr<StyleValue const> {
                 SubstitutionFunctionsPresence substitution_presence {};
                 if (Parser::collect_arbitrary_substitution_function_presence(component_values, substitution_presence).is_error()
@@ -2410,21 +2320,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 }
                 return UnresolvedStyleValue::create(move(component_values), substitution_presence, source);
-            };
-            auto parse_rust_source_as_non_negative_number_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Number, non_negative_range }, { ValueType::Percentage, non_negative_range } } });
-                    if (calc && (calc->as_calculated().resolves_to_number() || calc->as_calculated().resolves_to_percentage()))
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_number_percentage_value(value_tokens, non_negative_range, non_negative_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
             };
             auto parse_rust_component_values_as_non_negative_number_percentage = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
@@ -2474,21 +2369,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto parse_rust_source_as_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Length, infinite_range } } });
-                    if (calc && calc->as_calculated().resolves_to_length_percentage())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return parse_rust_source_as_unresolved(source);
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_length_percentage = [&](String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -2501,21 +2381,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return parse_rust_component_values_as_unresolved(source, component_values);
-                return value.release_nonnull();
-            };
-            auto parse_rust_source_as_length = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Length, infinite_range } } });
-                    if (calc && calc->as_calculated().resolves_to_length())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_length_value(value_tokens, infinite_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_component_values_as_length = [&](String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
@@ -2532,21 +2397,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parse_rust_component_values_as_unresolved(source, component_values);
                 return value.release_nonnull();
             };
-            auto parse_rust_source_as_non_negative_length_percentage = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Length, non_negative_range } } });
-                    if (calc && calc->as_calculated().resolves_to_length_percentage())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return parse_rust_source_as_unresolved(source);
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_non_negative_length_percentage = [&](String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -2559,21 +2409,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 value_tokens.discard_whitespace();
                 if (!value || value_tokens.has_next_token())
                     return parse_rust_component_values_as_unresolved(source, component_values);
-                return value.release_nonnull();
-            };
-            auto parse_rust_source_as_non_negative_length = [&](String const& source) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Length, non_negative_range } } });
-                    if (calc && calc->as_calculated().resolves_to_length())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_length_value(value_tokens, non_negative_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return parse_rust_source_as_unresolved(source);
                 return value.release_nonnull();
             };
             auto parse_rust_component_values_as_non_negative_length = [&](String const& source, Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
@@ -2604,21 +2439,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return values[0];
                 return StyleValueList::create(move(values), StyleValueList::Separator::Space);
             };
-            auto parse_rust_source_as_angle = [&](String const& source, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
-                auto component_values = RustComponentValueParser::parse_a_list_of_component_values(source, "utf-8"sv);
-                auto stripped_component_values = remove_whitespace_component_values(component_values);
-                if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
-                    auto calc = parse_calculated_value(stripped_component_values[0], { .accepted_ranges_by_type = { { ValueType::Angle, accepted_range } } });
-                    if (calc && calc->as_calculated().resolves_to_angle())
-                        return calc;
-                }
-                TokenStream value_tokens { component_values };
-                auto value = parse_angle_value(value_tokens, accepted_range);
-                value_tokens.discard_whitespace();
-                if (!value || value_tokens.has_next_token())
-                    return nullptr;
-                return value.release_nonnull();
-            };
             auto parse_rust_component_values_as_angle = [&](Vector<ComponentValue> const& component_values, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
                 auto stripped_component_values = remove_whitespace_component_values(component_values);
                 if (stripped_component_values.size() == 1 && stripped_component_values[0].is_function()) {
@@ -2634,17 +2454,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return value.release_nonnull();
             };
             auto materialize_rust_nested_length_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range_and_percentage_resolution(property_id, ValueType::Length, value.calculation_node_events, range, DiscardCalculationToken::No, AllowPercentageResolution::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range_and_percentage_resolution(property_id, ValueType::Length, value.calculation_node_events, range, DiscardCalculationToken::No, AllowPercentageResolution::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (!value.source_component_values.is_empty()) {
                         if (range.min >= 0)
                             return parse_rust_component_values_as_non_negative_length(value.source_or_unit, value.source_component_values);
                         return parse_rust_component_values_as_length(value.source_or_unit, value.source_component_values);
                     }
-                    if (range.min >= 0)
-                        return parse_rust_source_as_non_negative_length(value.source_or_unit);
-                    return parse_rust_source_as_length(value.source_or_unit);
+                    return nullptr;
                 }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
                     return nullptr;
@@ -2660,17 +2480,17 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return materialize_rust_nested_length_for_property(rust_style_value->property_id, value, range);
             };
             auto materialize_rust_nested_length_percentage_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::LengthPercentage, value.calculation_node_events, range, DiscardCalculationToken::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range(property_id, ValueType::LengthPercentage, value.calculation_node_events, range, DiscardCalculationToken::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (!value.source_component_values.is_empty()) {
                         if (range.min >= 0)
                             return parse_rust_component_values_as_non_negative_length_percentage(value.source_or_unit, value.source_component_values);
                         return parse_rust_component_values_as_length_percentage(value.source_or_unit, value.source_component_values);
                     }
-                    if (range.min >= 0)
-                        return parse_rust_source_as_non_negative_length_percentage(value.source_or_unit);
-                    return parse_rust_source_as_length_percentage(value.source_or_unit);
+                    return nullptr;
                 }
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Length)
                     return materialize_rust_nested_length_for_property(property_id, value, range);
@@ -2992,12 +2812,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
             };
             auto materialize_rust_nested_angle = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& accepted_range) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Angle, value.calculation_node_events, accepted_range, DiscardCalculationToken::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Angle, value.calculation_node_events, accepted_range, DiscardCalculationToken::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_angle(value.source_component_values, accepted_range);
-                    return parse_rust_source_as_angle(value.source_or_unit, accepted_range);
+                    return nullptr;
                 }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Angle)
                     return nullptr;
@@ -3018,14 +2840,16 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return nullptr;
             };
             auto materialize_rust_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, range, DiscardCalculationToken::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Integer, value.calculation_node_events, range, DiscardCalculationToken::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Integer))
                         return tree_counting_function;
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_integer_in_range(value.source_component_values, range);
-                    return parse_rust_source_as_integer_in_range(value.source_or_unit, range);
+                    return nullptr;
                 }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer)
                     return nullptr;
@@ -3036,28 +2860,32 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
             };
             auto materialize_rust_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, infinite_range, DiscardCalculationToken::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_number(value.source_component_values);
-                    return parse_rust_source_as_number(value.source_or_unit);
+                    return nullptr;
                 }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
                     return nullptr;
                 return NumberStyleValue::create(*value.numeric_value);
             };
             auto materialize_rust_nested_non_negative_number_for_property = [&](PropertyID property_id, RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-                if (!value.calculation_node_events.is_empty())
-                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Number, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No);
+                if (!value.calculation_node_events.is_empty()) {
+                    if (auto calculation = materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Number, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No))
+                        return calculation;
+                }
                 if (!value.numeric_value.has_value()) {
                     if (auto tree_counting_function = materialize_rust_tree_counting_function(value, TreeCountingFunctionStyleValue::ComputedType::Number))
                         return tree_counting_function;
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_non_negative_number(value.source_component_values);
-                    return parse_rust_source_as_non_negative_number(value.source_or_unit);
+                    return nullptr;
                 }
                 if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number)
                     return nullptr;
@@ -3072,12 +2900,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!value.calculation_node_events.is_empty()) {
                     if (auto number = materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Number, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No))
                         return number;
-                    return materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Percentage, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No);
+                    if (auto percentage = materialize_rust_calculation_tree_values_with_range(property_id, ValueType::Percentage, value.calculation_node_events, non_negative_range, DiscardCalculationToken::No))
+                        return percentage;
                 }
                 if (!value.numeric_value.has_value()) {
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_non_negative_number_percentage(value.source_component_values);
-                    return parse_rust_source_as_non_negative_number_percentage(value.source_or_unit);
+                    return nullptr;
                 }
                 if (*value.numeric_value < 0)
                     return nullptr;
@@ -3094,12 +2923,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (!value.calculation_node_events.is_empty()) {
                     if (auto number = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Number, value.calculation_node_events, infinite_range, DiscardCalculationToken::No))
                         return number;
-                    return materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No);
+                    if (auto percentage = materialize_rust_calculation_tree_values_with_range(rust_style_value->property_id, ValueType::Percentage, value.calculation_node_events, infinite_range, DiscardCalculationToken::No))
+                        return percentage;
                 }
                 if (!value.numeric_value.has_value()) {
                     if (!value.source_component_values.is_empty())
                         return parse_rust_component_values_as_number_percentage(value.source_component_values);
-                    return parse_rust_source_as_number_percentage(value.source_or_unit);
+                    return nullptr;
                 }
                 if (value.primitive_kind == FFI::CssPrimitiveValueKind::Number)
                     return NumberStyleValue::create(*value.numeric_value);
@@ -4076,7 +3906,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (!item.color_name_or_source.has_value())
                             return nullptr;
                         if (item.color_source_component_values.is_empty())
-                            return parse_rust_source_as_property(item.property_id, *item.color_name_or_source);
+                            return nullptr;
                         TokenStream color_tokens { item.color_source_component_values };
                         auto color = parse_color_value(color_tokens);
                         color_tokens.discard_whitespace();
@@ -4096,17 +3926,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         RustComponentValueParser::RustNestedPrimitiveValue value {
                             .primitive_kind = item.primitive_kind,
                             .source_or_unit = item.primitive_source_or_unit,
+                            .source_component_values = move(item.primitive_source_component_values),
                         };
                         if (item.primitive_numeric_value.has_value())
                             value.numeric_value = *item.primitive_numeric_value;
 
                         RefPtr<StyleValue const> parsed_value;
-                        if (*item.primitive_value_type == ValueType::Length)
+                        if (!item.calculation_node_events.is_empty())
+                            parsed_value = materialize_rust_calculation_tree_values(item.property_id, *item.primitive_value_type, item.calculation_node_events, DiscardCalculationToken::No);
+                        else if (*item.primitive_value_type == ValueType::Length)
                             parsed_value = materialize_rust_nested_length(value, non_negative_range);
                         else if (*item.primitive_value_type == ValueType::LengthPercentage)
                             parsed_value = materialize_rust_nested_length_percentage(value, non_negative_range);
 
                         if (parsed_value)
+                            return wrap_single_value_shorthand_if_needed(item.property_id, parsed_value.release_nonnull());
+                    }
+
+                    if (!item.value_component_values.is_empty()) {
+                        if (auto parsed_value = parse_rust_component_values_as_property(item.property_id, String {}, item.value_component_values))
                             return wrap_single_value_shorthand_if_needed(item.property_id, parsed_value.release_nonnull());
                     }
 
@@ -5467,6 +5305,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         RustComponentValueParser::RustNestedPrimitiveValue value {
                             .primitive_kind = item.primitive_kind,
                             .source_or_unit = item.primitive_source_or_unit,
+                            .source_component_values = move(item.primitive_source_component_values),
                         };
                         if (item.primitive_numeric_value.has_value())
                             value.numeric_value = *item.primitive_numeric_value;
@@ -5494,6 +5333,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         RustComponentValueParser::RustNestedPrimitiveValue parameter_value {
                             .primitive_kind = item.primitive_kind,
                             .source_or_unit = item.primitive_source_or_unit,
+                            .source_component_values = move(item.primitive_source_component_values),
+                            .calculation_node_events = move(item.calculation_node_events),
                         };
                         if (item.primitive_numeric_value.has_value())
                             parameter_value.numeric_value = *item.primitive_numeric_value;
