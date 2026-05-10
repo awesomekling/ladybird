@@ -1139,6 +1139,11 @@ public:
         Variant<Keyword, PropertyID, DescriptorMetadata::ValueType> syntax;
     };
 
+    struct DescriptorValue {
+        Variant<Keyword, PropertyID, DescriptorMetadata::ValueType> syntax;
+        Optional<DescriptorResult> result;
+    };
+
     struct SyntaxComponent {
         OwnPtr<SyntaxNode> syntax;
         size_t consumed_byte_length { 0 };
@@ -1154,6 +1159,7 @@ public:
     static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
     static DescriptorMetadata descriptor_metadata(AtRuleID, DescriptorID);
     static Optional<DescriptorSyntax> parse_descriptor_syntax(AtRuleID, DescriptorID, StringView input, StringView encoding);
+    static Optional<DescriptorValue> parse_descriptor(AtRuleID, DescriptorID, StringView input, StringView encoding);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);

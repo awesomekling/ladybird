@@ -480,14 +480,9 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
     auto descriptor_source = original_source_text.value_or_lazy_evaluated([&] {
         return serialize_component_values_for_reparsing(tokens.remaining_tokens());
     });
-    auto descriptor_syntax = RustComponentValueParser::parse_descriptor_syntax(at_rule_id, descriptor_name_and_id.id(), descriptor_source.bytes_as_string_view(), "utf-8"sv);
-
-    for (auto const& option : metadata.syntax) {
-        if (!descriptor_syntax.has_value() || option != descriptor_syntax->syntax)
-            continue;
-
-        auto syntax_transaction = transaction.create_child();
-        auto parsed_style_value = option.visit(
+    auto descriptor_value = RustComponentValueParser::parse_descriptor(at_rule_id, descriptor_name_and_id.id(), descriptor_source.bytes_as_string_view(), "utf-8"sv);
+    if (descriptor_value.has_value()) {
+        auto parsed_style_value = descriptor_value->syntax.visit(
             [&](Keyword keyword) {
                 return parse_all_as_single_keyword_value(tokens, keyword);
             },
@@ -507,7 +502,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // [ <integer [0,∞]> && <symbol> ]#
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto additive_symbols = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& additive_symbols = descriptor_value->result;
                     if (!additive_symbols.has_value() || additive_symbols->kind != FFI::CssDescriptorResultKind::CounterStyleAdditiveSymbols)
                         return nullptr;
 
@@ -557,7 +552,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // cyclic | numeric | alphabetic | symbolic | additive | [fixed <integer>?] | [ extends <counter-style-name> ]
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto system = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleSystem, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& system = descriptor_value->result;
                     if (!system.has_value())
                         return nullptr;
 
@@ -622,7 +617,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <symbol> <symbol>?
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto negative = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleNegative, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& negative = descriptor_value->result;
                     if (!negative.has_value() || negative->kind != FFI::CssDescriptorResultKind::CounterStyleNegative)
                         return nullptr;
 
@@ -643,7 +638,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <integer [0,∞]> && <symbol>
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto pad = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStylePad, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& pad = descriptor_value->result;
                     if (!pad.has_value() || pad->kind != FFI::CssDescriptorResultKind::CounterStylePad || pad->items.size() != 1)
                         return nullptr;
 
@@ -657,7 +652,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // [ [ <integer> | infinite ]{2} ]# | auto
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto range = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CounterStyleRange, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& range = descriptor_value->result;
                     if (!range.has_value())
                         return nullptr;
 
@@ -712,7 +707,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // crop || cross
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto crop_or_cross = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::CropOrCross, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& crop_or_cross = descriptor_value->result;
                     if (!crop_or_cross.has_value())
                         return nullptr;
 
@@ -735,7 +730,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // https://drafts.csswg.org/css-fonts-4/#family-name-syntax
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto family_name = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FamilyName, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& family_name = descriptor_value->result;
                     if (!family_name.has_value() || family_name->kind != FFI::CssDescriptorResultKind::FamilyName || family_name->items.size() != 1)
                         return nullptr;
 
@@ -756,7 +751,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto source_lists = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FontSrcList, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& source_lists = descriptor_value->result;
                     if (!source_lists.has_value() || source_lists->kind != FFI::CssDescriptorResultKind::FontSrcList)
                         return nullptr;
 
@@ -819,7 +814,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <font-weight-absolute>{1,2}
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto weight_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::FontWeightAbsolutePair, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& weight_sources = descriptor_value->result;
                     if (!weight_sources.has_value() || weight_sources->kind != FFI::CssDescriptorResultKind::FontWeightAbsolutePair)
                         return nullptr;
 
@@ -838,7 +833,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <length>
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto length_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Length, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& length_sources = descriptor_value->result;
                     if (!length_sources.has_value() || length_sources->kind != FFI::CssDescriptorResultKind::Length || length_sources->items.size() != 1)
                         return nullptr;
 
@@ -884,7 +879,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <length [0,∞]>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto page_size_descriptor = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::PageSize, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& page_size_descriptor = descriptor_value->result;
                     if (!page_size_descriptor.has_value())
                         return nullptr;
 
@@ -1005,7 +1000,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <percentage [0,∞]>
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto percentage_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::PositivePercentage, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& percentage_sources = descriptor_value->result;
                     if (!percentage_sources.has_value() || percentage_sources->kind != FFI::CssDescriptorResultKind::PositivePercentage || percentage_sources->items.size() != 1)
                         return nullptr;
 
@@ -1020,7 +1015,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <string>
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto string_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::String, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& string_sources = descriptor_value->result;
                     if (!string_sources.has_value() || string_sources->kind != FFI::CssDescriptorResultKind::String || string_sources->items.size() != 1)
                         return nullptr;
 
@@ -1032,7 +1027,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <symbol> = <string> | <image> | <custom-ident>
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto symbol_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Symbol, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& symbol_sources = descriptor_value->result;
                     if (!symbol_sources.has_value() || symbol_sources->kind != FFI::CssDescriptorResultKind::Symbol || symbol_sources->items.size() != 1)
                         return nullptr;
 
@@ -1044,7 +1039,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <symbol>+
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto symbol_sources = RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType::Symbols, descriptor_source.bytes_as_string_view(), "utf-8"sv);
+                    auto const& symbol_sources = descriptor_value->result;
                     if (!symbol_sources.has_value() || symbol_sources->kind != FFI::CssDescriptorResultKind::Symbols)
                         return nullptr;
 
@@ -1076,10 +1071,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 }
                 return nullptr;
             });
-        if (!parsed_style_value || tokens.has_next_token())
-            continue;
-        syntax_transaction.commit();
-        return parsed_style_value.release_nonnull();
+        if (parsed_style_value && !tokens.has_next_token()) {
+            transaction.commit();
+            return parsed_style_value.release_nonnull();
+        }
     }
 
     ErrorReporter::the().report(InvalidPropertyError {

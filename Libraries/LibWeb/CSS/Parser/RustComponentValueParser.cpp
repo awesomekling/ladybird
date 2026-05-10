@@ -966,6 +966,131 @@ static CrossOriginModifierValue cross_origin_modifier_value_from_rust(FFI::CssUr
 static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI::CssUrlReferrerPolicyModifierValue);
 static FontTech font_tech_from_rust(FFI::CssFontTech);
 
+Optional<RustComponentValueParser::DescriptorValue> RustComponentValueParser::parse_descriptor(AtRuleID at_rule_id, DescriptorID descriptor_id, StringView input, StringView encoding)
+{
+    Optional<DescriptorValue> descriptor_value;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_descriptor(
+        static_cast<u8>(to_underlying(at_rule_id)),
+        static_cast<u8>(to_underlying(descriptor_id)),
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &descriptor_value,
+        [](void* raw_descriptor_value, FFI::CssDescriptorSyntaxKind kind, u16 property_id, FFI::CssDescriptorValueType value_type, u8 const* value_ptr, size_t value_len) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            switch (kind) {
+            case FFI::CssDescriptorSyntaxKind::Keyword: {
+                auto keyword = keyword_from_string({ value_ptr, value_len });
+                if (!keyword.has_value())
+                    return;
+                descriptor_value = DescriptorValue { .syntax = keyword.release_value() };
+                return;
+            }
+            case FFI::CssDescriptorSyntaxKind::Property:
+                descriptor_value = DescriptorValue { .syntax = static_cast<PropertyID>(property_id) };
+                return;
+            case FFI::CssDescriptorSyntaxKind::ValueType:
+                descriptor_value = DescriptorValue { .syntax = descriptor_value_type_from_ffi(value_type) };
+                return;
+            }
+        },
+        [](void* raw_descriptor_value, FFI::CssDescriptorResultKind kind) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            descriptor_value->result = DescriptorResult { .kind = kind };
+        },
+        [](void* raw_descriptor_value, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u8 page_size_keyword, u8 page_size_orientation) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            descriptor_value->result->items.append(DescriptorResultItem {
+                .order = order,
+                .source = string_from_ffi_bytes(source_ptr, source_len),
+                .is_string = is_string,
+                .primitive_kind = primitive_kind,
+                .has_numeric_value = has_numeric_value,
+                .numeric_value = numeric_value,
+                .page_size_keyword = page_size_keyword,
+                .page_size_orientation = page_size_orientation,
+            });
+        },
+        [](void* raw_descriptor_value, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            descriptor_value->result->items.last().calculation_node_events.append(RustCalculationNodeEvent {
+                .kind = kind,
+                .primitive_kind = primitive_kind,
+                .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
+                .child_count = child_count,
+                .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
+            });
+        },
+        [](void* raw_descriptor_value, FFI::CssFontSourceKind kind, u8 const* family_name_ptr, size_t family_name_len, bool family_name_is_string) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            auto& item = descriptor_value->result->items.last();
+            item.font_source_kind = kind;
+            if (kind == FFI::CssFontSourceKind::Local) {
+                item.font_source_family_name = FamilyName {
+                    .name = fly_string_from_ffi_bytes(family_name_ptr, family_name_len),
+                    .is_string = family_name_is_string,
+                };
+            }
+        },
+        [](void* raw_descriptor_value, FFI::CssUrlFunction const* rust_url_function) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            auto& item = descriptor_value->result->items.last();
+            item.url_function_type = url_function_type_from_rust(rust_url_function->function_type);
+            item.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
+        },
+        [](void* raw_descriptor_value, FFI::CssUrlModifier const* rust_modifier) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            auto& item = descriptor_value->result->items.last();
+            switch (rust_modifier->kind) {
+            case FFI::CssUrlModifierKind::CrossOrigin:
+                item.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
+                break;
+            case FFI::CssUrlModifierKind::Integrity:
+                item.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
+                break;
+            case FFI::CssUrlModifierKind::ReferrerPolicy:
+                item.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
+                break;
+            }
+        },
+        [](void* raw_descriptor_value, u8 const* format_ptr, size_t format_len) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            descriptor_value->result->items.last().font_source_format = fly_string_from_ffi_bytes(format_ptr, format_len);
+        },
+        [](void* raw_descriptor_value, FFI::CssFontTech rust_font_tech) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            VERIFY(!descriptor_value->result->items.is_empty());
+            descriptor_value->result->items.last().font_source_tech.append(font_tech_from_rust(rust_font_tech));
+        });
+
+    if (!parsed || !descriptor_value.has_value())
+        return {};
+
+    return descriptor_value;
+}
+
 Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
 {
     Optional<DescriptorResult> result;

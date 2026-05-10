@@ -330,23 +330,64 @@ where
     })
 }
 
-pub(crate) fn parse_descriptor_syntax<F>(
-    at_rule_id: u8,
-    descriptor_id: u8,
-    filtered_input: &[u8],
-    mut callback: F,
-) -> bool
+pub(crate) fn parse_descriptor_syntax<F>(at_rule_id: u8, descriptor_id: u8, filtered_input: &[u8], callback: F) -> bool
 where
     F: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
 {
-    let Some(at_rule_id) = at_rule_id_from_u8(at_rule_id) else {
+    let Some(matched_syntax) = find_matching_descriptor_syntax(at_rule_id, descriptor_id, filtered_input) else {
         return false;
     };
-    let Some(descriptor_id) = descriptor_id_from_u8(descriptor_id) else {
+
+    emit_descriptor_syntax(&matched_syntax, callback);
+    true
+}
+
+pub(crate) fn parse_descriptor<K, S, C, F, U, M, O, T, Y>(
+    at_rule_id: u8,
+    descriptor_id: u8,
+    filtered_input: &[u8],
+    syntax_callback: Y,
+    result_callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T>,
+) -> bool
+where
+    K: FnMut(CssDescriptorResultKind),
+    S: for<'a> FnMut(CssNonnegativeIntegerSymbolPairOrder, &'a str, bool, CssPrimitiveValueKind, bool, f64, u8, u8),
+    C: for<'a> FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &'a [u8]),
+    F: for<'a> FnMut(CssFontSourceKind, Option<&'a str>, bool),
+    U: FnMut(CssUrlFunction),
+    M: FnMut(CssUrlModifier),
+    O: for<'a> FnMut(&'a str),
+    T: FnMut(CssFontTech),
+    Y: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
+{
+    let Some(matched_syntax) = find_matching_descriptor_syntax(at_rule_id, descriptor_id, filtered_input) else {
         return false;
     };
+
+    emit_descriptor_syntax(&matched_syntax, syntax_callback);
+
+    match matched_syntax {
+        DescriptorSyntax::ValueType(
+            CssDescriptorValueType::CounterStyleName
+            | CssDescriptorValueType::OptionalDeclarationValue
+            | CssDescriptorValueType::UnicodeRangeTokens,
+        ) => true,
+        DescriptorSyntax::ValueType(value_type) => {
+            parse_descriptor_result(value_type, filtered_input, result_callbacks)
+        }
+        DescriptorSyntax::Keyword(_) | DescriptorSyntax::Property(_) => true,
+    }
+}
+
+fn find_matching_descriptor_syntax(
+    at_rule_id: u8,
+    descriptor_id: u8,
+    filtered_input: &[u8],
+) -> Option<DescriptorSyntax> {
+    let at_rule_id = at_rule_id_from_u8(at_rule_id)?;
+    let descriptor_id = descriptor_id_from_u8(descriptor_id)?;
     if !generated_at_rule_supports_descriptor(at_rule_id, descriptor_id) {
-        return false;
+        return None;
     }
 
     let mut matched_syntax = None;
@@ -359,33 +400,32 @@ where
             matched_syntax = Some(syntax);
         }
     }) {
-        return false;
+        return None;
     }
 
-    match matched_syntax {
-        Some(DescriptorSyntax::Keyword(keyword)) => {
-            callback(
-                CssDescriptorSyntaxKind::Keyword,
-                0,
-                CssDescriptorValueType::CounterStyleSystem,
-                keyword,
-            );
-            true
+    matched_syntax
+}
+
+fn emit_descriptor_syntax<F>(syntax: &DescriptorSyntax, mut callback: F)
+where
+    F: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
+{
+    match syntax {
+        DescriptorSyntax::Keyword(keyword) => callback(
+            CssDescriptorSyntaxKind::Keyword,
+            0,
+            CssDescriptorValueType::CounterStyleSystem,
+            keyword,
+        ),
+        DescriptorSyntax::Property(property_id) => callback(
+            CssDescriptorSyntaxKind::Property,
+            *property_id as u16,
+            CssDescriptorValueType::CounterStyleSystem,
+            "",
+        ),
+        DescriptorSyntax::ValueType(value_type) => {
+            callback(CssDescriptorSyntaxKind::ValueType, 0, *value_type, "");
         }
-        Some(DescriptorSyntax::Property(property_id)) => {
-            callback(
-                CssDescriptorSyntaxKind::Property,
-                property_id as u16,
-                CssDescriptorValueType::CounterStyleSystem,
-                "",
-            );
-            true
-        }
-        Some(DescriptorSyntax::ValueType(value_type)) => {
-            callback(CssDescriptorSyntaxKind::ValueType, 0, value_type, "");
-            true
-        }
-        None => false,
     }
 }
 
