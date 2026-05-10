@@ -4564,7 +4564,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Number:
         return parse_number_value(tokens, infinite_range);
     case ValueType::OpacityValue:
-        return parse_opacity_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::Opacity, [](StyleValue const& value) { return value.is_opacity_value(); });
     case ValueType::OpentypeTag:
         return parse_opentype_tag_value(tokens);
     case ValueType::Paint:
