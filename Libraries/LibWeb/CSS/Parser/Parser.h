@@ -254,12 +254,6 @@ private:
     RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, AllowImageSet, Optional<StringView> original_source_text = {});
     RefPtr<ImageSetStyleValue const> parse_image_set_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_paint_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    enum class PositionParsingMode {
-        Normal,
-        BackgroundPosition,
-    };
-    RefPtr<PositionStyleValue const> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
     RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_opacity_value_value(TokenStream<ComponentValue>&);
 

@@ -2283,47 +2283,6 @@ RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<Comp
     return nullptr;
 }
 
-// https://svgwg.org/svg2-draft/painting.html#SpecifyingPaint
-RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // `<paint> = none | <color> | <url> [none | <color>]? | context-fill | context-stroke`
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    auto value = parse_css_value_for_property(PropertyID::Fill, tokens, original_source_text);
-    if (!value)
-        return nullptr;
-
-    transaction.commit();
-    return value;
-}
-
-// https://www.w3.org/TR/css-values-4/#position
-RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<ComponentValue>& tokens, PositionParsingMode position_parsing_mode)
-{
-    // <position> = [
-    //   [ left | center | right | top | bottom | <length-percentage> ]
-    // |
-    //   [ left | center | right ] && [ top | center | bottom ]
-    // |
-    //   [ left | center | right | <length-percentage> ]
-    //   [ top | center | bottom | <length-percentage> ]
-    // |
-    //   [ [ left | right ] <length-percentage> ] &&
-    //   [ [ top | bottom ] <length-percentage> ]
-    // ]
-    auto transaction = tokens.begin_transaction();
-    auto property_id = position_parsing_mode == PositionParsingMode::BackgroundPosition
-        ? PropertyID::BackgroundPosition
-        : PropertyID::ObjectPosition;
-    auto value = parse_css_value_for_property(property_id, tokens);
-    if (!value || !value->is_position())
-        return nullptr;
-
-    transaction.commit();
-    return static_ptr_cast<PositionStyleValue const>(value);
-}
-
 RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
@@ -3365,7 +3324,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::OpentypeTag:
         return parse_opentype_tag_value(tokens, original_source_text);
     case ValueType::Paint:
-        return parse_paint_value(tokens, original_source_text);
+        return parse_css_value_for_property(PropertyID::Fill, tokens, original_source_text);
     case ValueType::Percentage:
         return parse_percentage_value(tokens, infinite_range, original_source_text);
     case ValueType::Position:

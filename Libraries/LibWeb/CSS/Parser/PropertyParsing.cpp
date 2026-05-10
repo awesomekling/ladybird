@@ -1785,7 +1785,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 };
                 auto materialize_position = [&](Vector<ComponentValue> const& component_values) -> RefPtr<PositionStyleValue const> {
                     return static_ptr_cast<PositionStyleValue const>(materialize_component_values(component_values, [&](TokenStream<ComponentValue>& position_tokens) {
-                        return parse_position_value(position_tokens);
+                        auto value = parse_css_value_for_property(PropertyID::ObjectPosition, position_tokens);
+                        if (!value || !value->is_position())
+                            return RefPtr<StyleValue const> {};
+                        return value;
                     }));
                 };
                 auto materialize_length_percentage = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
