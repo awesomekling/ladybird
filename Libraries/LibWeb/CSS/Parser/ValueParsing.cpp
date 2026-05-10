@@ -1197,49 +1197,56 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
 RefPtr<StyleValue const> Parser::parse_rect_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    auto const& function_token = tokens.consume_a_token();
-    if (!function_token.is_function("rect"sv))
+    auto serialized_rect = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    PropertyID property_id = PropertyID::Clip;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_rect.bytes_as_string_view());
+    if (!rust_style_value.has_value()
+        || rust_style_value->kind != FFI::CssStyleValueKind::Rect
+        || rust_style_value->rect_sides.size() != 4)
         return nullptr;
 
-    auto serialized_rect = function_token.original_source_text();
-    if (serialized_rect.is_empty())
-        serialized_rect = function_token.to_string();
-    if (RustComponentValueParser::parse_rect(serialized_rect.bytes_as_string_view(), "utf-8"sv) == FFI::CssRectValueKind::Invalid)
-        return nullptr;
+    auto materialize_rect_side = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+        if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
+            auto keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
+            if (!keyword.has_value() || *keyword != Keyword::Auto)
+                return nullptr;
+            return KeywordStyleValue::create(Keyword::Auto);
+        }
 
-    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_length_value(value_tokens, infinite_range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
+                return nullptr;
+            return parsed;
+        }
 
-    StyleValueVector params;
-    params.ensure_capacity(4);
+        if (!value.numeric_value.has_value()
+            || value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
+            return nullptr;
 
-    auto argument_tokens = TokenStream { function_token.function().value };
+        auto length_unit = string_to_length_unit(value.source_or_unit);
+        if (!length_unit.has_value())
+            return nullptr;
+        return LengthStyleValue::create(Length { *value.numeric_value, length_unit.release_value() });
+    };
 
     // In CSS 2.1, the only valid <shape> value is: rect(<top>, <right>, <bottom>, <left>) where
     // <top> and <bottom> specify offsets from the top border edge of the box, and <right>, and
     //  <left> specify offsets from the left border edge of the box.
-    for (size_t side = 0; side < 4; side++) {
-        argument_tokens.discard_whitespace();
+    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
+    auto top = materialize_rect_side(rust_style_value->rect_sides[0]);
+    auto right = materialize_rect_side(rust_style_value->rect_sides[1]);
+    auto bottom = materialize_rect_side(rust_style_value->rect_sides[2]);
+    auto left = materialize_rect_side(rust_style_value->rect_sides[3]);
+    if (!top || !right || !bottom || !left)
+        return nullptr;
 
-        // <top>, <right>, <bottom>, and <left> may either have a <length> value or 'auto'.
-        // Negative lengths are permitted.
-        if (argument_tokens.next_token().is_ident("auto"sv)) {
-            (void)argument_tokens.consume_a_token(); // `auto`
-            params.append(KeywordStyleValue::create(Keyword::Auto));
-        } else {
-            auto maybe_length = parse_length_value(argument_tokens, infinite_range);
-            if (!maybe_length)
-                return nullptr;
-
-            params.append(maybe_length.release_nonnull());
-        }
-        argument_tokens.discard_whitespace();
-
-        if (argument_tokens.next_token().is(Token::Type::Comma))
-            argument_tokens.discard_a_token();
-    }
-
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
     transaction.commit();
-    return RectStyleValue::create(params[0], params[1], params[2], params[3]);
+    return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
 }
 
 // https://www.w3.org/TR/css-color-4/#typedef-hue
@@ -2150,56 +2157,47 @@ RefPtr<StyleValue const> Parser::parse_corner_shape_value(TokenStream<ComponentV
 {
     // <corner-shape-value> = round | scoop | bevel | notch | square | squircle | <superellipse()>
     auto transaction = tokens.begin_transaction();
+    auto serialized_corner_shape = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    PropertyID property_id = PropertyID::CornerTopLeftShape;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_corner_shape.bytes_as_string_view());
+    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::CornerShape)
+        return nullptr;
 
-    tokens.discard_whitespace();
+    auto value = [&]() -> RefPtr<StyleValue const> {
+        if (rust_style_value->corner_shape_keyword.has_value())
+            return KeywordStyleValue::create(*rust_style_value->corner_shape_keyword);
 
-    auto token = tokens.consume_a_token();
+        if (rust_style_value->corner_shape_superellipse_parameter.has_value()) {
+            auto const& parameter = *rust_style_value->corner_shape_superellipse_parameter;
+            auto context_guard = push_temporary_value_parsing_context(FunctionContext { "superellipse"sv });
+            RefPtr<StyleValue const> parameter_value;
+            if (!parameter.source_component_values.is_empty()) {
+                TokenStream parameter_tokens { parameter.source_component_values };
+                parameter_value = parse_number_value(parameter_tokens, infinite_range);
+                parameter_tokens.discard_whitespace();
+                if (!parameter_value || parameter_tokens.has_next_token())
+                    return nullptr;
+            } else {
+                if (!parameter.numeric_value.has_value()
+                    || parameter.primitive_kind != FFI::CssPrimitiveValueKind::Number)
+                    return nullptr;
+                parameter_value = NumberStyleValue::create(*parameter.numeric_value);
+            }
 
-    if (token.is(Token::Type::Ident)) {
-        auto keyword = keyword_from_string(token.token().ident());
-
-        if (!keyword.has_value())
-            return nullptr;
-
-        if (!first_is_one_of(keyword, Keyword::Round, Keyword::Scoop, Keyword::Bevel, Keyword::Notch, Keyword::Square, Keyword::Squircle))
-            return nullptr;
-
-        transaction.commit();
-        return KeywordStyleValue::create(keyword.value());
-    }
-
-    if (token.is_function("superellipse"sv)) {
-        // superellipse() = superellipse(<number> | infinity | -infinity)
-        auto const& function = token.function();
-
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
-
-        TokenStream function_tokens { function.value };
-
-        function_tokens.discard_whitespace();
-
-        if (parse_all_as_single_keyword_value(function_tokens, Keyword::NegativeInfinity)) {
-            transaction.commit();
-            return SuperellipseStyleValue::create(NumberStyleValue::create(-AK::Infinity<double>));
-        }
-
-        if (parse_all_as_single_keyword_value(function_tokens, Keyword::Infinity)) {
-            transaction.commit();
-            return SuperellipseStyleValue::create(NumberStyleValue::create(AK::Infinity<double>));
-        }
-
-        if (auto number_value = parse_number_value(function_tokens, infinite_range); number_value) {
-            function_tokens.discard_whitespace();
-
-            if (function_tokens.has_next_token())
+            if (!parameter_value)
                 return nullptr;
-
-            transaction.commit();
-            return SuperellipseStyleValue::create(number_value.release_nonnull());
+            return SuperellipseStyleValue::create(parameter_value.release_nonnull());
         }
-    }
 
-    return nullptr;
+        return nullptr;
+    }();
+    if (!value)
+        return nullptr;
+
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+    transaction.commit();
+    return value;
 }
 
 // https://drafts.csswg.org/css-lists-3/#counter-functions
@@ -3017,38 +3015,55 @@ RefPtr<RadialSizeStyleValue const> Parser::parse_radial_size(TokenStream<Compone
 RefPtr<StyleValue const> Parser::parse_fit_content_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
+    auto serialized_fit_content = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    PropertyID property_id = PropertyID::Width;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_fit_content.bytes_as_string_view());
+    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::FitContent)
         return nullptr;
 
-    auto serialized_fit_content = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
-    if (RustComponentValueParser::parse_fit_content(serialized_fit_content.bytes_as_string_view(), "utf-8"sv) == FFI::CssFitContentValueKind::Invalid)
-        return nullptr;
+    RefPtr<StyleValue const> value;
+    switch (rust_style_value->fit_content_kind) {
+    case RustComponentValueParser::RustFitContentKind::Keyword:
+        value = KeywordStyleValue::create(Keyword::FitContent);
+        break;
+    case RustComponentValueParser::RustFitContentKind::Function: {
+        if (!rust_style_value->fit_content_argument.has_value())
+            return nullptr;
 
-    auto& component_value = tokens.consume_a_token();
+        auto const& argument = *rust_style_value->fit_content_argument;
+        RefPtr<StyleValue const> argument_value;
+        if (!argument.source_component_values.is_empty()) {
+            TokenStream argument_tokens { argument.source_component_values };
+            argument_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range);
+            argument_tokens.discard_whitespace();
+            if (!argument_value || argument_tokens.has_next_token())
+                return nullptr;
+        } else if (argument.numeric_value.has_value()) {
+            if (argument.primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
+                argument_value = PercentageStyleValue::create(Percentage { *argument.numeric_value });
+            } else if (argument.primitive_kind == FFI::CssPrimitiveValueKind::Length) {
+                auto length_unit = string_to_length_unit(argument.source_or_unit);
+                if (!length_unit.has_value())
+                    return nullptr;
+                argument_value = LengthStyleValue::create(Length { *argument.numeric_value, length_unit.release_value() });
+            }
+        }
 
-    if (component_value.is_ident("fit-content"sv)) {
-        transaction.commit();
-        return KeywordStyleValue::create(Keyword::FitContent);
+        if (!argument_value)
+            return nullptr;
+        auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
+        value = FunctionStyleValue::create("fit-content"_fly_string, argument_value.release_nonnull());
+        break;
+    }
     }
 
-    if (!component_value.is_function())
+    if (!value)
         return nullptr;
 
-    auto const& function = component_value.function();
-    if (function.name != "fit-content"sv)
-        return nullptr;
-    TokenStream argument_tokens { function.value };
-    argument_tokens.discard_whitespace();
-    auto length_percentage_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range);
-    if (!length_percentage_value)
-        return nullptr;
-    argument_tokens.discard_whitespace();
-    if (argument_tokens.has_next_token())
-        return nullptr;
-
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
     transaction.commit();
-    return FunctionStyleValue::create("fit-content"_fly_string, length_percentage_value.release_nonnull());
+    return value;
 }
 
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
