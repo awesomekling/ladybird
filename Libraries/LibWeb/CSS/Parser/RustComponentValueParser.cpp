@@ -196,16 +196,14 @@ static void append_component_value_token(ComponentValueBuilder& builder, FFI::Cs
     }
 }
 
-static void set_original_value_text_for_custom_property(Declaration& declaration)
+static void set_original_value_text(Declaration& declaration)
 {
     // https://drafts.csswg.org/css-syntax/#consume-declaration
     // If decl’s name is a custom property name string, then set decl’s original text to the
     // segment of the original source text string corresponding to the tokens of decl’s value.
-    if (!is_a_custom_property_name_string(declaration.name))
-        return;
-
-    // TODO: If the Rust parser emitted the original source segment directly, we could use
-    //       that instead of having to reconstruct it.
+    //
+    // NB: We preserve this for all declarations so downstream property and descriptor parsing
+    //     can pass the original value source back to Rust without serializing component values.
     StringBuilder original_text;
     for (auto const& value : declaration.value)
         original_text.append(value.original_source_text());
@@ -4701,7 +4699,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
         return {};
 
     builder.declaration->value = move(builder.component_value_builder.root_values);
-    set_original_value_text_for_custom_property(*builder.declaration);
+    set_original_value_text(*builder.declaration);
     return builder.declaration;
 }
 
@@ -4748,7 +4746,7 @@ Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView i
         return {};
 
     builder.declaration->value = move(builder.component_value_builder.root_values);
-    set_original_value_text_for_custom_property(*builder.declaration);
+    set_original_value_text(*builder.declaration);
     return builder.declaration;
 }
 
@@ -6612,7 +6610,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         VERIFY(builder.component_value_builder.stack.is_empty());
         auto declaration = frame.declaration.release_value();
         declaration.value = move(builder.component_value_builder.root_values);
-        set_original_value_text_for_custom_property(declaration);
+        set_original_value_text(declaration);
         builder.component_value_builder = {};
         builder.append_declaration(move(declaration));
         break;
