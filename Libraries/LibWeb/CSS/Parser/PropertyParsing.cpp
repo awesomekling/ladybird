@@ -1807,26 +1807,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return ImageSetStyleValue::create(move(options));
             };
-            auto materialize_rust_image_from_original_tokens = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values = {}) -> RefPtr<AbstractImageStyleValue const> {
-                switch (kind) {
-                case RustComponentValueParser::RustImageKind::Url:
-                    return materialize_rust_image(kind, typed_url, source_component_values);
-                case RustComponentValueParser::RustImageKind::Gradient:
-                case RustComponentValueParser::RustImageKind::ImageSet:
-                    if (!source_component_values.is_empty()) {
-                        TokenStream image_tokens { source_component_values };
-                        auto image = parse_image_value(image_tokens);
-                        image_tokens.discard_whitespace();
-                        if (image && !image_tokens.has_next_token())
-                            return image.release_nonnull();
-                    }
-                    // AD-HOC: Re-parsing substituted component values through Rust
-                    // would lose C++-side attr() taint metadata until that
-                    // metadata is carried over FFI.
-                    return parse_image_value(tokens);
-                }
-                VERIFY_NOT_REACHED();
-            };
             auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Optional<u8> fill_rule_value, Vector<RustComponentValueParser::RustBasicShapeRectangleComponent> const& rectangle_components, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_horizontal_radii, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_vertical_radii, bool radial_shape_is_typed, Vector<RustComponentValueParser::RustBasicShapeRadiusComponent> const& radial_shape_radius, Optional<RustComponentValueParser::RustPosition> const& radial_shape_position, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& polygon_coordinates, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
                 auto materialize_rust_fill_rule = [](Optional<u8> fill_rule_value) -> Optional<Gfx::WindingRule> {
                     if (!fill_rule_value.has_value() || *fill_rule_value == 0)
@@ -3465,20 +3445,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 break;
             case FFI::CssStyleValueKind::Image:
                 if (rust_style_value->image_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->image_set_options.is_empty()) {
-                    auto image_set_tokens_contain_attr_tainted_value = tokens.remaining_tokens().first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value();
-                    auto value = image_set_tokens_contain_attr_tainted_value ? parse_image_set_function(tokens) : materialize_rust_image_set();
+                    auto value = materialize_rust_image_set();
                     if (value) {
-                        // AD-HOC: Re-parsing substituted component values through Rust
-                        // loses C++-side attr() taint metadata until that
-                        // metadata is carried over FFI.
-                        if (!image_set_tokens_contain_attr_tainted_value)
-                            discard_rust_owned_property_value_tokens();
+                        discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
                         return PropertyAndValue { rust_style_value->property_id, value.release_nonnull() };
                     }
                 }
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
-                    if (auto value = materialize_rust_image_from_original_tokens(*rust_style_value->image_kind, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
+                    if (auto value = materialize_rust_image_from_component_values(*rust_style_value->image_kind, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
                         if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url || !rust_style_value->image_source_component_values.is_empty())
                             discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
@@ -4899,7 +4874,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
 
                     if (item.image_kind.has_value() && item.image_source.has_value()) {
-                        if (auto image = materialize_rust_image_from_original_tokens(*item.image_kind, item.image_url, item.image_source_component_values))
+                        if (auto image = materialize_rust_image_from_component_values(*item.image_kind, item.image_url, item.image_source_component_values))
                             return image;
                     }
 
