@@ -3269,44 +3269,6 @@ NonnullRefPtr<StyleValue const> Parser::resolve_unresolved_style_value(DOM::Abst
     return parsed_value.release_value();
 }
 
-// https://drafts.csswg.org/css-transforms-1/#typedef-transform-function
-RefPtr<StyleValue const> Parser::parse_transform_function_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    auto const& part = tokens.consume_a_token();
-    auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(part);
-    auto value = parse_css_value_for_property(PropertyID::Transform, component_value_tokens, original_source_text);
-    component_value_tokens.discard_whitespace();
-    if (!value || (!original_source_text.has_value() && component_value_tokens.has_next_token()) || !value->is_value_list())
-        return nullptr;
-
-    auto const& transformations = value->as_value_list();
-    if (transformations.size() != 1)
-        return nullptr;
-    discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
-    transaction.commit();
-    return transformations.value_at(0, false);
-}
-
-// https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
-RefPtr<StyleValue const> Parser::parse_transform_list_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // <transform-list> = <transform-function>+
-    // https://www.w3.org/TR/css-transforms-1/#transform-property
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    auto value = parse_css_value_for_property(PropertyID::Transform, tokens, original_source_text);
-    if (!value || !value->is_value_list())
-        return nullptr;
-
-    transaction.commit();
-    return value;
-}
-
 // https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
 RefPtr<StyleValue const> Parser::parse_symbol_value(TokenStream<ComponentValue>& tokens)
 {
@@ -3481,10 +3443,21 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_time_value(tokens, infinite_range, original_source_text);
     case ValueType::TimePercentage:
         return parse_time_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
-    case ValueType::TransformFunction:
-        return parse_transform_function_value(tokens, original_source_text);
-    case ValueType::TransformList:
-        return parse_transform_list_value(tokens, original_source_text);
+    case ValueType::TransformFunction: {
+        auto value = parse_rust_owned_property_value_prefix(PropertyID::Transform, tokens, original_source_text);
+        if (!value || !value->is_value_list())
+            return nullptr;
+        auto const& transformations = value->as_value_list();
+        if (transformations.size() != 1)
+            return nullptr;
+        return transformations.value_at(0, false);
+    }
+    case ValueType::TransformList: {
+        auto value = parse_rust_owned_property_value_prefix(PropertyID::Transform, tokens, original_source_text);
+        if (!value || !value->is_value_list())
+            return nullptr;
+        return value;
+    }
     case ValueType::Url:
         return parse_url_value(tokens, original_source_text);
     case ValueType::ViewFunction:

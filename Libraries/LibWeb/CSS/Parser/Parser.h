@@ -296,8 +296,6 @@ private:
 
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_symbol_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     RefPtr<CalculationNode const> materialize_rust_calculation_node_events(ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const>, CalculationContext const&);
 
