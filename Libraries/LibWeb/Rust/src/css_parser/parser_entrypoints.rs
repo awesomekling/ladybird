@@ -333,7 +333,7 @@ where
 
     match feature {
         SupportsFeature::Declaration(_) => feature_callback(CssSupportsFeatureKind::Declaration, None),
-        SupportsFeature::Selector => feature_callback(CssSupportsFeatureKind::Selector, None),
+        SupportsFeature::Selector { .. } => feature_callback(CssSupportsFeatureKind::Selector, None),
         SupportsFeature::FontTech(name) => feature_callback(CssSupportsFeatureKind::FontTech, Some(&name)),
         SupportsFeature::FontFormat(name) => feature_callback(CssSupportsFeatureKind::FontFormat, Some(&name)),
         SupportsFeature::Env(name) => feature_callback(CssSupportsFeatureKind::Env, Some(&name)),

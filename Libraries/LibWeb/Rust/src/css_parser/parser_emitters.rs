@@ -1504,7 +1504,18 @@ fn emit_supports_feature<C>(
                 declaration.important,
             );
         }
-        SupportsFeature::Selector => callback(CssSupportsFeatureKind::Selector, None, None, false),
+        SupportsFeature::Selector { matches } => {
+            let source = component_values
+                .first()
+                .and_then(|component_value| match component_value {
+                    ComponentValue::Function(function) => {
+                        serialize_component_values_for_reparsing(&function.value, filtered_input)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            callback(CssSupportsFeatureKind::Selector, None, Some(&source), *matches);
+        }
         SupportsFeature::FontTech(name) => callback(CssSupportsFeatureKind::FontTech, Some(name), None, false),
         SupportsFeature::FontFormat(name) => callback(CssSupportsFeatureKind::FontFormat, Some(name), None, false),
         SupportsFeature::Env(name) => callback(CssSupportsFeatureKind::Env, Some(name), None, false),

@@ -62,6 +62,7 @@ public:
         Optional<FlyString> name;
         Optional<String> value;
         Important important { Important::No };
+        bool matches { false };
     };
 
     struct PropertyKeyword {

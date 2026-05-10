@@ -1227,8 +1227,22 @@ impl ComponentValueParser {
 
         // `<supports-selector-fn> = selector( <complex-selector> )`
         if function.name.eq_ignore_ascii_case("selector") {
+            let mut parser = ComponentValueParser::with_declared_namespaces(
+                function.value.clone(),
+                self.declared_namespaces.clone(),
+            );
+            // A CSS processor is considered to support a CSS selector if it accepts that all aspects of that selector,
+            // recursively, (rather than considering any of its syntax to be unknown or invalid) and that selector doesn’t
+            // contain unknown -webkit- pseudo-elements.
+            // https://drafts.csswg.org/css-conditional-4/#dfn-support-selector
+            let matches = parser
+                .parse_complex_selector(SelectorType::Standalone)
+                .is_some_and(|selector| {
+                    parser.discard_whitespace();
+                    !parser.has_next_component_value() && !selector_contains_unknown_webkit_pseudo_element(&selector)
+                });
             self.index += 1;
-            return Some((SupportsFeature::Selector, component_value));
+            return Some((SupportsFeature::Selector { matches }, component_value));
         }
 
         // `<supports-font-tech-fn> = font-tech( <font-tech> )`

@@ -288,25 +288,9 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
         VERIFY_NOT_REACHED();
     case FFI::CssSupportsFeatureKind::Selector: {
         VERIFY(first_token.is_function("selector"sv));
-        // FIXME: Parsing and then converting back to a string is weird.
-        StringBuilder builder;
-        for (auto const& item : first_token.function().value)
-            builder.append(item.to_string());
+        VERIFY(feature->value.has_value());
         transaction.commit();
-        auto maybe_selector_list = RustComponentValueParser::parse_a_selector_list(
-            builder.string_view(),
-            "utf-8"sv,
-            RustComponentValueParser::SelectorType::Standalone,
-            RustComponentValueParser::SelectorParsingMode::Normal,
-            m_declared_namespaces);
-        // A CSS processor is considered to support a CSS selector if it accepts that all aspects of that selector,
-        // recursively, (rather than considering any of its syntax to be unknown or invalid) and that selector doesn’t
-        // contain unknown -webkit- pseudo-elements.
-        // https://drafts.csswg.org/css-conditional-4/#dfn-support-selector
-        bool matches = maybe_selector_list.has_value()
-            && maybe_selector_list->size() == 1
-            && !maybe_selector_list->first()->contains_unknown_webkit_pseudo_element();
-        return Supports::Selector::create(builder.to_string_without_validation(), matches);
+        return Supports::Selector::create(feature->value.release_value(), feature->matches);
     }
     case FFI::CssSupportsFeatureKind::FontTech: {
         VERIFY(feature->name.has_value());

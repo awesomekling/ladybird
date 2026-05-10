@@ -503,7 +503,7 @@ pub(crate) enum BooleanExpressionTest {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum SupportsFeature {
     Declaration(Declaration),
-    Selector,
+    Selector { matches: bool },
     FontTech(String),
     FontFormat(String),
     Env(String),

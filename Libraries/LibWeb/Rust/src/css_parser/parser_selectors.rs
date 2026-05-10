@@ -58,6 +58,24 @@ pub(super) fn validate_pseudo_element_chain(compound_selectors: &[CompoundSelect
     None
 }
 
+pub(super) fn selector_contains_unknown_webkit_pseudo_element(selector: &SelectorSyntax) -> bool {
+    selector.compound_selectors.iter().any(|compound_selector| {
+        compound_selector
+            .simple_selectors
+            .iter()
+            .any(|simple_selector| match simple_selector {
+                SimpleSelectorSyntax::PseudoClass(pseudo_class) => pseudo_class
+                    .argument_selector_list
+                    .iter()
+                    .any(selector_contains_unknown_webkit_pseudo_element),
+                SimpleSelectorSyntax::PseudoElement(pseudo_element) => {
+                    pseudo_element.pseudo_element_id == PseudoElementId::UnknownWebKit
+                }
+                _ => false,
+            })
+    })
+}
+
 pub(super) fn selector_component_value_ends_selector(component_value: Option<&ComponentValue>) -> bool {
     matches!(
         component_value,

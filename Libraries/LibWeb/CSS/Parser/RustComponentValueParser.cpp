@@ -4775,6 +4775,7 @@ static void set_boolean_expression_supports_feature(RustBooleanExpressionBuilder
         move(name),
         move(value),
         important ? Important::Yes : Important::No,
+        important,
     };
 }
 
