@@ -22,6 +22,7 @@
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
+#include <LibWeb/CSS/Supports.h>
 #include <LibWeb/RustFFI.h>
 
 namespace Web::CSS::Parser {
@@ -5935,9 +5936,20 @@ struct RuleEventBuilder {
     Vector<Frame> stack;
     ComponentValueBuilder component_value_builder;
     Optional<RustBooleanExpressionBuilder> media_condition_builder;
+    Optional<RustBooleanExpressionBuilder> supports_condition_builder;
     AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> parse_media_feature_test;
+    AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature;
     Optional<FlyString> current_page_selector_name;
     Vector<PagePseudoClass> current_page_selector_pseudo_classes;
+
+    RustBooleanExpressionBuilder* current_boolean_expression_builder()
+    {
+        if (media_condition_builder.has_value())
+            return &*media_condition_builder;
+        if (supports_condition_builder.has_value())
+            return &*supports_condition_builder;
+        return nullptr;
+    }
 
     void finish_media_condition()
     {
@@ -5966,6 +5978,25 @@ struct RuleEventBuilder {
         VERIFY(media_condition_builder->component_value_builder.stack.is_empty());
         media_query->set_media_condition_for_parser(media_condition_builder->root.release_nonnull());
         media_condition_builder = {};
+    }
+
+    void finish_supports_condition()
+    {
+        if (!supports_condition_builder.has_value())
+            return;
+
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        if (supports_condition_builder->invalid || !supports_condition_builder->stack.is_empty() || !supports_condition_builder->root) {
+            supports_condition_builder = {};
+            return;
+        }
+
+        VERIFY(supports_condition_builder->component_value_builder.stack.is_empty());
+        at_rule.rust_supports_condition = Supports::create(supports_condition_builder->root.release_nonnull());
+        supports_condition_builder = {};
     }
 
     void append_rule(Rule completed_rule)
@@ -6052,6 +6083,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_font_feature_values_family_names = {},
                 .rust_container_rule_prelude_conditions = {},
                 .rust_media_query_list = {},
+                .rust_supports_condition = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6059,6 +6091,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
     case FFI::CssRuleEventKind::AtRuleEnd: {
         VERIFY(!builder.stack.is_empty());
         builder.finish_media_condition();
+        builder.finish_supports_condition();
         auto frame = builder.stack.take_last();
         VERIFY(frame.type == RuleEventBuilder::FrameType::AtRule);
         builder.append_rule(frame.rule.release_value());
@@ -6267,6 +6300,9 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
     case FFI::CssRuleEventKind::MediaQueryListEnd:
         builder.finish_media_condition();
         break;
+    case FFI::CssRuleEventKind::SupportsConditionEnd:
+        builder.finish_supports_condition();
+        break;
     }
 }
 
@@ -6306,29 +6342,59 @@ static void apply_rule_media_query(RuleEventBuilder& builder, FFI::CssMediaQuery
     }
 }
 
+static void apply_rule_supports_condition_start(RuleEventBuilder& builder)
+{
+    builder.finish_supports_condition();
+
+    VERIFY(!builder.stack.is_empty());
+    auto& rule = builder.stack.last().rule;
+    VERIFY(rule.has_value());
+    auto& at_rule = rule->get<AtRule>();
+    VERIFY(at_rule.name.equals_ignoring_ascii_case("supports"sv));
+
+    builder.supports_condition_builder = RustBooleanExpressionBuilder {
+        .parse_test = [&builder](Optional<RustComponentValueParser::MediaFeatureTest>&&, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+            return builder.parse_supports_feature(move(component_values));
+        },
+        .result_for_general_enclosed = MatchResult::False,
+    };
+}
+
 static void apply_rule_boolean_expression_event(RuleEventBuilder& builder, FFI::CssBooleanExpressionEventKind event)
 {
-    VERIFY(builder.media_condition_builder.has_value());
-    process_boolean_expression_event(*builder.media_condition_builder, event);
+    if (!builder.current_boolean_expression_builder()) {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        if (at_rule.name.equals_ignoring_ascii_case("supports"sv))
+            apply_rule_supports_condition_start(builder);
+    }
+
+    auto boolean_expression_builder = builder.current_boolean_expression_builder();
+    VERIFY(boolean_expression_builder);
+    process_boolean_expression_event(*boolean_expression_builder, event);
 }
 
 static void apply_rule_media_feature(RuleEventBuilder& builder, FFI::CssMediaFeature const* media_feature)
 {
-    VERIFY(builder.media_condition_builder.has_value());
-    set_boolean_expression_media_feature(*builder.media_condition_builder, media_feature);
+    auto boolean_expression_builder = builder.current_boolean_expression_builder();
+    VERIFY(boolean_expression_builder);
+    set_boolean_expression_media_feature(*boolean_expression_builder, media_feature);
 }
 
 static void apply_rule_media_feature_value(RuleEventBuilder& builder, FFI::CssMediaFeatureValue const* media_feature_value)
 {
-    VERIFY(builder.media_condition_builder.has_value());
-    append_boolean_expression_media_feature_value(*builder.media_condition_builder, media_feature_value);
+    auto boolean_expression_builder = builder.current_boolean_expression_builder();
+    VERIFY(boolean_expression_builder);
+    append_boolean_expression_media_feature_value(*boolean_expression_builder, media_feature_value);
 }
 
 static void apply_rule_component_value(RuleEventBuilder& builder, FFI::CssComponentValue const* component_value)
 {
     auto token = RustTokenizer::token_from_ffi(component_value->token);
-    if (builder.media_condition_builder.has_value()) {
-        append_component_value_token(builder.media_condition_builder->component_value_builder, component_value->kind, move(token));
+    if (auto* boolean_expression_builder = builder.current_boolean_expression_builder()) {
+        append_component_value_token(boolean_expression_builder->component_value_builder, component_value->kind, move(token));
         return;
     }
     append_component_value_token(builder.component_value_builder, component_value->kind, move(token));
@@ -6338,6 +6404,7 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
 {
     VERIFY(builder.stack.is_empty());
     VERIFY(!builder.media_condition_builder.has_value());
+    VERIFY(!builder.supports_condition_builder.has_value());
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 
@@ -6382,10 +6449,11 @@ static FFI::CssRuleContext rule_context_to_ffi(RuleContext context)
     VERIFY_NOT_REACHED();
 }
 
-Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test)
+Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
+        .parse_supports_feature = move(parse_supports_feature),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
@@ -6417,17 +6485,18 @@ Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringVi
     return builder.rule;
 }
 
-Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test)
+Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
 {
     Vector<RuleContext> rule_context;
     rule_context.append(RuleContext::Style);
-    return parse_a_blocks_contents(input, encoding, rule_context, move(parse_media_feature_test));
+    return parse_a_blocks_contents(input, encoding, rule_context, move(parse_media_feature_test), move(parse_supports_feature));
 }
 
-Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test)
+Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
+        .parse_supports_feature = move(parse_supports_feature),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
@@ -6466,10 +6535,11 @@ Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_conten
     return move(builder.rules_or_lists_of_declarations);
 }
 
-Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test)
+Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
+        .parse_supports_feature = move(parse_supports_feature),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();

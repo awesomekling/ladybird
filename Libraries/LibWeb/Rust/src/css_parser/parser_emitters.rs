@@ -607,6 +607,28 @@ pub(super) fn emit_rule<E, C>(
                 }
                 event_callback(CssRuleEvent::new(CssRuleEventKind::MediaQueryListEnd));
             }
+            if at_rule.name.eq_ignore_ascii_case("supports") {
+                let mut parser = ComponentValueParser::new(at_rule.prelude.clone());
+                if parser
+                    .parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature)
+                    .is_some()
+                    && !parser.has_next_component_value()
+                {
+                    let boolean_expression = parser
+                        .boolean_expression
+                        .take()
+                        .expect("parsed expression must be present");
+                    emit_boolean_expression(
+                        &boolean_expression,
+                        filtered_input,
+                        boolean_expression_event_callback,
+                        component_value_callback,
+                        media_feature_callback,
+                        media_feature_value_callback,
+                    );
+                    event_callback(CssRuleEvent::new(CssRuleEventKind::SupportsConditionEnd));
+                }
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,

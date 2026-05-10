@@ -391,6 +391,9 @@ private:
     RefPtr<CalculationNode const> convert_to_calculation_node(CalcParsing::Node const&, CalculationContext const&);
     RefPtr<CalculationNode const> parse_a_calculation(TokenStream<ComponentValue>&, CalculationContext const&);
 
+    AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> rust_media_feature_test_parser();
+    AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> rust_supports_feature_parser();
+
     OwnPtr<BooleanExpression> materialize_rust_supports_condition(Vector<ComponentValue> const&);
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);

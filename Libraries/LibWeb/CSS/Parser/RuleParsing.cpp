@@ -470,8 +470,7 @@ GC::Ptr<CSSSupportsRule> Parser::convert_to_supports_rule(AtRule const& rule, Ne
         return {};
     }
 
-    auto serialized_supports = serialize_component_values_for_reparsing(rule.prelude);
-    auto supports = parse_a_supports_from_string(serialized_supports.bytes_as_string_view(), "utf-8"sv);
+    auto supports = rule.rust_supports_condition;
     if (!supports) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@supports"_fly_string,
