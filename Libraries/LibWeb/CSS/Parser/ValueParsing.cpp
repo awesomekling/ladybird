@@ -2017,7 +2017,7 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
     return {};
 }
 
-static NonnullRefPtr<StyleValue const> materialize_rust_counter_style(Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style)
+NonnullRefPtr<StyleValue const> Parser::materialize_rust_counter_style(Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style)
 {
     if (!maybe_counter_style.has_value())
         return CounterStyleStyleValue::create("decimal"_fly_string);

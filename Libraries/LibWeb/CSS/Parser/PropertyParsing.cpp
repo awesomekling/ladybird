@@ -2375,45 +2375,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_counter_style = [&](Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style) -> NonnullRefPtr<StyleValue const> {
-                if (!maybe_counter_style.has_value())
-                    return CounterStyleStyleValue::create("decimal"_fly_string);
-
-                auto counter_style = *maybe_counter_style;
-                if (counter_style.kind == FFI::CssCounterStyleKind::Name) {
-                    auto counter_style_name = counter_style.name;
-
-                    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
-                    // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
-                    // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
-                    // @counter-style rule, and in the counter() functions.
-
-                    // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
-                    auto const& keyword = keyword_from_string(counter_style_name);
-                    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
-                        counter_style_name = counter_style_name.to_ascii_lowercase();
-
-                    return CounterStyleStyleValue::create(counter_style_name);
-                }
-
-                VERIFY(counter_style.kind == FFI::CssCounterStyleKind::SymbolsFunction);
-                auto symbols_type = [&] {
-                    switch (counter_style.symbols_type) {
-                    case FFI::CssCounterStyleSymbolsType::Cyclic:
-                        return SymbolsType::Cyclic;
-                    case FFI::CssCounterStyleSymbolsType::Numeric:
-                        return SymbolsType::Numeric;
-                    case FFI::CssCounterStyleSymbolsType::Alphabetic:
-                        return SymbolsType::Alphabetic;
-                    case FFI::CssCounterStyleSymbolsType::Symbolic:
-                        return SymbolsType::Symbolic;
-                    case FFI::CssCounterStyleSymbolsType::Fixed:
-                        return SymbolsType::Fixed;
-                    }
-                    VERIFY_NOT_REACHED();
-                }();
-                return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
-            };
             auto materialize_rust_counter = [&](RustComponentValueParser::RustCounterFunctionKind function, FlyString const& name, FlyString const& join_string, Optional<RustComponentValueParser::CounterStyle> const& counter_style) -> RefPtr<StyleValue const> {
                 auto counter_style_value = materialize_rust_counter_style(counter_style);
                 switch (function) {

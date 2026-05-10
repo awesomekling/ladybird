@@ -288,6 +288,7 @@ private:
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
 
     OwnPtr<BooleanExpression> materialize_rust_supports_feature(Optional<RustComponentValueParser::SupportsFeature>&&, Vector<ComponentValue>&&);
+    NonnullRefPtr<StyleValue const> materialize_rust_counter_style(Optional<RustComponentValueParser::CounterStyle> const&);
 
     NonnullRefPtr<StyleValue const> resolve_unresolved_style_value(DOM::AbstractElement, GuardedSubstitutionContexts&, PropertyNameAndID const&, UnresolvedStyleValue const&);
 
