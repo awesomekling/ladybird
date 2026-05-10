@@ -2466,13 +2466,6 @@ Optional<FlyString> Parser::parse_custom_ident(TokenStream<ComponentValue>& toke
     return custom_ident;
 }
 
-RefPtr<CustomIdentStyleValue const> Parser::parse_custom_ident_value(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist, Optional<StringView> original_source_text)
-{
-    if (auto custom_ident = parse_custom_ident(tokens, blacklist, original_source_text); custom_ident.has_value())
-        return CustomIdentStyleValue::create(custom_ident.release_value());
-    return nullptr;
-}
-
 // https://drafts.csswg.org/css-values-4/#typedef-dashed-ident
 Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
@@ -2504,17 +2497,6 @@ Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& toke
 
     transaction.commit();
     return dashed_ident;
-}
-
-RefPtr<CustomIdentStyleValue const> Parser::parse_dashed_ident_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (auto dashed_ident = parse_dashed_ident(tokens, original_source_text); dashed_ident.has_value()) {
-        transaction.commit();
-        return CustomIdentStyleValue::create(*dashed_ident);
-    }
-    return nullptr;
 }
 
 RefPtr<CalculationNode const> Parser::materialize_rust_calculation_node_events(ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, CalculationContext const& context)
@@ -3097,9 +3079,9 @@ RefPtr<StyleValue const> Parser::parse_symbol_value(TokenStream<ComponentValue>&
         return string.release_nonnull();
     }
 
-    if (auto custom_ident = parse_custom_ident_value(tokens)) {
+    if (auto custom_ident = parse_custom_ident(tokens, {}); custom_ident.has_value()) {
         transaction.commit();
-        return custom_ident.release_nonnull();
+        return CustomIdentStyleValue::create(custom_ident.release_value());
     }
 
     return nullptr;
@@ -3176,11 +3158,19 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_counter_value(tokens, original_source_text);
     case ValueType::CounterStyle:
         return parse_rust_owned_property_value_prefix(PropertyID::ListStyleType, tokens, original_source_text);
-    case ValueType::CustomIdent:
+    case ValueType::CustomIdent: {
         // FIXME: Figure out how to pass the blacklist here
-        return parse_custom_ident_value(tokens, {}, original_source_text);
-    case ValueType::DashedIdent:
-        return parse_dashed_ident_value(tokens, original_source_text);
+        auto custom_ident = parse_custom_ident(tokens, {}, original_source_text);
+        if (!custom_ident.has_value())
+            return nullptr;
+        return CustomIdentStyleValue::create(custom_ident.release_value());
+    }
+    case ValueType::DashedIdent: {
+        auto dashed_ident = parse_dashed_ident(tokens, original_source_text);
+        if (!dashed_ident.has_value())
+            return nullptr;
+        return CustomIdentStyleValue::create(dashed_ident.release_value());
+    }
     case ValueType::EasingFunction:
         return parse_easing_value(tokens, original_source_text);
     case ValueType::FilterValueList:
