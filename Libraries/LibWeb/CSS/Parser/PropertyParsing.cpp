@@ -6915,59 +6915,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         break;
     }
 
-    // We have more values than the property claims to allow. Check if it's a shorthand.
-    auto unassigned_properties = longhands_for_shorthand(property_id);
-    if (unassigned_properties.is_empty())
-        return ParseError::SyntaxError;
-
-    OrderedHashMap<UnderlyingType<PropertyID>, Vector<ValueComparingNonnullRefPtr<StyleValue const>>> assigned_values;
-
-    while (tokens.has_next_token() && !unassigned_properties.is_empty()) {
-        auto property_and_value = parse_css_value_for_properties(unassigned_properties, tokens);
-        if (property_and_value.has_value()) {
-            auto property = property_and_value->property;
-            auto value = property_and_value->style_value;
-            auto& values = assigned_values.ensure(to_underlying(property));
-            if (values.size() + 1 == property_maximum_value_count(property)) {
-                // We're done with this property, move on to the next one.
-                unassigned_properties.remove_first_matching([&](auto& unassigned_property) { return unassigned_property == property; });
-            }
-
-            values.append(value.release_nonnull());
-            continue;
-        }
-
-        // No property matched, so we're done.
-        if constexpr (CSS_PARSER_DEBUG) {
-            dbgln("No property (from {} properties) matched {}", unassigned_properties.size(), tokens.next_token().to_debug_string());
-            for (auto id : unassigned_properties)
-                dbgln("    {}", string_from_property_id(id));
-        }
-        break;
-    }
-
-    for (auto& property : unassigned_properties)
-        assigned_values.ensure(to_underlying(property)).append(property_initial_value(property));
-
-    tokens.discard_whitespace();
-    if (tokens.has_next_token())
-        return ParseError::SyntaxError;
-
-    Vector<PropertyID> longhand_properties;
-    longhand_properties.ensure_capacity(assigned_values.size());
-    for (auto& it : assigned_values)
-        longhand_properties.unchecked_append(static_cast<PropertyID>(it.key));
-
-    StyleValueVector longhand_values;
-    longhand_values.ensure_capacity(assigned_values.size());
-    for (auto& it : assigned_values) {
-        if (it.value.size() == 1)
-            longhand_values.unchecked_append(it.value.take_first());
-        else
-            longhand_values.unchecked_append(StyleValueList::create(move(it.value), StyleValueList::Separator::Space));
-    }
-
-    return { ShorthandStyleValue::create(property_id, move(longhand_properties), move(longhand_values)) };
+    return ParseError::SyntaxError;
 }
 
 }
