@@ -324,31 +324,6 @@ The generated code provides:
 - `bool media_feature_accepts_keyword(MediaFeatureID, Keyword)` returns whether the media feature accepts this keyword
 - `bool media_feature_keyword_is_falsey(MediaFeatureID, Keyword)` returns whether the given keyword is considered false when the media-feature is evaluated in a boolean context. (Like `@media (foo)`)
 
-## MathFunctions.json
-
-This is a single JSON object, describing each [CSS math function](https://www.w3.org/TR/css-values/#math-function),
-with the keys being the function name and the values being objects describing that function's properties.
-This generates `MathFunctions.h` and `MathFunctions.cpp`.
-
-Each entry has two properties:
-
-| Field                  | Description                                                                                                                                                                                                            |
-|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `parameter-validation` | Optional string. Either "same" or "consistent", depending on whether the spec says the input calculations should be the same type or consistent types. Defaults to "same". Ignore this if there is only one parameter. |
-| `parameters`           | An array of parameter definition objects, see below.                                                                                                                                                                   |
-
-Parameter definitions have the following properties:
-
-| Field      | Description                                                                      |
-|------------|----------------------------------------------------------------------------------|
-| `name`     | String. Name of the parameter, as given in the spec.                             |
-| `type`     | String. Accepted types for the parameter, as a single string, separated by `\|`. |
-| `required` | Boolean. Whether this parameter is required.                                     |
-
-The generated code provides:
-- A `MathFunction` enum listing the math functions
-- The implementation of the CSS Parser's `parse_math_function()` method
-
 ## TransformFunctions.json
 
 This is a single JSON object, describing each [CSS transform function](https://www.w3.org/TR/css-transforms/#transform-functions),

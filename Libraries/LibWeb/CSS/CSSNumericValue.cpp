@@ -18,7 +18,6 @@
 #include <LibWeb/CSS/CSSNumericArray.h>
 #include <LibWeb/CSS/CSSNumericValue.h>
 #include <LibWeb/CSS/CSSUnitValue.h>
-#include <LibWeb/CSS/MathFunctions.h>
 #include <LibWeb/CSS/NumericType.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/WebIDL/DOMException.h>
@@ -499,15 +498,10 @@ WebIDL::ExceptionOr<GC::Ref<CSSNumericValue>> CSSNumericValue::parse(JS::VM& vm,
 
     // 2. If result is not a <number-token>, <percentage-token>, <dimension-token>, or a math function, throw a
     //    SyntaxError and abort this algorithm.
-    auto is_a_math_function = [](Parser::ComponentValue const& component_value) -> bool {
-        if (!component_value.is_function())
-            return false;
-        return math_function_from_string(component_value.function().name).has_value();
-    };
     if (!(result.is(Parser::Token::Type::Number)
             || result.is(Parser::Token::Type::Percentage)
             || result.is(Parser::Token::Type::Dimension)
-            || is_a_math_function(result))) {
+            || result.is_function())) {
         return WebIDL::SyntaxError::create(realm, "Input not a <number-token>, <percentage-token>, <dimension-token>, or a math function."_utf16);
     }
 

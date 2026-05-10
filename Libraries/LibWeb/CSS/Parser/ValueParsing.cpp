@@ -18,7 +18,6 @@
 #include <AK/TemporaryChange.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/FontFeatureData.h>
-#include <LibWeb/CSS/MathFunctions.h>
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
