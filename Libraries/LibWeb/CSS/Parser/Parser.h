@@ -204,13 +204,6 @@ private:
     [[nodiscard]] Vector<ComponentValue> consume_a_list_of_component_values(TokenStream<ComponentValue>&, Optional<Token::Type> stop_token = {});
     // TODO: consume_a_unicode_range_value()
 
-    struct FunctionPrelude {
-        FlyString name;
-        Vector<FunctionParameterInternal> parameters;
-        NonnullOwnPtr<SyntaxNode> return_type;
-    };
-    Optional<FunctionPrelude> parse_function_prelude(TokenStream<ComponentValue>&);
-
     bool is_valid_in_the_current_context(Declaration const&) const;
     bool is_valid_in_the_current_context(AtRule const&) const;
     bool is_valid_in_the_current_context(QualifiedRule const&) const;

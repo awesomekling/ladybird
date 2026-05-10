@@ -340,6 +340,238 @@ where
     }
 }
 
+fn emit_function_type_syntax_node<E>(syntax_node: &SyntaxNode, event_callback: &mut E)
+where
+    E: FnMut(CssRuleEvent),
+{
+    fn emit_event<E>(kind: CssRuleEventKind, value: Option<&str>, event_callback: &mut E)
+    where
+        E: FnMut(CssRuleEvent),
+    {
+        let (name_ptr, name_len) = value.map_or((std::ptr::null(), 0), string_parts);
+        event_callback(CssRuleEvent {
+            kind,
+            name_ptr,
+            name_len,
+            value_ptr: std::ptr::null(),
+            value_len: 0,
+            keyframe_selector: 0.0,
+            page_pseudo_class: CssPagePseudoClassKind::Left,
+            important: false,
+            is_block_rule: false,
+        });
+    }
+
+    match syntax_node {
+        SyntaxNode::Universal => emit_event(CssRuleEventKind::FunctionParameterTypeUniversal, None, event_callback),
+        SyntaxNode::Type(value) => emit_event(CssRuleEventKind::FunctionParameterTypeType, Some(value), event_callback),
+        SyntaxNode::Ident(value) => emit_event(
+            CssRuleEventKind::FunctionParameterTypeIdent,
+            Some(value),
+            event_callback,
+        ),
+        SyntaxNode::Multiplier(child) => {
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeMultiplierStart,
+                None,
+                event_callback,
+            );
+            emit_function_type_syntax_node(child, event_callback);
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeMultiplierEnd,
+                None,
+                event_callback,
+            );
+        }
+        SyntaxNode::CommaSeparatedMultiplier(child) => {
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierStart,
+                None,
+                event_callback,
+            );
+            emit_function_type_syntax_node(child, event_callback);
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierEnd,
+                None,
+                event_callback,
+            );
+        }
+        SyntaxNode::Alternatives(children) => {
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeAlternativesStart,
+                None,
+                event_callback,
+            );
+            for child in children {
+                emit_function_type_syntax_node(child, event_callback);
+            }
+            emit_event(
+                CssRuleEventKind::FunctionParameterTypeAlternativesEnd,
+                None,
+                event_callback,
+            );
+        }
+    }
+}
+
+struct FunctionParameterPrelude {
+    name: String,
+    syntax_node: Option<SyntaxNode>,
+    default_value: Option<Vec<ComponentValue>>,
+}
+
+struct FunctionPrelude {
+    name: String,
+    parameters: Vec<FunctionParameterPrelude>,
+    return_type: Option<SyntaxNode>,
+}
+
+fn parse_function_prelude(prelude: &[ComponentValue], filtered_input: &str) -> Option<FunctionPrelude> {
+    // https://drafts.csswg.org/css-mixins-1/#function-rule
+    // <function-token> <function-parameter>#? ) [ returns <css-type> ]?
+    // <function-parameter> = <custom-property-name> <css-type>? [ : <default-value> ]?
+    // <default-value> = <declaration-value>
+    let mut parser = ComponentValueParser::new(prelude.to_vec());
+    parser.discard_whitespace();
+
+    let Some(ComponentValue::Function(function)) = parser.consume_the_next_component_value() else {
+        return None;
+    };
+    if !function.name.starts_with("--") {
+        return None;
+    }
+
+    let mut function_prelude = FunctionPrelude {
+        name: function.name,
+        parameters: vec![],
+        return_type: None,
+    };
+
+    if !strip_whitespace(&function.value).is_empty() {
+        for parameter_component_values in split_component_values_on_comma(&function.value) {
+            let mut parameter_parser = ComponentValueParser::new(parameter_component_values.to_vec());
+            parameter_parser.discard_whitespace();
+
+            let name = parameter_parser.consume_an_ident()?;
+            if !is_a_custom_property_name_string(&name) {
+                return None;
+            }
+            let syntax_node = parse_css_type(&mut parameter_parser, false, Some(filtered_input));
+
+            parameter_parser.discard_whitespace();
+            let default_value = if matches!(
+                parameter_parser.next_component_value(),
+                Some(ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Colon,
+                    ..
+                }))
+            ) {
+                parameter_parser.index += 1;
+                parameter_parser.discard_whitespace();
+                if !parameter_parser.has_next_component_value() {
+                    return None;
+                }
+                let default_value = parameter_parser.remaining_component_values().to_vec();
+                parameter_parser.index = parameter_parser.component_values.len();
+                Some(default_value)
+            } else {
+                None
+            };
+
+            parameter_parser.discard_whitespace();
+            if parameter_parser.has_next_component_value() {
+                return None;
+            }
+
+            function_prelude.parameters.push(FunctionParameterPrelude {
+                name,
+                syntax_node,
+                default_value,
+            });
+        }
+    }
+
+    parser.discard_whitespace();
+    if component_value_is_ident(parser.next_component_value(), "returns") {
+        parser.index += 1;
+        parser.discard_whitespace();
+        function_prelude.return_type = Some(parse_css_type(&mut parser, false, Some(filtered_input))?);
+    }
+
+    parser.discard_whitespace();
+    if parser.has_next_component_value() {
+        return None;
+    }
+
+    Some(function_prelude)
+}
+
+fn emit_function_rule_event<E>(kind: CssRuleEventKind, name: Option<&str>, event_callback: &mut E)
+where
+    E: FnMut(CssRuleEvent),
+{
+    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), string_parts);
+    event_callback(CssRuleEvent {
+        kind,
+        name_ptr,
+        name_len,
+        value_ptr: std::ptr::null(),
+        value_len: 0,
+        keyframe_selector: 0.0,
+        page_pseudo_class: CssPagePseudoClassKind::Left,
+        important: false,
+        is_block_rule: false,
+    });
+}
+
+fn emit_function_prelude<E, C>(
+    prelude: &[ComponentValue],
+    filtered_input: &str,
+    event_callback: &mut E,
+    component_value_callback: &mut C,
+) -> Option<()>
+where
+    E: FnMut(CssRuleEvent),
+    C: FnMut(CssComponentValue),
+{
+    let function_prelude = parse_function_prelude(prelude, filtered_input)?;
+
+    emit_function_rule_event(
+        CssRuleEventKind::FunctionName,
+        Some(&function_prelude.name),
+        event_callback,
+    );
+    for parameter in function_prelude.parameters {
+        emit_function_rule_event(
+            CssRuleEventKind::FunctionParameterStart,
+            Some(&parameter.name),
+            event_callback,
+        );
+
+        if let Some(syntax_node) = parameter.syntax_node {
+            emit_function_type_syntax_node(&syntax_node, event_callback);
+        }
+
+        if let Some(default_value) = parameter.default_value {
+            event_callback(CssRuleEvent::new(CssRuleEventKind::FunctionParameterDefaultValueStart));
+            for component_value in &default_value {
+                emit_component_value(component_value, filtered_input, component_value_callback);
+            }
+            event_callback(CssRuleEvent::new(CssRuleEventKind::FunctionParameterDefaultValueEnd));
+        }
+
+        event_callback(CssRuleEvent::new(CssRuleEventKind::FunctionParameterEnd));
+    }
+
+    if let Some(return_type) = function_prelude.return_type {
+        event_callback(CssRuleEvent::new(CssRuleEventKind::FunctionReturnTypeStart));
+        emit_function_type_syntax_node(&return_type, event_callback);
+        event_callback(CssRuleEvent::new(CssRuleEventKind::FunctionReturnTypeEnd));
+    }
+
+    Some(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_rule<E, C>(
     rule: &Rule,
@@ -764,6 +996,16 @@ pub(super) fn emit_rule<E, C>(
                     );
                     event_callback(CssRuleEvent::new(CssRuleEventKind::SupportsConditionEnd));
                 }
+            }
+            if at_rule.name.eq_ignore_ascii_case("function") {
+                // Leave the typed function prelude fields empty so C++ reports
+                // the invalid prelude if this does not parse.
+                let _ = emit_function_prelude(
+                    &at_rule.prelude,
+                    filtered_input,
+                    event_callback,
+                    component_value_callback,
+                );
             }
             emit_component_value_list(
                 &at_rule.prelude,

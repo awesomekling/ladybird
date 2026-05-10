@@ -24,6 +24,11 @@ UniversalSyntaxNode::UniversalSyntaxNode()
 
 UniversalSyntaxNode::~UniversalSyntaxNode() = default;
 
+NonnullOwnPtr<SyntaxNode> UniversalSyntaxNode::clone() const
+{
+    return create();
+}
+
 String UniversalSyntaxNode::to_string() const
 {
     return "*"_string;
@@ -49,6 +54,11 @@ TypeSyntaxNode::TypeSyntaxNode(FlyString type_name, Optional<ValueType> value_ty
 
 TypeSyntaxNode::~TypeSyntaxNode() = default;
 
+NonnullOwnPtr<SyntaxNode> TypeSyntaxNode::clone() const
+{
+    return create(m_type_name);
+}
+
 String TypeSyntaxNode::to_string() const
 {
     return MUST(String::formatted("<{}>", m_type_name));
@@ -68,6 +78,11 @@ IdentSyntaxNode::IdentSyntaxNode(FlyString ident, CaseSensitivity case_sensitivi
 
 IdentSyntaxNode::~IdentSyntaxNode() = default;
 
+NonnullOwnPtr<SyntaxNode> IdentSyntaxNode::clone() const
+{
+    return create(m_ident, m_case_sensitivity);
+}
+
 String IdentSyntaxNode::to_string() const
 {
     return serialize_an_identifier(m_ident);
@@ -85,6 +100,11 @@ MultiplierSyntaxNode::MultiplierSyntaxNode(NonnullOwnPtr<SyntaxNode> child)
 }
 
 MultiplierSyntaxNode::~MultiplierSyntaxNode() = default;
+
+NonnullOwnPtr<SyntaxNode> MultiplierSyntaxNode::clone() const
+{
+    return create(m_child->clone());
+}
 
 String MultiplierSyntaxNode::to_string() const
 {
@@ -105,6 +125,11 @@ CommaSeparatedMultiplierSyntaxNode::CommaSeparatedMultiplierSyntaxNode(NonnullOw
 
 CommaSeparatedMultiplierSyntaxNode::~CommaSeparatedMultiplierSyntaxNode() = default;
 
+NonnullOwnPtr<SyntaxNode> CommaSeparatedMultiplierSyntaxNode::clone() const
+{
+    return create(m_child->clone());
+}
+
 String CommaSeparatedMultiplierSyntaxNode::to_string() const
 {
     return MUST(String::formatted("{}#", m_child->to_string()));
@@ -123,6 +148,14 @@ AlternativesSyntaxNode::AlternativesSyntaxNode(Vector<NonnullOwnPtr<SyntaxNode>>
 }
 
 AlternativesSyntaxNode::~AlternativesSyntaxNode() = default;
+
+NonnullOwnPtr<SyntaxNode> AlternativesSyntaxNode::clone() const
+{
+    Vector<NonnullOwnPtr<SyntaxNode>> children;
+    for (auto const& child : m_children)
+        children.append(child->clone());
+    return create(move(children));
+}
 
 String AlternativesSyntaxNode::to_string() const
 {

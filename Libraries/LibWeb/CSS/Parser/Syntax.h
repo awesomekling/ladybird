@@ -29,6 +29,7 @@ public:
     NodeType type() const { return m_type; }
 
     virtual ~SyntaxNode() = default;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const = 0;
     virtual String to_string() const = 0;
     virtual void dump(StringBuilder&, int indent) const = 0;
     String dump() const;
@@ -52,6 +53,7 @@ public:
     }
 
     virtual ~UniversalSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
     virtual String to_string() const override;
     virtual void dump(StringBuilder&, int indent) const override;
 
@@ -68,6 +70,7 @@ public:
     }
 
     virtual ~IdentSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
     FlyString const& ident() const { return m_ident; }
     CaseSensitivity case_sensitivity() const { return m_case_sensitivity; }
 
@@ -85,6 +88,7 @@ class TypeSyntaxNode final : public SyntaxNode {
 public:
     static NonnullOwnPtr<TypeSyntaxNode> create(FlyString type_name);
     virtual ~TypeSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
 
     FlyString const& type_name() const { return m_type_name; }
     Optional<ValueType> const& value_type() const { return m_value_type; }
@@ -107,6 +111,7 @@ public:
     }
 
     virtual ~MultiplierSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
     SyntaxNode const& child() const { return *m_child; }
 
     virtual String to_string() const override;
@@ -126,6 +131,7 @@ public:
     }
 
     virtual ~CommaSeparatedMultiplierSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
     SyntaxNode const& child() const { return *m_child; }
 
     virtual String to_string() const override;
@@ -145,6 +151,7 @@ public:
     }
 
     virtual ~AlternativesSyntaxNode() override;
+    virtual NonnullOwnPtr<SyntaxNode> clone() const override;
     ReadonlySpan<NonnullOwnPtr<SyntaxNode>> children() const { return m_children; }
 
     virtual String to_string() const override;

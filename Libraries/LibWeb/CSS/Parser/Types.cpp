@@ -12,6 +12,58 @@
 
 namespace Web::CSS::Parser {
 
+RustFunctionParameter::RustFunctionParameter(FlyString name, NonnullOwnPtr<SyntaxNode> type, Optional<Vector<ComponentValue>> default_value)
+    : name(move(name))
+    , type(move(type))
+    , default_value(move(default_value))
+{
+}
+
+RustFunctionParameter::RustFunctionParameter(RustFunctionParameter const& other)
+    : name(other.name)
+    , type(other.type->clone())
+    , default_value(other.default_value)
+{
+}
+
+RustFunctionParameter& RustFunctionParameter::operator=(RustFunctionParameter const& other)
+{
+    if (this == &other)
+        return *this;
+    name = other.name;
+    type = other.type->clone();
+    default_value = other.default_value;
+    return *this;
+}
+
+RustFunctionParameter::~RustFunctionParameter() = default;
+
+RustFunctionPrelude::RustFunctionPrelude(FlyString name, Vector<RustFunctionParameter> parameters, NonnullOwnPtr<SyntaxNode> return_type)
+    : name(move(name))
+    , parameters(move(parameters))
+    , return_type(move(return_type))
+{
+}
+
+RustFunctionPrelude::RustFunctionPrelude(RustFunctionPrelude const& other)
+    : name(other.name)
+    , parameters(other.parameters)
+    , return_type(other.return_type->clone())
+{
+}
+
+RustFunctionPrelude& RustFunctionPrelude::operator=(RustFunctionPrelude const& other)
+{
+    if (this == &other)
+        return *this;
+    name = other.name;
+    parameters = other.parameters;
+    return_type = other.return_type->clone();
+    return *this;
+}
+
+RustFunctionPrelude::~RustFunctionPrelude() = default;
+
 String SimpleBlock::to_string() const
 {
     StringBuilder builder;

@@ -15,6 +15,7 @@
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/PageSelector.h>
+#include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/Token.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/StyleProperty.h>
@@ -38,6 +39,32 @@ struct RustContainerRulePreludeCondition {
     RefPtr<ContainerQuery> query;
 };
 
+struct RustFunctionParameter {
+    RustFunctionParameter(FlyString name, NonnullOwnPtr<SyntaxNode> type, Optional<Vector<ComponentValue>> default_value);
+    RustFunctionParameter(RustFunctionParameter const&);
+    RustFunctionParameter(RustFunctionParameter&&) = default;
+    RustFunctionParameter& operator=(RustFunctionParameter const&);
+    RustFunctionParameter& operator=(RustFunctionParameter&&) = default;
+    ~RustFunctionParameter();
+
+    FlyString name;
+    NonnullOwnPtr<SyntaxNode> type;
+    Optional<Vector<ComponentValue>> default_value;
+};
+
+struct RustFunctionPrelude {
+    RustFunctionPrelude(FlyString name, Vector<RustFunctionParameter> parameters, NonnullOwnPtr<SyntaxNode> return_type);
+    RustFunctionPrelude(RustFunctionPrelude const&);
+    RustFunctionPrelude(RustFunctionPrelude&&) = default;
+    RustFunctionPrelude& operator=(RustFunctionPrelude const&);
+    RustFunctionPrelude& operator=(RustFunctionPrelude&&) = default;
+    ~RustFunctionPrelude();
+
+    FlyString name;
+    Vector<RustFunctionParameter> parameters;
+    NonnullOwnPtr<SyntaxNode> return_type;
+};
+
 // https://drafts.csswg.org/css-syntax/#ref-for-at-rule%E2%91%A0%E2%91%A1
 struct AtRule {
     FlyString name;
@@ -52,6 +79,7 @@ struct AtRule {
     Optional<PageSelectorList> rust_page_selectors;
     Optional<Vector<FlyString>> rust_font_feature_values_family_names;
     Optional<Vector<RustContainerRulePreludeCondition>> rust_container_rule_prelude_conditions;
+    Optional<RustFunctionPrelude> rust_function_prelude;
     Optional<Vector<NonnullRefPtr<MediaQuery>>> rust_media_query_list;
     RefPtr<Supports> rust_supports_condition;
     Optional<URL> rust_import_url;

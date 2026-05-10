@@ -4406,62 +4406,6 @@ OwnPtr<SyntaxNode> RustComponentValueParser::parse_as_syntax(StringView input, S
     return move(builder.root);
 }
 
-Optional<RustComponentValueParser::SyntaxComponent> RustComponentValueParser::parse_css_type(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
-{
-    RustSyntaxNodeBuilder builder;
-    builder.ident_case_sensitivity = limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes ? CaseSensitivity::CaseSensitive : CaseSensitivity::CaseInsensitive;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto consumed_byte_length = FFI::rust_css_parse_css_type_prefix(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes,
-        &builder,
-        [](void* raw_builder, FFI::CssSyntaxNode const* syntax_node) {
-            auto& builder = *static_cast<RustSyntaxNodeBuilder*>(raw_builder);
-            switch (syntax_node->kind) {
-            case FFI::CssSyntaxNodeKind::Invalid:
-                builder.invalid = true;
-                return;
-            case FFI::CssSyntaxNodeKind::Universal:
-                builder.append_node(UniversalSyntaxNode::create());
-                return;
-            case FFI::CssSyntaxNodeKind::Type:
-                builder.append_node(TypeSyntaxNode::create(fly_string_from_ffi_bytes(syntax_node->value_ptr, syntax_node->value_len)));
-                return;
-            case FFI::CssSyntaxNodeKind::Ident:
-                builder.append_node(IdentSyntaxNode::create(fly_string_from_ffi_bytes(syntax_node->value_ptr, syntax_node->value_len), builder.ident_case_sensitivity));
-                return;
-            case FFI::CssSyntaxNodeKind::MultiplierStart:
-                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::Multiplier, {} });
-                return;
-            case FFI::CssSyntaxNodeKind::MultiplierEnd:
-                builder.end_frame(RustSyntaxNodeBuilder::FrameType::Multiplier);
-                return;
-            case FFI::CssSyntaxNodeKind::CommaSeparatedMultiplierStart:
-                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier, {} });
-                return;
-            case FFI::CssSyntaxNodeKind::CommaSeparatedMultiplierEnd:
-                builder.end_frame(RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier);
-                return;
-            case FFI::CssSyntaxNodeKind::AlternativesStart:
-                builder.stack.append({ RustSyntaxNodeBuilder::FrameType::Alternatives, {} });
-                return;
-            case FFI::CssSyntaxNodeKind::AlternativesEnd:
-                builder.end_frame(RustSyntaxNodeBuilder::FrameType::Alternatives);
-                return;
-            }
-
-            VERIFY_NOT_REACHED();
-        });
-
-    VERIFY(builder.stack.is_empty());
-    if (builder.invalid || consumed_byte_length == 0)
-        return {};
-    return SyntaxComponent { move(builder.root), consumed_byte_length };
-}
-
 Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding)
 {
     struct DeclarationBuilder {
@@ -5730,6 +5674,15 @@ struct RuleEventBuilder {
     Optional<String> current_import_url;
     Vector<RequestURLModifier> current_import_url_modifiers;
     Optional<String> current_import_supports_declaration_source;
+    Optional<RustFunctionParameter> current_function_parameter;
+    Optional<RustSyntaxNodeBuilder> current_function_syntax_builder;
+    bool collecting_function_parameter_default_value { false };
+
+    enum class FunctionSyntaxTarget : u8 {
+        Parameter,
+        Return,
+    };
+    Optional<FunctionSyntaxTarget> current_function_syntax_target;
 
     RustBooleanExpressionBuilder* current_boolean_expression_builder()
     {
@@ -5841,6 +5794,86 @@ struct RuleEventBuilder {
         at_rule.rust_import_url = URL { current_import_url.release_value(), current_import_url_type.release_value(), move(current_import_url_modifiers) };
         current_import_url_type = {};
         current_import_url_modifiers.clear();
+    }
+
+    AtRule& current_at_rule()
+    {
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        return rule->get<AtRule>();
+    }
+
+    void finish_function_syntax()
+    {
+        if (!current_function_syntax_builder.has_value())
+            return;
+
+        VERIFY(!current_function_syntax_builder->invalid);
+        VERIFY(current_function_syntax_builder->stack.is_empty());
+        VERIFY(current_function_syntax_builder->root);
+        VERIFY(current_function_syntax_target.has_value());
+
+        switch (*current_function_syntax_target) {
+        case FunctionSyntaxTarget::Parameter:
+            VERIFY(current_function_parameter.has_value());
+            current_function_parameter->type = current_function_syntax_builder->root.release_nonnull();
+            break;
+        case FunctionSyntaxTarget::Return:
+            current_at_rule().rust_function_prelude->return_type = current_function_syntax_builder->root.release_nonnull();
+            break;
+        }
+
+        current_function_syntax_builder = {};
+        current_function_syntax_target = {};
+    }
+
+    void start_function_syntax(FunctionSyntaxTarget target)
+    {
+        if (current_function_syntax_builder.has_value())
+            return;
+        current_function_syntax_builder = RustSyntaxNodeBuilder {};
+        current_function_syntax_builder->ident_case_sensitivity = CaseSensitivity::CaseInsensitive;
+        current_function_syntax_target = target;
+    }
+
+    void apply_function_syntax_event(FFI::CssRuleEvent const& event)
+    {
+        if (!current_function_syntax_target.has_value())
+            start_function_syntax(FunctionSyntaxTarget::Parameter);
+        VERIFY(current_function_syntax_builder.has_value());
+
+        switch (event.kind) {
+        case FFI::CssRuleEventKind::FunctionParameterTypeUniversal:
+            current_function_syntax_builder->append_node(UniversalSyntaxNode::create());
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeType:
+            current_function_syntax_builder->append_node(TypeSyntaxNode::create(fly_string_from_ffi_bytes(event.name_ptr, event.name_len)));
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeIdent:
+            current_function_syntax_builder->append_node(IdentSyntaxNode::create(fly_string_from_ffi_bytes(event.name_ptr, event.name_len), current_function_syntax_builder->ident_case_sensitivity));
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeMultiplierStart:
+            current_function_syntax_builder->stack.append({ .type = RustSyntaxNodeBuilder::FrameType::Multiplier });
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeMultiplierEnd:
+            current_function_syntax_builder->end_frame(RustSyntaxNodeBuilder::FrameType::Multiplier);
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierStart:
+            current_function_syntax_builder->stack.append({ .type = RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier });
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierEnd:
+            current_function_syntax_builder->end_frame(RustSyntaxNodeBuilder::FrameType::CommaSeparatedMultiplier);
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeAlternativesStart:
+            current_function_syntax_builder->stack.append({ .type = RustSyntaxNodeBuilder::FrameType::Alternatives });
+            return;
+        case FFI::CssRuleEventKind::FunctionParameterTypeAlternativesEnd:
+            current_function_syntax_builder->end_frame(RustSyntaxNodeBuilder::FrameType::Alternatives);
+            return;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 
     void append_rule(Rule completed_rule)
@@ -6149,6 +6182,60 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
     case FFI::CssRuleEventKind::ContainerConditionEnd:
         builder.finish_container_condition();
         break;
+    case FFI::CssRuleEventKind::FunctionName: {
+        auto& at_rule = builder.current_at_rule();
+        at_rule.rust_function_prelude = RustFunctionPrelude {
+            fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
+            {},
+            UniversalSyntaxNode::create(),
+        };
+        break;
+    }
+    case FFI::CssRuleEventKind::FunctionParameterStart:
+        builder.current_function_parameter = RustFunctionParameter {
+            fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
+            UniversalSyntaxNode::create(),
+            {},
+        };
+        break;
+    case FFI::CssRuleEventKind::FunctionParameterTypeUniversal:
+    case FFI::CssRuleEventKind::FunctionParameterTypeIdent:
+    case FFI::CssRuleEventKind::FunctionParameterTypeType:
+    case FFI::CssRuleEventKind::FunctionParameterTypeMultiplierStart:
+    case FFI::CssRuleEventKind::FunctionParameterTypeMultiplierEnd:
+    case FFI::CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierStart:
+    case FFI::CssRuleEventKind::FunctionParameterTypeCommaSeparatedMultiplierEnd:
+    case FFI::CssRuleEventKind::FunctionParameterTypeAlternativesStart:
+    case FFI::CssRuleEventKind::FunctionParameterTypeAlternativesEnd:
+        builder.apply_function_syntax_event(event);
+        break;
+    case FFI::CssRuleEventKind::FunctionParameterDefaultValueStart:
+        builder.finish_function_syntax();
+        builder.collecting_function_parameter_default_value = true;
+        builder.component_value_builder = {};
+        break;
+    case FFI::CssRuleEventKind::FunctionParameterDefaultValueEnd:
+        VERIFY(builder.collecting_function_parameter_default_value);
+        VERIFY(builder.current_function_parameter.has_value());
+        VERIFY(builder.component_value_builder.stack.is_empty());
+        builder.current_function_parameter->default_value = move(builder.component_value_builder.root_values);
+        builder.component_value_builder = {};
+        builder.collecting_function_parameter_default_value = false;
+        break;
+    case FFI::CssRuleEventKind::FunctionParameterEnd: {
+        builder.finish_function_syntax();
+        VERIFY(builder.current_function_parameter.has_value());
+        auto& at_rule = builder.current_at_rule();
+        VERIFY(at_rule.rust_function_prelude.has_value());
+        at_rule.rust_function_prelude->parameters.append(builder.current_function_parameter.release_value());
+        break;
+    }
+    case FFI::CssRuleEventKind::FunctionReturnTypeStart:
+        builder.start_function_syntax(RuleEventBuilder::FunctionSyntaxTarget::Return);
+        break;
+    case FFI::CssRuleEventKind::FunctionReturnTypeEnd:
+        builder.finish_function_syntax();
+        break;
     case FFI::CssRuleEventKind::ImportUrl:
         builder.current_import_url_type = event.important ? URL::Type::Src : URL::Type::Url;
         builder.current_import_url = string_from_ffi_bytes(event.name_ptr, event.name_len);
@@ -6337,6 +6424,10 @@ static void apply_rule_media_feature_value(RuleEventBuilder& builder, FFI::CssMe
 static void apply_rule_component_value(RuleEventBuilder& builder, FFI::CssComponentValue const* component_value)
 {
     auto token = RustTokenizer::token_from_ffi(component_value->token);
+    if (builder.collecting_function_parameter_default_value) {
+        append_component_value_token(builder.component_value_builder, component_value->kind, move(token));
+        return;
+    }
     if (auto* boolean_expression_builder = builder.current_boolean_expression_builder()) {
         append_component_value_token(boolean_expression_builder->component_value_builder, component_value->kind, move(token));
         return;
@@ -6354,6 +6445,10 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(!builder.current_import_url.has_value());
     VERIFY(builder.current_import_url_modifiers.is_empty());
     VERIFY(!builder.current_import_supports_declaration_source.has_value());
+    VERIFY(!builder.current_function_parameter.has_value());
+    VERIFY(!builder.current_function_syntax_builder.has_value());
+    VERIFY(!builder.current_function_syntax_target.has_value());
+    VERIFY(!builder.collecting_function_parameter_default_value);
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 
