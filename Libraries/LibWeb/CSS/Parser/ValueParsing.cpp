@@ -2361,79 +2361,15 @@ RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<Compon
     //   [ [ top | bottom ] <length-percentage> ]
     // ]
     auto transaction = tokens.begin_transaction();
-    auto serialized_position = serialize_component_values_for_reparsing(tokens.remaining_tokens());
     auto property_id = position_parsing_mode == PositionParsingMode::BackgroundPosition
         ? PropertyID::BackgroundPosition
         : PropertyID::ObjectPosition;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_position.bytes_as_string_view());
-    if (!rust_style_value.has_value()
-        || rust_style_value->kind != FFI::CssStyleValueKind::Position
-        || rust_style_value->positions.size() != 1)
+    auto value = parse_css_value_for_property(property_id, tokens);
+    if (!value || !value->is_position())
         return nullptr;
 
-    auto materialize_position_edge = [](RustComponentValueParser::RustPositionEdge edge) -> Optional<PositionEdge> {
-        switch (edge) {
-        case RustComponentValueParser::RustPositionEdge::None:
-            return {};
-        case RustComponentValueParser::RustPositionEdge::Center:
-            return PositionEdge::Center;
-        case RustComponentValueParser::RustPositionEdge::Left:
-            return PositionEdge::Left;
-        case RustComponentValueParser::RustPositionEdge::Right:
-            return PositionEdge::Right;
-        case RustComponentValueParser::RustPositionEdge::Top:
-            return PositionEdge::Top;
-        case RustComponentValueParser::RustPositionEdge::Bottom:
-            return PositionEdge::Bottom;
-        }
-        VERIFY_NOT_REACHED();
-    };
-
-    auto materialize_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-        if (!value.source_component_values.is_empty()) {
-            TokenStream value_tokens { value.source_component_values };
-            auto parsed = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
-            value_tokens.discard_whitespace();
-            if (!parsed || value_tokens.has_next_token())
-                return nullptr;
-            return parsed;
-        }
-
-        if (!value.numeric_value.has_value())
-            return nullptr;
-
-        if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage)
-            return PercentageStyleValue::create(Percentage { *value.numeric_value });
-
-        if (value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
-            return nullptr;
-
-        auto length_unit = string_to_length_unit(value.source_or_unit);
-        if (!length_unit.has_value())
-            return nullptr;
-        return LengthStyleValue::create(Length { *value.numeric_value, length_unit.release_value() });
-    };
-
-    auto materialize_position_component = [&](RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<EdgeStyleValue const> {
-        RefPtr<StyleValue const> offset;
-        if (component.offset.has_value()) {
-            offset = materialize_length_percentage(*component.offset);
-            if (!offset)
-                return nullptr;
-        }
-        return EdgeStyleValue::create(materialize_position_edge(component.edge), offset);
-    };
-
-    auto const& rust_position = rust_style_value->positions[0];
-    auto x = materialize_position_component(rust_position.x);
-    auto y = materialize_position_component(rust_position.y);
-    if (!x || !y)
-        return nullptr;
-
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
     transaction.commit();
-    return PositionStyleValue::create(x.release_nonnull(), y.release_nonnull());
+    return static_ptr_cast<PositionStyleValue const>(value);
 }
 
 RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens)
