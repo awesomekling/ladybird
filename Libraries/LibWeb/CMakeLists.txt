@@ -1231,7 +1231,6 @@ set(GENERATED_SOURCES
     CSS/Keyword.cpp
     CSS/MathFunctions.cpp
     CSS/MediaFeatureID.cpp
-    CSS/Parser/GeneratedValueTypesParsing.cpp
     CSS/PropertyID.cpp
     CSS/PseudoClass.cpp
     CSS/PseudoElement.cpp
