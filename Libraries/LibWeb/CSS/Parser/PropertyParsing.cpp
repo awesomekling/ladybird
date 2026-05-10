@@ -29,6 +29,7 @@
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
@@ -52,11 +53,13 @@
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/LinearGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpacityValueStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RadialGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RadialSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
@@ -1738,20 +1741,60 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return ImageStyleValue::create(*typed_url);
             };
+            auto materialize_rust_gradient_from_component_values = [&](Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
+                if (source_component_values.is_empty())
+                    return nullptr;
+
+                auto stripped_component_values = remove_whitespace_component_values(source_component_values);
+                if (stripped_component_values.size() != 1 || !stripped_component_values[0].is_function())
+                    return nullptr;
+
+                auto function_name = stripped_component_values[0].function().name.bytes_as_string_view();
+                auto unprefixed_function_name = function_name;
+                if (unprefixed_function_name.starts_with("-webkit-"sv))
+                    unprefixed_function_name = unprefixed_function_name.substring_view(8);
+                if (unprefixed_function_name.starts_with("repeating-"sv))
+                    unprefixed_function_name = unprefixed_function_name.substring_view(10);
+
+                TokenStream gradient_tokens { source_component_values };
+                RefPtr<AbstractImageStyleValue const> gradient;
+                if (unprefixed_function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
+                    auto linear_gradient = parse_linear_gradient_function(gradient_tokens);
+                    if (linear_gradient)
+                        gradient = linear_gradient.release_nonnull();
+                } else if (unprefixed_function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
+                    auto radial_gradient = parse_radial_gradient_function(gradient_tokens);
+                    if (radial_gradient)
+                        gradient = radial_gradient.release_nonnull();
+                } else if (unprefixed_function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
+                    auto conic_gradient = parse_conic_gradient_function(gradient_tokens);
+                    if (conic_gradient)
+                        gradient = conic_gradient.release_nonnull();
+                } else {
+                    return nullptr;
+                }
+
+                gradient_tokens.discard_whitespace();
+                if (!gradient || gradient_tokens.has_next_token())
+                    return nullptr;
+                return gradient.release_nonnull();
+            };
             auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
                     return materialize_rust_url_image(typed_url);
                 case RustComponentValueParser::RustImageKind::Gradient:
-                case RustComponentValueParser::RustImageKind::ImageSet:
+                    return materialize_rust_gradient_from_component_values(source_component_values);
+                case RustComponentValueParser::RustImageKind::ImageSet: {
                     if (source_component_values.is_empty())
                         return nullptr;
-                    TokenStream image_tokens { source_component_values };
-                    auto image = parse_image_value(image_tokens);
-                    image_tokens.discard_whitespace();
-                    if (!image || image_tokens.has_next_token())
+                    TokenStream image_set_tokens { source_component_values };
+                    auto image_set = parse_image_set_function(image_set_tokens);
+                    image_set_tokens.discard_whitespace();
+                    if (!image_set || image_set_tokens.has_next_token())
                         return nullptr;
-                    return image.release_nonnull();
+                    return image_set.release_nonnull();
+                }
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -1773,11 +1816,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (option.image_kind == RustComponentValueParser::RustImageKind::Url && option.image_url.has_value()) {
                         image = ImageStyleValue::create(*option.image_url);
                     } else if (!option.image_source_component_values.is_empty()) {
-                        TokenStream image_tokens { option.image_source_component_values };
-                        image = parse_image_value(image_tokens);
-                        image_tokens.discard_whitespace();
-                        if (!image || image_tokens.has_next_token())
-                            return nullptr;
+                        image = materialize_rust_image(option.image_kind, option.image_url, option.image_source_component_values);
                     } else {
                         return nullptr;
                     }
