@@ -843,49 +843,6 @@ static DescriptorMetadata::ValueType descriptor_value_type_from_ffi(FFI::CssDesc
     VERIFY_NOT_REACHED();
 }
 
-static FFI::CssDescriptorValueType descriptor_value_type_to_ffi(DescriptorMetadata::ValueType value_type)
-{
-    switch (value_type) {
-    case DescriptorMetadata::ValueType::CounterStyleSystem:
-        return FFI::CssDescriptorValueType::CounterStyleSystem;
-    case DescriptorMetadata::ValueType::CounterStyleAdditiveSymbols:
-        return FFI::CssDescriptorValueType::CounterStyleAdditiveSymbols;
-    case DescriptorMetadata::ValueType::CounterStyleName:
-        return FFI::CssDescriptorValueType::CounterStyleName;
-    case DescriptorMetadata::ValueType::CounterStyleNegative:
-        return FFI::CssDescriptorValueType::CounterStyleNegative;
-    case DescriptorMetadata::ValueType::CounterStylePad:
-        return FFI::CssDescriptorValueType::CounterStylePad;
-    case DescriptorMetadata::ValueType::CounterStyleRange:
-        return FFI::CssDescriptorValueType::CounterStyleRange;
-    case DescriptorMetadata::ValueType::CropOrCross:
-        return FFI::CssDescriptorValueType::CropOrCross;
-    case DescriptorMetadata::ValueType::FamilyName:
-        return FFI::CssDescriptorValueType::FamilyName;
-    case DescriptorMetadata::ValueType::FontSrcList:
-        return FFI::CssDescriptorValueType::FontSrcList;
-    case DescriptorMetadata::ValueType::FontWeightAbsolutePair:
-        return FFI::CssDescriptorValueType::FontWeightAbsolutePair;
-    case DescriptorMetadata::ValueType::Length:
-        return FFI::CssDescriptorValueType::Length;
-    case DescriptorMetadata::ValueType::OptionalDeclarationValue:
-        return FFI::CssDescriptorValueType::OptionalDeclarationValue;
-    case DescriptorMetadata::ValueType::PageSize:
-        return FFI::CssDescriptorValueType::PageSize;
-    case DescriptorMetadata::ValueType::PositivePercentage:
-        return FFI::CssDescriptorValueType::PositivePercentage;
-    case DescriptorMetadata::ValueType::String:
-        return FFI::CssDescriptorValueType::String;
-    case DescriptorMetadata::ValueType::Symbol:
-        return FFI::CssDescriptorValueType::Symbol;
-    case DescriptorMetadata::ValueType::Symbols:
-        return FFI::CssDescriptorValueType::Symbols;
-    case DescriptorMetadata::ValueType::UnicodeRangeTokens:
-        return FFI::CssDescriptorValueType::UnicodeRangeTokens;
-    }
-    VERIFY_NOT_REACHED();
-}
-
 bool RustComponentValueParser::at_rule_supports_descriptor(AtRuleID at_rule_id, DescriptorID descriptor_id)
 {
     return FFI::rust_css_at_rule_supports_descriptor(
@@ -923,42 +880,6 @@ DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rul
         });
     VERIFY(parsed);
     return metadata;
-}
-
-Optional<RustComponentValueParser::DescriptorSyntax> RustComponentValueParser::parse_descriptor_syntax(AtRuleID at_rule_id, DescriptorID descriptor_id, StringView input, StringView encoding)
-{
-    Optional<DescriptorSyntax> descriptor_syntax;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_descriptor_syntax(
-        static_cast<u8>(to_underlying(at_rule_id)),
-        static_cast<u8>(to_underlying(descriptor_id)),
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &descriptor_syntax,
-        [](void* raw_descriptor_syntax, FFI::CssDescriptorSyntaxKind kind, u16 property_id, FFI::CssDescriptorValueType value_type, u8 const* value_ptr, size_t value_len) {
-            auto& descriptor_syntax = *static_cast<Optional<DescriptorSyntax>*>(raw_descriptor_syntax);
-            switch (kind) {
-            case FFI::CssDescriptorSyntaxKind::Keyword: {
-                auto keyword = keyword_from_string({ value_ptr, value_len });
-                if (!keyword.has_value())
-                    return;
-                descriptor_syntax = DescriptorSyntax { .syntax = keyword.release_value() };
-                return;
-            }
-            case FFI::CssDescriptorSyntaxKind::Property:
-                descriptor_syntax = DescriptorSyntax { .syntax = static_cast<PropertyID>(property_id) };
-                return;
-            case FFI::CssDescriptorSyntaxKind::ValueType:
-                descriptor_syntax = DescriptorSyntax { .syntax = descriptor_value_type_from_ffi(value_type) };
-                return;
-            }
-        });
-
-    if (!parsed || !descriptor_syntax.has_value())
-        return {};
-    return descriptor_syntax;
 }
 
 static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType);
@@ -1098,111 +1019,6 @@ Optional<RustComponentValueParser::DescriptorValue> RustComponentValueParser::pa
         return {};
 
     return descriptor_value;
-}
-
-Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::parse_descriptor_result(DescriptorMetadata::ValueType value_type, StringView input, StringView encoding)
-{
-    Optional<DescriptorResult> result;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_descriptor_result(
-        descriptor_value_type_to_ffi(value_type),
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &result,
-        [](void* raw_result, FFI::CssDescriptorResultKind kind) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            result = DescriptorResult { .kind = kind };
-        },
-        [](void* raw_result, FFI::CssNonnegativeIntegerSymbolPairOrder order, u8 const* source_ptr, size_t source_len, bool is_string, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u8 page_size_keyword, u8 page_size_orientation) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            result->items.append(DescriptorResultItem {
-                .order = order,
-                .source = string_from_ffi_bytes(source_ptr, source_len),
-                .is_string = is_string,
-                .primitive_kind = primitive_kind,
-                .has_numeric_value = has_numeric_value,
-                .numeric_value = numeric_value,
-                .page_size_keyword = page_size_keyword,
-                .page_size_orientation = page_size_orientation,
-            });
-        },
-        [](void* raw_result, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            result->items.last().calculation_node_events.append(RustCalculationNodeEvent {
-                .kind = kind,
-                .primitive_kind = primitive_kind,
-                .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
-                .child_count = child_count,
-                .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
-            });
-        },
-        [](void* raw_result, FFI::CssFontSourceKind kind, u8 const* family_name_ptr, size_t family_name_len, bool family_name_is_string) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            auto& item = result->items.last();
-            item.font_source_kind = kind;
-            if (kind == FFI::CssFontSourceKind::Local) {
-                item.font_source_family_name = FamilyName {
-                    .name = fly_string_from_ffi_bytes(family_name_ptr, family_name_len),
-                    .is_string = family_name_is_string,
-                };
-            }
-        },
-        [](void* raw_result, FFI::CssUrlFunction const* rust_url_function) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            auto& item = result->items.last();
-            item.url_function_type = url_function_type_from_rust(rust_url_function->function_type);
-            item.url = string_from_ffi_bytes(rust_url_function->url_ptr, rust_url_function->url_len);
-        },
-        [](void* raw_result, FFI::CssUrlModifier const* rust_modifier) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            auto& item = result->items.last();
-            switch (rust_modifier->kind) {
-            case FFI::CssUrlModifierKind::CrossOrigin:
-                item.request_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(rust_modifier->cross_origin_value)));
-                break;
-            case FFI::CssUrlModifierKind::Integrity:
-                item.request_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(rust_modifier->integrity_ptr, rust_modifier->integrity_len)));
-                break;
-            case FFI::CssUrlModifierKind::ReferrerPolicy:
-                item.request_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(rust_modifier->referrer_policy_value)));
-                break;
-            }
-        },
-        [](void* raw_result, u8 const* format_ptr, size_t format_len) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            result->items.last().font_source_format = fly_string_from_ffi_bytes(format_ptr, format_len);
-        },
-        [](void* raw_result, FFI::CssFontTech rust_font_tech) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            VERIFY(!result->items.is_empty());
-            result->items.last().font_source_tech.append(font_tech_from_rust(rust_font_tech));
-        },
-        [](void* raw_result, FFI::CssUnicodeRange const* rust_unicode_range) {
-            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
-            VERIFY(result.has_value());
-            result->items.append(DescriptorResultItem {
-                .unicode_range = unicode_range_from_rust(*rust_unicode_range),
-            });
-        });
-
-    if (!parsed || !result.has_value())
-        return {};
-
-    return result;
 }
 
 Optional<PropertyID> RustComponentValueParser::property_accepting_type(ReadonlySpan<PropertyID> property_ids, ValueType value_type)

@@ -1159,7 +1159,6 @@ public:
     static bool property_accepts_keyword(PropertyID, Keyword);
     static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
     static DescriptorMetadata descriptor_metadata(AtRuleID, DescriptorID);
-    static Optional<DescriptorSyntax> parse_descriptor_syntax(AtRuleID, DescriptorID, StringView input, StringView encoding);
     static Optional<DescriptorValue> parse_descriptor(AtRuleID, DescriptorID, StringView input, StringView encoding);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
@@ -1205,7 +1204,6 @@ public:
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);
-    static Optional<DescriptorResult> parse_descriptor_result(DescriptorMetadata::ValueType, StringView input, StringView encoding);
     static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
