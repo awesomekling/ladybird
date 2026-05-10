@@ -2407,35 +2407,46 @@ RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& 
     auto transaction = tokens.begin_transaction();
 
     auto serialized_ratio = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    auto ratio = RustComponentValueParser::parse_ratio_prefix(serialized_ratio.bytes_as_string_view(), "utf-8"sv);
-    if (ratio.kind == FFI::CssRatioValueKind::Invalid)
+    PropertyID property_id = PropertyID::AspectRatio;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_ratio.bytes_as_string_view());
+    if (!rust_style_value.has_value()
+        || rust_style_value->kind != FFI::CssStyleValueKind::AspectRatio
+        || rust_style_value->aspect_ratio_has_auto
+        || !rust_style_value->aspect_ratio_numerator.has_value())
         return nullptr;
 
-    tokens.discard_whitespace();
+    auto materialize_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_number_value(value_tokens, non_negative_range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
+                return nullptr;
+            return parsed;
+        }
 
-    auto numerator = parse_number_value(tokens, non_negative_range);
+        if (!value.numeric_value.has_value()
+            || value.primitive_kind != FFI::CssPrimitiveValueKind::Number
+            || *value.numeric_value < 0)
+            return nullptr;
+
+        return NumberStyleValue::create(*value.numeric_value);
+    };
+
+    auto numerator = materialize_nested_non_negative_number(*rust_style_value->aspect_ratio_numerator);
     if (!numerator)
         return nullptr;
 
-    tokens.discard_whitespace();
+    auto denominator = rust_style_value->aspect_ratio_denominator.has_value()
+        ? materialize_nested_non_negative_number(*rust_style_value->aspect_ratio_denominator)
+        : NumberStyleValue::create(1);
+    if (!denominator)
+        return nullptr;
 
-    if (ratio.has_denominator) {
-        if (!tokens.next_token().is(Token::Type::Delim) || tokens.next_token().token().delim() != '/')
-            return nullptr;
+    while (tokens.has_next_token())
         tokens.discard_a_token();
-        tokens.discard_whitespace();
-
-        auto denominator = parse_number_value(tokens, non_negative_range);
-        if (!denominator)
-            return nullptr;
-
-        transaction.commit();
-        return RatioStyleValue::create(numerator.release_nonnull(), denominator.release_nonnull());
-    }
-
     transaction.commit();
-    // The second <number> is optional, defaulting to 1.
-    return RatioStyleValue::create(numerator.release_nonnull(), NumberStyleValue::create(1));
+    return RatioStyleValue::create(numerator.release_nonnull(), denominator.release_nonnull());
 }
 
 RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentValue>& tokens)
