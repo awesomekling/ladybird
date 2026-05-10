@@ -6820,7 +6820,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     } else if (first_is_one_of(*rust_style_value->value_type, ValueType::Integer, ValueType::Number, ValueType::Angle, ValueType::AnglePercentage, ValueType::Flex, ValueType::Frequency, ValueType::FrequencyPercentage, ValueType::Length, ValueType::LengthPercentage, ValueType::Resolution, ValueType::Time, ValueType::TimePercentage, ValueType::Percentage, ValueType::OpacityValue)) {
                         maybe_parsed_value = parse_rust_numeric_value();
                     } else {
-                        maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens);
+                        maybe_parsed_value = parse_value(*rust_style_value->value_type, tokens, source);
                     }
 
                     if (maybe_parsed_value) {

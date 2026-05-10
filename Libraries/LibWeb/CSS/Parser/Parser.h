@@ -316,16 +316,16 @@ private:
     RefPtr<StyleValue const> parse_counter_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     Optional<FlyString> parse_counter_style_name(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_ratio_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_ratio_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StringStyleValue const> parse_string_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     enum class AllowImageSet {
         No,
         Yes,
     };
-    RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&);
-    RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, AllowImageSet);
-    RefPtr<ImageSetStyleValue const> parse_image_set_function(TokenStream<ComponentValue>&);
+    RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, AllowImageSet, Optional<StringView> original_source_text = {});
+    RefPtr<ImageSetStyleValue const> parse_image_set_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_paint_value(TokenStream<ComponentValue>&);
     enum class PositionParsingMode {
         Normal,
@@ -370,8 +370,8 @@ private:
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
 #define __ENUMERATE_GENERATED_CSS_VALUE_TYPE(value_type_name, name_title, name_string) \
     RefPtr<StyleValue const> parse_##value_type_name##_value(TokenStream<ComponentValue>& tokens);
