@@ -2206,36 +2206,6 @@ RefPtr<StyleValue const> Parser::parse_counter_value(TokenStream<ComponentValue>
     VERIFY_NOT_REACHED();
 }
 
-// https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
-Optional<FlyString> Parser::parse_counter_style_name(TokenStream<ComponentValue>& tokens)
-{
-    // <counter-style-name> is a <custom-ident> that is not an ASCII case-insensitive match for none.
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    auto const& component_value = tokens.next_token();
-    auto original_source_text = component_value.original_source_text();
-    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
-
-    auto counter_style_name = RustComponentValueParser::parse_a_counter_style_name(source.bytes_as_string_view(), "utf-8"sv);
-    if (!counter_style_name.has_value())
-        return {};
-    tokens.discard_a_token();
-
-    // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
-    // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
-    // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
-    // @counter-style rule, and in the counter() functions.
-
-    // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
-    auto const& keyword = keyword_from_string(counter_style_name.value());
-    if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
-        counter_style_name = counter_style_name->to_ascii_lowercase();
-
-    transaction.commit();
-    return counter_style_name;
-}
-
 // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style
 RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
@@ -2375,13 +2345,13 @@ RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<Comp
 }
 
 // https://svgwg.org/svg2-draft/painting.html#SpecifyingPaint
-RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // `<paint> = none | <color> | <url> [none | <color>]? | context-fill | context-stroke`
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
-    auto value = parse_css_value_for_property(PropertyID::Fill, tokens);
+    auto value = parse_css_value_for_property(PropertyID::Fill, tokens, original_source_text);
     if (!value)
         return nullptr;
 
@@ -3109,24 +3079,6 @@ RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<
 
     transaction.commit();
     return TupleStyleValue::create(tuple);
-}
-
-RefPtr<StyleValue const> Parser::parse_basic_shape_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    auto& component_value = tokens.consume_a_token();
-    auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
-    auto value = parse_css_value_for_property(PropertyID::ShapeOutside, component_value_tokens);
-    component_value_tokens.discard_whitespace();
-    if (!value || component_value_tokens.has_next_token() || !value->is_basic_shape())
-        return nullptr;
-
-    transaction.commit();
-    return value;
 }
 
 RefPtr<StyleValue const> Parser::parse_builtin_value(TokenStream<ComponentValue>& tokens)
@@ -4374,7 +4326,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::OpentypeTag:
         return parse_opentype_tag_value(tokens, original_source_text);
     case ValueType::Paint:
-        return parse_paint_value(tokens);
+        return parse_paint_value(tokens, original_source_text);
     case ValueType::Percentage:
         return parse_percentage_value(tokens, infinite_range, original_source_text);
     case ValueType::Position:

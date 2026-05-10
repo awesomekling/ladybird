@@ -272,7 +272,6 @@ private:
 
     RefPtr<BorderRadiusRectStyleValue const> parse_border_radius_rect_value(TokenStream<ComponentValue>&);
     RefPtr<RadialSizeStyleValue const> parse_radial_size(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_basic_shape_value(TokenStream<ComponentValue>&);
 
     Optional<Vector<ColorStopListElement>> parse_color_stop_list(TokenStream<ComponentValue>& tokens, auto parse_position);
     Optional<Vector<ColorStopListElement>> parse_linear_color_stop_list(TokenStream<ComponentValue>&);
@@ -314,7 +313,6 @@ private:
     RefPtr<StyleValue const> parse_light_dark_color_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_color_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_counter_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    Optional<FlyString> parse_counter_style_name(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_ratio_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
@@ -326,7 +324,7 @@ private:
     RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<AbstractImageStyleValue const> parse_image_value(TokenStream<ComponentValue>&, AllowImageSet, Optional<StringView> original_source_text = {});
     RefPtr<ImageSetStyleValue const> parse_image_set_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_paint_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_paint_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     enum class PositionParsingMode {
         Normal,
         BackgroundPosition,
