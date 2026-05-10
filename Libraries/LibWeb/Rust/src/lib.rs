@@ -1641,41 +1641,6 @@ pub unsafe extern "C" fn rust_css_parse_view_function(input: *const u8, input_le
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_rect(input: *const u8, input_len: usize) -> CssRectValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssRectValueKind::Invalid;
-            };
-
-            css_parser::parse_rect_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_ratio_prefix(input: *const u8, input_len: usize) -> CssRatioValue {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssRatioValue {
-                    kind: CssRatioValueKind::Invalid,
-                    has_denominator: false,
-                    numerator: 0.0,
-                    denominator: 0.0,
-                };
-            };
-
-            css_parser::parse_ratio_value_prefix(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_primitive_value_prefix(
     input: *const u8,
     input_len: usize,
@@ -1709,84 +1674,6 @@ pub unsafe extern "C" fn rust_css_parse_primitive_value(
             };
 
             css_parser::parse_primitive_value(input, value_type, options)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_easing(input: *const u8, input_len: usize) -> CssEasingValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssEasingValueKind::Invalid;
-            };
-
-            css_parser::parse_easing_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_transform_function(
-    input: *const u8,
-    input_len: usize,
-) -> CssTransformFunctionValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssTransformFunctionValueKind::Invalid;
-            };
-
-            css_parser::parse_transform_function_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_fit_content(input: *const u8, input_len: usize) -> CssFitContentValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssFitContentValueKind::Invalid;
-            };
-
-            css_parser::parse_fit_content_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_basic_shape(input: *const u8, input_len: usize) -> CssBasicShapeValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssBasicShapeValueKind::Invalid;
-            };
-
-            css_parser::parse_basic_shape_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_grid_auto_flow(input: *const u8, input_len: usize) -> CssGridAutoFlowValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssGridAutoFlowValueKind::Invalid;
-            };
-
-            css_parser::parse_grid_auto_flow_value(input)
         })
     }
 }
@@ -1848,95 +1735,6 @@ pub unsafe extern "C" fn rust_css_parse_grid_track_size_list(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_position(
-    input: *const u8,
-    input_len: usize,
-    allow_background_position_3_value_syntax: bool,
-) -> CssPositionValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssPositionValueKind::Invalid;
-            };
-
-            css_parser::parse_position_value(input, allow_background_position_3_value_syntax)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_background_position_longhand(
-    input: *const u8,
-    input_len: usize,
-    is_horizontal: bool,
-) -> CssPositionValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssPositionValueKind::Invalid;
-            };
-
-            css_parser::parse_background_position_longhand_value(input, is_horizontal)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_background_size(
-    input: *const u8,
-    input_len: usize,
-) -> CssBackgroundSizeValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssBackgroundSizeValueKind::Invalid;
-            };
-
-            css_parser::parse_background_size_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_repeat_style(input: *const u8, input_len: usize) -> CssRepeatStyleValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssRepeatStyleValueKind::Invalid;
-            };
-
-            css_parser::parse_repeat_style_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_color_function(
-    input: *const u8,
-    input_len: usize,
-) -> CssColorFunctionValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssColorFunctionValueKind::Invalid;
-            };
-
-            css_parser::parse_color_function_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_color(
     input: *const u8,
     input_len: usize,
@@ -1982,21 +1780,6 @@ pub unsafe extern "C" fn rust_css_parse_simple_color(
             css_parser::parse_simple_color_value(input, allow_quirky_color, |kind, red, green, blue, alpha, name| {
                 callback(ctx, kind, red, green, blue, alpha, name.as_ptr(), name.len());
             })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_image_set(input: *const u8, input_len: usize) -> CssImageSetValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssImageSetValueKind::Invalid;
-            };
-
-            css_parser::parse_image_set_value(input)
         })
     }
 }
@@ -3083,35 +2866,6 @@ pub unsafe extern "C" fn rust_css_parse_container_rule_prelude(
                     query_ptr,
                     query_len,
                 );
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_family_name(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    family_name_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        family_name_ptr: *const u8,
-        family_name_len: usize,
-        is_string: bool,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_a_family_name(input, |family_name, is_string| {
-                family_name_callback(ctx, family_name.as_ptr(), family_name.len(), is_string);
             })
         })
     }

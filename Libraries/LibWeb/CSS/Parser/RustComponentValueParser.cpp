@@ -6052,26 +6052,6 @@ RustComponentValueParser::ViewFunction RustComponentValueParser::parse_view_func
     };
 }
 
-FFI::CssRectValueKind RustComponentValueParser::parse_rect(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_rect(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssRatioValue RustComponentValueParser::parse_ratio_prefix(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_ratio_prefix(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
 FFI::CssPrimitiveValueKind RustComponentValueParser::parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType value_type, FFI::CssPrimitiveValueOptions options)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
@@ -6094,108 +6074,6 @@ FFI::CssPrimitiveValueKind RustComponentValueParser::parse_primitive_value(Strin
         filtered_input_bytes.size(),
         value_type,
         options);
-}
-
-FFI::CssEasingValueKind RustComponentValueParser::parse_easing(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_easing(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssTransformFunctionValueKind RustComponentValueParser::parse_transform_function(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_transform_function(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssFitContentValueKind RustComponentValueParser::parse_fit_content(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_fit_content(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssBasicShapeValueKind RustComponentValueParser::parse_basic_shape(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_basic_shape(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssGridAutoFlowValueKind RustComponentValueParser::parse_grid_auto_flow(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_grid_auto_flow(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssPositionValueKind RustComponentValueParser::parse_position(StringView input, StringView encoding, bool allow_background_position_3_value_syntax)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_position(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        allow_background_position_3_value_syntax);
-}
-
-FFI::CssPositionValueKind RustComponentValueParser::parse_background_position_longhand(StringView input, StringView encoding, bool is_horizontal)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_background_position_longhand(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        is_horizontal);
-}
-
-FFI::CssBackgroundSizeValueKind RustComponentValueParser::parse_background_size(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_background_size(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssRepeatStyleValueKind RustComponentValueParser::parse_repeat_style(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_repeat_style(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-FFI::CssColorFunctionValueKind RustComponentValueParser::parse_color_function(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_color_function(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
 }
 
 FFI::CssColorValueKind RustComponentValueParser::parse_color(StringView input, StringView encoding, bool allow_quirky_color)
@@ -6233,40 +6111,6 @@ Optional<RustComponentValueParser::SimpleColor> RustComponentValueParser::parse_
         });
 
     return color;
-}
-
-FFI::CssImageSetValueKind RustComponentValueParser::parse_image_set(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_image_set(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-}
-
-Optional<RustComponentValueParser::FamilyName> RustComponentValueParser::parse_a_family_name(StringView input, StringView encoding)
-{
-    Optional<FamilyName> family_name;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_family_name(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &family_name,
-        [](void* raw_family_name, u8 const* name_ptr, size_t name_len, bool is_string) {
-            auto& family_name = *static_cast<Optional<FamilyName>*>(raw_family_name);
-            family_name = FamilyName {
-                .name = fly_string_from_ffi_bytes(name_ptr, name_len),
-                .is_string = is_string,
-            };
-        });
-
-    if (!parsed)
-        return {};
-
-    return family_name;
 }
 
 Optional<RustComponentValueParser::NamespaceRulePrelude> RustComponentValueParser::parse_a_namespace_rule_prelude(StringView input, StringView encoding)
