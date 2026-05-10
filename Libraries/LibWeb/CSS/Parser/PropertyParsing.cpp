@@ -87,11 +87,6 @@
 
 namespace Web::CSS::Parser {
 
-static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
-{
-    return property_id != PropertyID::All && property_id != PropertyID::Custom;
-}
-
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
 {
     switch (font_style) {
@@ -6837,9 +6832,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
     }
 
-    if (property_ids.size() == 1 && property_uses_rust_owned_whole_grammar(property_ids[0]))
-        return OptionalNone {};
-
     return OptionalNone {};
 }
 
@@ -6901,20 +6893,12 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     if (!tokens.has_next_token())
         return ParseError::SyntaxError;
 
-    if (property_uses_rust_owned_whole_grammar(property_id))
+    if (property_id != PropertyID::All)
         return parse_all_as(tokens, [this, property_id, rust_parse_source_text_view](auto& tokens) { return parse_css_value_for_property(property_id, tokens, rust_parse_source_text_view); });
 
-    // Special-case property handling
-    switch (property_id) {
-    case PropertyID::All:
-        // NOTE: The 'all' property, unlike some other shorthands, doesn't support directly listing sub-property
-        //       values, only the CSS-wide keywords - this is handled above, and thus, if we have gotten to here, there
-        //       is an invalid value which is a syntax error.
-        return ParseError::SyntaxError;
-    default:
-        break;
-    }
-
+    // NOTE: The 'all' property, unlike some other shorthands, doesn't support directly listing sub-property
+    //       values, only the CSS-wide keywords - this is handled above, and thus, if we have gotten to here, there
+    //       is an invalid value which is a syntax error.
     return ParseError::SyntaxError;
 }
 
