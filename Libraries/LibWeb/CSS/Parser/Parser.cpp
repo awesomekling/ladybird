@@ -174,9 +174,9 @@ RefPtr<Supports> Parser::parse_as_supports()
 RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringView encoding)
 {
     m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(input, encoding, [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(input, encoding, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
         TokenStream<ComponentValue> token_stream { component_values };
-        return parse_supports_feature(token_stream);
+        return parse_supports_feature(token_stream, move(supports_feature));
     });
     m_rule_context.take_last();
     if (maybe_condition)
@@ -192,12 +192,12 @@ AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTes
     };
 }
 
-AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> Parser::rust_supports_feature_parser()
+AK::Function<OwnPtr<BooleanExpression>(Optional<RustComponentValueParser::SupportsFeature>&&, Vector<ComponentValue>&&)> Parser::rust_supports_feature_parser()
 {
-    return [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+    return [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
         m_rule_context.append(RuleContext::SupportsCondition);
         TokenStream<ComponentValue> token_stream { component_values };
-        auto expression = parse_supports_feature(token_stream);
+        auto expression = parse_supports_feature(token_stream, move(supports_feature));
         m_rule_context.take_last();
         return expression;
     };
@@ -253,9 +253,9 @@ OwnPtr<BooleanExpression> Parser::materialize_rust_supports_condition(Vector<Com
     auto serialized_supports_condition = serialize_component_values_for_reparsing(component_values);
 
     m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(serialized_supports_condition.bytes_as_string_view(), "utf-8"sv, [this](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(serialized_supports_condition.bytes_as_string_view(), "utf-8"sv, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
         TokenStream<ComponentValue> token_stream { component_values };
-        return parse_supports_feature(token_stream);
+        return parse_supports_feature(token_stream, move(supports_feature));
     });
     m_rule_context.take_last();
 
@@ -263,7 +263,7 @@ OwnPtr<BooleanExpression> Parser::materialize_rust_supports_condition(Vector<Com
 }
 
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
-OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentValue>& tokens)
+OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentValue>& tokens, Optional<RustComponentValueParser::SupportsFeature>&& feature)
 {
     // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
     //                    | <supports-font-format-fn> | <supports-env-fn>
@@ -271,19 +271,13 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
-    auto feature_start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_feature = serialize_component_values_for_reparsing(tokens.tokens_since(feature_start));
-    auto feature = RustComponentValueParser::parse_a_supports_feature(serialized_feature.bytes_as_string_view(), "utf-8"sv);
     if (!feature.has_value())
         return {};
 
-    auto component_values = Vector<ComponentValue> { tokens.tokens_since(feature_start) };
-    TokenStream<ComponentValue> feature_tokens { component_values };
-    feature_tokens.discard_whitespace();
-    auto const& first_token = feature_tokens.consume_a_token();
+    auto const& first_token = tokens.consume_a_token();
+    tokens.discard_whitespace();
+    if (tokens.has_next_token())
+        return {};
 
     switch (feature->kind) {
     case FFI::CssSupportsFeatureKind::Declaration: {

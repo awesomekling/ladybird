@@ -6,6 +6,8 @@
 
 use super::*;
 
+fn ignore_supports_feature(_: CssSupportsFeatureKind, _: Option<&str>) {}
+
 pub(super) fn parse_rust_owned_math_function(
     value_type: PropertyValueType,
     component_values: &[ComponentValue],
@@ -331,13 +333,15 @@ where
     consumed_input.len()
 }
 
-pub(crate) fn parse_a_supports_condition<E, C>(
+pub(crate) fn parse_a_supports_condition<E, C, S>(
     filtered_input: &[u8],
     mut event_callback: E,
     mut component_value_callback: C,
+    mut supports_feature_callback: S,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     C: FnMut(CssComponentValue),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     parser.rule_context.push(RuleContext::SupportsCondition);
@@ -365,6 +369,7 @@ pub(crate) fn parse_a_supports_condition<E, C>(
         &mut component_value_callback,
         &mut |_| {},
         &mut |_| {},
+        &mut supports_feature_callback,
     );
 }
 
@@ -428,6 +433,7 @@ where
         &mut component_value_callback,
         &mut |_| {},
         &mut |_| {},
+        &mut ignore_supports_feature,
     );
 }
 
@@ -11194,6 +11200,7 @@ pub(crate) fn parse_a_media_condition<E, M, V, C>(
         .boolean_expression
         .take()
         .expect("parsed expression must be present");
+    let mut supports_feature_callback = ignore_supports_feature;
     emit_boolean_expression(
         &boolean_expression,
         filtered_input_string,
@@ -11201,6 +11208,7 @@ pub(crate) fn parse_a_media_condition<E, M, V, C>(
         &mut component_value_callback,
         &mut media_feature_callback,
         &mut media_feature_value_callback,
+        &mut supports_feature_callback,
     );
 }
 
@@ -11249,6 +11257,7 @@ pub(crate) fn parse_a_media_test<E, M, V, C>(
         .boolean_expression
         .take()
         .expect("parsed expression must be present");
+    let mut supports_feature_callback = ignore_supports_feature;
     emit_boolean_expression(
         &boolean_expression,
         filtered_input_string,
@@ -11256,6 +11265,7 @@ pub(crate) fn parse_a_media_test<E, M, V, C>(
         &mut component_value_callback,
         &mut media_feature_callback,
         &mut media_feature_value_callback,
+        &mut supports_feature_callback,
     );
 }
 
@@ -11392,6 +11402,7 @@ pub(super) fn emit_media_query_syntax<Q, E, M, V, C>(
                 media_type_len: media_type.as_ref().map_or(0, String::len),
             });
             if let Some(condition) = condition {
+                let mut supports_feature_callback = ignore_supports_feature;
                 emit_boolean_expression(
                     &condition,
                     filtered_input_string,
@@ -11399,6 +11410,7 @@ pub(super) fn emit_media_query_syntax<Q, E, M, V, C>(
                     component_value_callback,
                     media_feature_callback,
                     media_feature_value_callback,
+                    &mut supports_feature_callback,
                 );
             }
         }
@@ -11495,11 +11507,13 @@ pub(crate) fn parse_a_declaration_with_context<D, C>(
     }
 }
 
-pub(crate) fn parse_a_rule<Q, E, B, M, V, C>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
+    mut supports_feature_callback: S,
     mut media_feature_callback: M,
     mut media_feature_value_callback: V,
     mut component_value_callback: C,
@@ -11507,6 +11521,7 @@ pub(crate) fn parse_a_rule<Q, E, B, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11523,17 +11538,20 @@ pub(crate) fn parse_a_rule<Q, E, B, M, V, C>(
         &mut event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
+        &mut supports_feature_callback,
         &mut media_feature_callback,
         &mut media_feature_value_callback,
         &mut component_value_callback,
     );
 }
 
-pub(crate) fn parse_a_blocks_contents<Q, E, B, M, V, C>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
+    mut supports_feature_callback: S,
     mut media_feature_callback: M,
     mut media_feature_value_callback: V,
     mut component_value_callback: C,
@@ -11541,6 +11559,7 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11555,6 +11574,7 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, M, V, C>(
         &mut event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
+        &mut supports_feature_callback,
         &mut media_feature_callback,
         &mut media_feature_value_callback,
         &mut component_value_callback,
@@ -11562,12 +11582,13 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, M, V, C>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, M, V, C>(
+pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
     filtered_input: &[u8],
     rule_context: &[CssRuleContext],
     mut event_callback: E,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
+    mut supports_feature_callback: S,
     mut media_feature_callback: M,
     mut media_feature_value_callback: V,
     mut component_value_callback: C,
@@ -11575,6 +11596,7 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11588,17 +11610,20 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, M, V, C>(
         &mut event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
+        &mut supports_feature_callback,
         &mut media_feature_callback,
         &mut media_feature_value_callback,
         &mut component_value_callback,
     );
 }
 
-pub(crate) fn parse_a_stylesheets_contents<Q, E, B, M, V, C>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
+    mut supports_feature_callback: S,
     mut media_feature_callback: M,
     mut media_feature_value_callback: V,
     mut component_value_callback: C,
@@ -11606,6 +11631,7 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11620,6 +11646,7 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, M, V, C>(
             &mut event_callback,
             &mut media_query_callback,
             &mut boolean_expression_event_callback,
+            &mut supports_feature_callback,
             &mut media_feature_callback,
             &mut media_feature_value_callback,
             &mut component_value_callback,

@@ -1200,8 +1200,8 @@ impl ComponentValueParser {
         // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
         //                    | <supports-font-format-fn> | <supports-env-fn>
         //                    | <supports-decl>
-        let (_, component_value) = self.parse_supports_feature_syntax()?;
-        Some(BooleanExpressionTest::SupportsFeature(vec![component_value]))
+        let (feature, component_value) = self.parse_supports_feature_syntax()?;
+        Some(BooleanExpressionTest::SupportsFeature(feature, vec![component_value]))
     }
 
     // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature

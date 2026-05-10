@@ -347,6 +347,7 @@ pub(super) fn emit_rule<E, C>(
     event_callback: &mut E,
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
+    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>),
     media_feature_callback: &mut impl FnMut(CssMediaFeature),
     media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
@@ -629,6 +630,7 @@ pub(super) fn emit_rule<E, C>(
                                 component_value_callback,
                                 media_feature_callback,
                                 media_feature_value_callback,
+                                supports_feature_callback,
                             );
                             event_callback(CssRuleEvent::new(CssRuleEventKind::ImportSupportsConditionEnd));
                         } else if let Some(declaration) = parse_declaration_from_component_values(&function.value) {
@@ -716,6 +718,7 @@ pub(super) fn emit_rule<E, C>(
                                 component_value_callback,
                                 media_feature_callback,
                                 media_feature_value_callback,
+                                supports_feature_callback,
                             );
                             event_callback(CssRuleEvent::new(CssRuleEventKind::ContainerConditionEnd));
                         }
@@ -757,6 +760,7 @@ pub(super) fn emit_rule<E, C>(
                         component_value_callback,
                         media_feature_callback,
                         media_feature_value_callback,
+                        supports_feature_callback,
                     );
                     event_callback(CssRuleEvent::new(CssRuleEventKind::SupportsConditionEnd));
                 }
@@ -773,6 +777,7 @@ pub(super) fn emit_rule<E, C>(
                 event_callback,
                 media_query_callback,
                 boolean_expression_event_callback,
+                supports_feature_callback,
                 media_feature_callback,
                 media_feature_value_callback,
                 component_value_callback,
@@ -815,6 +820,7 @@ pub(super) fn emit_rule<E, C>(
                 event_callback,
                 media_query_callback,
                 boolean_expression_event_callback,
+                supports_feature_callback,
                 media_feature_callback,
                 media_feature_value_callback,
                 component_value_callback,
@@ -831,6 +837,7 @@ pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
     event_callback: &mut E,
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
+    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>),
     media_feature_callback: &mut impl FnMut(CssMediaFeature),
     media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
@@ -848,6 +855,7 @@ pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
                     event_callback,
                     media_query_callback,
                     boolean_expression_event_callback,
+                    supports_feature_callback,
                     media_feature_callback,
                     media_feature_value_callback,
                     component_value_callback,
@@ -1018,18 +1026,20 @@ pub(super) fn emit_component_value_list<E, C>(
     event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
 }
 
-pub(super) fn emit_boolean_expression<E, C, M, V>(
+pub(super) fn emit_boolean_expression<E, C, M, V, S>(
     expression: &BooleanExpression,
     filtered_input: &str,
     event_callback: &mut E,
     component_value_callback: &mut C,
     media_feature_callback: &mut M,
     media_feature_value_callback: &mut V,
+    supports_feature_callback: &mut S,
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     C: FnMut(CssComponentValue),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>),
 {
     match expression {
         BooleanExpression::Not(child) => {
@@ -1041,6 +1051,7 @@ pub(super) fn emit_boolean_expression<E, C, M, V>(
                 component_value_callback,
                 media_feature_callback,
                 media_feature_value_callback,
+                supports_feature_callback,
             );
             event_callback(CssBooleanExpressionEventKind::NotEnd);
         }
@@ -1053,6 +1064,7 @@ pub(super) fn emit_boolean_expression<E, C, M, V>(
                 component_value_callback,
                 media_feature_callback,
                 media_feature_value_callback,
+                supports_feature_callback,
             );
             event_callback(CssBooleanExpressionEventKind::ParensEnd);
         }
@@ -1066,6 +1078,7 @@ pub(super) fn emit_boolean_expression<E, C, M, V>(
                     component_value_callback,
                     media_feature_callback,
                     media_feature_value_callback,
+                    supports_feature_callback,
                 );
             }
             event_callback(CssBooleanExpressionEventKind::AndEnd);
@@ -1080,12 +1093,14 @@ pub(super) fn emit_boolean_expression<E, C, M, V>(
                     component_value_callback,
                     media_feature_callback,
                     media_feature_value_callback,
+                    supports_feature_callback,
                 );
             }
             event_callback(CssBooleanExpressionEventKind::OrEnd);
         }
-        BooleanExpression::Test(BooleanExpressionTest::SupportsFeature(component_values)) => {
+        BooleanExpression::Test(BooleanExpressionTest::SupportsFeature(feature, component_values)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
+            emit_supports_feature(feature, supports_feature_callback);
             for component_value in component_values {
                 emit_component_value(component_value, filtered_input, component_value_callback);
             }
@@ -1110,6 +1125,19 @@ pub(super) fn emit_boolean_expression<E, C, M, V>(
             emit_component_value(component_value, filtered_input, component_value_callback);
             event_callback(CssBooleanExpressionEventKind::GeneralEnclosedEnd);
         }
+    }
+}
+
+fn emit_supports_feature<C>(feature: &SupportsFeature, callback: &mut C)
+where
+    C: FnMut(CssSupportsFeatureKind, Option<&str>),
+{
+    match feature {
+        SupportsFeature::Declaration => callback(CssSupportsFeatureKind::Declaration, None),
+        SupportsFeature::Selector => callback(CssSupportsFeatureKind::Selector, None),
+        SupportsFeature::FontTech(name) => callback(CssSupportsFeatureKind::FontTech, Some(name)),
+        SupportsFeature::FontFormat(name) => callback(CssSupportsFeatureKind::FontFormat, Some(name)),
+        SupportsFeature::Env(name) => callback(CssSupportsFeatureKind::Env, Some(name)),
     }
 }
 

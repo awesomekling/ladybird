@@ -1135,8 +1135,7 @@ public:
     static Optional<SyntaxComponent> parse_css_type(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding);
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
-    static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
-    static Optional<SupportsFeature> parse_a_supports_feature(StringView input, StringView encoding);
+    static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_test);
     static OwnPtr<BooleanExpression> parse_an_if_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_test);
     static OwnPtr<BooleanExpression> parse_a_container_condition(StringView input, StringView encoding);
     static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
@@ -1165,10 +1164,10 @@ public:
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
-    static Optional<Rule> parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
-    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
-    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
-    static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
+    static Optional<Rule> parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
+    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
+    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
+    static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
 
 private:
     using BooleanExpressionEventCallback = void (*)(void*, FFI::CssBooleanExpressionEventKind);
@@ -1176,8 +1175,9 @@ private:
     using MediaFeatureCallback = void (*)(void*, FFI::CssMediaFeature const*);
     using MediaFeatureValueCallback = void (*)(void*, FFI::CssMediaFeatureValue const*);
     using ComponentValueCallback = void (*)(void*, FFI::CssComponentValue const*);
-    using BooleanExpressionTestParser = AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Vector<ComponentValue>&&)>;
-    using RustBooleanExpressionParser = AK::Function<void(u8 const*, size_t, void*, BooleanExpressionEventCallback, MediaFeatureCallback, MediaFeatureValueCallback, ComponentValueCallback)>;
+    using SupportsFeatureCallback = void (*)(void*, FFI::CssSupportsFeatureKind, u8 const*, size_t);
+    using BooleanExpressionTestParser = AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Optional<SupportsFeature>&&, Vector<ComponentValue>&&)>;
+    using RustBooleanExpressionParser = AK::Function<void(u8 const*, size_t, void*, BooleanExpressionEventCallback, SupportsFeatureCallback, MediaFeatureCallback, MediaFeatureValueCallback, ComponentValueCallback)>;
 
     static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression);
 };

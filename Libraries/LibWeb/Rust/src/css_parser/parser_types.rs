@@ -494,7 +494,7 @@ pub(crate) enum BooleanExpression {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BooleanExpressionTest {
-    SupportsFeature(Vec<ComponentValue>),
+    SupportsFeature(SupportsFeature, Vec<ComponentValue>),
     MediaFeature(Box<MediaFeatureTest>),
     IfTest(Vec<ComponentValue>),
 }

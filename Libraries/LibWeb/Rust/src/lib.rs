@@ -953,6 +953,12 @@ pub unsafe extern "C" fn rust_css_parse_supports_condition(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -969,38 +975,12 @@ pub unsafe extern "C" fn rust_css_parse_supports_condition(
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);
                 },
+                |kind, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len);
+                },
             );
         });
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_supports_feature(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    feature_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        kind: CssSupportsFeatureKind,
-        name_ptr: *const u8,
-        name_len: usize,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_a_supports_feature(input, |kind, name| {
-                let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
-                feature_callback(ctx, kind, name_ptr, name_len);
-            })
-        })
     }
 }
 
@@ -2029,6 +2009,12 @@ pub unsafe extern "C" fn rust_css_parse_rule(
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
     media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
     boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
     media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
     media_feature_value_callback: unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -2052,6 +2038,10 @@ pub unsafe extern "C" fn rust_css_parse_rule(
                 },
                 |event| {
                     boolean_expression_event_callback(ctx, event);
+                },
+                |kind, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len);
                 },
                 |media_feature| {
                     media_feature_callback(ctx, &raw const media_feature);
@@ -2079,6 +2069,12 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
     media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
     boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
     media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
     media_feature_value_callback: unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -2102,6 +2098,10 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
                 },
                 |event| {
                     boolean_expression_event_callback(ctx, event);
+                },
+                |kind, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len);
                 },
                 |media_feature| {
                     media_feature_callback(ctx, &raw const media_feature);
@@ -2132,6 +2132,12 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
     media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
     boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
     media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
     media_feature_value_callback: unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -2160,6 +2166,10 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
                 |event| {
                     boolean_expression_event_callback(ctx, event);
                 },
+                |kind, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len);
+                },
                 |media_feature| {
                     media_feature_callback(ctx, &raw const media_feature);
                 },
@@ -2186,6 +2196,12 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
     media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
     boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
     media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
     media_feature_value_callback: unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -2209,6 +2225,10 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
                 },
                 |event| {
                     boolean_expression_event_callback(ctx, event);
+                },
+                |kind, name| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len);
                 },
                 |media_feature| {
                     media_feature_callback(ctx, &raw const media_feature);
