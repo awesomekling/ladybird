@@ -65,6 +65,11 @@ public:
         bool matches { false };
     };
 
+    struct SizesAttributeItem {
+        Vector<ComponentValue> source_size_value;
+        OwnPtr<BooleanExpression> media_condition;
+    };
+
     struct PropertyKeyword {
         PropertyID property_id;
         Keyword keyword;
@@ -1133,6 +1138,7 @@ public:
     static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_test);
     static OwnPtr<BooleanExpression> parse_an_if_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_test);
     static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
+    static Vector<SizesAttributeItem> parse_sizes_attribute(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Vector<MediaQuerySyntax> parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Optional<PageSelectorList> parse_a_page_selector_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);

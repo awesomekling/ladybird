@@ -1762,6 +1762,16 @@ pub struct CssRuleEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
+pub enum CssSizesAttributeEventKind {
+    ItemStart,
+    ItemEnd,
+    MediaConditionEnd,
+    SourceSizeValueStart,
+    SourceSizeValueEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub enum CssBooleanExpressionEventKind {
     Invalid,
     NotStart,

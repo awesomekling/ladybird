@@ -4909,6 +4909,113 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(Stri
         });
 }
 
+struct SizesAttributeBuilder {
+    Vector<RustComponentValueParser::SizesAttributeItem> items;
+    Optional<RustComponentValueParser::SizesAttributeItem> current_item;
+    Optional<RustBooleanExpressionBuilder> media_condition_builder;
+    ComponentValueBuilder source_size_value_builder;
+    AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> parse_test;
+    bool in_source_size_value { false };
+
+    void finish_media_condition()
+    {
+        if (!current_item.has_value() || !media_condition_builder.has_value())
+            return;
+
+        auto& builder = *media_condition_builder;
+        if (!builder.invalid && builder.stack.is_empty() && builder.root)
+            current_item->media_condition = builder.root.release_nonnull();
+        else
+            current_item = {};
+        media_condition_builder = {};
+    }
+
+    void finish_source_size_value()
+    {
+        if (!current_item.has_value())
+            return;
+        if (!source_size_value_builder.stack.is_empty() || source_size_value_builder.root_values.is_empty()) {
+            current_item = {};
+            return;
+        }
+        current_item->source_size_value = move(source_size_value_builder.root_values);
+    }
+};
+
+Vector<RustComponentValueParser::SizesAttributeItem> RustComponentValueParser::parse_sizes_attribute(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
+{
+    SizesAttributeBuilder builder {
+        .parse_test = move(parse_test),
+    };
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    FFI::rust_css_parse_sizes_attribute(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &builder,
+        [](void* raw_builder, FFI::CssSizesAttributeEventKind event) {
+            auto& builder = *static_cast<SizesAttributeBuilder*>(raw_builder);
+            switch (event) {
+            case FFI::CssSizesAttributeEventKind::ItemStart:
+                builder.current_item = SizesAttributeItem {};
+                builder.media_condition_builder = RustBooleanExpressionBuilder {
+                    .parse_test = [&builder](Optional<MediaFeatureTest>&& media_feature, Optional<SupportsFeature>&&, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+                        if (!media_feature.has_value())
+                            return nullptr;
+                        return builder.parse_test(media_feature.release_value());
+                    },
+                    .result_for_general_enclosed = MatchResult::Unknown,
+                };
+                builder.source_size_value_builder = {};
+                builder.in_source_size_value = false;
+                break;
+            case FFI::CssSizesAttributeEventKind::MediaConditionEnd:
+                builder.finish_media_condition();
+                break;
+            case FFI::CssSizesAttributeEventKind::SourceSizeValueStart:
+                builder.source_size_value_builder = {};
+                builder.in_source_size_value = true;
+                break;
+            case FFI::CssSizesAttributeEventKind::SourceSizeValueEnd:
+                builder.in_source_size_value = false;
+                builder.finish_source_size_value();
+                break;
+            case FFI::CssSizesAttributeEventKind::ItemEnd:
+                builder.media_condition_builder = {};
+                if (builder.current_item.has_value() && !builder.current_item->source_size_value.is_empty())
+                    builder.items.append(builder.current_item.release_value());
+                break;
+            }
+        },
+        [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
+            auto& builder = *static_cast<SizesAttributeBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            process_boolean_expression_event(*builder.media_condition_builder, event);
+        },
+        [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
+            auto& builder = *static_cast<SizesAttributeBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            set_boolean_expression_media_feature(*builder.media_condition_builder, media_feature);
+        },
+        [](void* raw_builder, FFI::CssMediaFeatureValue const* media_feature_value) {
+            auto& builder = *static_cast<SizesAttributeBuilder*>(raw_builder);
+            VERIFY(builder.media_condition_builder.has_value());
+            append_boolean_expression_media_feature_value(*builder.media_condition_builder, media_feature_value);
+        },
+        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
+            auto& builder = *static_cast<SizesAttributeBuilder*>(raw_builder);
+            if (builder.in_source_size_value) {
+                append_component_value_token(builder.source_size_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+                return;
+            }
+            VERIFY(builder.media_condition_builder.has_value());
+            append_component_value_token(builder.media_condition_builder->component_value_builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
+        });
+
+    return move(builder.items);
+}
+
 struct MediaQuerySyntaxBuilder {
     Vector<RustComponentValueParser::MediaQuerySyntax> media_queries;
     Optional<RustBooleanExpressionBuilder> media_condition_builder;

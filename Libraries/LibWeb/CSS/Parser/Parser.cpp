@@ -941,44 +941,25 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
     if (!element.has_attribute(HTML::AttributeNames::sizes))
         return LengthStyleValue::create(Length(100, LengthUnit::Vw));
 
-    // 1. Let unparsed sizes list be the result of parsing a comma-separated list of component values
-    //    from the value of element's sizes attribute (or the empty string, if the attribute is absent).
-    auto unparsed_sizes_list = RustComponentValueParser::parse_a_comma_separated_list_of_component_values(m_input, m_encoding);
-
     // 2. Let size be null.
     RefPtr<StyleValue const> size;
 
-    auto remove_all_consecutive_whitespace_tokens_from_the_end_of = [](auto& tokens) {
-        while (!tokens.is_empty() && tokens.last().is_token() && tokens.last().token().is(Token::Type::Whitespace))
-            tokens.take_last();
-    };
+    // 1. Let unparsed sizes list be the result of parsing a comma-separated list of component values
+    //    from the value of element's sizes attribute (or the empty string, if the attribute is absent).
+    auto sizes_attribute_items = RustComponentValueParser::parse_sizes_attribute(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 
     // 3. For each unparsed size in unparsed sizes list:
-    for (auto i = 0u; i < unparsed_sizes_list.size(); i++) {
-        auto& unparsed_size = unparsed_sizes_list[i];
-
-        // 1. Remove all consecutive <whitespace-token>s from the end of unparsed size.
-        //    If unparsed size is now empty, that is a parse error; continue.
-        remove_all_consecutive_whitespace_tokens_from_the_end_of(unparsed_size);
-        if (unparsed_size.is_empty()) {
-            log_parse_error();
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "sizes attribute"_fly_string,
-                .value_string = m_input,
-                .description = "Failed in step 3.1; all whitespace"_string,
-            });
-            continue;
-        }
-
+    for (auto& item : sizes_attribute_items) {
         // 2. If the last component value in unparsed size is a valid non-negative <source-size-value>,
         //    then set size to its value and remove the component value from unparsed size.
         //    Any CSS function other than the math functions is invalid.
         //    Otherwise, there is a parse error; continue.
-        auto last_value_stream = TokenStream<ComponentValue>::of_single_token(unparsed_size.last());
-        if (auto source_size_value = parse_source_size_value(last_value_stream)) {
+        auto last_value_stream = TokenStream<ComponentValue> { item.source_size_value };
+        if (auto source_size_value = parse_source_size_value(last_value_stream))
             size = source_size_value.release_nonnull();
-            unparsed_size.take_last();
-        } else {
+        else {
             log_parse_error();
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = "sizes attribute"_fly_string,
@@ -1004,18 +985,7 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
         // 4. Remove all consecutive <whitespace-token>s from the end of unparsed size.
         //    If unparsed size is now empty:
-        remove_all_consecutive_whitespace_tokens_from_the_end_of(unparsed_size);
-        if (unparsed_size.is_empty()) {
-            // 1. If this was not the last item in unparsed sizes list, that is a parse error.
-            if (i != unparsed_sizes_list.size() - 1) {
-                log_parse_error();
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "sizes attribute"_fly_string,
-                    .value_string = m_input,
-                    .description = MUST(String::formatted("Failed in step 3.4.1; is unparsed size #{}, count {}", i, unparsed_sizes_list.size())),
-                });
-            }
-
+        if (!item.media_condition) {
             // 2. If size is not auto, then return size. Otherwise, continue.
             if (!size->has_auto())
                 return size.release_nonnull();
@@ -1024,18 +994,11 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
         // 5. Parse the remaining component values in unparsed size as a <media-condition>.
         //    If it does not parse correctly, or it does parse correctly but the <media-condition> evaluates to false, continue.
-        auto serialized_media_condition = serialize_component_values_for_reparsing(unparsed_size);
-        auto media_condition = RustComponentValueParser::parse_a_media_condition(serialized_media_condition.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
-            return materialize_rust_media_feature_test(move(media_feature_test));
-        });
-        if (!media_condition)
-            continue;
-
         // https://drafts.csswg.org/mediaqueries-5/#evaluating
         // "If the result of any of the above productions is used in any
         // context that expects a two-valued boolean, 'unknown' must be
         // converted to 'false'."
-        if (m_document && !media_condition->evaluate_to_boolean(m_document))
+        if (m_document && !item.media_condition->evaluate_to_boolean(m_document))
             continue;
 
         // 5. If size is not auto, then return size. Otherwise, continue.

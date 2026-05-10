@@ -11159,6 +11159,137 @@ pub(crate) fn parse_a_media_condition<E, M, V, C>(
     );
 }
 
+fn source_size_value_is_valid(component_value: &ComponentValue) -> bool {
+    // https://html.spec.whatwg.org/multipage/images.html#valid-source-size-list
+    // A <source-size-value> is a CSS <length>, or the CSS keyword "auto".
+    if matches!(
+        component_value,
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Ident { value },
+            ..
+        }) if value.eq_ignore_ascii_case("auto")
+    ) {
+        return true;
+    }
+
+    // https://html.spec.whatwg.org/multipage/images.html#valid-source-size-list
+    // A <source-size-value> that is a <length> must not be negative,
+    // and must not use CSS functions other than the math functions.
+    match component_value {
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Dimension { number, unit, .. },
+            ..
+        }) => number.value() >= 0.0 && matches!(dimension_for_unit(unit), Some(DimensionType::Length)),
+        // https://drafts.csswg.org/css-values-4/#zero-value
+        // Values of 0 can be written without units, even if the value type doesn't allow "unitless zeroes".
+        ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Number { number },
+            ..
+        }) => number.value() == 0.0,
+        // AD-HOC: C++ still materializes and range-checks math functions here.
+        ComponentValue::Function(function) => function_can_represent_length(function),
+        _ => false,
+    }
+}
+
+pub(crate) fn parse_sizes_attribute<E, B, M, V, C>(
+    filtered_input: &[u8],
+    mut sizes_attribute_event_callback: E,
+    mut boolean_expression_event_callback: B,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) where
+    E: FnMut(CssSizesAttributeEventKind),
+    B: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
+    C: FnMut(CssComponentValue),
+{
+    let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
+
+    // https://html.spec.whatwg.org/multipage/images.html#parsing-a-sizes-attribute
+    // 1. Let unparsed sizes list be the result of parsing a comma-separated list of component values
+    //    from the value of element's sizes attribute (or the empty string, if the attribute is absent).
+    let unparsed_sizes_list = parser.parse_a_comma_separated_list_of_component_values();
+
+    // 3. For each unparsed size in unparsed sizes list:
+    for mut unparsed_size in unparsed_sizes_list {
+        // 1. Remove all consecutive <whitespace-token>s from the end of unparsed size.
+        //    If unparsed size is now empty, that is a parse error; continue.
+        while matches!(
+            unparsed_size.last(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            }))
+        ) {
+            unparsed_size.pop();
+        }
+        let Some(source_size_value) = unparsed_size.pop() else {
+            continue;
+        };
+
+        // 2. If the last component value in unparsed size is a valid non-negative <source-size-value>,
+        //    then set size to its value and remove the component value from unparsed size.
+        //    Any CSS function other than the math functions is invalid.
+        //    Otherwise, there is a parse error; continue.
+        if !source_size_value_is_valid(&source_size_value) {
+            continue;
+        }
+
+        // 4. Remove all consecutive <whitespace-token>s from the end of unparsed size.
+        while matches!(
+            unparsed_size.last(),
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Whitespace,
+                ..
+            }))
+        ) {
+            unparsed_size.pop();
+        }
+
+        let media_condition = if unparsed_size.is_empty() {
+            None
+        } else {
+            // 5. Parse the remaining component values in unparsed size as a <media-condition>.
+            let mut parser = ComponentValueParser::new(unparsed_size);
+            if parser
+                .parse_a_boolean_expression(BooleanExpressionTestKind::MediaFeature)
+                .is_none()
+                || parser.has_next_component_value()
+            {
+                continue;
+            }
+            Some(
+                parser
+                    .boolean_expression
+                    .take()
+                    .expect("parsed expression must be present"),
+            )
+        };
+
+        sizes_attribute_event_callback(CssSizesAttributeEventKind::ItemStart);
+        if let Some(media_condition) = media_condition {
+            let mut supports_feature_callback = ignore_supports_feature;
+            emit_boolean_expression(
+                &media_condition,
+                filtered_input_string,
+                &mut boolean_expression_event_callback,
+                &mut component_value_callback,
+                &mut media_feature_callback,
+                &mut media_feature_value_callback,
+                &mut supports_feature_callback,
+            );
+            sizes_attribute_event_callback(CssSizesAttributeEventKind::MediaConditionEnd);
+        }
+        sizes_attribute_event_callback(CssSizesAttributeEventKind::SourceSizeValueStart);
+        emit_component_value(&source_size_value, filtered_input_string, &mut component_value_callback);
+        sizes_attribute_event_callback(CssSizesAttributeEventKind::SourceSizeValueEnd);
+        sizes_attribute_event_callback(CssSizesAttributeEventKind::ItemEnd);
+    }
+}
+
 pub(crate) fn parse_a_media_test<E, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
