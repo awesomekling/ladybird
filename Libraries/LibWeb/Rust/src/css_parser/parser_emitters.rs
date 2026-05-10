@@ -1360,7 +1360,13 @@ pub(super) fn emit_component_value_list<E, C>(
     for component_value in component_values {
         emit_component_value(component_value, filtered_input, component_value_callback);
     }
-    event_callback(CssRuleEvent::new(CssRuleEventKind::PreludeEnd));
+    let source = serialize_component_values_for_reparsing(component_values, filtered_input).unwrap_or_default();
+    let (value_ptr, value_len) = string_parts(&source);
+    event_callback(CssRuleEvent {
+        value_ptr,
+        value_len,
+        ..CssRuleEvent::new(CssRuleEventKind::PreludeEnd)
+    });
 }
 
 pub(super) fn emit_boolean_expression<E, C, M, V, S>(

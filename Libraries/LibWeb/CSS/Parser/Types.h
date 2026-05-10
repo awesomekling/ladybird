@@ -75,6 +75,7 @@ struct RustFunctionPrelude {
 struct AtRule {
     FlyString name;
     Vector<ComponentValue> prelude;
+    String prelude_source;
     Vector<RuleOrListOfDeclarations> child_rules_and_lists_of_declarations;
     Optional<Vector<FlyString>> rust_layer_names;
     Optional<FlyString> rust_keyframes_name;
@@ -105,6 +106,7 @@ struct AtRule {
 // https://drafts.csswg.org/css-syntax/#qualified-rule
 struct QualifiedRule {
     Vector<ComponentValue> prelude;
+    String prelude_source;
     Vector<Declaration> declarations;
     Vector<RuleOrListOfDeclarations> child_rules;
     Optional<Vector<Percentage>> rust_keyframe_selectors;

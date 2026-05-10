@@ -225,7 +225,7 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     if (rule.is_block_rule) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Must be a statement, not a block."_string,
         });
         return {};
@@ -243,7 +243,7 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     if (!rule.rust_import_url.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Unable to parse prelude."_string,
         });
         return {};
@@ -272,7 +272,7 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
         if (!rule.rust_layer_names.has_value() || rule.rust_layer_names->size() != 1) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@layer"_fly_string,
-                .prelude = serialize_component_values_for_reparsing(rule.prelude),
+                .prelude = rule.prelude_source,
                 .description = "Not a valid layer name."_string,
             });
             return {};
@@ -300,7 +300,7 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
     if (!rule.rust_layer_names.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@layer"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Contains invalid layer name."_string,
         });
         return {};
@@ -338,7 +338,7 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
     if (!rule.rust_keyframes_name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@keyframes"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Invalid name."_string,
         });
         return {};
@@ -366,7 +366,7 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
         if (!qualified_rule.rust_keyframe_selectors.has_value()) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "keyframe"_fly_string,
-                .prelude = serialize_component_values_for_reparsing(qualified_rule.prelude),
+                .prelude = qualified_rule.prelude_source,
                 .description = "Invalid selector."_string,
             });
             return;
@@ -413,7 +413,7 @@ GC::Ptr<CSSNamespaceRule> Parser::convert_to_namespace_rule(AtRule const& rule)
     if (!rule.rust_namespace_uri.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@namespace"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Unable to parse prelude."_string,
         });
         return {};
@@ -502,7 +502,7 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
     if (!rule.rust_custom_property_name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@property"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Name must be an ident starting with '--'."_string,
         });
         return {};
@@ -670,7 +670,7 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
     if (!name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Missing counter style name."_string,
         });
         return nullptr;
@@ -690,7 +690,7 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
     if (CSSCounterStyleRule::matches_non_overridable_counter_style_name(name.value()) && m_is_ua_style_sheet != IsUAStyleSheet::Yes) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = serialize_component_values_for_reparsing(rule.prelude),
+            .prelude = rule.prelude_source,
             .description = "Non-overridable counter style name."_string,
         });
         return nullptr;

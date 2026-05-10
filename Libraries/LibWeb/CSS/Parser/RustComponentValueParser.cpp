@@ -5971,6 +5971,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
             .rule = Rule { AtRule {
                 .name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
                 .prelude = {},
+                .prelude_source = {},
                 .child_rules_and_lists_of_declarations = {},
                 .rust_layer_names = {},
                 .rust_keyframes_name = {},
@@ -6007,6 +6008,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
             .type = RuleEventBuilder::FrameType::QualifiedRule,
             .rule = Rule { QualifiedRule {
                 .prelude = {},
+                .prelude_source = {},
                 .declarations = {},
                 .child_rules = {},
                 .rust_keyframe_selectors = {},
@@ -6035,9 +6037,11 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         builder.stack.last().rule->visit(
             [&](AtRule& at_rule) {
                 at_rule.prelude = move(builder.component_value_builder.root_values);
+                at_rule.prelude_source = string_from_ffi_bytes(event.value_ptr, event.value_len);
             },
             [&](QualifiedRule& qualified_rule) {
                 qualified_rule.prelude = move(builder.component_value_builder.root_values);
+                qualified_rule.prelude_source = string_from_ffi_bytes(event.value_ptr, event.value_len);
             });
         builder.component_value_builder = {};
         break;
