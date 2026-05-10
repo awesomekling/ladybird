@@ -631,21 +631,26 @@ pub(super) fn emit_rule<E, C>(
                                 media_feature_value_callback,
                             );
                             event_callback(CssRuleEvent::new(CssRuleEventKind::ImportSupportsConditionEnd));
-                        } else {
-                            let supports_source =
+                        } else if let Some(declaration) = parse_declaration_from_component_values(&function.value) {
+                            let declaration_source =
                                 serialize_component_values_for_reparsing(&function.value, filtered_input)?;
-                            let (value_ptr, value_len) = string_parts(&supports_source);
+                            let (name_ptr, name_len) = string_parts(&declaration.name);
+                            let (value_ptr, value_len) = string_parts(&declaration_source);
                             event_callback(CssRuleEvent {
-                                kind: CssRuleEventKind::ImportSupportsDeclaration,
-                                name_ptr: std::ptr::null(),
-                                name_len: 0,
+                                kind: CssRuleEventKind::ImportSupportsDeclarationStart,
+                                name_ptr,
+                                name_len,
                                 value_ptr,
                                 value_len,
                                 keyframe_selector: 0.0,
                                 page_pseudo_class: CssPagePseudoClassKind::Left,
-                                important: false,
+                                important: declaration.important,
                                 is_block_rule: false,
                             });
+                            for value in &declaration.value {
+                                emit_component_value(value, filtered_input, component_value_callback);
+                            }
+                            event_callback(CssRuleEvent::new(CssRuleEventKind::ImportSupportsDeclarationEnd));
                         }
                         parser.index += 1;
                     }
@@ -882,6 +887,116 @@ pub(super) fn emit_declaration<E, C>(
         emit_component_value(value, filtered_input, component_value_callback);
     }
     event_callback(CssRuleEvent::new(CssRuleEventKind::DeclarationEnd));
+}
+
+fn parse_declaration_from_component_values(component_values: &[ComponentValue]) -> Option<Declaration> {
+    // https://drafts.csswg.org/css-syntax/#consume-declaration
+    // To consume a declaration from a token stream input, given an optional bool nested (default false):
+
+    let mut index = 0;
+    while component_values.get(index).is_some_and(is_whitespace_component_value) {
+        index += 1;
+    }
+
+    // Let decl be a new declaration, with an initially empty name and a value set to an empty list.
+    // 1. If the next token is an <ident-token>, consume a token from input and set decl's name to the token's value.
+    let Some(ComponentValue::PreservedToken(Token {
+        token_type: TokenType::Ident { value: name },
+        ..
+    })) = component_values.get(index)
+    else {
+        return None;
+    };
+    index += 1;
+
+    // 2. Discard whitespace from input.
+    while component_values.get(index).is_some_and(is_whitespace_component_value) {
+        index += 1;
+    }
+
+    // 3. If the next token is a <colon-token>, discard a token from input.
+    if !matches!(
+        component_values.get(index),
+        Some(ComponentValue::PreservedToken(Token {
+            token_type: TokenType::Colon,
+            ..
+        }))
+    ) {
+        return None;
+    }
+    index += 1;
+
+    // 4. Discard whitespace from input.
+    while component_values.get(index).is_some_and(is_whitespace_component_value) {
+        index += 1;
+    }
+
+    // 5. Consume a list of component values from input, with nested, and with <semicolon-token> as the stop token,
+    // and set decl's value to the result.
+    let mut declaration = Declaration {
+        name: name.clone(),
+        value: component_values[index..].to_vec(),
+        important: false,
+    };
+    if declaration.value.iter().any(|component_value| {
+        matches!(
+            component_value,
+            ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Semicolon,
+                ..
+            })
+        )
+    }) {
+        return None;
+    }
+
+    // 6. If the last two non-<whitespace-token>s in decl's value are a <delim-token> with the value "!"
+    // followed by an <ident-token> with a value that is an ASCII case-insensitive match for "important",
+    // remove them from decl's value and set decl's important flag.
+    if let Some(important_index) = declaration
+        .value
+        .iter()
+        .rposition(|value| is_ident_component_value(value, "important"))
+    {
+        let has_only_whitespace_after_important = declaration.value[important_index + 1..]
+            .iter()
+            .all(is_whitespace_component_value);
+        if has_only_whitespace_after_important
+            && let Some(bang_index) = declaration.value[..important_index]
+                .iter()
+                .rposition(is_bang_component_value)
+        {
+            let has_only_whitespace_between_bang_and_important = declaration.value[bang_index + 1..important_index]
+                .iter()
+                .all(is_whitespace_component_value);
+            if has_only_whitespace_between_bang_and_important {
+                declaration.value.remove(important_index);
+                declaration.value.remove(bang_index);
+                declaration.important = true;
+            }
+        }
+    }
+
+    // 7. While the last item in decl's value is a <whitespace-token>, remove that token.
+    while declaration.value.last().is_some_and(is_whitespace_component_value) {
+        declaration.value.pop();
+    }
+
+    // 8. If decl's name is a custom property name string, then set decl's original text to the segment
+    // of the original source text string corresponding to the tokens of decl's value.
+    if declaration.name.starts_with("--") {
+        if contains_an_unmatched_closing_token(&declaration.value) {
+            return None;
+        }
+    }
+    // Otherwise, if decl's value contains a top-level simple block with an associated token of <{-token>,
+    // and also contains any other non-<whitespace-token> value, return nothing.
+    else if contains_a_curly_block_and_non_whitespace(&declaration.value) {
+        return None;
+    }
+
+    // 9. If decl is valid in the current context, return it; otherwise return nothing.
+    Some(declaration)
 }
 
 pub(super) fn emit_component_value_list<E, C>(

@@ -5879,11 +5879,13 @@ struct RuleEventBuilder {
     Optional<RustBooleanExpressionBuilder> container_condition_builder;
     AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> parse_media_feature_test;
     AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature;
+    AK::Function<bool(Declaration const&)> supports_declaration_is_supported;
     Optional<FlyString> current_page_selector_name;
     Vector<PagePseudoClass> current_page_selector_pseudo_classes;
     Optional<URL::Type> current_import_url_type;
     Optional<String> current_import_url;
     Vector<RequestURLModifier> current_import_url_modifiers;
+    Optional<String> current_import_supports_declaration_source;
 
     RustBooleanExpressionBuilder* current_boolean_expression_builder()
     {
@@ -6073,7 +6075,6 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_import_url = {},
                 .rust_import_layer = {},
                 .rust_import_supports_condition = {},
-                .rust_import_supports_declaration = {},
                 .rust_import_media_query_list = {},
                 .is_block_rule = event.is_block_rule,
             } },
@@ -6318,12 +6319,36 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         at_rule.rust_import_layer = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
         break;
     }
-    case FFI::CssRuleEventKind::ImportSupportsDeclaration: {
+    case FFI::CssRuleEventKind::ImportSupportsDeclarationStart:
+        builder.component_value_builder = {};
+        builder.current_import_supports_declaration_source = string_from_ffi_bytes(event.value_ptr, event.value_len);
+        builder.stack.append({
+            .type = RuleEventBuilder::FrameType::Declaration,
+            .declaration = Declaration {
+                .name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
+                .value = {},
+                .important = event.important ? Important::Yes : Important::No,
+            },
+        });
+        break;
+    case FFI::CssRuleEventKind::ImportSupportsDeclarationEnd: {
+        VERIFY(!builder.stack.is_empty());
+        auto frame = builder.stack.take_last();
+        VERIFY(frame.type == RuleEventBuilder::FrameType::Declaration);
+        VERIFY(builder.component_value_builder.stack.is_empty());
+        VERIFY(builder.current_import_supports_declaration_source.has_value());
+        auto declaration = frame.declaration.release_value();
+        declaration.value = move(builder.component_value_builder.root_values);
+        set_original_value_text(declaration);
+        builder.component_value_builder = {};
+
+        auto supports = Supports::create(Supports::Declaration::create(builder.current_import_supports_declaration_source.release_value(), builder.supports_declaration_is_supported(declaration)));
+
         VERIFY(!builder.stack.is_empty());
         auto& rule = builder.stack.last().rule;
         VERIFY(rule.has_value());
         auto& at_rule = rule->get<AtRule>();
-        at_rule.rust_import_supports_declaration = string_from_ffi_bytes(event.value_ptr, event.value_len);
+        at_rule.rust_import_supports_condition = move(supports);
         break;
     }
     case FFI::CssRuleEventKind::ImportSupportsConditionEnd:
@@ -6465,6 +6490,7 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(!builder.current_import_url_type.has_value());
     VERIFY(!builder.current_import_url.has_value());
     VERIFY(builder.current_import_url_modifiers.is_empty());
+    VERIFY(!builder.current_import_supports_declaration_source.has_value());
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 
@@ -6509,11 +6535,12 @@ static FFI::CssRuleContext rule_context_to_ffi(RuleContext context)
     VERIFY_NOT_REACHED();
 }
 
-Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
+Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
         .parse_supports_feature = move(parse_supports_feature),
+        .supports_declaration_is_supported = move(supports_declaration_is_supported),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
@@ -6545,18 +6572,19 @@ Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringVi
     return builder.rule;
 }
 
-Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
+Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported)
 {
     Vector<RuleContext> rule_context;
     rule_context.append(RuleContext::Style);
-    return parse_a_blocks_contents(input, encoding, rule_context, move(parse_media_feature_test), move(parse_supports_feature));
+    return parse_a_blocks_contents(input, encoding, rule_context, move(parse_media_feature_test), move(parse_supports_feature), move(supports_declaration_is_supported));
 }
 
-Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
+Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
         .parse_supports_feature = move(parse_supports_feature),
+        .supports_declaration_is_supported = move(supports_declaration_is_supported),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();
@@ -6595,11 +6623,12 @@ Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_conten
     return move(builder.rules_or_lists_of_declarations);
 }
 
-Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature)
+Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported)
 {
     RuleEventBuilder builder {
         .parse_media_feature_test = move(parse_media_feature_test),
         .parse_supports_feature = move(parse_supports_feature),
+        .supports_declaration_is_supported = move(supports_declaration_is_supported),
     };
     auto filtered_input = decode_and_filter_code_points(input, encoding);
     auto filtered_input_bytes = filtered_input.bytes();

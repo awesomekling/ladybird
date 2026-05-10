@@ -262,13 +262,6 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
     // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
     //                      <media-query-list>?
     auto supports = rule.rust_import_supports_condition;
-    if (!supports && rule.rust_import_supports_declaration.has_value()) {
-        m_rule_context.append(RuleContext::SupportsCondition);
-        auto supports_declaration = RustComponentValueParser::parse_a_declaration(rule.rust_import_supports_declaration->bytes_as_string_view(), "utf-8"sv, m_rule_context);
-        m_rule_context.take_last();
-        if (supports_declaration.has_value())
-            supports = Supports::create(Supports::Declaration::create(rule.rust_import_supports_declaration.value(), convert_to_style_property(supports_declaration.release_value()).has_value()));
-    }
 
     auto media_query_list = rule.rust_import_media_query_list.value_or({});
 

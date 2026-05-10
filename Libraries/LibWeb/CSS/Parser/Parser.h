@@ -393,6 +393,7 @@ private:
 
     AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> rust_media_feature_test_parser();
     AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> rust_supports_feature_parser();
+    AK::Function<bool(Declaration const&)> rust_supports_declaration_parser();
 
     OwnPtr<BooleanExpression> materialize_rust_supports_condition(Vector<ComponentValue> const&);
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);

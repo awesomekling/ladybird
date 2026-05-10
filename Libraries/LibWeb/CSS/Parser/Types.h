@@ -57,7 +57,6 @@ struct AtRule {
     Optional<URL> rust_import_url;
     Optional<FlyString> rust_import_layer;
     RefPtr<Supports> rust_import_supports_condition;
-    Optional<String> rust_import_supports_declaration;
     Optional<Vector<NonnullRefPtr<MediaQuery>>> rust_import_media_query_list;
     bool is_block_rule { false };
 
