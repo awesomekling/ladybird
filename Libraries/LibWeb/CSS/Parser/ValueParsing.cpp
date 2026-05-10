@@ -1884,7 +1884,7 @@ RefPtr<StyleValue const> Parser::parse_light_dark_color_value(TokenStream<Compon
 }
 
 // https://www.w3.org/TR/css-color-4/#color-syntax
-RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     {
         auto transaction = tokens.begin_transaction();
@@ -1892,8 +1892,12 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
         tokens.discard_whitespace();
         if (tokens.has_next_token()) {
             tokens.discard_a_token();
-            auto serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto rust_color = RustComponentValueParser::parse_simple_color(serialized_color.bytes_as_string_view(), "utf-8"sv, context_allows_quirky_color());
+            Optional<String> serialized_color;
+            auto color_source = original_source_text.value_or_lazy_evaluated([&] {
+                serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                return serialized_color->bytes_as_string_view();
+            });
+            auto rust_color = RustComponentValueParser::parse_simple_color(color_source, "utf-8"sv, context_allows_quirky_color());
             if (rust_color.has_value()) {
                 switch (rust_color.value().kind) {
                 case FFI::CssParsedColorKind::Invalid:
@@ -1921,8 +1925,12 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
         if (!value)
             return nullptr;
 
-        auto serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        if (RustComponentValueParser::parse_color(serialized_color.bytes_as_string_view(), "utf-8"sv, allow_quirky_color) == FFI::CssColorValueKind::Invalid)
+        Optional<String> serialized_color;
+        auto color_source = original_source_text.value_or_lazy_evaluated([&] {
+            serialized_color = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            return serialized_color->bytes_as_string_view();
+        });
+        if (RustComponentValueParser::parse_color(color_source, "utf-8"sv, allow_quirky_color) == FFI::CssColorValueKind::Invalid)
             return nullptr;
 
         return value;
@@ -4201,7 +4209,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::BasicShape:
         return parse_rust_owned_property_value(PropertyID::ShapeOutside, [](StyleValue const& value) { return value.is_basic_shape(); });
     case ValueType::Color:
-        return parse_color_value(tokens);
+        return parse_color_value(tokens, original_source_text);
     case ValueType::CornerShape:
         return parse_rust_owned_property_value(PropertyID::CornerTopLeftShape, [](StyleValue const& value) { return value.is_keyword() || value.is_superellipse(); });
     case ValueType::Counter:
