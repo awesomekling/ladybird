@@ -438,6 +438,19 @@ pub(super) fn emit_rule<E, C>(
                     is_block_rule: false,
                 });
             }
+            if at_rule.name.eq_ignore_ascii_case("counter-style")
+                && let Some(name) = ComponentValueParser::new(at_rule.prelude.clone()).parse_a_counter_style_name()
+            {
+                let (name_ptr, name_len) = string_parts(&name);
+                event_callback(CssRuleEvent {
+                    kind: CssRuleEventKind::CounterStyleName,
+                    name_ptr,
+                    name_len,
+                    keyframe_selector: 0.0,
+                    important: false,
+                    is_block_rule: false,
+                });
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,

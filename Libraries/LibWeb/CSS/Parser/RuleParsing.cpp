@@ -709,12 +709,11 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
         return nullptr;
     }
 
-    auto serialized_counter_style_name = serialize_component_values_for_reparsing(rule.prelude);
-    auto name = RustComponentValueParser::parse_a_counter_style_name(serialized_counter_style_name.bytes_as_string_view(), "utf-8"sv);
+    auto name = rule.rust_counter_style_name;
     if (!name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = serialized_counter_style_name,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Missing counter style name."_string,
         });
         return nullptr;
@@ -734,7 +733,7 @@ GC::Ptr<CSSCounterStyleRule> Parser::convert_to_counter_style_rule(AtRule const&
     if (CSSCounterStyleRule::matches_non_overridable_counter_style_name(name.value()) && m_is_ua_style_sheet != IsUAStyleSheet::Yes) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@counter-style"_fly_string,
-            .prelude = serialized_counter_style_name,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Non-overridable counter style name."_string,
         });
         return nullptr;

@@ -1711,6 +1711,7 @@ pub enum CssRuleEventKind {
     NamespacePrefix,
     NamespaceUri,
     CustomPropertyName,
+    CounterStyleName,
 }
 
 #[repr(C)]

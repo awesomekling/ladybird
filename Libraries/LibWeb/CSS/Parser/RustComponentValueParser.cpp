@@ -6067,6 +6067,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_namespace_prefix = {},
                 .rust_namespace_uri = {},
                 .rust_custom_property_name = {},
+                .rust_counter_style_name = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6217,6 +6218,14 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         VERIFY(rule.has_value());
         auto& at_rule = rule->get<AtRule>();
         at_rule.rust_custom_property_name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
+        break;
+    }
+    case FFI::CssRuleEventKind::CounterStyleName: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_counter_style_name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
         break;
     }
     }

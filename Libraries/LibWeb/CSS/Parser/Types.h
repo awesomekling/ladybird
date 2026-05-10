@@ -39,6 +39,7 @@ struct AtRule {
     Optional<FlyString> rust_namespace_prefix;
     Optional<FlyString> rust_namespace_uri;
     Optional<FlyString> rust_custom_property_name;
+    Optional<FlyString> rust_counter_style_name;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;
