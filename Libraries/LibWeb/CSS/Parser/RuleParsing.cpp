@@ -357,12 +357,10 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
         return {};
     }
 
-    auto serialized_keyframes_name = serialize_component_values_for_reparsing(rule.prelude);
-    auto name = RustComponentValueParser::parse_a_keyframes_name(serialized_keyframes_name.bytes_as_string_view(), "utf-8"sv);
-    if (!name.has_value()) {
+    if (!rule.rust_keyframes_name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@keyframes"_fly_string,
-            .prelude = serialized_keyframes_name,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Invalid name."_string,
         });
         return {};
@@ -387,12 +385,10 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
             }
         }
 
-        auto serialized_keyframe_selector_list = serialize_component_values_for_reparsing(qualified_rule.prelude);
-        auto maybe_selectors = RustComponentValueParser::parse_a_keyframe_selector_list(serialized_keyframe_selector_list.bytes_as_string_view(), "utf-8"sv);
-        if (!maybe_selectors.has_value()) {
+        if (!qualified_rule.rust_keyframe_selectors.has_value()) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "keyframe"_fly_string,
-                .prelude = serialized_keyframe_selector_list,
+                .prelude = serialize_component_values_for_reparsing(qualified_rule.prelude),
                 .description = "Invalid selector."_string,
             });
             return;
@@ -403,13 +399,13 @@ GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
             extract_property(declaration, properties);
         });
         auto style = CSSStyleProperties::create(realm(), move(properties.properties), move(properties.custom_properties));
-        for (auto& selector : maybe_selectors.value()) {
+        for (auto& selector : qualified_rule.rust_keyframe_selectors.value()) {
             auto keyframe_rule = CSSKeyframeRule::create(realm(), selector, *style);
             keyframes.append(keyframe_rule);
         }
     });
 
-    return CSSKeyframesRule::create(realm(), name.release_value(), CSSRuleList::create(realm(), keyframes));
+    return CSSKeyframesRule::create(realm(), rule.rust_keyframes_name.value(), CSSRuleList::create(realm(), keyframes));
 }
 
 GC::Ptr<CSSNamespaceRule> Parser::convert_to_namespace_rule(AtRule const& rule)

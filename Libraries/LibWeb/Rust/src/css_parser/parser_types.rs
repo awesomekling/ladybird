@@ -1706,6 +1706,8 @@ pub enum CssRuleEventKind {
     DeclarationStart,
     DeclarationEnd,
     LayerName,
+    KeyframesName,
+    KeyframeSelector,
 }
 
 #[repr(C)]
@@ -1713,6 +1715,7 @@ pub struct CssRuleEvent {
     pub kind: CssRuleEventKind,
     pub name_ptr: *const u8,
     pub name_len: usize,
+    pub keyframe_selector: f64,
     pub important: bool,
     pub is_block_rule: bool,
 }

@@ -13,6 +13,7 @@
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/Parser/Token.h>
+#include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Forward.h>
 
@@ -34,6 +35,7 @@ struct AtRule {
     Vector<ComponentValue> prelude;
     Vector<RuleOrListOfDeclarations> child_rules_and_lists_of_declarations;
     Optional<Vector<FlyString>> rust_layer_names;
+    Optional<FlyString> rust_keyframes_name;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;
@@ -49,6 +51,7 @@ struct QualifiedRule {
     Vector<ComponentValue> prelude;
     Vector<Declaration> declarations;
     Vector<RuleOrListOfDeclarations> child_rules;
+    Optional<Vector<Percentage>> rust_keyframe_selectors;
 
     void for_each_as_declaration_list(FlyString const& rule_name, DeclarationVisitor&& visit) const;
 };

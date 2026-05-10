@@ -178,6 +178,7 @@ impl CssRuleEvent {
             kind,
             name_ptr: std::ptr::null(),
             name_len: 0,
+            keyframe_selector: 0.0,
             important: false,
             is_block_rule: false,
         }

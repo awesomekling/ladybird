@@ -1162,8 +1162,6 @@ public:
     static Optional<MediaQuerySyntax> parse_a_media_query(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Vector<MediaQuerySyntax> parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Optional<PageSelectorList> parse_a_page_selector_list(StringView input, StringView encoding);
-    static Optional<Vector<Percentage>> parse_a_keyframe_selector_list(StringView input, StringView encoding);
-    static Optional<FlyString> parse_a_keyframes_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_property_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);

@@ -356,6 +356,7 @@ pub(super) fn emit_rule<E, C>(
                 kind: CssRuleEventKind::AtRuleStart,
                 name_ptr,
                 name_len,
+                keyframe_selector: 0.0,
                 important: false,
                 is_block_rule: at_rule.is_block_rule,
             });
@@ -379,11 +380,25 @@ pub(super) fn emit_rule<E, C>(
                             kind: CssRuleEventKind::LayerName,
                             name_ptr,
                             name_len,
+                            keyframe_selector: 0.0,
                             important: false,
                             is_block_rule: false,
                         });
                     }
                 }
+            }
+            if at_rule.name.eq_ignore_ascii_case("keyframes")
+                && let Some(name) = ComponentValueParser::new(at_rule.prelude.clone()).parse_a_keyframes_name()
+            {
+                let (name_ptr, name_len) = string_parts(&name);
+                event_callback(CssRuleEvent {
+                    kind: CssRuleEventKind::KeyframesName,
+                    name_ptr,
+                    name_len,
+                    keyframe_selector: 0.0,
+                    important: false,
+                    is_block_rule: false,
+                });
             }
             emit_component_value_list(
                 &at_rule.prelude,
@@ -401,6 +416,20 @@ pub(super) fn emit_rule<E, C>(
         }
         Rule::QualifiedRule(qualified_rule) => {
             event_callback(CssRuleEvent::new(CssRuleEventKind::QualifiedRuleStart));
+            if let Some(selectors) =
+                ComponentValueParser::new(qualified_rule.prelude.clone()).parse_a_keyframe_selector_list()
+            {
+                for selector in selectors {
+                    event_callback(CssRuleEvent {
+                        kind: CssRuleEventKind::KeyframeSelector,
+                        name_ptr: std::ptr::null(),
+                        name_len: 0,
+                        keyframe_selector: selector,
+                        important: false,
+                        is_block_rule: false,
+                    });
+                }
+            }
             emit_component_value_list(
                 &qualified_rule.prelude,
                 filtered_input,
@@ -464,6 +493,7 @@ pub(super) fn emit_declaration<E, C>(
         kind: CssRuleEventKind::DeclarationStart,
         name_ptr,
         name_len,
+        keyframe_selector: 0.0,
         important: declaration.important,
         is_block_rule: false,
     });
