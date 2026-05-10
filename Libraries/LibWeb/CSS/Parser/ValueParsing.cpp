@@ -2108,54 +2108,6 @@ RefPtr<StyleValue const> Parser::parse_color_value(TokenStream<ComponentValue>& 
     return {};
 }
 
-// https://drafts.csswg.org/css-borders-4/#typedef-corner-shape-value
-RefPtr<StyleValue const> Parser::parse_corner_shape_value(TokenStream<ComponentValue>& tokens)
-{
-    // <corner-shape-value> = round | scoop | bevel | notch | square | squircle | <superellipse()>
-    auto transaction = tokens.begin_transaction();
-    auto serialized_corner_shape = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    PropertyID property_id = PropertyID::CornerTopLeftShape;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_corner_shape.bytes_as_string_view());
-    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::CornerShape)
-        return nullptr;
-
-    auto value = [&]() -> RefPtr<StyleValue const> {
-        if (rust_style_value->corner_shape_keyword.has_value())
-            return KeywordStyleValue::create(*rust_style_value->corner_shape_keyword);
-
-        if (rust_style_value->corner_shape_superellipse_parameter.has_value()) {
-            auto const& parameter = *rust_style_value->corner_shape_superellipse_parameter;
-            auto context_guard = push_temporary_value_parsing_context(FunctionContext { "superellipse"sv });
-            RefPtr<StyleValue const> parameter_value;
-            if (!parameter.source_component_values.is_empty()) {
-                TokenStream parameter_tokens { parameter.source_component_values };
-                parameter_value = parse_number_value(parameter_tokens, infinite_range);
-                parameter_tokens.discard_whitespace();
-                if (!parameter_value || parameter_tokens.has_next_token())
-                    return nullptr;
-            } else {
-                if (!parameter.numeric_value.has_value()
-                    || parameter.primitive_kind != FFI::CssPrimitiveValueKind::Number)
-                    return nullptr;
-                parameter_value = NumberStyleValue::create(*parameter.numeric_value);
-            }
-
-            if (!parameter_value)
-                return nullptr;
-            return SuperellipseStyleValue::create(parameter_value.release_nonnull());
-        }
-
-        return nullptr;
-    }();
-    if (!value)
-        return nullptr;
-
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-    transaction.commit();
-    return value;
-}
-
 static NonnullRefPtr<StyleValue const> materialize_rust_counter_style(Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style)
 {
     if (!maybe_counter_style.has_value())
@@ -2274,55 +2226,6 @@ RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<Component
     return counter_style;
 }
 
-// https://drafts.csswg.org/css-values-4/#ratios
-RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& tokens)
-{
-    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
-    auto transaction = tokens.begin_transaction();
-
-    auto serialized_ratio = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    PropertyID property_id = PropertyID::AspectRatio;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_ratio.bytes_as_string_view());
-    if (!rust_style_value.has_value()
-        || rust_style_value->kind != FFI::CssStyleValueKind::AspectRatio
-        || rust_style_value->aspect_ratio_has_auto
-        || !rust_style_value->aspect_ratio_numerator.has_value())
-        return nullptr;
-
-    auto materialize_nested_non_negative_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-        if (!value.source_component_values.is_empty()) {
-            TokenStream value_tokens { value.source_component_values };
-            auto parsed = parse_number_value(value_tokens, non_negative_range);
-            value_tokens.discard_whitespace();
-            if (!parsed || value_tokens.has_next_token())
-                return nullptr;
-            return parsed;
-        }
-
-        if (!value.numeric_value.has_value()
-            || value.primitive_kind != FFI::CssPrimitiveValueKind::Number
-            || *value.numeric_value < 0)
-            return nullptr;
-
-        return NumberStyleValue::create(*value.numeric_value);
-    };
-
-    auto numerator = materialize_nested_non_negative_number(*rust_style_value->aspect_ratio_numerator);
-    if (!numerator)
-        return nullptr;
-
-    auto denominator = rust_style_value->aspect_ratio_denominator.has_value()
-        ? materialize_nested_non_negative_number(*rust_style_value->aspect_ratio_denominator)
-        : NumberStyleValue::create(1);
-    if (!denominator)
-        return nullptr;
-
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-    transaction.commit();
-    return RatioStyleValue::create(numerator.release_nonnull(), denominator.release_nonnull());
-}
-
 RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentValue>& tokens)
 {
     auto start = tokens.current_index();
@@ -2339,6 +2242,19 @@ RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentV
     }
 
     return nullptr;
+}
+
+// https://drafts.csswg.org/css-values-4/#ratios
+RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& tokens)
+{
+    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
+    auto transaction = tokens.begin_transaction();
+    auto value = parse_css_value_for_property(PropertyID::AspectRatio, tokens);
+    if (!value || !value->is_ratio())
+        return nullptr;
+
+    transaction.commit();
+    return value;
 }
 
 RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<ComponentValue>& tokens)
@@ -2856,60 +2772,6 @@ RefPtr<RadialSizeStyleValue const> Parser::parse_radial_size(TokenStream<Compone
 
     transaction.commit();
     return RadialSizeStyleValue::create(values);
-}
-
-RefPtr<StyleValue const> Parser::parse_fit_content_value(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto serialized_fit_content = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    PropertyID property_id = PropertyID::Width;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_fit_content.bytes_as_string_view());
-    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::FitContent)
-        return nullptr;
-
-    RefPtr<StyleValue const> value;
-    switch (rust_style_value->fit_content_kind) {
-    case RustComponentValueParser::RustFitContentKind::Keyword:
-        value = KeywordStyleValue::create(Keyword::FitContent);
-        break;
-    case RustComponentValueParser::RustFitContentKind::Function: {
-        if (!rust_style_value->fit_content_argument.has_value())
-            return nullptr;
-
-        auto const& argument = *rust_style_value->fit_content_argument;
-        RefPtr<StyleValue const> argument_value;
-        if (!argument.source_component_values.is_empty()) {
-            TokenStream argument_tokens { argument.source_component_values };
-            argument_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range);
-            argument_tokens.discard_whitespace();
-            if (!argument_value || argument_tokens.has_next_token())
-                return nullptr;
-        } else if (argument.numeric_value.has_value()) {
-            if (argument.primitive_kind == FFI::CssPrimitiveValueKind::Percentage) {
-                argument_value = PercentageStyleValue::create(Percentage { *argument.numeric_value });
-            } else if (argument.primitive_kind == FFI::CssPrimitiveValueKind::Length) {
-                auto length_unit = string_to_length_unit(argument.source_or_unit);
-                if (!length_unit.has_value())
-                    return nullptr;
-                argument_value = LengthStyleValue::create(Length { *argument.numeric_value, length_unit.release_value() });
-            }
-        }
-
-        if (!argument_value)
-            return nullptr;
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { "fit-content"sv });
-        value = FunctionStyleValue::create("fit-content"_fly_string, argument_value.release_nonnull());
-        break;
-    }
-    }
-
-    if (!value)
-        return nullptr;
-
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-    transaction.commit();
-    return value;
 }
 
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
@@ -4400,7 +4262,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Color:
         return parse_color_value(tokens);
     case ValueType::CornerShape:
-        return parse_corner_shape_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::CornerTopLeftShape, [](StyleValue const& value) { return value.is_keyword() || value.is_superellipse(); });
     case ValueType::Counter:
         return parse_counter_value(tokens);
     case ValueType::CounterStyle:
@@ -4415,7 +4277,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FilterValueList:
         return parse_css_value_for_property(PropertyID::Filter, tokens);
     case ValueType::FitContent:
-        return parse_fit_content_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::Width, [](StyleValue const& value) { return (value.is_keyword() && value.to_keyword() == Keyword::FitContent) || (value.is_function() && value.as_function().name() == "fit-content"_fly_string); });
     case ValueType::Flex:
         return parse_flex_value(tokens, infinite_range);
     case ValueType::FontStyle:
