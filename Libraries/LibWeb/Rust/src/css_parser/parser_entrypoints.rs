@@ -11455,9 +11455,10 @@ pub(crate) fn parse_a_declaration_with_context<D, C>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
+pub(crate) fn parse_a_rule<Q, E, R, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut selector_event_callback: R,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
     mut supports_feature_callback: S,
@@ -11467,6 +11468,7 @@ pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
 ) where
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    R: FnMut(CssSelectorEvent),
     B: FnMut(CssBooleanExpressionEventKind),
     S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
@@ -11482,7 +11484,10 @@ pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
     emit_rule(
         &rule,
         filtered_input_string,
+        &mut Vec::new(),
+        false,
         &mut event_callback,
+        &mut selector_event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
         &mut supports_feature_callback,
@@ -11493,9 +11498,10 @@ pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
+pub(crate) fn parse_a_blocks_contents<Q, E, R, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut selector_event_callback: R,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
     mut supports_feature_callback: S,
@@ -11505,6 +11511,7 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
 ) where
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    R: FnMut(CssSelectorEvent),
     B: FnMut(CssBooleanExpressionEventKind),
     S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
@@ -11518,7 +11525,9 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
     emit_rule_or_list_of_declarations_list(
         &rules_or_lists_of_declarations,
         filtered_input_string,
+        &mut Vec::new(),
         &mut event_callback,
+        &mut selector_event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
         &mut supports_feature_callback,
@@ -11529,10 +11538,11 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
+pub(crate) fn parse_a_blocks_contents_with_context<Q, E, R, B, S, M, V, C>(
     filtered_input: &[u8],
     rule_context: &[CssRuleContext],
     mut event_callback: E,
+    mut selector_event_callback: R,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
     mut supports_feature_callback: S,
@@ -11542,6 +11552,7 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
 ) where
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    R: FnMut(CssSelectorEvent),
     B: FnMut(CssBooleanExpressionEventKind),
     S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
@@ -11554,7 +11565,9 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
     emit_rule_or_list_of_declarations_list(
         &rules_or_lists_of_declarations,
         filtered_input_string,
+        &mut Vec::new(),
         &mut event_callback,
+        &mut selector_event_callback,
         &mut media_query_callback,
         &mut boolean_expression_event_callback,
         &mut supports_feature_callback,
@@ -11565,9 +11578,10 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
+pub(crate) fn parse_a_stylesheets_contents<Q, E, R, B, S, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut selector_event_callback: R,
     mut media_query_callback: Q,
     mut boolean_expression_event_callback: B,
     mut supports_feature_callback: S,
@@ -11577,6 +11591,7 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
 ) where
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    R: FnMut(CssSelectorEvent),
     B: FnMut(CssBooleanExpressionEventKind),
     S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
@@ -11586,11 +11601,22 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let rules = parser.parse_a_stylesheets_contents();
     event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesStart));
+    let mut declared_namespaces = Vec::new();
+    let mut stylesheet_rule_order_state = StylesheetRuleOrderState::new();
     for rule in &rules {
+        let namespace_rule_is_valid = match rule {
+            Rule::AtRule(at_rule) if at_rule.name.eq_ignore_ascii_case("namespace") => {
+                stylesheet_rule_order_state.namespace_rule_is_valid()
+            }
+            _ => false,
+        };
         emit_rule(
             rule,
             filtered_input_string,
+            &mut declared_namespaces,
+            namespace_rule_is_valid,
             &mut event_callback,
+            &mut selector_event_callback,
             &mut media_query_callback,
             &mut boolean_expression_event_callback,
             &mut supports_feature_callback,
@@ -11598,6 +11624,7 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
             &mut media_feature_value_callback,
             &mut component_value_callback,
         );
+        stylesheet_rule_order_state.note_rule(rule);
     }
     event_callback(CssRuleEvent::new(CssRuleEventKind::ChildRulesEnd));
 }

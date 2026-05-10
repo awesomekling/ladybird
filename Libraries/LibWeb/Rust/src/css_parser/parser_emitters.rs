@@ -6,6 +6,62 @@
 
 use super::*;
 
+pub(super) struct StylesheetRuleOrderState {
+    import_rules_valid: bool,
+    namespace_rules_valid: bool,
+}
+
+impl StylesheetRuleOrderState {
+    pub(super) fn new() -> Self {
+        Self {
+            import_rules_valid: true,
+            namespace_rules_valid: true,
+        }
+    }
+
+    pub(super) fn namespace_rule_is_valid(&mut self) -> bool {
+        self.import_rules_valid = false;
+        self.namespace_rules_valid
+    }
+
+    pub(super) fn note_rule(&mut self, rule: &Rule) {
+        // "Any @import rules must precede all other valid at-rules and style rules in a style sheet
+        // (ignoring @charset and @layer statement rules) and must not have any other valid at-rules
+        // or style rules between it and previous @import rules, or else the @import rule is invalid."
+        // https://drafts.csswg.org/css-cascade-5/#at-import
+        //
+        // "Any @namespace rules must follow all @charset and @import rules and precede all other
+        // non-ignored at-rules and style rules in a style sheet.
+        // ...
+        // A syntactically invalid @namespace rule (whether malformed or misplaced) must be ignored."
+        // https://drafts.csswg.org/css-namespaces/#syntax
+        match rule {
+            Rule::AtRule(at_rule) => {
+                if at_rule.name.eq_ignore_ascii_case("layer") && !at_rule.is_block_rule {
+                    return;
+                }
+
+                if at_rule.name.eq_ignore_ascii_case("import") && self.import_rules_valid {
+                    return;
+                }
+
+                if at_rule.name.eq_ignore_ascii_case("namespace") {
+                    self.import_rules_valid = false;
+                    return;
+                }
+
+                if rule_context_type_for_at_rule(&at_rule.name) == RuleContext::Unknown {
+                    return;
+                }
+            }
+            Rule::QualifiedRule(_) => {}
+        }
+
+        self.import_rules_valid = false;
+        self.namespace_rules_valid = false;
+    }
+}
+
 pub(super) fn emit_component_value<F>(component_value: &ComponentValue, filtered_input: &str, callback: &mut F)
 where
     F: FnMut(CssComponentValue),
@@ -576,7 +632,10 @@ where
 pub(super) fn emit_rule<E, C>(
     rule: &Rule,
     filtered_input: &str,
+    declared_namespaces: &mut Vec<String>,
+    namespace_rule_is_valid: bool,
     event_callback: &mut E,
+    selector_event_callback: &mut impl FnMut(CssSelectorEvent),
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
     supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
@@ -665,6 +724,13 @@ pub(super) fn emit_rule<E, C>(
                         important: false,
                         is_block_rule: false,
                     });
+                    if namespace_rule_is_valid
+                        && !declared_namespaces
+                            .iter()
+                            .any(|declared_namespace| declared_namespace.eq_ignore_ascii_case(&prefix))
+                    {
+                        declared_namespaces.push(prefix);
+                    }
                 }
                 let (name_ptr, name_len) = string_parts(&namespace_uri);
                 event_callback(CssRuleEvent {
@@ -1016,7 +1082,9 @@ pub(super) fn emit_rule<E, C>(
             emit_rule_or_list_of_declarations_list(
                 &at_rule.child_rules_and_lists_of_declarations,
                 filtered_input,
+                declared_namespaces,
                 event_callback,
+                selector_event_callback,
                 media_query_callback,
                 boolean_expression_event_callback,
                 supports_feature_callback,
@@ -1028,6 +1096,26 @@ pub(super) fn emit_rule<E, C>(
         }
         Rule::QualifiedRule(qualified_rule) => {
             event_callback(CssRuleEvent::new(CssRuleEventKind::QualifiedRuleStart));
+            if let Some(selector_type) = qualified_rule.selector_type {
+                let selector_type = if selector_type == Nested::Yes {
+                    SelectorType::Relative
+                } else {
+                    SelectorType::Standalone
+                };
+                if let Some(selectors) = ComponentValueParser::with_declared_namespaces(
+                    qualified_rule.prelude.clone(),
+                    declared_namespaces.clone(),
+                )
+                .parse_a_selector_list(selector_type, SelectorParsingMode::Normal)
+                {
+                    emit_selector_list(
+                        &selectors,
+                        filtered_input,
+                        selector_event_callback,
+                        component_value_callback,
+                    );
+                }
+            }
             if let Some(selectors) =
                 ComponentValueParser::new(qualified_rule.prelude.clone()).parse_a_keyframe_selector_list()
             {
@@ -1059,7 +1147,9 @@ pub(super) fn emit_rule<E, C>(
             emit_rule_or_list_of_declarations_list(
                 &qualified_rule.child_rules,
                 filtered_input,
+                declared_namespaces,
                 event_callback,
+                selector_event_callback,
                 media_query_callback,
                 boolean_expression_event_callback,
                 supports_feature_callback,
@@ -1076,7 +1166,9 @@ pub(super) fn emit_rule<E, C>(
 pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
     rules_or_lists_of_declarations: &[RuleOrListOfDeclarations],
     filtered_input: &str,
+    declared_namespaces: &mut Vec<String>,
     event_callback: &mut E,
+    selector_event_callback: &mut impl FnMut(CssSelectorEvent),
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
     supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
@@ -1094,7 +1186,10 @@ pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
                 emit_rule(
                     rule,
                     filtered_input,
+                    declared_namespaces,
+                    false,
                     event_callback,
+                    selector_event_callback,
                     media_query_callback,
                     boolean_expression_event_callback,
                     supports_feature_callback,

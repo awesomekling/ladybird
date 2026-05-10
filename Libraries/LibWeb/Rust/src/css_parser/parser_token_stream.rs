@@ -453,10 +453,31 @@ impl Parser {
         // and an optional bool nested (default false):
 
         // Let rule be a new qualified rule with its prelude, declarations, and child rules all initially set to empty lists.
+        let is_style_rule = self.rule_context.last().is_none_or(|context| {
+            matches!(
+                context,
+                RuleContext::Style
+                    | RuleContext::AtContainer
+                    | RuleContext::AtLayer
+                    | RuleContext::AtMedia
+                    | RuleContext::AtSupports
+            )
+        });
+        let selector_type = if nested == Nested::Yes
+            && self
+                .rule_context
+                .iter()
+                .any(|context| matches!(context, RuleContext::Style | RuleContext::AtFunction))
+        {
+            Nested::Yes
+        } else {
+            Nested::No
+        };
         let mut rule = QualifiedRule {
             prelude: Vec::new(),
             declarations: Vec::new(),
             child_rules: Vec::new(),
+            selector_type: is_style_rule.then_some(selector_type),
         };
 
         // NOTE: Qualified rules inside @keyframes are a keyframe rule.

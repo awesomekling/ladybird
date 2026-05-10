@@ -22,6 +22,12 @@
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/Forward.h>
 
+namespace Web::CSS {
+
+class Selector;
+
+}
+
 namespace Web::CSS::Parser {
 
 // https://drafts.csswg.org/css-syntax/#css-rule
@@ -102,6 +108,7 @@ struct QualifiedRule {
     Vector<Declaration> declarations;
     Vector<RuleOrListOfDeclarations> child_rules;
     Optional<Vector<Percentage>> rust_keyframe_selectors;
+    Optional<Vector<NonnullRefPtr<CSS::Selector>>> rust_selectors;
 
     void for_each_as_declaration_list(FlyString const& rule_name, DeclarationVisitor&& visit) const;
 };

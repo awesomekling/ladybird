@@ -1773,6 +1773,7 @@ pub unsafe extern "C" fn rust_css_parse_rule(
         media_feature_value: *const CssMediaFeatureValue,
     ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+    selector_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssSelectorEvent),
 ) {
     unsafe {
         abort_on_panic(|| {
@@ -1784,6 +1785,9 @@ pub unsafe extern "C" fn rust_css_parse_rule(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |event| {
+                    selector_event_callback(ctx, &raw const event);
                 },
                 |media_query| {
                     media_query_callback(ctx, &raw const media_query);
@@ -1841,6 +1845,7 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
         media_feature_value: *const CssMediaFeatureValue,
     ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+    selector_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssSelectorEvent),
 ) {
     unsafe {
         abort_on_panic(|| {
@@ -1856,6 +1861,9 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
                 rule_context,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |event| {
+                    selector_event_callback(ctx, &raw const event);
                 },
                 |media_query| {
                     media_query_callback(ctx, &raw const media_query);
@@ -1910,6 +1918,7 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
         media_feature_value: *const CssMediaFeatureValue,
     ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+    selector_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssSelectorEvent),
 ) {
     unsafe {
         abort_on_panic(|| {
@@ -1921,6 +1930,9 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |event| {
+                    selector_event_callback(ctx, &raw const event);
                 },
                 |media_query| {
                     media_query_callback(ctx, &raw const media_query);

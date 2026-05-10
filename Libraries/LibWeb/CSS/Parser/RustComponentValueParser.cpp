@@ -5676,6 +5676,8 @@ struct RuleEventBuilder {
     Optional<String> current_import_supports_declaration_source;
     Optional<RustFunctionParameter> current_function_parameter;
     Optional<RustSyntaxNodeBuilder> current_function_syntax_builder;
+    Optional<SelectorBuilder> current_selector_builder;
+    bool collecting_selector_component_values { false };
     bool collecting_function_parameter_default_value { false };
 
     enum class FunctionSyntaxTarget : u8 {
@@ -5826,6 +5828,25 @@ struct RuleEventBuilder {
 
         current_function_syntax_builder = {};
         current_function_syntax_target = {};
+    }
+
+    void start_selector_list()
+    {
+        current_selector_builder = SelectorBuilder {};
+    }
+
+    void finish_selector_list()
+    {
+        if (!current_selector_builder.has_value())
+            return;
+
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& qualified_rule = rule->get<QualifiedRule>();
+        if (!current_selector_builder->failed && current_selector_builder->root_selector_list.has_value())
+            qualified_rule.rust_selectors = current_selector_builder->root_selector_list.release_value();
+        current_selector_builder = {};
     }
 
     void start_function_syntax(FunctionSyntaxTarget target)
@@ -5988,11 +6009,13 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .declarations = {},
                 .child_rules = {},
                 .rust_keyframe_selectors = {},
+                .rust_selectors = {},
             } },
         });
         break;
     case FFI::CssRuleEventKind::QualifiedRuleEnd: {
         VERIFY(!builder.stack.is_empty());
+        builder.finish_selector_list();
         auto frame = builder.stack.take_last();
         VERIFY(frame.type == RuleEventBuilder::FrameType::QualifiedRule);
         builder.append_rule(frame.rule.release_value());
@@ -6423,6 +6446,12 @@ static void apply_rule_media_feature_value(RuleEventBuilder& builder, FFI::CssMe
 
 static void apply_rule_component_value(RuleEventBuilder& builder, FFI::CssComponentValue const* component_value)
 {
+    if (builder.collecting_selector_component_values) {
+        VERIFY(builder.current_selector_builder.has_value());
+        builder.current_selector_builder->handle_component_value(*component_value);
+        return;
+    }
+
     auto token = RustTokenizer::token_from_ffi(component_value->token);
     if (builder.collecting_function_parameter_default_value) {
         append_component_value_token(builder.component_value_builder, component_value->kind, move(token));
@@ -6433,6 +6462,20 @@ static void apply_rule_component_value(RuleEventBuilder& builder, FFI::CssCompon
         return;
     }
     append_component_value_token(builder.component_value_builder, component_value->kind, move(token));
+}
+
+static void apply_rule_selector_event(RuleEventBuilder& builder, FFI::CssSelectorEvent const* event)
+{
+    if (event->kind == FFI::CssSelectorEventKind::SelectorListStart && !builder.current_selector_builder.has_value())
+        builder.start_selector_list();
+    VERIFY(builder.current_selector_builder.has_value());
+    builder.current_selector_builder->handle_event(*event);
+    if (event->kind == FFI::CssSelectorEventKind::InvalidSelectorStart)
+        builder.collecting_selector_component_values = true;
+    if (event->kind == FFI::CssSelectorEventKind::InvalidSelectorEnd)
+        builder.collecting_selector_component_values = false;
+    if (event->kind == FFI::CssSelectorEventKind::SelectorListEnd && builder.current_selector_builder->selector_list_stack.is_empty())
+        builder.finish_selector_list();
 }
 
 static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
@@ -6448,6 +6491,8 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(!builder.current_function_parameter.has_value());
     VERIFY(!builder.current_function_syntax_builder.has_value());
     VERIFY(!builder.current_function_syntax_target.has_value());
+    VERIFY(!builder.current_selector_builder.has_value());
+    VERIFY(!builder.collecting_selector_component_values);
     VERIFY(!builder.collecting_function_parameter_default_value);
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
@@ -6527,6 +6572,9 @@ Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringVi
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             apply_rule_component_value(*static_cast<RuleEventBuilder*>(raw_builder), component_value);
+        },
+        [](void* raw_builder, FFI::CssSelectorEvent const* event) {
+            apply_rule_selector_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         });
 
     verify_rule_event_builder_is_empty(builder);
@@ -6581,6 +6629,9 @@ Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_conten
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             apply_rule_component_value(*static_cast<RuleEventBuilder*>(raw_builder), component_value);
+        },
+        [](void* raw_builder, FFI::CssSelectorEvent const* event) {
+            apply_rule_selector_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         });
 
     verify_rule_event_builder_is_empty(builder);
@@ -6621,6 +6672,9 @@ Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView i
         },
         [](void* raw_builder, FFI::CssComponentValue const* component_value) {
             apply_rule_component_value(*static_cast<RuleEventBuilder*>(raw_builder), component_value);
+        },
+        [](void* raw_builder, FFI::CssSelectorEvent const* event) {
+            apply_rule_selector_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         });
 
     verify_rule_event_builder_is_empty(builder);

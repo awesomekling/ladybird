@@ -319,6 +319,7 @@ pub(crate) struct QualifiedRule {
     pub(super) prelude: Vec<ComponentValue>,
     pub(super) declarations: Vec<Declaration>,
     pub(super) child_rules: Vec<RuleOrListOfDeclarations>,
+    pub(super) selector_type: Option<Nested>,
 }
 
 // https://drafts.csswg.org/css-syntax/#declaration
