@@ -1127,6 +1127,7 @@ public:
         Vector<RequestURLModifier> request_url_modifiers;
         Optional<FlyString> font_source_format;
         Vector<FontTech> font_source_tech;
+        Optional<Gfx::UnicodeRange> unicode_range;
         Vector<RustCalculationNodeEvent> calculation_node_events;
     };
 

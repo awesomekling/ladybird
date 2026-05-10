@@ -565,6 +565,7 @@ pub unsafe extern "C" fn rust_css_parse_descriptor(
     modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
     format_callback: unsafe extern "C" fn(ctx: *mut c_void, format_ptr: *const u8, format_len: usize),
     tech_callback: unsafe extern "C" fn(ctx: *mut c_void, tech: CssFontTech),
+    unicode_range_callback: unsafe extern "C" fn(ctx: *mut c_void, unicode_range: *const CssUnicodeRange),
 ) -> bool {
     unsafe {
         abort_on_panic(|| {
@@ -638,6 +639,9 @@ pub unsafe extern "C" fn rust_css_parse_descriptor(
                     tech_callback: |tech| {
                         tech_callback(ctx, tech);
                     },
+                    unicode_range_callback: |unicode_range| {
+                        unicode_range_callback(ctx, &raw const unicode_range);
+                    },
                 },
             )
         })
@@ -687,6 +691,7 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
     modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
     format_callback: unsafe extern "C" fn(ctx: *mut c_void, format_ptr: *const u8, format_len: usize),
     tech_callback: unsafe extern "C" fn(ctx: *mut c_void, tech: CssFontTech),
+    unicode_range_callback: unsafe extern "C" fn(ctx: *mut c_void, unicode_range: *const CssUnicodeRange),
 ) -> bool {
     unsafe {
         abort_on_panic(|| {
@@ -755,6 +760,9 @@ pub unsafe extern "C" fn rust_css_parse_descriptor_result(
                     },
                     tech_callback: |tech| {
                         tech_callback(ctx, tech);
+                    },
+                    unicode_range_callback: |unicode_range| {
+                        unicode_range_callback(ctx, &raw const unicode_range);
                     },
                 },
             )

@@ -793,6 +793,7 @@ fn parse_descriptor_result_value(
             modifier_callback: |_| {},
             format_callback: ignore_format_callback,
             tech_callback: |_| {},
+            unicode_range_callback: |_| {},
         },
     );
 
@@ -2141,6 +2142,10 @@ fn parses_descriptor_results_with_rust_owned_dispatch() {
     assert_eq!(
         parse_descriptor_result_value("default", CssDescriptorValueType::OptionalDeclarationValue),
         Some((CssDescriptorResultKind::OptionalDeclarationValue, vec![]))
+    );
+    assert_eq!(
+        parse_descriptor_result_value("U+0025-00FF, U+4??", CssDescriptorValueType::UnicodeRangeTokens),
+        Some((CssDescriptorResultKind::UnicodeRangeTokens, vec![]))
     );
     assert_eq!(
         parse_descriptor_result_value("calc(50% + 25%)", CssDescriptorValueType::PositivePercentage),

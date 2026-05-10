@@ -342,12 +342,12 @@ where
     true
 }
 
-pub(crate) fn parse_descriptor<K, S, C, F, U, M, O, T, Y>(
+pub(crate) fn parse_descriptor<K, S, C, F, U, M, O, T, R, Y>(
     at_rule_id: u8,
     descriptor_id: u8,
     filtered_input: &[u8],
     syntax_callback: Y,
-    result_callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T>,
+    result_callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T, R>,
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
@@ -358,6 +358,7 @@ where
     M: FnMut(CssUrlModifier),
     O: for<'a> FnMut(&'a str),
     T: FnMut(CssFontTech),
+    R: FnMut(CssUnicodeRange),
     Y: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
 {
     let Some(matched_syntax) = find_matching_descriptor_syntax(at_rule_id, descriptor_id, filtered_input) else {
@@ -367,7 +368,6 @@ where
     emit_descriptor_syntax(&matched_syntax, syntax_callback);
 
     match matched_syntax {
-        DescriptorSyntax::ValueType(CssDescriptorValueType::UnicodeRangeTokens) => true,
         DescriptorSyntax::ValueType(value_type) => {
             parse_descriptor_result(value_type, filtered_input, result_callbacks)
         }
@@ -500,7 +500,7 @@ fn descriptor_value_type_matches(value_type: CssDescriptorValueType, filtered_in
     }
 }
 
-pub(crate) struct DescriptorResultCallbacks<K, S, C, F, U, M, O, T> {
+pub(crate) struct DescriptorResultCallbacks<K, S, C, F, U, M, O, T, R> {
     pub(crate) kind_callback: K,
     pub(crate) source_callback: S,
     pub(crate) calculation_callback: C,
@@ -509,12 +509,13 @@ pub(crate) struct DescriptorResultCallbacks<K, S, C, F, U, M, O, T> {
     pub(crate) modifier_callback: M,
     pub(crate) format_callback: O,
     pub(crate) tech_callback: T,
+    pub(crate) unicode_range_callback: R,
 }
 
-pub(crate) fn parse_descriptor_result<K, S, C, F, U, M, O, T>(
+pub(crate) fn parse_descriptor_result<K, S, C, F, U, M, O, T, R>(
     value_type: CssDescriptorValueType,
     filtered_input: &[u8],
-    mut callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T>,
+    mut callbacks: DescriptorResultCallbacks<K, S, C, F, U, M, O, T, R>,
 ) -> bool
 where
     K: FnMut(CssDescriptorResultKind),
@@ -525,6 +526,7 @@ where
     M: FnMut(CssUrlModifier),
     O: for<'a> FnMut(&'a str),
     T: FnMut(CssFontTech),
+    R: FnMut(CssUnicodeRange),
 {
     let default_order = CssNonnegativeIntegerSymbolPairOrder::IntegerFirst;
 
@@ -963,7 +965,19 @@ where
 
             (callbacks.kind_callback)(CssDescriptorResultKind::OptionalDeclarationValue);
         }
-        _ => return false,
+        CssDescriptorValueType::UnicodeRangeTokens => {
+            let mut unicode_ranges = Vec::new();
+            if !parse_a_unicode_range_list(filtered_input, |unicode_range| {
+                unicode_ranges.push(unicode_range);
+            }) {
+                return false;
+            }
+
+            (callbacks.kind_callback)(CssDescriptorResultKind::UnicodeRangeTokens);
+            for unicode_range in unicode_ranges {
+                (callbacks.unicode_range_callback)(unicode_range);
+            }
+        }
     }
 
     true

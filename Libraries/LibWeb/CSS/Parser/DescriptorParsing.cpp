@@ -1060,13 +1060,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <urange>#
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto unicode_ranges = RustComponentValueParser::parse_a_unicode_range_list(descriptor_source.bytes_as_string_view(), "utf-8"sv);
-                    if (!unicode_ranges.has_value())
+                    auto const& unicode_range_descriptor = descriptor_value->result;
+                    if (!unicode_range_descriptor.has_value() || unicode_range_descriptor->kind != FFI::CssDescriptorResultKind::UnicodeRangeTokens)
                         return nullptr;
 
                     StyleValueVector unicode_range_values;
-                    for (auto const& unicode_range : *unicode_ranges)
-                        unicode_range_values.append(UnicodeRangeStyleValue::create(unicode_range));
+                    for (auto const& item : unicode_range_descriptor->items) {
+                        if (!item.unicode_range.has_value())
+                            return nullptr;
+                        unicode_range_values.append(UnicodeRangeStyleValue::create(item.unicode_range.value()));
+                    }
 
                     return StyleValueList::create(move(unicode_range_values), StyleValueList::Separator::Comma);
                 }

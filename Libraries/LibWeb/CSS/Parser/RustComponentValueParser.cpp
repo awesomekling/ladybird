@@ -965,6 +965,7 @@ static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType);
 static CrossOriginModifierValue cross_origin_modifier_value_from_rust(FFI::CssUrlCrossOriginModifierValue);
 static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI::CssUrlReferrerPolicyModifierValue);
 static FontTech font_tech_from_rust(FFI::CssFontTech);
+static Gfx::UnicodeRange unicode_range_from_rust(FFI::CssUnicodeRange const&);
 
 Optional<RustComponentValueParser::DescriptorValue> RustComponentValueParser::parse_descriptor(AtRuleID at_rule_id, DescriptorID descriptor_id, StringView input, StringView encoding)
 {
@@ -1083,6 +1084,14 @@ Optional<RustComponentValueParser::DescriptorValue> RustComponentValueParser::pa
             VERIFY(descriptor_value->result.has_value());
             VERIFY(!descriptor_value->result->items.is_empty());
             descriptor_value->result->items.last().font_source_tech.append(font_tech_from_rust(rust_font_tech));
+        },
+        [](void* raw_descriptor_value, FFI::CssUnicodeRange const* rust_unicode_range) {
+            auto& descriptor_value = *static_cast<Optional<DescriptorValue>*>(raw_descriptor_value);
+            VERIFY(descriptor_value.has_value());
+            VERIFY(descriptor_value->result.has_value());
+            descriptor_value->result->items.append(DescriptorResultItem {
+                .unicode_range = unicode_range_from_rust(*rust_unicode_range),
+            });
         });
 
     if (!parsed || !descriptor_value.has_value())
@@ -1181,6 +1190,13 @@ Optional<RustComponentValueParser::DescriptorResult> RustComponentValueParser::p
             VERIFY(result.has_value());
             VERIFY(!result->items.is_empty());
             result->items.last().font_source_tech.append(font_tech_from_rust(rust_font_tech));
+        },
+        [](void* raw_result, FFI::CssUnicodeRange const* rust_unicode_range) {
+            auto& result = *static_cast<Optional<DescriptorResult>*>(raw_result);
+            VERIFY(result.has_value());
+            result->items.append(DescriptorResultItem {
+                .unicode_range = unicode_range_from_rust(*rust_unicode_range),
+            });
         });
 
     if (!parsed || !result.has_value())
