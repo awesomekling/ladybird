@@ -917,20 +917,6 @@ GC::Ptr<CSSFunctionRule> Parser::convert_to_function_rule(AtRule const& function
     auto const& rust_prelude = function_rule.rust_function_prelude.value();
     Vector<FunctionParameterInternal> parsed_parameters;
     for (auto const& parameter : rust_prelude.parameters) {
-        if (parameter.default_value.has_value()) {
-            // <default-value> = <declaration-value>
-            //
-            // If a default value and a parameter type are both provided, then the default value must parse successfully
-            // according to that parameter type’s syntax. Otherwise, the @function rule is invalid.
-            // FIXME: Chrome allows ASFs regardless of the parameter's type
-            TokenStream default_value_tokens { parameter.default_value.value() };
-            default_value_tokens.discard_whitespace();
-            auto parsed_default_value = parse_according_to_syntax_node(default_value_tokens, *parameter.type);
-            default_value_tokens.discard_whitespace();
-            if (!parsed_default_value || !default_value_tokens.is_empty())
-                return nullptr;
-        }
-
         parsed_parameters.append({ parameter.name, parameter.type->clone(), parameter.default_value });
     }
 

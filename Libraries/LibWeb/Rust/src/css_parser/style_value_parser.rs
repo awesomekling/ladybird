@@ -2206,7 +2206,7 @@ pub(crate) fn component_values_match_syntax(
     !parser.has_next_component_value()
 }
 
-fn syntax_node_matches_component_values(
+pub(super) fn syntax_node_matches_component_values(
     parser: &mut ComponentValueParser,
     syntax_node: &SyntaxNode,
     filtered_input_string: &str,

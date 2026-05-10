@@ -5,6 +5,10 @@
  */
 
 use super::*;
+use crate::css_parser::parser_arbitrary_substitutions::{
+    ArbitrarySubstitutionFunctionPresence, collect_arbitrary_substitution_function_presence,
+};
+use crate::css_parser::style_value_parser::syntax_node_matches_component_values;
 
 pub(super) struct StylesheetRuleOrderState {
     import_rules_valid: bool,
@@ -528,6 +532,27 @@ fn parse_function_prelude(prelude: &[ComponentValue], filtered_input: &str) -> O
                     return None;
                 }
                 let default_value = parameter_parser.remaining_component_values().to_vec();
+                let mut substitution_function_presence = ArbitrarySubstitutionFunctionPresence::default();
+                if !collect_arbitrary_substitution_function_presence(
+                    &default_value,
+                    filtered_input,
+                    &mut substitution_function_presence,
+                ) {
+                    return None;
+                }
+
+                // https://drafts.csswg.org/css-mixins-1/#function-rule
+                // If a default value and a parameter type are both provided, then the default value must parse
+                // successfully according to that parameter type’s syntax. Otherwise, the @function rule is invalid.
+                let syntax_node = syntax_node.as_ref().unwrap_or(&SyntaxNode::Universal);
+                let mut default_value_parser = ComponentValueParser::new(default_value.clone());
+                if !syntax_node_matches_component_values(&mut default_value_parser, syntax_node, filtered_input) {
+                    return None;
+                }
+                default_value_parser.discard_whitespace();
+                if default_value_parser.has_next_component_value() {
+                    return None;
+                }
                 parameter_parser.index = parameter_parser.component_values.len();
                 Some(default_value)
             } else {

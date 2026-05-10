@@ -61,7 +61,7 @@ fn is_empty_after_trimming(component_values: &[ComponentValue]) -> bool {
 }
 
 #[derive(Default)]
-struct ArbitrarySubstitutionFunctionPresence {
+pub(super) struct ArbitrarySubstitutionFunctionPresence {
     attr: bool,
     env: bool,
     if_: bool,
@@ -189,7 +189,7 @@ pub(crate) fn parse_arbitrary_substitution_function_if_arguments(
     Some(parsed_branches)
 }
 
-fn collect_arbitrary_substitution_function_presence(
+pub(super) fn collect_arbitrary_substitution_function_presence(
     component_values: &[ComponentValue],
     filtered_input: &str,
     presence: &mut ArbitrarySubstitutionFunctionPresence,
