@@ -1197,56 +1197,12 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
 RefPtr<StyleValue const> Parser::parse_rect_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-    auto serialized_rect = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    PropertyID property_id = PropertyID::Clip;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_rect.bytes_as_string_view());
-    if (!rust_style_value.has_value()
-        || rust_style_value->kind != FFI::CssStyleValueKind::Rect
-        || rust_style_value->rect_sides.size() != 4)
+    auto value = parse_css_value_for_property(PropertyID::Clip, tokens);
+    if (!value || !value->is_rect())
         return nullptr;
 
-    auto materialize_rect_side = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
-        if (value.primitive_kind == FFI::CssPrimitiveValueKind::Keyword) {
-            auto keyword = keyword_from_string(value.source_or_unit.bytes_as_string_view());
-            if (!keyword.has_value() || *keyword != Keyword::Auto)
-                return nullptr;
-            return KeywordStyleValue::create(Keyword::Auto);
-        }
-
-        if (!value.source_component_values.is_empty()) {
-            TokenStream value_tokens { value.source_component_values };
-            auto parsed = parse_length_value(value_tokens, infinite_range);
-            value_tokens.discard_whitespace();
-            if (!parsed || value_tokens.has_next_token())
-                return nullptr;
-            return parsed;
-        }
-
-        if (!value.numeric_value.has_value()
-            || value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
-            return nullptr;
-
-        auto length_unit = string_to_length_unit(value.source_or_unit);
-        if (!length_unit.has_value())
-            return nullptr;
-        return LengthStyleValue::create(Length { *value.numeric_value, length_unit.release_value() });
-    };
-
-    // In CSS 2.1, the only valid <shape> value is: rect(<top>, <right>, <bottom>, <left>) where
-    // <top> and <bottom> specify offsets from the top border edge of the box, and <right>, and
-    //  <left> specify offsets from the left border edge of the box.
-    auto context_guard = push_temporary_value_parsing_context(FunctionContext { "rect"sv });
-    auto top = materialize_rect_side(rust_style_value->rect_sides[0]);
-    auto right = materialize_rect_side(rust_style_value->rect_sides[1]);
-    auto bottom = materialize_rect_side(rust_style_value->rect_sides[2]);
-    auto left = materialize_rect_side(rust_style_value->rect_sides[3]);
-    if (!top || !right || !bottom || !left)
-        return nullptr;
-
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
     transaction.commit();
-    return RectStyleValue::create(top.release_nonnull(), right.release_nonnull(), bottom.release_nonnull(), left.release_nonnull());
+    return value;
 }
 
 // https://www.w3.org/TR/css-color-4/#typedef-hue
