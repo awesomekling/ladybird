@@ -3953,7 +3953,18 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
             if_condition.append(tokens.consume_a_token());
 
         auto serialized_if_condition = serialize_component_values_for_reparsing(if_condition);
-        auto parsed_boolean_expression = RustComponentValueParser::parse_an_if_condition(serialized_if_condition.bytes_as_string_view(), "utf-8"sv, [&](Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+        auto parsed_boolean_expression = RustComponentValueParser::parse_an_if_condition(serialized_if_condition.bytes_as_string_view(), "utf-8"sv, [&](Optional<RustComponentValueParser::MediaFeatureTest>&& media_feature, Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+            if (supports_feature.has_value()) {
+                TokenStream<ComponentValue> token_stream { component_values };
+                m_rule_context.append(RuleContext::SupportsCondition);
+                auto expression = parse_supports_feature(token_stream, move(supports_feature));
+                m_rule_context.take_last();
+                return expression;
+            }
+
+            if (media_feature.has_value())
+                return materialize_rust_media_feature_test(media_feature.release_value());
+
             TokenStream<ComponentValue> test_tokens { component_values };
             auto const& maybe_function_token = test_tokens.consume_a_token();
 

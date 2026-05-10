@@ -348,7 +348,14 @@ fn parse_media_test_values(
 
 fn parse_if_condition(input: &str) -> Vec<CssBooleanExpressionEventKind> {
     let mut events = Vec::new();
-    parse_an_if_condition(input.as_bytes(), |event| events.push(event), |_| {});
+    parse_an_if_condition(
+        input.as_bytes(),
+        |event| events.push(event),
+        |_, _, _, _| {},
+        |_| {},
+        |_| {},
+        |_| {},
+    );
     events
 }
 

@@ -999,6 +999,20 @@ pub unsafe extern "C" fn rust_css_parse_if_condition(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    supports_feature_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssSupportsFeatureKind,
+        name_ptr: *const u8,
+        name_len: usize,
+        value_ptr: *const u8,
+        value_len: usize,
+        important: bool,
+    ),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -1011,6 +1025,18 @@ pub unsafe extern "C" fn rust_css_parse_if_condition(
                 input,
                 |event| {
                     event_callback(ctx, event);
+                },
+                |kind, name, value, important| {
+                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
+                    let (value_ptr, value_len) =
+                        value.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+                    supports_feature_callback(ctx, kind, name_ptr, name_len, value_ptr, value_len, important);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);

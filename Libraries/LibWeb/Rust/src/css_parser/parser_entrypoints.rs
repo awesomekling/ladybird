@@ -404,9 +404,18 @@ where
     true
 }
 
-pub(crate) fn parse_an_if_condition<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
-where
+pub(crate) fn parse_an_if_condition<E, S, M, V, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut supports_feature_callback: S,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) where
     E: FnMut(CssBooleanExpressionEventKind),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -431,9 +440,9 @@ where
         filtered_input_string,
         &mut event_callback,
         &mut component_value_callback,
-        &mut |_| {},
-        &mut |_| {},
-        &mut ignore_supports_feature,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
+        &mut supports_feature_callback,
     );
 }
 

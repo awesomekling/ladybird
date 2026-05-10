@@ -1292,10 +1292,35 @@ impl ComponentValueParser {
             return None;
         };
 
-        if function.name.eq_ignore_ascii_case("supports")
-            || function.name.eq_ignore_ascii_case("media")
-            || function.name.eq_ignore_ascii_case("style")
-        {
+        if function.name.eq_ignore_ascii_case("supports") {
+            if let Some(declaration) =
+                crate::css_parser::parser_emitters::parse_declaration_from_component_values(&function.value)
+            {
+                self.index += 1;
+                return Some(BooleanExpressionTest::SupportsFeature(
+                    SupportsFeature::Declaration(declaration),
+                    vec![component_value],
+                ));
+            }
+
+            self.index += 1;
+            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
+        }
+
+        if function.name.eq_ignore_ascii_case("media") {
+            let mut parser = ComponentValueParser::new(function.value.clone());
+            if let Some(media_feature) = parser.parse_media_feature()
+                && !parser.has_next_component_value()
+            {
+                self.index += 1;
+                return Some(media_feature);
+            }
+
+            self.index += 1;
+            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
+        }
+
+        if function.name.eq_ignore_ascii_case("style") {
             self.index += 1;
             return Some(BooleanExpressionTest::IfTest(vec![component_value]));
         }
