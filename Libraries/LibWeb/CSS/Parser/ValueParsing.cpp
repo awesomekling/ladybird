@@ -4479,6 +4479,16 @@ RefPtr<StyleValue const> Parser::parse_transform_list_value(TokenStream<Componen
 
 RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens)
 {
+    auto parse_rust_owned_property_value = [&](PropertyID property_id, auto accepts_value) -> RefPtr<StyleValue const> {
+        auto transaction = tokens.begin_transaction();
+        auto value = parse_css_value_for_property(property_id, tokens);
+        if (!value || !accepts_value(*value))
+            return nullptr;
+
+        transaction.commit();
+        return value;
+    };
+
     switch (value_type) {
     case ValueType::Anchor:
         return parse_anchor(tokens);
@@ -4489,9 +4499,9 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::AnglePercentage:
         return parse_angle_percentage_value(tokens, infinite_range, infinite_range);
     case ValueType::BackgroundPosition:
-        return parse_position_value(tokens, PositionParsingMode::BackgroundPosition);
+        return parse_rust_owned_property_value(PropertyID::BackgroundPosition, [](StyleValue const& value) { return value.is_position(); });
     case ValueType::BasicShape:
-        return parse_basic_shape_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::ShapeOutside, [](StyleValue const& value) { return value.is_basic_shape(); });
     case ValueType::Color:
         return parse_color_value(tokens);
     case ValueType::CornerShape:
@@ -4562,7 +4572,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Percentage:
         return parse_percentage_value(tokens, infinite_range);
     case ValueType::Position:
-        return parse_position_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::ObjectPosition, [](StyleValue const& value) { return value.is_position(); });
     case ValueType::Ratio:
         return parse_ratio_value(tokens);
     case ValueType::Rect:
