@@ -5928,6 +5928,18 @@ struct RuleEventBuilder {
         media_condition_builder = {};
     }
 
+    void finish_media_query_list()
+    {
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        auto& media_query_list = at_rule.name.equals_ignoring_ascii_case("import"sv) ? at_rule.rust_import_media_query_list : at_rule.rust_media_query_list;
+        if (!media_query_list.has_value())
+            media_query_list = Vector<NonnullRefPtr<MediaQuery>> {};
+        finish_media_condition();
+    }
+
     void finish_supports_condition()
     {
         if (!supports_condition_builder.has_value())
@@ -6355,10 +6367,10 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         builder.finish_supports_condition();
         break;
     case FFI::CssRuleEventKind::ImportMediaQueryListEnd:
-        builder.finish_media_condition();
+        builder.finish_media_query_list();
         break;
     case FFI::CssRuleEventKind::MediaQueryListEnd:
-        builder.finish_media_condition();
+        builder.finish_media_query_list();
         break;
     case FFI::CssRuleEventKind::SupportsConditionEnd:
         builder.finish_supports_condition();

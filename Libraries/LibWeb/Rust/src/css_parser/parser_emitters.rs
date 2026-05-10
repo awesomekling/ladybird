@@ -723,16 +723,19 @@ pub(super) fn emit_rule<E, C>(
                 }
             }
             if at_rule.name.eq_ignore_ascii_case("media") {
-                for group in split_component_values_on_comma(&at_rule.prelude) {
-                    emit_media_query_syntax(
-                        component_values_parse_as_media_query(group.to_vec()),
-                        filtered_input,
-                        media_query_callback,
-                        boolean_expression_event_callback,
-                        media_feature_callback,
-                        media_feature_value_callback,
-                        component_value_callback,
-                    );
+                let mut parser = ComponentValueParser::new(at_rule.prelude.clone());
+                if parser.has_next_component_value() {
+                    for group in split_component_values_on_comma(&at_rule.prelude) {
+                        emit_media_query_syntax(
+                            component_values_parse_as_media_query(group.to_vec()),
+                            filtered_input,
+                            media_query_callback,
+                            boolean_expression_event_callback,
+                            media_feature_callback,
+                            media_feature_value_callback,
+                            component_value_callback,
+                        );
+                    }
                 }
                 event_callback(CssRuleEvent::new(CssRuleEventKind::MediaQueryListEnd));
             }
