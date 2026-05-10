@@ -1210,28 +1210,6 @@ pub unsafe extern "C" fn rust_css_parse_opentype_tag(
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_contain(input: *const u8, input_len: usize) -> CssContainValue {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssContainValue {
-                    kind: CssContainValueKind::Invalid,
-                    is_size: false,
-                    is_inline_size: false,
-                    has_layout: false,
-                    has_style: false,
-                    has_paint: false,
-                };
-            };
-
-            css_parser::parse_contain_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_scroll_function(input: *const u8, input_len: usize) -> CssScrollFunctionValue {
     unsafe {
         abort_on_panic(|| {
@@ -1860,71 +1838,6 @@ pub unsafe extern "C" fn rust_css_parse_rule(
             };
 
             css_parser::parse_a_rule(
-                input,
-                |event| {
-                    event_callback(ctx, &raw const event);
-                },
-                |media_query| {
-                    media_query_callback(ctx, &raw const media_query);
-                },
-                |event| {
-                    boolean_expression_event_callback(ctx, event);
-                },
-                |kind, name, value, important| {
-                    let (name_ptr, name_len) = name.map_or((std::ptr::null(), 0), |name| (name.as_ptr(), name.len()));
-                    let (value_ptr, value_len) =
-                        value.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
-                    supports_feature_callback(ctx, kind, name_ptr, name_len, value_ptr, value_len, important);
-                },
-                |media_feature| {
-                    media_feature_callback(ctx, &raw const media_feature);
-                },
-                |media_feature_value| {
-                    media_feature_value_callback(ctx, &raw const media_feature_value);
-                },
-                |component_value| {
-                    component_value_callback(ctx, &raw const component_value);
-                },
-            );
-        });
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_block_contents(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
-    media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
-    boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
-    supports_feature_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        kind: CssSupportsFeatureKind,
-        name_ptr: *const u8,
-        name_len: usize,
-        value_ptr: *const u8,
-        value_len: usize,
-        important: bool,
-    ),
-    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
-    media_feature_value_callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        media_feature_value: *const CssMediaFeatureValue,
-    ),
-    component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
-) {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return;
-            };
-
-            css_parser::parse_a_blocks_contents(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
