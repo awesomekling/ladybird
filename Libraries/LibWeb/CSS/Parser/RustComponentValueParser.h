@@ -1045,11 +1045,6 @@ public:
         String media_query_list;
     };
 
-    struct ContainerRulePreludeCondition {
-        Optional<FlyString> name;
-        Optional<String> query;
-    };
-
     struct FamilyName {
         FlyString name;
         bool is_string { false };
@@ -1178,7 +1173,6 @@ public:
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
-    static Optional<Vector<ContainerRulePreludeCondition>> parse_container_rule_prelude(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);

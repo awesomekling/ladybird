@@ -1717,6 +1717,7 @@ pub enum CssRuleEventKind {
     PageSelectorEnd,
     PagePseudoClass,
     FontFeatureValuesFamilyName,
+    ContainerCondition,
 }
 
 #[repr(C)]
@@ -1724,6 +1725,8 @@ pub struct CssRuleEvent {
     pub kind: CssRuleEventKind,
     pub name_ptr: *const u8,
     pub name_len: usize,
+    pub value_ptr: *const u8,
+    pub value_len: usize,
     pub keyframe_selector: f64,
     pub page_pseudo_class: CssPagePseudoClassKind,
     pub important: bool,

@@ -630,12 +630,11 @@ GC::Ptr<CSSContainerRule> Parser::convert_to_container_rule(AtRule const& rule, 
         return nullptr;
     }
 
-    auto serialized_prelude = serialize_component_values_for_reparsing(rule.prelude);
-    auto prelude_conditions = RustComponentValueParser::parse_container_rule_prelude(serialized_prelude.bytes_as_string_view(), "utf-8"sv);
+    auto prelude_conditions = rule.rust_container_rule_prelude_conditions;
     if (!prelude_conditions.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@container"_fly_string,
-            .prelude = serialized_prelude,
+            .prelude = prelude_stream.dump_string(),
             .description = "Empty prelude."_string,
         });
         return nullptr;
@@ -651,7 +650,7 @@ GC::Ptr<CSSContainerRule> Parser::convert_to_container_rule(AtRule const& rule, 
             if (!query_condition) {
                 ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                     .rule_name = "@container"_fly_string,
-                    .prelude = serialized_prelude,
+                    .prelude = prelude_stream.dump_string(),
                     .description = prelude_condition.name.has_value() ? "Trailing tokens after name and query."_string : "Missing container name or query."_string,
                 });
                 return nullptr;
@@ -662,7 +661,7 @@ GC::Ptr<CSSContainerRule> Parser::convert_to_container_rule(AtRule const& rule, 
         if (!prelude_condition.name.has_value() && !container_query) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@container"_fly_string,
-                .prelude = serialized_prelude,
+                .prelude = prelude_stream.dump_string(),
                 .description = "Missing container name or query."_string,
             });
             return nullptr;

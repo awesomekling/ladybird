@@ -5912,30 +5912,6 @@ Optional<Vector<u32>> RustComponentValueParser::parse_font_feature_values_featur
     return values;
 }
 
-Optional<Vector<RustComponentValueParser::ContainerRulePreludeCondition>> RustComponentValueParser::parse_container_rule_prelude(StringView input, StringView encoding)
-{
-    Vector<ContainerRulePreludeCondition> conditions;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_container_rule_prelude(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &conditions,
-        [](void* raw_conditions, bool has_name, u8 const* name_ptr, size_t name_len, bool has_query, u8 const* query_ptr, size_t query_len) {
-            auto& conditions = *static_cast<Vector<ContainerRulePreludeCondition>*>(raw_conditions);
-            conditions.append({
-                .name = has_name ? Optional<FlyString> { fly_string_from_ffi_bytes(name_ptr, name_len) } : OptionalNone {},
-                .query = has_query ? Optional<String> { string_from_ffi_bytes(query_ptr, query_len) } : OptionalNone {},
-            });
-        });
-
-    if (!parsed)
-        return {};
-
-    return conditions;
-}
-
 struct RuleEventBuilder {
     enum class FrameType : u8 {
         AtRule,
@@ -6043,6 +6019,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_counter_style_name = {},
                 .rust_page_selectors = {},
                 .rust_font_feature_values_family_names = {},
+                .rust_container_rule_prelude_conditions = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6239,6 +6216,19 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         if (!at_rule.rust_font_feature_values_family_names.has_value())
             at_rule.rust_font_feature_values_family_names = Vector<FlyString> {};
         at_rule.rust_font_feature_values_family_names->append(fly_string_from_ffi_bytes(event.name_ptr, event.name_len));
+        break;
+    }
+    case FFI::CssRuleEventKind::ContainerCondition: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        if (!at_rule.rust_container_rule_prelude_conditions.has_value())
+            at_rule.rust_container_rule_prelude_conditions = Vector<RustContainerRulePreludeCondition> {};
+        at_rule.rust_container_rule_prelude_conditions->append({
+            .name = event.name_len > 0 ? Optional<FlyString> { fly_string_from_ffi_bytes(event.name_ptr, event.name_len) } : OptionalNone {},
+            .query = event.value_len > 0 ? Optional<String> { string_from_ffi_bytes(event.value_ptr, event.value_len) } : OptionalNone {},
+        });
         break;
     }
     }

@@ -356,6 +356,8 @@ pub(super) fn emit_rule<E, C>(
                 kind: CssRuleEventKind::AtRuleStart,
                 name_ptr,
                 name_len,
+                value_ptr: std::ptr::null(),
+                value_len: 0,
                 keyframe_selector: 0.0,
                 page_pseudo_class: CssPagePseudoClassKind::Left,
                 important: false,
@@ -381,6 +383,8 @@ pub(super) fn emit_rule<E, C>(
                             kind: CssRuleEventKind::LayerName,
                             name_ptr,
                             name_len,
+                            value_ptr: std::ptr::null(),
+                            value_len: 0,
                             keyframe_selector: 0.0,
                             page_pseudo_class: CssPagePseudoClassKind::Left,
                             important: false,
@@ -397,6 +401,8 @@ pub(super) fn emit_rule<E, C>(
                     kind: CssRuleEventKind::KeyframesName,
                     name_ptr,
                     name_len,
+                    value_ptr: std::ptr::null(),
+                    value_len: 0,
                     keyframe_selector: 0.0,
                     page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
@@ -413,6 +419,8 @@ pub(super) fn emit_rule<E, C>(
                         kind: CssRuleEventKind::NamespacePrefix,
                         name_ptr,
                         name_len,
+                        value_ptr: std::ptr::null(),
+                        value_len: 0,
                         keyframe_selector: 0.0,
                         page_pseudo_class: CssPagePseudoClassKind::Left,
                         important: false,
@@ -424,6 +432,8 @@ pub(super) fn emit_rule<E, C>(
                     kind: CssRuleEventKind::NamespaceUri,
                     name_ptr,
                     name_len,
+                    value_ptr: std::ptr::null(),
+                    value_len: 0,
                     keyframe_selector: 0.0,
                     page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
@@ -438,6 +448,8 @@ pub(super) fn emit_rule<E, C>(
                     kind: CssRuleEventKind::CustomPropertyName,
                     name_ptr,
                     name_len,
+                    value_ptr: std::ptr::null(),
+                    value_len: 0,
                     keyframe_selector: 0.0,
                     page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
@@ -452,6 +464,8 @@ pub(super) fn emit_rule<E, C>(
                     kind: CssRuleEventKind::CounterStyleName,
                     name_ptr,
                     name_len,
+                    value_ptr: std::ptr::null(),
+                    value_len: 0,
                     keyframe_selector: 0.0,
                     page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
@@ -471,6 +485,8 @@ pub(super) fn emit_rule<E, C>(
                         kind: CssRuleEventKind::PageSelectorStart,
                         name_ptr,
                         name_len,
+                        value_ptr: std::ptr::null(),
+                        value_len: 0,
                         keyframe_selector: 0.0,
                         page_pseudo_class: CssPagePseudoClassKind::Left,
                         important: false,
@@ -481,6 +497,8 @@ pub(super) fn emit_rule<E, C>(
                             kind: CssRuleEventKind::PagePseudoClass,
                             name_ptr: std::ptr::null(),
                             name_len: 0,
+                            value_ptr: std::ptr::null(),
+                            value_len: 0,
                             keyframe_selector: 0.0,
                             page_pseudo_class: pseudo_class,
                             important: false,
@@ -520,6 +538,47 @@ pub(super) fn emit_rule<E, C>(
                             kind: CssRuleEventKind::FontFeatureValuesFamilyName,
                             name_ptr,
                             name_len,
+                            value_ptr: std::ptr::null(),
+                            value_len: 0,
+                            keyframe_selector: 0.0,
+                            page_pseudo_class: CssPagePseudoClassKind::Left,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    }
+                }
+            }
+            if at_rule.name.eq_ignore_ascii_case("container") {
+                let conditions: Option<Vec<_>> = {
+                    let groups = split_component_values_on_comma(&at_rule.prelude);
+                    if groups.is_empty() {
+                        None
+                    } else {
+                        let mut conditions = Vec::with_capacity(groups.len());
+                        for group in groups {
+                            let mut parser = ComponentValueParser::new(group.to_vec());
+                            let Some(condition) = parser.parse_container_rule_prelude_item(filtered_input) else {
+                                conditions.clear();
+                                break;
+                            };
+                            conditions.push(condition);
+                        }
+                        (!conditions.is_empty()).then_some(conditions)
+                    }
+                };
+                if let Some(conditions) = conditions {
+                    for (name, query) in conditions {
+                        let (name_ptr, name_len) =
+                            name.as_ref().map_or((std::ptr::null(), 0), |name| string_parts(name));
+                        let (value_ptr, value_len) = query
+                            .as_ref()
+                            .map_or((std::ptr::null(), 0), |query| string_parts(query));
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::ContainerCondition,
+                            name_ptr,
+                            name_len,
+                            value_ptr,
+                            value_len,
                             keyframe_selector: 0.0,
                             page_pseudo_class: CssPagePseudoClassKind::Left,
                             important: false,
@@ -552,6 +611,8 @@ pub(super) fn emit_rule<E, C>(
                         kind: CssRuleEventKind::KeyframeSelector,
                         name_ptr: std::ptr::null(),
                         name_len: 0,
+                        value_ptr: std::ptr::null(),
+                        value_len: 0,
                         keyframe_selector: selector,
                         page_pseudo_class: CssPagePseudoClassKind::Left,
                         important: false,
@@ -622,6 +683,8 @@ pub(super) fn emit_declaration<E, C>(
         kind: CssRuleEventKind::DeclarationStart,
         name_ptr,
         name_len,
+        value_ptr: std::ptr::null(),
+        value_len: 0,
         keyframe_selector: 0.0,
         page_pseudo_class: CssPagePseudoClassKind::Left,
         important: declaration.important,

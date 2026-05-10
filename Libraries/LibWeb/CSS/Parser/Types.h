@@ -10,6 +10,7 @@
 #include <AK/Function.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
+#include <AK/String.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/PageSelector.h>
@@ -30,6 +31,11 @@ using QualifiedRuleVisitor = AK::Function<void(QualifiedRule const&)>;
 using RuleVisitor = AK::Function<void(Rule const&)>;
 using DeclarationVisitor = AK::Function<void(Declaration const&)>;
 
+struct RustContainerRulePreludeCondition {
+    Optional<FlyString> name;
+    Optional<String> query;
+};
+
 // https://drafts.csswg.org/css-syntax/#ref-for-at-rule%E2%91%A0%E2%91%A1
 struct AtRule {
     FlyString name;
@@ -43,6 +49,7 @@ struct AtRule {
     Optional<FlyString> rust_counter_style_name;
     Optional<PageSelectorList> rust_page_selectors;
     Optional<Vector<FlyString>> rust_font_feature_values_family_names;
+    Optional<Vector<RustContainerRulePreludeCondition>> rust_container_rule_prelude_conditions;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;
