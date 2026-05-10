@@ -7549,12 +7549,12 @@ pub(super) fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Opt
     if let Some(value) = rust_owned_image_style_value_kind(filtered_input, filtered_input_string) {
         return match value {
             RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(image)),
-            RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
+            RustOwnedStyleValueKind::ImageSet(image_set) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
                 kind: RustOwnedImageKind::ImageSet,
                 source: Some(filtered_input_to_string(filtered_input)),
                 url: None,
                 gradient: None,
-                image_set: None,
+                image_set: Some(image_set),
                 component_values: component_values.to_vec(),
             })),
             _ => None,

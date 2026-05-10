@@ -667,15 +667,47 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                     payload.as_bytes(),
                     "",
                 );
-                if let RustOwnedBorderImageSource::Image(image) = source
-                    && !image.component_values.is_empty()
-                {
-                    SourceComponentValueEmitter {
+                if let RustOwnedBorderImageSource::Image(image) = source {
+                    let mut source_component_value_emitter = SourceComponentValueEmitter {
                         filtered_input,
                         list_callback: source_component_value_list_callback,
                         component_value_callback: source_component_value_callback,
+                    };
+                    if image.kind == RustOwnedImageKind::ImageSet
+                        && let Some(image_set) = image.image_set.as_ref()
+                    {
+                        for option in &image_set.options {
+                            let (_, url_function_type, image_source) = image_callback_payload(&option.image);
+                            let metadata = image_set_option_metadata(option);
+                            callback(
+                                CssStyleValueKind::BorderImage,
+                                property_id,
+                                CssPrimitiveValueKind::Invalid,
+                                false,
+                                0.0,
+                                false,
+                                0.0,
+                                BORDER_IMAGE_CALLBACK_SOURCE_IMAGE_SET_OPTION,
+                                option.image.kind as u8,
+                                0,
+                                url_function_type,
+                                image_source.as_bytes(),
+                                &metadata,
+                            );
+                            if !option.image.component_values.is_empty() {
+                                source_component_value_emitter
+                                    .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+                            }
+                            if !option.resolution_component_values.is_empty() {
+                                source_component_value_emitter.emit(
+                                    SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                                    &option.resolution_component_values,
+                                );
+                            }
+                        }
+                    } else if !image.component_values.is_empty() {
+                        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
                     }
-                    .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
                 }
             }
             if let Some(slice) = &value.slice {
@@ -4184,6 +4216,7 @@ const FLEX_SHORTHAND_CALLBACK_SHRINK: u8 = 2;
 const FLEX_SHORTHAND_CALLBACK_BASIS: u8 = 3;
 const LIST_STYLE_IMAGE_CALLBACK_NONE: u8 = 0;
 const LIST_STYLE_IMAGE_CALLBACK_SOURCE: u8 = 1;
+const LIST_STYLE_IMAGE_CALLBACK_IMAGE_SET_OPTION: u8 = 2;
 const LIST_STYLE_TYPE_CALLBACK_NONE: u8 = 0;
 const LIST_STYLE_TYPE_CALLBACK_STRING: u8 = 1;
 const LIST_STYLE_TYPE_CALLBACK_COUNTER_STYLE_NAME: u8 = 2;
@@ -4221,6 +4254,8 @@ const SHAPE_OUTSIDE_CALLBACK_NONE: u8 = 0;
 const SHAPE_OUTSIDE_CALLBACK_IMAGE: u8 = 1;
 const SHAPE_OUTSIDE_CALLBACK_BASIC_SHAPE: u8 = 2;
 const SHAPE_OUTSIDE_CALLBACK_SHAPE_BOX: u8 = 3;
+const SHAPE_OUTSIDE_CALLBACK_IMAGE_SET_OPTION: u8 = 4;
+const BORDER_IMAGE_CALLBACK_SOURCE_IMAGE_SET_OPTION: u8 = 5;
 const IMAGE_URL_FUNCTION_TYPE_NONE: u8 = 0;
 const IMAGE_URL_FUNCTION_TYPE_URL: u8 = 1;
 const IMAGE_URL_FUNCTION_TYPE_SRC: u8 = 2;
@@ -4604,10 +4639,42 @@ fn callback_list_style_image<C, S, E>(
         payload.as_bytes(),
         "",
     );
-    if let RustOwnedListStyleImage::Image(image) = value
-        && !image.component_values.is_empty()
-    {
-        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    if let RustOwnedListStyleImage::Image(image) = value {
+        if image.kind == RustOwnedImageKind::ImageSet
+            && let Some(image_set) = image.image_set.as_ref()
+        {
+            for option in &image_set.options {
+                let (_, url_function_type, image_source) = image_callback_payload(&option.image);
+                let metadata = image_set_option_metadata(option);
+                callback(
+                    CssStyleValueKind::ListStyle,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    1,
+                    LIST_STYLE_IMAGE_CALLBACK_IMAGE_SET_OPTION,
+                    option.image.kind as u8,
+                    url_function_type,
+                    image_source.as_bytes(),
+                    &metadata,
+                );
+                if !option.image.component_values.is_empty() {
+                    source_component_value_emitter
+                        .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+                }
+                if !option.resolution_component_values.is_empty() {
+                    source_component_value_emitter.emit(
+                        SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                        &option.resolution_component_values,
+                    );
+                }
+            }
+        } else if !image.component_values.is_empty() {
+            source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+        }
     }
 }
 
@@ -5230,7 +5297,38 @@ fn callback_shape_outside_image_event<C, S, E>(
         payload.as_bytes(),
         "",
     );
-    if !image.component_values.is_empty() {
+    if image.kind == RustOwnedImageKind::ImageSet
+        && let Some(image_set) = image.image_set.as_ref()
+    {
+        for option in &image_set.options {
+            let (_, url_function_type, image_source) = image_callback_payload(&option.image);
+            let metadata = image_set_option_metadata(option);
+            callback(
+                CssStyleValueKind::ShapeOutside,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                SHAPE_OUTSIDE_CALLBACK_IMAGE_SET_OPTION,
+                option.image.kind as u8,
+                0,
+                url_function_type,
+                image_source.as_bytes(),
+                &metadata,
+            );
+            if !option.image.component_values.is_empty() {
+                source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+            }
+            if !option.resolution_component_values.is_empty() {
+                source_component_value_emitter.emit(
+                    SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                    &option.resolution_component_values,
+                );
+            }
+        }
+    } else if !image.component_values.is_empty() {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
     }
 }

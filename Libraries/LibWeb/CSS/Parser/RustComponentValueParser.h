@@ -529,6 +529,7 @@ public:
         Optional<String> image_source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Vector<RustImageSetOption> image_set_options;
         Vector<RustBackgroundSize> background_sizes;
         Vector<RustPosition> positions;
         Optional<ValueType> position_value_type;
@@ -621,6 +622,7 @@ public:
         Image,
         BasicShape,
         ShapeBox,
+        ImageSetOption,
     };
 
     enum class RustBasicShapeKind : u8 {
@@ -753,6 +755,7 @@ public:
         Optional<String> list_style_image_source;
         Optional<URL> list_style_image_source_url;
         Vector<ComponentValue> list_style_image_source_component_values;
+        Vector<RustImageSetOption> list_style_image_source_image_set_options;
         Optional<RustListStyleTypeKind> list_style_type_kind;
         Optional<String> list_style_type_string;
         Optional<CounterStyle> list_style_type_counter_style;
@@ -773,6 +776,7 @@ public:
         Optional<String> border_image_source_source;
         Optional<URL> border_image_source_source_url;
         Vector<ComponentValue> border_image_source_source_component_values;
+        Vector<RustImageSetOption> border_image_source_source_image_set_options;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };
         bool border_image_shorthand_has_outset { false };
@@ -845,6 +849,7 @@ public:
         Optional<String> shape_outside_image_source;
         Optional<URL> shape_outside_image_source_url;
         Vector<ComponentValue> shape_outside_image_source_component_values;
+        Vector<RustImageSetOption> shape_outside_image_source_image_set_options;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Optional<u8> shape_outside_basic_shape_fill_rule;
         Vector<RustBasicShapeRectangleComponent> shape_outside_basic_shape_rectangle_components;

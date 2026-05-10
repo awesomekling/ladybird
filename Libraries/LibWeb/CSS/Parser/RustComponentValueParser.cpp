@@ -1256,6 +1256,19 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->cursor_images.last().image_kind == RustImageKind::ImageSet);
                     VERIFY(!style_value->cursor_images.last().image_set_options.is_empty());
                     style_value->cursor_images.last().image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else if (style_value->kind == FFI::CssStyleValueKind::ListStyle) {
+                    VERIFY(!style_value->list_style_image_source_image_set_options.is_empty());
+                    style_value->list_style_image_source_image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else if (style_value->kind == FFI::CssStyleValueKind::BorderImage) {
+                    VERIFY(!style_value->border_image_source_source_image_set_options.is_empty());
+                    style_value->border_image_source_source_image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                    VERIFY(!style_value->shape_outside_image_source_image_set_options.is_empty());
+                    style_value->shape_outside_image_source_image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else if (style_value->kind == FFI::CssStyleValueKind::LayerShorthand) {
+                    VERIFY(!style_value->layer_shorthand_items.is_empty());
+                    VERIFY(!style_value->layer_shorthand_items.last().image_set_options.is_empty());
+                    style_value->layer_shorthand_items.last().image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
                 } else {
                     VERIFY(style_value->kind == FFI::CssStyleValueKind::Image);
                     VERIFY(style_value->image_kind == RustImageKind::ImageSet);
@@ -1432,7 +1445,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
 
                 return URL { string_from_ffi_bytes(value_ptr, value_len), url_type, {} };
             };
-            auto image_set_option_metadata_from_callback_payload = [&]() {
+            auto image_set_option_metadata_from_callback_payload = [&](u8 image_kind) {
                 Optional<String> resolution;
                 Optional<String> type;
                 if (value_type_len > 0) {
@@ -1446,7 +1459,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     }
                 }
                 return RustImageSetOption {
-                    .image_kind = static_cast<RustImageKind>(color_green),
+                    .image_kind = static_cast<RustImageKind>(image_kind),
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
                     .image_url = image_url_from_callback_payload(),
                     .resolution = move(resolution),
@@ -1702,10 +1715,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 if (kind == FFI::CssStyleValueKind::Image) {
-                    item.image_kind = static_cast<RustImageKind>(color_red);
-                    item.image_source = string_from_ffi_bytes(value_ptr, value_len);
-                    item.image_url = image_url_from_callback_payload();
-                    note_source_component_values_target(item.image_source_component_values);
+                    if (static_cast<RustImageKind>(color_red) == RustImageKind::ImageSet) {
+                        item.image_kind = RustImageKind::ImageSet;
+                        item.image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
+                        note_source_component_values_target(item.image_set_options.last().image_source_component_values);
+                    } else {
+                        item.image_kind = static_cast<RustImageKind>(color_red);
+                        item.image_source = string_from_ffi_bytes(value_ptr, value_len);
+                        item.image_url = image_url_from_callback_payload();
+                        note_source_component_values_target(item.image_source_component_values);
+                    }
                     return;
                 }
 
@@ -1806,7 +1825,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         VERIFY(style_value->image_kind == RustImageKind::ImageSet);
                     }
 
-                    style_value->image_set_options.append(image_set_option_metadata_from_callback_payload());
+                    style_value->image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
                     note_source_component_values_target(style_value->image_set_options.last().image_source_component_values);
                     return;
                 }
@@ -2445,6 +2464,18 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_red == 0)
                     style_value->list_style_position = static_cast<RustListStylePosition>(color_green);
                 else if (color_red == 1) {
+                    enum : u8 {
+                        ImageNone,
+                        ImageSource,
+                        ImageSetOption,
+                    };
+                    if (color_green == ImageSetOption) {
+                        style_value->list_style_image_kind = RustListStyleImageKind::Source;
+                        style_value->list_style_image_source_kind = RustImageKind::ImageSet;
+                        style_value->list_style_image_source_image_set_options.append(image_set_option_metadata_from_callback_payload(color_blue));
+                        note_source_component_values_target(style_value->list_style_image_source_image_set_options.last().image_source_component_values);
+                        return;
+                    }
                     style_value->list_style_image_kind = static_cast<RustListStyleImageKind>(color_green);
                     if (*style_value->list_style_image_kind == RustListStyleImageKind::Source) {
                         style_value->list_style_image_source_kind = static_cast<RustImageKind>(color_blue);
@@ -2578,6 +2609,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->border_image_source_source_url = image_url_from_callback_payload();
                         note_source_component_values_target(style_value->border_image_source_source_component_values);
                     }
+                    break;
+                case 5:
+                    style_value->border_image_source_kind = RustBorderImageSourceKind::Source;
+                    style_value->border_image_source_source_kind = RustImageKind::ImageSet;
+                    style_value->border_image_source_source_image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
+                    note_source_component_values_target(style_value->border_image_source_source_image_set_options.last().image_source_component_values);
                     break;
                 case 1:
                     style_value->border_image_shorthand_has_slice = true;
@@ -2791,6 +2828,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_image_source_url = image_url_from_callback_payload();
                     note_source_component_values_target(style_value->shape_outside_image_source_component_values);
                     break;
+                case RustShapeOutsideEventKind::ImageSetOption:
+                    style_value->shape_outside_image_source_kind = RustImageKind::ImageSet;
+                    style_value->shape_outside_image_source_image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
+                    note_source_component_values_target(style_value->shape_outside_image_source_image_set_options.last().image_source_component_values);
+                    break;
                 case RustShapeOutsideEventKind::BasicShape: {
                     style_value->shape_outside_basic_shape_kind = static_cast<RustBasicShapeKind>(color_green);
                     enum : u8 {
@@ -2937,7 +2979,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(!style_value->content_events.is_empty());
                     VERIFY(style_value->content_events.last().kind == RustContentEventKind::ItemImage);
                     VERIFY(style_value->content_events.last().image_kind == RustImageKind::ImageSet);
-                    style_value->content_events.last().image_set_options.append(image_set_option_metadata_from_callback_payload());
+                    style_value->content_events.last().image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
                     note_source_component_values_target(style_value->content_events.last().image_set_options.last().image_source_component_values);
                     break;
                 }
@@ -3084,7 +3126,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_red == ImageSetOption) {
                     VERIFY(!style_value->cursor_images.is_empty());
                     VERIFY(style_value->cursor_images.last().image_kind == RustImageKind::ImageSet);
-                    style_value->cursor_images.last().image_set_options.append(image_set_option_metadata_from_callback_payload());
+                    style_value->cursor_images.last().image_set_options.append(image_set_option_metadata_from_callback_payload(color_green));
                     note_source_component_values_target(style_value->cursor_images.last().image_set_options.last().image_source_component_values);
                     return;
                 }

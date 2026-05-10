@@ -1,8 +1,8 @@
 Harness status: OK
 
-Found 144 tests
+Found 148 tests
 
-144 Pass
+148 Pass
 Pass	e.style['background-image'] = "image-set(url(example.png) 1x)" should set the property value
 Pass	e.style['background-image'] = "-webkit-image-set(url(example.png) 1x)" should set the property value
 Pass	e.style['background-image'] = "image-set('example.jpg' 1x)" should set the property value
@@ -21,6 +21,10 @@ Pass	e.style['border-image-source'] = "image-set(url(\"example.png\") 1x)" shoul
 Pass	e.style['border-image-source'] = "-webkit-image-set(url(\"example.png\") 1x)" should set the property value
 Pass	e.style['border-image-source'] = "image-set(url(\"example.png\") 1x, \"example.png\" 3x)" should set the property value
 Pass	e.style['border-image-source'] = "-webkit-image-set(url(\"example.png\") 1x, \"example.png\" 3x)" should set the property value
+Pass	e.style['list-style-image'] = "image-set(url(\"example.png\") 1x)" should set the property value
+Pass	e.style['list-style-image'] = "-webkit-image-set(url(\"example.png\") 1x)" should set the property value
+Pass	e.style['shape-outside'] = "image-set(url(\"example.png\") 1x)" should set the property value
+Pass	e.style['shape-outside'] = "-webkit-image-set(url(\"example.png\") 1x)" should set the property value
 Pass	e.style['background-image'] = "image-set(url(\"example.png\") -20x)" should not set the property value
 Pass	e.style['background-image'] = "-webkit-image-set(url(\"example.png\") -20x)" should not set the property value
 Pass	e.style['background-image'] = "image-set(none, url(example.png) 1x)" should not set the property value

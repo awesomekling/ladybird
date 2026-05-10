@@ -2279,6 +2279,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (rust_style_value->shape_outside_image_source.has_value()) {
                     if (!rust_style_value->shape_outside_image_source_kind.has_value())
                         return nullptr;
+                    if (*rust_style_value->shape_outside_image_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->shape_outside_image_source_image_set_options.is_empty())
+                        return materialize_rust_image_set_options(rust_style_value->shape_outside_image_source_image_set_options);
                     return materialize_rust_image_from_component_values(*rust_style_value->shape_outside_image_source_kind, rust_style_value->shape_outside_image_source_url, rust_style_value->shape_outside_image_source_component_values);
                 }
 
@@ -2738,6 +2740,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 case RustComponentValueParser::RustListStyleImageKind::Source:
                     if (!rust_style_value->list_style_image_source.has_value() || !rust_style_value->list_style_image_source_kind.has_value())
                         return nullptr;
+                    if (*rust_style_value->list_style_image_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->list_style_image_source_image_set_options.is_empty())
+                        return materialize_rust_image_set_options(rust_style_value->list_style_image_source_image_set_options);
                     return materialize_rust_image_from_component_values(*rust_style_value->list_style_image_source_kind, rust_style_value->list_style_image_source_url, rust_style_value->list_style_image_source_component_values);
                 }
                 VERIFY_NOT_REACHED();
@@ -4314,7 +4318,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     case RustComponentValueParser::RustBorderImageSourceKind::Source:
                         if (!rust_style_value->border_image_source_source.has_value() || !rust_style_value->border_image_source_source_kind.has_value())
                             break;
-                        source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_source_component_values);
+                        if (*rust_style_value->border_image_source_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->border_image_source_source_image_set_options.is_empty())
+                            source = materialize_rust_image_set_options(rust_style_value->border_image_source_source_image_set_options);
+                        else
+                            source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_source_component_values);
                         break;
                     }
                 } else {
@@ -4915,8 +4922,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                             return color.release_nonnull();
                     }
 
-                    if (item.image_kind.has_value() && item.image_source.has_value()) {
-                        if (auto image = materialize_rust_image_from_component_values(*item.image_kind, item.image_url, item.image_source_component_values))
+                    if (item.image_kind.has_value() && (item.image_source.has_value() || !item.image_set_options.is_empty())) {
+                        RefPtr<StyleValue const> image;
+                        if (*item.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !item.image_set_options.is_empty())
+                            image = materialize_rust_image_set_options(item.image_set_options);
+                        else
+                            image = materialize_rust_image_from_component_values(*item.image_kind, item.image_url, item.image_source_component_values);
+                        if (image)
                             return image;
                     }
 
