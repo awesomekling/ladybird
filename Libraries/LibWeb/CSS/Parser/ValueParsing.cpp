@@ -4467,20 +4467,14 @@ RefPtr<StyleValue const> Parser::parse_transform_list_value(TokenStream<Componen
 {
     // <transform-list> = <transform-function>+
     // https://www.w3.org/TR/css-transforms-1/#transform-property
-    StyleValueVector transformations;
     auto transaction = tokens.begin_transaction();
-    while (tokens.has_next_token()) {
-        if (auto maybe_function = parse_transform_function_value(tokens)) {
-            transformations.append(maybe_function.release_nonnull());
-            tokens.discard_whitespace();
-            continue;
-        }
-        break;
-    }
-    if (transformations.is_empty())
-        return {};
+    tokens.discard_whitespace();
+    auto value = parse_css_value_for_property(PropertyID::Transform, tokens);
+    if (!value || !value->is_value_list())
+        return nullptr;
+
     transaction.commit();
-    return StyleValueList::create(move(transformations), StyleValueList::Separator::Space);
+    return value;
 }
 
 RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens)
