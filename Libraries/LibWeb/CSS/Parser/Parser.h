@@ -211,7 +211,6 @@ private:
     RefPtr<StyleValue const> parse_rust_owned_property_value_prefix(PropertyID, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     Optional<URL> parse_url_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     RefPtr<ColorInterpolationMethodStyleValue const> parse_color_interpolation_method_value(TokenStream<ComponentValue>&);
 

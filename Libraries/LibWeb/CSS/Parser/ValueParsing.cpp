@@ -2398,14 +2398,6 @@ Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens, Op
     return maybe_url.release_value();
 }
 
-RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    auto url = parse_url_function(tokens, original_source_text);
-    if (!url.has_value())
-        return nullptr;
-    return URLStyleValue::create(url.release_value());
-}
-
 RefPtr<StyleValue const> Parser::parse_builtin_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -3311,8 +3303,12 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
             return nullptr;
         return value;
     }
-    case ValueType::Url:
-        return parse_url_value(tokens, original_source_text);
+    case ValueType::Url: {
+        auto url = parse_url_function(tokens, original_source_text);
+        if (!url.has_value())
+            return nullptr;
+        return URLStyleValue::create(url.release_value());
+    }
     case ValueType::ViewFunction:
         return parse_view_function_value(tokens, original_source_text);
     case ValueType::ViewTimelineInset:
