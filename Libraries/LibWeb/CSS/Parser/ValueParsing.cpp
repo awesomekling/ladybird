@@ -2699,7 +2699,7 @@ static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_
     VERIFY_NOT_REACHED();
 }
 
-RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // https://drafts.csswg.org/css-fonts/#font-style-prop
     // normal | italic | left | right | oblique <angle [-90deg,90deg]>?
@@ -2710,8 +2710,12 @@ RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentVal
         return nullptr;
 
     tokens.discard_a_token();
-    auto serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto font_style = RustComponentValueParser::parse_a_font_style(serialized_font_style.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_font_style;
+    auto font_style_source = original_source_text.value_or_lazy_evaluated([&] {
+        serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        return serialized_font_style->bytes_as_string_view();
+    });
+    auto font_style = RustComponentValueParser::parse_a_font_style(font_style_source, "utf-8"sv);
 
     if (!font_style.has_value())
         return nullptr;
@@ -2722,8 +2726,11 @@ RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentVal
         if (tokens.has_next_token()) {
             auto angle_start = tokens.current_index();
             tokens.discard_a_token();
-            serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto maybe_font_style_with_angle = RustComponentValueParser::parse_a_font_style(serialized_font_style.bytes_as_string_view(), "utf-8"sv);
+            auto font_style_with_angle_source = original_source_text.value_or_lazy_evaluated([&] {
+                serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+                return serialized_font_style->bytes_as_string_view();
+            });
+            auto maybe_font_style_with_angle = RustComponentValueParser::parse_a_font_style(font_style_with_angle_source, "utf-8"sv);
             if (maybe_font_style_with_angle.has_value() && maybe_font_style_with_angle->has_angle) {
                 Vector<ComponentValue> angle_component_values;
                 for (auto const& component_value : tokens.tokens_since(angle_start))
@@ -2744,7 +2751,7 @@ RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentVal
     return FontStyleStyleValue::create(font_style_keyword_from_rust(font_style->kind));
 }
 
-RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // 6.8 https://drafts.csswg.org/css-fonts/#font-variant-alternates-prop
     // [ stylistic(<feature-value-name>) || historical-forms || styleset(<feature-value-name>#) || character-variant(<feature-value-name>#) || swash(<feature-value-name>) || ornaments(<feature-value-name>) || annotation(<feature-value-name>) ]
@@ -2753,20 +2760,28 @@ RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream
     auto start = tokens.current_index();
     Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> parsed_values;
 
-    while (tokens.has_next_token()) {
-        auto component_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-        tokens.discard_a_token();
+    if (original_source_text.has_value()) {
+        parsed_values = RustComponentValueParser::parse_a_font_variant_alternates(*original_source_text, "utf-8"sv);
+        if (!parsed_values.has_value())
+            return nullptr;
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    } else {
+        while (tokens.has_next_token()) {
+            auto component_transaction = tokens.begin_transaction();
+            tokens.discard_whitespace();
+            if (!tokens.has_next_token())
+                break;
+            tokens.discard_a_token();
 
-        auto serialized_font_variant_alternates = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto maybe_values = RustComponentValueParser::parse_a_font_variant_alternates(serialized_font_variant_alternates.bytes_as_string_view(), "utf-8"sv);
-        if (!maybe_values.has_value())
-            break;
+            auto serialized_font_variant_alternates = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            auto maybe_values = RustComponentValueParser::parse_a_font_variant_alternates(serialized_font_variant_alternates.bytes_as_string_view(), "utf-8"sv);
+            if (!maybe_values.has_value())
+                break;
 
-        component_transaction.commit();
-        parsed_values = maybe_values.release_value();
+            component_transaction.commit();
+            parsed_values = maybe_values.release_value();
+        }
     }
 
     if (!parsed_values.has_value())
@@ -2815,7 +2830,7 @@ RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream
     return StyleValueList::create(move(values), StyleValueList::Separator::Space);
 }
 
-RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // 6.10 https://drafts.csswg.org/css-fonts/#propdef-font-variant-east-asian
     // [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
@@ -2825,20 +2840,28 @@ RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream
     auto start = tokens.current_index();
     Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> parsed_values;
 
-    while (tokens.has_next_token()) {
-        auto component_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-        tokens.discard_a_token();
+    if (original_source_text.has_value()) {
+        parsed_values = RustComponentValueParser::parse_a_font_variant_east_asian(*original_source_text, "utf-8"sv);
+        if (!parsed_values.has_value())
+            return nullptr;
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    } else {
+        while (tokens.has_next_token()) {
+            auto component_transaction = tokens.begin_transaction();
+            tokens.discard_whitespace();
+            if (!tokens.has_next_token())
+                break;
+            tokens.discard_a_token();
 
-        auto serialized_font_variant_east_asian = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto maybe_values = RustComponentValueParser::parse_a_font_variant_east_asian(serialized_font_variant_east_asian.bytes_as_string_view(), "utf-8"sv);
-        if (!maybe_values.has_value())
-            break;
+            auto serialized_font_variant_east_asian = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            auto maybe_values = RustComponentValueParser::parse_a_font_variant_east_asian(serialized_font_variant_east_asian.bytes_as_string_view(), "utf-8"sv);
+            if (!maybe_values.has_value())
+                break;
 
-        component_transaction.commit();
-        parsed_values = maybe_values.release_value();
+            component_transaction.commit();
+            parsed_values = maybe_values.release_value();
+        }
     }
 
     if (!parsed_values.has_value())
@@ -2869,7 +2892,7 @@ RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream
     return TupleStyleValue::create(tuple);
 }
 
-RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // 6.7 https://drafts.csswg.org/css-fonts/#propdef-font-variant-numeric
     // [ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero]
@@ -2880,20 +2903,28 @@ RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<Co
     auto start = tokens.current_index();
     Optional<Vector<RustComponentValueParser::FontVariantNumericValue>> parsed_values;
 
-    while (tokens.has_next_token()) {
-        auto component_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-        tokens.discard_a_token();
+    if (original_source_text.has_value()) {
+        parsed_values = RustComponentValueParser::parse_a_font_variant_numeric(*original_source_text, "utf-8"sv);
+        if (!parsed_values.has_value())
+            return nullptr;
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    } else {
+        while (tokens.has_next_token()) {
+            auto component_transaction = tokens.begin_transaction();
+            tokens.discard_whitespace();
+            if (!tokens.has_next_token())
+                break;
+            tokens.discard_a_token();
 
-        auto serialized_font_variant_numeric = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto maybe_values = RustComponentValueParser::parse_a_font_variant_numeric(serialized_font_variant_numeric.bytes_as_string_view(), "utf-8"sv);
-        if (!maybe_values.has_value())
-            break;
+            auto serialized_font_variant_numeric = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            auto maybe_values = RustComponentValueParser::parse_a_font_variant_numeric(serialized_font_variant_numeric.bytes_as_string_view(), "utf-8"sv);
+            if (!maybe_values.has_value())
+                break;
 
-        component_transaction.commit();
-        parsed_values = maybe_values.release_value();
+            component_transaction.commit();
+            parsed_values = maybe_values.release_value();
+        }
     }
 
     if (!parsed_values.has_value())
@@ -2930,7 +2961,7 @@ RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<Co
     return TupleStyleValue::create(tuple);
 }
 
-RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // 6.4 https://drafts.csswg.org/css-fonts/#propdef-font-variant-ligatures
     // [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]
@@ -2942,20 +2973,28 @@ RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<
     auto start = tokens.current_index();
     Optional<Vector<RustComponentValueParser::FontVariantLigaturesValue>> parsed_values;
 
-    while (tokens.has_next_token()) {
-        auto component_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token())
-            break;
-        tokens.discard_a_token();
+    if (original_source_text.has_value()) {
+        parsed_values = RustComponentValueParser::parse_a_font_variant_ligatures(*original_source_text, "utf-8"sv);
+        if (!parsed_values.has_value())
+            return nullptr;
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    } else {
+        while (tokens.has_next_token()) {
+            auto component_transaction = tokens.begin_transaction();
+            tokens.discard_whitespace();
+            if (!tokens.has_next_token())
+                break;
+            tokens.discard_a_token();
 
-        auto serialized_font_variant_ligatures = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto maybe_values = RustComponentValueParser::parse_a_font_variant_ligatures(serialized_font_variant_ligatures.bytes_as_string_view(), "utf-8"sv);
-        if (!maybe_values.has_value())
-            break;
+            auto serialized_font_variant_ligatures = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+            auto maybe_values = RustComponentValueParser::parse_a_font_variant_ligatures(serialized_font_variant_ligatures.bytes_as_string_view(), "utf-8"sv);
+            if (!maybe_values.has_value())
+                break;
 
-        component_transaction.commit();
-        parsed_values = maybe_values.release_value();
+            component_transaction.commit();
+            parsed_values = maybe_values.release_value();
+        }
     }
 
     if (!parsed_values.has_value())
@@ -4183,7 +4222,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Flex:
         return parse_flex_value(tokens, infinite_range);
     case ValueType::FontStyle:
-        return parse_font_style_value(tokens);
+        return parse_font_style_value(tokens, original_source_text);
     case ValueType::FontKerningValue:
         return parse_font_kerning_value_value(tokens);
     case ValueType::FontOpticalSizingValue:
@@ -4193,19 +4232,19 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FontWidthCss3:
         return parse_font_width_css3_value(tokens);
     case ValueType::FontVariantAlternates:
-        return parse_font_variant_alternates_value(tokens);
+        return parse_font_variant_alternates_value(tokens, original_source_text);
     case ValueType::FontVariantCapsValue:
         return parse_font_variant_caps_value_value(tokens);
     case ValueType::FontVariantCss2:
         return parse_font_variant_css2_value(tokens);
     case ValueType::FontVariantEastAsian:
-        return parse_font_variant_east_asian_value(tokens);
+        return parse_font_variant_east_asian_value(tokens, original_source_text);
     case ValueType::FontVariantEmojiValue:
         return parse_font_variant_emoji_value_value(tokens);
     case ValueType::FontVariantLigatures:
-        return parse_font_variant_ligatures_value(tokens);
+        return parse_font_variant_ligatures_value(tokens, original_source_text);
     case ValueType::FontVariantNumeric:
-        return parse_font_variant_numeric_value(tokens);
+        return parse_font_variant_numeric_value(tokens, original_source_text);
     case ValueType::FontVariantPositionValue:
         return parse_font_variant_position_value_value(tokens);
     case ValueType::Frequency:
