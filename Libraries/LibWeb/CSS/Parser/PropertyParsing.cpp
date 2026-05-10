@@ -3593,15 +3593,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         rust_style_value->string)
                 };
             case FFI::CssStyleValueKind::Url:
-                if (rust_style_value->string.has_value()) {
-                    auto maybe_url = rust_style_value->url.has_value()
-                        ? rust_style_value->url
-                        : RustComponentValueParser::parse_a_url_function(rust_style_value->string->bytes_as_string_view(), "utf-8"sv);
-                    if (maybe_url.has_value()) {
-                        tokens.discard_a_token();
-                        generated_transaction.commit();
-                        return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(maybe_url.release_value()) };
-                    }
+                if (rust_style_value->url.has_value()) {
+                    tokens.discard_a_token();
+                    generated_transaction.commit();
+                    return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(rust_style_value->url.release_value()) };
                 }
                 break;
             case FFI::CssStyleValueKind::CounterStyleName:
@@ -5866,10 +5861,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return PropertyAndValue { rust_style_value->property_id, color.release_nonnull() };
                 }
                 if (rust_style_value->paint_url_source.has_value()) {
-                    auto maybe_url = rust_style_value->paint_url.has_value()
-                        ? rust_style_value->paint_url
-                        : RustComponentValueParser::parse_a_url_function(rust_style_value->paint_url_source->bytes_as_string_view(), "utf-8"sv);
-                    if (!maybe_url.has_value())
+                    if (!rust_style_value->paint_url.has_value())
                         break;
 
                     RefPtr<StyleValue const> paint_fallback;
@@ -5881,7 +5873,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                     discard_rust_owned_property_value_tokens();
                     generated_transaction.commit();
-                    return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(maybe_url.release_value(), paint_fallback) };
+                    return PropertyAndValue { rust_style_value->property_id, URLStyleValue::create(rust_style_value->paint_url.release_value(), paint_fallback) };
                 }
                 break;
             case FFI::CssStyleValueKind::PaintOrder:
