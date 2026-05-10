@@ -349,7 +349,7 @@ private:
     NonnullRefPtr<MediaQuery> materialize_rust_media_query(RustComponentValueParser::MediaQuerySyntax&&);
     OwnPtr<MediaFeature> materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&&);
 
-    OwnPtr<BooleanExpression> parse_supports_feature(TokenStream<ComponentValue>&, Optional<RustComponentValueParser::SupportsFeature>&&);
+    OwnPtr<BooleanExpression> materialize_rust_supports_feature(Optional<RustComponentValueParser::SupportsFeature>&&, Vector<ComponentValue>&&);
 
     NonnullRefPtr<StyleValue const> resolve_unresolved_style_value(DOM::AbstractElement, GuardedSubstitutionContexts&, PropertyNameAndID const&, UnresolvedStyleValue const&);
 

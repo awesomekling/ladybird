@@ -4149,9 +4149,8 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
         auto serialized_if_condition = serialize_component_values_for_reparsing(if_condition);
         auto parsed_boolean_expression = RustComponentValueParser::parse_an_if_condition(serialized_if_condition.bytes_as_string_view(), "utf-8"sv, [&](Optional<RustComponentValueParser::MediaFeatureTest>&& media_feature, Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
             if (supports_feature.has_value()) {
-                TokenStream<ComponentValue> token_stream { component_values };
                 m_rule_context.append(RuleContext::SupportsCondition);
-                auto expression = parse_supports_feature(token_stream, move(supports_feature));
+                auto expression = materialize_rust_supports_feature(move(supports_feature), move(component_values));
                 m_rule_context.take_last();
                 return expression;
             }

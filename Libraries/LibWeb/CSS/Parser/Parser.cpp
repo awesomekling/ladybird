@@ -232,8 +232,7 @@ RefPtr<Supports> Parser::parse_as_supports()
 {
     m_rule_context.append(RuleContext::SupportsCondition);
     auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(m_input, m_encoding, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
-        TokenStream<ComponentValue> token_stream { component_values };
-        return parse_supports_feature(token_stream, move(supports_feature));
+        return materialize_rust_supports_feature(move(supports_feature), move(component_values));
     });
     m_rule_context.take_last();
     if (maybe_condition)
@@ -253,8 +252,7 @@ AK::Function<OwnPtr<BooleanExpression>(Optional<RustComponentValueParser::Suppor
 {
     return [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
         m_rule_context.append(RuleContext::SupportsCondition);
-        TokenStream<ComponentValue> token_stream { component_values };
-        auto expression = parse_supports_feature(token_stream, move(supports_feature));
+        auto expression = materialize_rust_supports_feature(move(supports_feature), move(component_values));
         m_rule_context.take_last();
         return expression;
     };
@@ -318,14 +316,11 @@ String Parser::serialize_component_values_for_reparsing(ReadonlySpan<ComponentVa
 }
 
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
-OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentValue>& tokens, Optional<RustComponentValueParser::SupportsFeature>&& feature)
+OwnPtr<BooleanExpression> Parser::materialize_rust_supports_feature(Optional<RustComponentValueParser::SupportsFeature>&& feature, Vector<ComponentValue>&& component_values)
 {
     // <supports-feature> = <supports-selector-fn> | <supports-font-tech-fn>
     //                    | <supports-font-format-fn> | <supports-env-fn>
     //                    | <supports-decl>
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
     if (!feature.has_value())
         return {};
 
@@ -333,51 +328,36 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
         VERIFY(feature->name.has_value());
         VERIFY(feature->value.has_value());
 
-        auto value_start = tokens.current_index();
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-
         Declaration declaration {
             .name = feature->name.release_value(),
-            .value = Vector<ComponentValue> { tokens.tokens_since(value_start) },
+            .value = move(component_values),
             .important = feature->important,
         };
 
-        transaction.commit();
         return BooleanExpressionInParens::create(Supports::Declaration::create(feature->value.release_value(), convert_to_style_property(declaration).has_value()));
     }
-
-    auto const& first_token = tokens.consume_a_token();
-    tokens.discard_whitespace();
-    if (tokens.has_next_token())
-        return {};
 
     switch (feature->kind) {
     case FFI::CssSupportsFeatureKind::Declaration:
         VERIFY_NOT_REACHED();
     case FFI::CssSupportsFeatureKind::Selector: {
-        VERIFY(first_token.is_function("selector"sv));
         VERIFY(feature->value.has_value());
-        transaction.commit();
         return Supports::Selector::create(feature->value.release_value(), feature->matches);
     }
     case FFI::CssSupportsFeatureKind::FontTech: {
         VERIFY(feature->name.has_value());
-        transaction.commit();
         auto tech_name = feature->name.release_value();
         bool matches = font_tech_is_supported(tech_name);
         return Supports::FontTech::create(move(tech_name), matches);
     }
     case FFI::CssSupportsFeatureKind::FontFormat: {
         VERIFY(feature->name.has_value());
-        transaction.commit();
         auto format_name = feature->name.release_value();
         bool matches = font_format_is_supported(format_name);
         return Supports::FontFormat::create(move(format_name), matches);
     }
     case FFI::CssSupportsFeatureKind::Env: {
         VERIFY(feature->name.has_value());
-        transaction.commit();
         auto variable_name = feature->name.release_value();
         // https://drafts.csswg.org/css-conditional-5/#support-definition-env
         // A CSS processor is considered to support an environment variable if the <ident> is a supported environment
