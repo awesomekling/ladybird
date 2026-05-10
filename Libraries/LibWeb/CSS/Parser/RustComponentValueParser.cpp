@@ -5308,27 +5308,6 @@ Optional<PageSelectorList> RustComponentValueParser::parse_a_page_selector_list(
     return move(builder.selectors);
 }
 
-Optional<FlyString> RustComponentValueParser::parse_a_custom_property_name(StringView input, StringView encoding)
-{
-    Optional<FlyString> name;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_custom_property_name(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &name,
-        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
-            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
-            name = fly_string_from_ffi_bytes(name_ptr, name_len);
-        });
-
-    if (!parsed)
-        return {};
-
-    return name;
-}
-
 Optional<FlyString> RustComponentValueParser::parse_a_custom_ident(StringView input, StringView encoding)
 {
     Optional<FlyString> name;
@@ -6087,6 +6066,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_keyframes_name = {},
                 .rust_namespace_prefix = {},
                 .rust_namespace_uri = {},
+                .rust_custom_property_name = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6229,6 +6209,14 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         VERIFY(rule.has_value());
         auto& at_rule = rule->get<AtRule>();
         at_rule.rust_namespace_uri = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
+        break;
+    }
+    case FFI::CssRuleEventKind::CustomPropertyName: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_custom_property_name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
         break;
     }
     }

@@ -522,12 +522,10 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         return {};
     }
 
-    auto serialized_custom_property_name = serialize_component_values_for_reparsing(rule.prelude);
-    auto name = RustComponentValueParser::parse_a_custom_property_name(serialized_custom_property_name.bytes_as_string_view(), "utf-8"sv);
-    if (!name.has_value()) {
+    if (!rule.rust_custom_property_name.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@property"_fly_string,
-            .prelude = serialized_custom_property_name,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Name must be an ident starting with '--'."_string,
         });
         return {};
@@ -609,7 +607,7 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         initial_value_maybe = move(parsed_initial_value);
     }
 
-    return CSSPropertyRule::create(realm(), name.release_value(), syntax_maybe.value(), inherits_maybe.value(), move(initial_value_maybe));
+    return CSSPropertyRule::create(realm(), rule.rust_custom_property_name.value(), syntax_maybe.value(), inherits_maybe.value(), move(initial_value_maybe));
 }
 
 // https://drafts.csswg.org/css-conditional-5/#container-rule

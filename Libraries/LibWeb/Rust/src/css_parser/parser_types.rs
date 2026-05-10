@@ -1710,6 +1710,7 @@ pub enum CssRuleEventKind {
     KeyframeSelector,
     NamespacePrefix,
     NamespaceUri,
+    CustomPropertyName,
 }
 
 #[repr(C)]
