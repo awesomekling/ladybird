@@ -1345,37 +1345,6 @@ pub unsafe extern "C" fn rust_css_parse_url_function(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_import_url(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    url_callback: unsafe extern "C" fn(ctx: *mut c_void, url_function: *const CssUrlFunction),
-    modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_an_import_url(
-                input,
-                |url_function| {
-                    url_callback(ctx, &raw const url_function);
-                },
-                |modifier| {
-                    modifier_callback(ctx, &raw const modifier);
-                },
-            )
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_import_rule_prelude(
     input: *const u8,
     input_len: usize,
@@ -1479,27 +1448,6 @@ pub unsafe extern "C" fn rust_css_parse_scroll_function(input: *const u8, input_
             };
 
             css_parser::parse_scroll_function_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_view_timeline_inset(
-    input: *const u8,
-    input_len: usize,
-) -> CssViewTimelineInsetValue {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssViewTimelineInsetValue {
-                    kind: CssViewTimelineInsetValueKind::Invalid,
-                    count: 0,
-                };
-            };
-
-            css_parser::parse_view_timeline_inset_value(input)
         })
     }
 }
@@ -1632,30 +1580,6 @@ pub unsafe extern "C" fn rust_css_parse_simple_color(
 
             css_parser::parse_simple_color_value(input, allow_quirky_color, |kind, red, green, blue, alpha, name| {
                 callback(ctx, kind, red, green, blue, alpha, name.as_ptr(), name.len());
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to `name_callback` must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_timeline_scope(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
-) -> CssTimelineScopeValueKind {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssTimelineScopeValueKind::Invalid;
-            };
-
-            css_parser::parse_timeline_scope_value(input, |name| {
-                name_callback(ctx, name.as_ptr(), name.len());
             })
         })
     }

@@ -1078,11 +1078,6 @@ public:
         FFI::CssViewFunctionInsetPosition inset_position;
     };
 
-    struct TimelineScope {
-        FFI::CssTimelineScopeValueKind kind;
-        Vector<FlyString> names;
-    };
-
     enum class AllowBlankLayerName : u8 {
         No,
         Yes,
@@ -1178,7 +1173,6 @@ public:
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
-    static Optional<URL> parse_an_import_url(StringView input, StringView encoding);
     static Optional<ImportRulePrelude> parse_an_import_rule_prelude(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
@@ -1191,9 +1185,7 @@ public:
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);
-    static TimelineScope parse_timeline_scope(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
-    static ViewTimelineInset parse_view_timeline_inset(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
     static ViewFunction parse_view_function(StringView input, StringView encoding);
     static bool syntax_matches(StringView input, StringView syntax, LimitSingleComponentIdentToCustomIdent);

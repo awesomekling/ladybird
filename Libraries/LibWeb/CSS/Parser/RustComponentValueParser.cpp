@@ -5545,11 +5545,6 @@ Optional<URL> RustComponentValueParser::parse_a_url_function(StringView input, S
     return parse_url_with_rust(input, encoding, FFI::rust_css_parse_url_function);
 }
 
-Optional<URL> RustComponentValueParser::parse_an_import_url(StringView input, StringView encoding)
-{
-    return parse_url_with_rust(input, encoding, FFI::rust_css_parse_import_url);
-}
-
 Optional<RustComponentValueParser::ImportRulePrelude> RustComponentValueParser::parse_an_import_rule_prelude(StringView input, StringView encoding)
 {
     struct ImportRulePreludeBuilder {
@@ -5901,27 +5896,6 @@ bool RustComponentValueParser::parse_optional_declaration_value_descriptor(Strin
     return FFI::rust_css_parse_optional_declaration_value_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
 }
 
-RustComponentValueParser::TimelineScope RustComponentValueParser::parse_timeline_scope(StringView input, StringView encoding)
-{
-    Vector<FlyString> names;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto kind = FFI::rust_css_parse_timeline_scope(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &names,
-        [](void* raw_names, u8 const* name_ptr, size_t name_len) {
-            auto& names = *static_cast<Vector<FlyString>*>(raw_names);
-            names.append(fly_string_from_ffi_bytes(name_ptr, name_len));
-        });
-
-    return TimelineScope {
-        .kind = kind,
-        .names = move(names),
-    };
-}
-
 RustComponentValueParser::ScrollFunction RustComponentValueParser::parse_scroll_function(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);
@@ -5935,21 +5909,6 @@ RustComponentValueParser::ScrollFunction RustComponentValueParser::parse_scroll_
         .kind = parsed.kind,
         .scroller = parsed.scroller,
         .axis = parsed.axis,
-    };
-}
-
-RustComponentValueParser::ViewTimelineInset RustComponentValueParser::parse_view_timeline_inset(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_view_timeline_inset(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size());
-
-    return {
-        .kind = parsed.kind,
-        .count = parsed.count,
     };
 }
 
