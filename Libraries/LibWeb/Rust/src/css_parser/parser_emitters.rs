@@ -359,6 +359,32 @@ pub(super) fn emit_rule<E, C>(
                 important: false,
                 is_block_rule: at_rule.is_block_rule,
             });
+            if at_rule.name.eq_ignore_ascii_case("layer") {
+                let mut parser = ComponentValueParser::new(at_rule.prelude.clone());
+                let parsed_names = if at_rule.is_block_rule {
+                    parser.parse_a_layer_name(true).and_then(|name| {
+                        parser.discard_whitespace();
+                        if parser.has_next_component_value() {
+                            return None;
+                        }
+                        Some(vec![name])
+                    })
+                } else {
+                    parser.parse_a_layer_name_list()
+                };
+                if let Some(names) = parsed_names {
+                    for name in names {
+                        let (name_ptr, name_len) = string_parts(&name);
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::LayerName,
+                            name_ptr,
+                            name_len,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    }
+                }
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,

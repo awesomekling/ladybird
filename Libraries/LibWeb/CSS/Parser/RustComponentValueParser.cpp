@@ -5752,49 +5752,6 @@ Optional<Vector<RustComponentValueParser::FontVariantLigaturesValue>> RustCompon
     return values;
 }
 
-Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName allow_blank_layer_name)
-{
-    Optional<FlyString> name;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_layer_name(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        allow_blank_layer_name == AllowBlankLayerName::Yes,
-        &name,
-        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
-            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
-            name = fly_string_from_ffi_bytes(name_ptr, name_len);
-        });
-
-    if (!parsed)
-        return {};
-
-    return name;
-}
-
-Optional<Vector<FlyString>> RustComponentValueParser::parse_a_layer_name_list(StringView input, StringView encoding)
-{
-    Vector<FlyString> names;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_layer_name_list(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &names,
-        [](void* raw_names, u8 const* name_ptr, size_t name_len) {
-            auto& names = *static_cast<Vector<FlyString>*>(raw_names);
-            names.append(fly_string_from_ffi_bytes(name_ptr, name_len));
-        });
-
-    if (!parsed)
-        return {};
-
-    return names;
-}
-
 Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringView input, StringView encoding)
 {
     Optional<FlyString> name;
@@ -6193,6 +6150,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len),
                 .prelude = {},
                 .child_rules_and_lists_of_declarations = {},
+                .rust_layer_names = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6290,6 +6248,16 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         set_original_value_text(declaration);
         builder.component_value_builder = {};
         builder.append_declaration(move(declaration));
+        break;
+    }
+    case FFI::CssRuleEventKind::LayerName: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        if (!at_rule.rust_layer_names.has_value())
+            at_rule.rust_layer_names = Vector<FlyString> {};
+        at_rule.rust_layer_names->append(fly_string_from_ffi_bytes(event.name_ptr, event.name_len));
         break;
     }
     }

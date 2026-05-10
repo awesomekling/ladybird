@@ -8,6 +8,7 @@
 
 #include <AK/FlyString.h>
 #include <AK/Function.h>
+#include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
@@ -32,6 +33,7 @@ struct AtRule {
     FlyString name;
     Vector<ComponentValue> prelude;
     Vector<RuleOrListOfDeclarations> child_rules_and_lists_of_declarations;
+    Optional<Vector<FlyString>> rust_layer_names;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;

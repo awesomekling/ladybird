@@ -1705,6 +1705,7 @@ pub enum CssRuleEventKind {
     ListOfDeclarationsEnd,
     DeclarationStart,
     DeclarationEnd,
+    LayerName,
 }
 
 #[repr(C)]

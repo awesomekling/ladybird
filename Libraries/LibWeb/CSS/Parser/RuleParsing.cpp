@@ -291,18 +291,15 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
         // }
 
         // First, the name
-        FlyString layer_name = {};
-        auto serialized_layer_name = serialize_component_values_for_reparsing(rule.prelude);
-        if (auto maybe_name = RustComponentValueParser::parse_a_layer_name(serialized_layer_name.bytes_as_string_view(), "utf-8"sv, RustComponentValueParser::AllowBlankLayerName::Yes); maybe_name.has_value()) {
-            layer_name = maybe_name.release_value();
-        } else {
+        if (!rule.rust_layer_names.has_value() || rule.rust_layer_names->size() != 1) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                 .rule_name = "@layer"_fly_string,
-                .prelude = serialized_layer_name,
+                .prelude = serialize_component_values_for_reparsing(rule.prelude),
                 .description = "Not a valid layer name."_string,
             });
             return {};
         }
+        auto layer_name = rule.rust_layer_names->first();
 
         // Then the rules
         GC::RootVector<GC::Ref<CSSRule>> child_rules { realm().heap() };
@@ -322,18 +319,16 @@ GC::Ptr<CSSRule> Parser::convert_to_layer_rule(AtRule const& rule, Nested nested
 
     // CSSLayerStatementRule
     // @layer <layer-name>#;
-    auto serialized_layer_names = serialize_component_values_for_reparsing(rule.prelude);
-    auto layer_names = RustComponentValueParser::parse_a_layer_name_list(serialized_layer_names.bytes_as_string_view(), "utf-8"sv);
-    if (!layer_names.has_value()) {
+    if (!rule.rust_layer_names.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@layer"_fly_string,
-            .prelude = serialized_layer_names,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Contains invalid layer name."_string,
         });
         return {};
     }
 
-    return CSSLayerStatementRule::create(realm(), layer_names.release_value());
+    return CSSLayerStatementRule::create(realm(), rule.rust_layer_names.value());
 }
 
 GC::Ptr<CSSKeyframesRule> Parser::convert_to_keyframes_rule(AtRule const& rule)
