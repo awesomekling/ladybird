@@ -1038,7 +1038,7 @@ RefPtr<StyleValue const> Parser::parse_specific_keyword_value(TokenStream<Compon
 }
 
 // https://drafts.csswg.org/scroll-animations-1/#funcdef-scroll
-RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream<ComponentValue>& tokens)
+RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // <scroll()> = scroll( [ <scroller> || <axis> ]? )
     auto transaction = tokens.begin_transaction();
@@ -1046,10 +1046,14 @@ RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream
     if (!function_token.is_function("scroll"sv))
         return nullptr;
 
-    auto serialized_scroll_function = function_token.original_source_text();
-    if (serialized_scroll_function.is_empty())
-        serialized_scroll_function = function_token.to_string();
-    auto scroll_function = RustComponentValueParser::parse_scroll_function(serialized_scroll_function.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_scroll_function;
+    auto scroll_function_source = original_source_text.value_or_lazy_evaluated([&] {
+        serialized_scroll_function = function_token.original_source_text();
+        if (serialized_scroll_function->is_empty())
+            serialized_scroll_function = function_token.to_string();
+        return serialized_scroll_function->bytes_as_string_view();
+    });
+    auto scroll_function = RustComponentValueParser::parse_scroll_function(scroll_function_source, "utf-8"sv);
     if (scroll_function.kind == FFI::CssScrollFunctionValueKind::Invalid)
         return nullptr;
 
@@ -1083,12 +1087,17 @@ RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream
         break;
     }
 
+    if (original_source_text.has_value()) {
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    }
+
     transaction.commit();
     return FunctionStyleValue::create("scroll"_fly_string, TupleStyleValue::create(move(tuple)));
 }
 
 // https://drafts.csswg.org/scroll-animations-1/#funcdef-view
-RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<ComponentValue>& tokens)
+RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // <view()> = view( [ <axis> || <'view-timeline-inset'> ]? )
     auto transaction = tokens.begin_transaction();
@@ -1096,10 +1105,14 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
     if (!function_token.is_function("view"sv))
         return nullptr;
 
-    auto serialized_view_function = function_token.original_source_text();
-    if (serialized_view_function.is_empty())
-        serialized_view_function = function_token.to_string();
-    auto view_function = RustComponentValueParser::parse_view_function(serialized_view_function.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_view_function;
+    auto view_function_source = original_source_text.value_or_lazy_evaluated([&] {
+        serialized_view_function = function_token.original_source_text();
+        if (serialized_view_function->is_empty())
+            serialized_view_function = function_token.to_string();
+        return serialized_view_function->bytes_as_string_view();
+    });
+    auto view_function = RustComponentValueParser::parse_view_function(view_function_source, "utf-8"sv);
     if (view_function.kind == FFI::CssViewFunctionValueKind::Invalid)
         return nullptr;
 
@@ -1141,6 +1154,11 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
         tuple[TupleStyleValue::Indices::ViewFunction::Inset] = inset_value.release_nonnull();
         break;
     }
+    }
+
+    if (original_source_text.has_value()) {
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
     }
 
     transaction.commit();
@@ -4295,7 +4313,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Resolution:
         return parse_resolution_value(tokens, infinite_range);
     case ValueType::ScrollFunction:
-        return parse_scroll_function_value(tokens);
+        return parse_scroll_function_value(tokens, original_source_text);
     case ValueType::String:
         return parse_string_value(tokens);
     case ValueType::Symbol:
@@ -4311,7 +4329,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Url:
         return parse_url_value(tokens, original_source_text);
     case ValueType::ViewFunction:
-        return parse_view_function_value(tokens);
+        return parse_view_function_value(tokens, original_source_text);
     case ValueType::ViewTimelineInset:
         return parse_view_timeline_inset_value(tokens, original_source_text);
     }

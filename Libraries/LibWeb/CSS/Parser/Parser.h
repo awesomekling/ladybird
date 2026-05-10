@@ -355,8 +355,8 @@ private:
     RefPtr<StyleValue const> parse_number_percentage_none_value(TokenStream<ComponentValue>& tokens);
 
     RefPtr<StyleValue const> parse_view_timeline_inset_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<FunctionStyleValue const> parse_scroll_function_value(TokenStream<ComponentValue>&);
-    RefPtr<FunctionStyleValue const> parse_view_function_value(TokenStream<ComponentValue>&);
+    RefPtr<FunctionStyleValue const> parse_scroll_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<FunctionStyleValue const> parse_view_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     using ParseFunction = AK::Function<RefPtr<StyleValue const>(TokenStream<ComponentValue>&)>;
     RefPtr<StyleValueList const> parse_comma_separated_value_list(TokenStream<ComponentValue>&, ParseFunction);
