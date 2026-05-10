@@ -2463,88 +2463,23 @@ RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<Comp
 
 RefPtr<ImageSetStyleValue const> Parser::parse_image_set_function(TokenStream<ComponentValue>& tokens)
 {
-    tokens.discard_whitespace();
-    auto const& function_token = tokens.next_token();
-    if (!function_token.is_function("image-set"sv) && !function_token.is_function("-webkit-image-set"sv))
-        return nullptr;
-
-    auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
-    auto const& function = tokens.consume_a_token().function();
-    TokenStream function_tokens { function.value };
-    auto image_set_options_tokens = parse_a_comma_separated_list_of_component_values(function_tokens);
-    function_tokens.discard_whitespace();
-    if (!function_tokens.is_empty())
+    tokens.discard_whitespace();
+    if (!tokens.has_next_token())
         return nullptr;
 
-    Vector<ImageSetStyleValue::Option> options;
-    options.ensure_capacity(image_set_options_tokens.size());
-    for (auto const& option_tokens_list : image_set_options_tokens) {
-        if (option_tokens_list.first_matching([](auto const& component_value) { return component_value.contains_attr_tainted_value(); }).has_value())
-            return nullptr;
-
-        TokenStream option_tokens { option_tokens_list };
-        option_tokens.discard_whitespace();
-
-        RefPtr<AbstractImageStyleValue const> image;
-        if (option_tokens.next_token().is(Token::Type::String)) {
-            auto url = URL { option_tokens.consume_a_token().token().string().to_string() };
-            image = ImageStyleValue::create(url);
-        } else {
-            image = parse_image_value(option_tokens, AllowImageSet::No);
-        }
-        if (!image)
-            return nullptr;
-
-        RefPtr<StyleValue const> resolution;
-        Optional<String> type;
-        while (true) {
-            option_tokens.discard_whitespace();
-            if (option_tokens.is_empty())
-                break;
-
-            if (!resolution) {
-                if (auto parsed_resolution = parse_resolution_value(option_tokens, infinite_range)) {
-                    resolution = parsed_resolution;
-                    continue;
-                }
-            }
-
-            if (!type.has_value() && option_tokens.next_token().is_function("type"sv)) {
-                auto const& type_function = option_tokens.consume_a_token().function();
-                TokenStream type_tokens { type_function.value };
-                type_tokens.discard_whitespace();
-                if (!type_tokens.next_token().is(Token::Type::String))
-                    return nullptr;
-                type = type_tokens.consume_a_token().token().string().to_string();
-                type_tokens.discard_whitespace();
-                if (!type_tokens.is_empty())
-                    return nullptr;
-                continue;
-            }
-
-            return nullptr;
-        }
-
-        if (!resolution)
-            resolution = ResolutionStyleValue::create(Resolution { 1, ResolutionUnit::X });
-
-        options.unchecked_append({
-            .image = image.release_nonnull(),
-            .resolution = resolution.release_nonnull(),
-            .type = move(type),
-        });
-    }
-
-    if (options.is_empty())
+    auto const& component_value = tokens.consume_a_token();
+    if (component_value.contains_attr_tainted_value())
         return nullptr;
 
-    auto serialized_image_set = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    if (RustComponentValueParser::parse_image_set(serialized_image_set.bytes_as_string_view(), "utf-8"sv) == FFI::CssImageSetValueKind::Invalid)
+    auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
+    auto value = parse_css_value_for_property(PropertyID::BorderImageSource, component_value_tokens);
+    component_value_tokens.discard_whitespace();
+    if (!value || component_value_tokens.has_next_token() || !value->is_image_set())
         return nullptr;
 
     transaction.commit();
-    return ImageSetStyleValue::create(move(options));
+    return static_ptr_cast<ImageSetStyleValue const>(value);
 }
 
 RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<ComponentValue>& tokens, AllowImageSet allow_image_set)
