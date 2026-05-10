@@ -4406,18 +4406,6 @@ OwnPtr<SyntaxNode> RustComponentValueParser::parse_as_syntax(StringView input, S
     return move(builder.root);
 }
 
-bool RustComponentValueParser::syntax_matches(StringView input, StringView syntax, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
-{
-    auto filtered_input = decode_and_filter_code_points(input, "utf-8"sv);
-    auto filtered_syntax = decode_and_filter_code_points(syntax, "utf-8"sv);
-    return FFI::rust_css_syntax_matches(
-        filtered_input.bytes().data(),
-        filtered_input.bytes().size(),
-        filtered_syntax.bytes().data(),
-        filtered_syntax.bytes().size(),
-        limit_single_component_ident_to_custom_ident == LimitSingleComponentIdentToCustomIdent::Yes);
-}
-
 Optional<RustComponentValueParser::SyntaxComponent> RustComponentValueParser::parse_css_type(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
 {
     RustSyntaxNodeBuilder builder;

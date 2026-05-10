@@ -1155,7 +1155,6 @@ public:
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
     static ViewFunction parse_view_function(StringView input, StringView encoding);
-    static bool syntax_matches(StringView input, StringView syntax, LimitSingleComponentIdentToCustomIdent);
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);

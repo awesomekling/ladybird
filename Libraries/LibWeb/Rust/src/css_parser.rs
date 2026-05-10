@@ -103,6 +103,7 @@ use style_value_emitter::emit_rust_owned_style_value;
 use style_value_emitter::emit_rust_owned_style_value_with_calculation_callback;
 pub(crate) use style_value_longhands::parse_rust_owned_counter_function;
 use style_value_longhands::*;
+#[cfg(test)]
 pub(crate) use style_value_parser::component_values_match_syntax;
 use style_value_parser::{
     component_values_parse_as_generated_property_value_type, component_values_parse_as_property_value_type,

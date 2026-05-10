@@ -834,38 +834,6 @@ pub unsafe extern "C" fn rust_css_parse_as_syntax(
 }
 
 /// # Safety
-/// - `input` and `syntax` must point to valid strings
-/// - `ctx` must be a valid pointer to a CallbackContext
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_syntax_matches(
-    input: *const u8,
-    input_len: usize,
-    syntax: *const u8,
-    syntax_len: usize,
-    limit_single_component_ident_to_custom_ident: bool,
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-            let Some(syntax) = bytes_from_raw(syntax, syntax_len) else {
-                return false;
-            };
-
-            css_parser::component_values_match_syntax(
-                input,
-                match std::str::from_utf8(syntax) {
-                    Ok(syntax) => syntax,
-                    Err(_) => return false,
-                },
-                limit_single_component_ident_to_custom_ident,
-            )
-        })
-    }
-}
-
-/// # Safety
 /// - `input` and `input_len` must point to a valid string
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to `callback` must be valid pointers
