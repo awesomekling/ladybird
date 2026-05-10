@@ -4235,6 +4235,26 @@ RefPtr<StyleValue const> Parser::parse_transform_list_value(TokenStream<Componen
     return value;
 }
 
+// https://drafts.csswg.org/css-counter-styles-3/#typedef-symbol
+RefPtr<StyleValue const> Parser::parse_symbol_value(TokenStream<ComponentValue>& tokens)
+{
+    // <symbol> = <string> | <custom-ident>
+    // AD-HOC: The spec actually defines this as '<string> | <image> | <custom-ident>' but the image portion is
+    // considered at-risk and no other browser supports it.
+    auto transaction = tokens.begin_transaction();
+    if (auto string = parse_string_value(tokens)) {
+        transaction.commit();
+        return string.release_nonnull();
+    }
+
+    if (auto custom_ident = parse_custom_ident_value(tokens)) {
+        transaction.commit();
+        return custom_ident.release_nonnull();
+    }
+
+    return nullptr;
+}
+
 RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto parse_rust_owned_property_value = [&](PropertyID property_id, auto accepts_value) -> RefPtr<StyleValue const> {
@@ -4284,29 +4304,33 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FontStyle:
         return parse_font_style_value(tokens, original_source_text);
     case ValueType::FontKerningValue:
-        return parse_font_kerning_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontKerning, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontOpticalSizingValue:
-        return parse_font_optical_sizing_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontOpticalSizing, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontWeightAbsolute:
-        return parse_font_weight_absolute_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontWeight, [](StyleValue const& value) {
+            return value.is_number() || (value.is_keyword() && first_is_one_of(value.to_keyword(), Keyword::Normal, Keyword::Bold));
+        });
     case ValueType::FontWidthCss3:
-        return parse_font_width_css3_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontWidth, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantAlternates:
         return parse_font_variant_alternates_value(tokens, original_source_text);
     case ValueType::FontVariantCapsValue:
-        return parse_font_variant_caps_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontVariantCaps, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantCss2:
-        return parse_font_variant_css2_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontVariantCaps, [](StyleValue const& value) {
+            return value.is_keyword() && first_is_one_of(value.to_keyword(), Keyword::Normal, Keyword::SmallCaps);
+        });
     case ValueType::FontVariantEastAsian:
         return parse_font_variant_east_asian_value(tokens, original_source_text);
     case ValueType::FontVariantEmojiValue:
-        return parse_font_variant_emoji_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontVariantEmoji, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantLigatures:
         return parse_font_variant_ligatures_value(tokens, original_source_text);
     case ValueType::FontVariantNumeric:
         return parse_font_variant_numeric_value(tokens, original_source_text);
     case ValueType::FontVariantPositionValue:
-        return parse_font_variant_position_value_value(tokens);
+        return parse_rust_owned_property_value(PropertyID::FontVariantPosition, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::Frequency:
         return parse_frequency_value(tokens, infinite_range, original_source_text);
     case ValueType::FrequencyPercentage:
