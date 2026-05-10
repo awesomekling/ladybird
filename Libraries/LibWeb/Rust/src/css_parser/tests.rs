@@ -53,25 +53,26 @@ use super::{
     RustOwnedFlexBasis, RustOwnedFlexDirection, RustOwnedFlexFlow, RustOwnedFlexShorthand, RustOwnedFlexWrap,
     RustOwnedFontFamilyList, RustOwnedFontLanguageOverride, RustOwnedFontShorthandItem, RustOwnedFontStyle,
     RustOwnedFontVariantLonghand, RustOwnedGeneratedValueList, RustOwnedGeneratedValueListItem, RustOwnedGradientKind,
-    RustOwnedGridAutoFlow, RustOwnedGridPlacementShorthandItem, RustOwnedGridRepeat, RustOwnedGridRepeatType,
-    RustOwnedGridTemplateShorthandItem, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
+    RustOwnedGradientSideOrCorner, RustOwnedGridAutoFlow, RustOwnedGridPlacementShorthandItem, RustOwnedGridRepeat,
+    RustOwnedGridRepeatType, RustOwnedGridTemplateShorthandItem, RustOwnedGridTrackPlacement, RustOwnedGridTrackSize,
     RustOwnedGridTrackSizeList, RustOwnedGridTrackSizeListItem, RustOwnedIdentifierValue, RustOwnedImage,
-    RustOwnedImageKind, RustOwnedLineStyle, RustOwnedListStyle, RustOwnedListStyleImage, RustOwnedListStylePosition,
-    RustOwnedListStyleType, RustOwnedMathDepth, RustOwnedMathFunction, RustOwnedNestedPrimitiveValue,
-    RustOwnedOpenTypeSettings, RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind,
-    RustOwnedOverflowClipMargin, RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder,
-    RustOwnedPlaceShorthand, RustOwnedPosition, RustOwnedPositionAnchor, RustOwnedPositionArea,
-    RustOwnedPositionComponent, RustOwnedPositionList, RustOwnedPositionListItem, RustOwnedPositionTryFallback,
-    RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder, RustOwnedPositionVisibility,
-    RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect, RustOwnedRepeatStyle,
-    RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
-    RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
-    RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
-    RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
-    RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition,
-    RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
-    RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
-    RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
+    RustOwnedImageKind, RustOwnedLineStyle, RustOwnedLinearGradientDirection, RustOwnedListStyle,
+    RustOwnedListStyleImage, RustOwnedListStylePosition, RustOwnedListStyleType, RustOwnedMathDepth,
+    RustOwnedMathFunction, RustOwnedNestedPrimitiveValue, RustOwnedOpenTypeSettings,
+    RustOwnedOpenTypeSettingsStyleValue, RustOwnedOpenTypeSettingsStyleValueKind, RustOwnedOverflowClipMargin,
+    RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
+    RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
+    RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
+    RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect,
+    RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline,
+    RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox,
+    RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
+    RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
+    RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
+    RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
+    RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
+    RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
+    RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
     RustOwnedTreeCountingFunction, RustOwnedTreeCountingFunctionKind, RustOwnedUrl, RustOwnedUrlPayload,
     RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
     SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
@@ -3053,7 +3054,19 @@ fn parses_style_values_with_rust_owned_ast() {
     let header = gradient.header.as_ref().unwrap();
     assert_eq!(header.component_values.len(), 5);
     assert!(header.color_interpolation_method.is_some());
+    assert_eq!(
+        header.linear_direction,
+        Some(RustOwnedLinearGradientDirection::SideOrCorner(
+            RustOwnedGradientSideOrCorner::Bottom
+        ))
+    );
     assert_eq!(gradient.groups.len(), 3);
+    let gradient = parse_rust_owned_image("linear-gradient(in oklab 45deg, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(
+        &header.linear_direction,
+        Some(RustOwnedLinearGradientDirection::AngleOrZero(component_values)) if component_values.len() == 1
+    ));
     assert_eq!(
         parse_rust_owned_style_value(
             &[PropertyId::BackgroundImage],

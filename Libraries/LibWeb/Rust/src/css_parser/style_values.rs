@@ -414,6 +414,25 @@ pub(crate) enum RustOwnedGradientKind {
 pub(crate) struct RustOwnedGradientHeader {
     pub(crate) component_values: Vec<ComponentValue>,
     pub(crate) color_interpolation_method: Option<Vec<ComponentValue>>,
+    pub(crate) linear_direction: Option<RustOwnedLinearGradientDirection>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedLinearGradientDirection {
+    AngleOrZero(Vec<ComponentValue>),
+    SideOrCorner(RustOwnedGradientSideOrCorner),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedGradientSideOrCorner {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
 }
 
 #[derive(Clone, Debug, PartialEq)]

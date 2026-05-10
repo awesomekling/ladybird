@@ -5242,6 +5242,9 @@ fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
     let header = (color_stop_group_index > 0).then(|| RustOwnedGradientHeader {
         component_values: groups[0].clone(),
         color_interpolation_method: rust_owned_gradient_header_color_interpolation_method(&groups[0]),
+        linear_direction: (kind == RustOwnedGradientKind::Linear)
+            .then(|| rust_owned_gradient_header_linear_direction(&groups[0], is_webkit_prefixed))
+            .flatten(),
     });
 
     Some(RustOwnedGradient {
@@ -5268,6 +5271,34 @@ fn rust_owned_gradient_header_color_interpolation_method(
         }
         if component_values_parse_as_color_interpolation_method(&component_values[split..]) {
             return Some(component_values[split..].to_vec());
+        }
+        None
+    })
+}
+
+fn rust_owned_gradient_header_linear_direction(
+    component_values: &[ComponentValue],
+    is_webkit_prefixed: bool,
+) -> Option<RustOwnedLinearGradientDirection> {
+    let component_values = remove_whitespace_component_values(component_values);
+    if let Some(direction) =
+        rust_owned_linear_gradient_direction_from_component_values(&component_values, is_webkit_prefixed)
+    {
+        return Some(direction);
+    }
+
+    (1..component_values.len()).find_map(|split| {
+        if component_values_parse_as_color_interpolation_method(&component_values[..split]) {
+            return rust_owned_linear_gradient_direction_from_component_values(
+                &component_values[split..],
+                is_webkit_prefixed,
+            );
+        }
+        if component_values_parse_as_color_interpolation_method(&component_values[split..]) {
+            return rust_owned_linear_gradient_direction_from_component_values(
+                &component_values[..split],
+                is_webkit_prefixed,
+            );
         }
         None
     })
@@ -5480,6 +5511,46 @@ fn component_values_parse_as_linear_gradient_direction(
         || matches!(sides, [side_a, side_b] if gradient_sides_form_corner(side_a, side_b))
 }
 
+fn rust_owned_linear_gradient_direction_from_component_values(
+    component_values: &[ComponentValue],
+    is_webkit_prefixed: bool,
+) -> Option<RustOwnedLinearGradientDirection> {
+    let component_values = remove_whitespace_component_values(component_values);
+    let component_values = component_values.as_slice();
+    if matches!(component_values, [component_value] if component_value_parse_as_angle_or_zero(component_value)) {
+        return Some(RustOwnedLinearGradientDirection::AngleOrZero(component_values.to_vec()));
+    }
+
+    let sides = if is_webkit_prefixed {
+        component_values
+    } else {
+        let [to, sides @ ..] = component_values else {
+            return None;
+        };
+        if !component_value_is_ident(Some(to), "to") {
+            return None;
+        }
+        sides
+    };
+
+    if let [side] = sides {
+        return Some(RustOwnedLinearGradientDirection::SideOrCorner(
+            rust_owned_gradient_side_or_corner_from_side(component_value_parse_as_gradient_side(side)?),
+        ));
+    }
+
+    if let [side_a, side_b] = sides {
+        return Some(RustOwnedLinearGradientDirection::SideOrCorner(
+            rust_owned_gradient_side_or_corner_from_sides(
+                component_value_parse_as_gradient_side(side_a)?,
+                component_value_parse_as_gradient_side(side_b)?,
+            )?,
+        ));
+    }
+
+    None
+}
+
 fn component_value_parse_as_gradient_side(component_value: &ComponentValue) -> Option<GradientSide> {
     let ComponentValue::PreservedToken(Token {
         token_type: TokenType::Ident { value },
@@ -5510,6 +5581,36 @@ enum GradientSide {
     Bottom,
     Left,
     Right,
+}
+
+fn rust_owned_gradient_side_or_corner_from_side(side: GradientSide) -> RustOwnedGradientSideOrCorner {
+    match side {
+        GradientSide::Top => RustOwnedGradientSideOrCorner::Top,
+        GradientSide::Bottom => RustOwnedGradientSideOrCorner::Bottom,
+        GradientSide::Left => RustOwnedGradientSideOrCorner::Left,
+        GradientSide::Right => RustOwnedGradientSideOrCorner::Right,
+    }
+}
+
+fn rust_owned_gradient_side_or_corner_from_sides(
+    side_a: GradientSide,
+    side_b: GradientSide,
+) -> Option<RustOwnedGradientSideOrCorner> {
+    match (side_a, side_b) {
+        (GradientSide::Top, GradientSide::Left) | (GradientSide::Left, GradientSide::Top) => {
+            Some(RustOwnedGradientSideOrCorner::TopLeft)
+        }
+        (GradientSide::Top, GradientSide::Right) | (GradientSide::Right, GradientSide::Top) => {
+            Some(RustOwnedGradientSideOrCorner::TopRight)
+        }
+        (GradientSide::Bottom, GradientSide::Left) | (GradientSide::Left, GradientSide::Bottom) => {
+            Some(RustOwnedGradientSideOrCorner::BottomLeft)
+        }
+        (GradientSide::Bottom, GradientSide::Right) | (GradientSide::Right, GradientSide::Bottom) => {
+            Some(RustOwnedGradientSideOrCorner::BottomRight)
+        }
+        _ => None,
+    }
 }
 
 fn gradient_sides_form_corner(side_a: &ComponentValue, side_b: &ComponentValue) -> bool {
