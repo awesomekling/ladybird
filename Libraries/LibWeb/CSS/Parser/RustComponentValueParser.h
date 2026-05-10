@@ -75,11 +75,6 @@ public:
         Keyword keyword;
     };
 
-    struct PropertyCustomIdent {
-        PropertyID property_id;
-        FlyString custom_ident;
-    };
-
     enum class RustDisplayValueKind : u8 {
         Invalid,
         Box,
@@ -1128,8 +1123,6 @@ public:
     static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
     static bool descriptor_allows_arbitrary_substitution_functions(AtRuleID, DescriptorID);
     static Optional<DescriptorValue> parse_descriptor(AtRuleID, DescriptorID, StringView input, StringView encoding);
-    static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
-    static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input,
         bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
