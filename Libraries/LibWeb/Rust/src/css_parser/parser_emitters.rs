@@ -393,7 +393,8 @@ pub(super) fn emit_rule<E, C>(
                     }
                 }
             }
-            if at_rule.name.eq_ignore_ascii_case("keyframes")
+            if (at_rule.name.eq_ignore_ascii_case("keyframes")
+                || at_rule.name.eq_ignore_ascii_case("-webkit-keyframes"))
                 && let Some(name) = ComponentValueParser::new(at_rule.prelude.clone()).parse_a_keyframes_name()
             {
                 let (name_ptr, name_len) = string_parts(&name);
