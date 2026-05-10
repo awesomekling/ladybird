@@ -4773,107 +4773,18 @@ RefPtr<StyleValue const> Parser::parse_transform_function_value(TokenStream<Comp
     if (!tokens.has_next_token())
         return nullptr;
 
-    auto serialized_transform_function = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
-    if (RustComponentValueParser::parse_transform_function(serialized_transform_function.bytes_as_string_view(), "utf-8"sv) == FFI::CssTransformFunctionValueKind::Invalid)
-        return nullptr;
-
     auto const& part = tokens.consume_a_token();
-    if (!part.is_function())
+    auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(part);
+    auto value = parse_css_value_for_property(PropertyID::Transform, component_value_tokens);
+    component_value_tokens.discard_whitespace();
+    if (!value || component_value_tokens.has_next_token() || !value->is_value_list())
         return nullptr;
-    auto maybe_function = transform_function_from_string(part.function().name);
-    if (!maybe_function.has_value())
+
+    auto const& transformations = value->as_value_list();
+    if (transformations.size() != 1)
         return nullptr;
-
-    auto context_guard = push_temporary_value_parsing_context(FunctionContext { part.function().name });
-
-    auto function = maybe_function.release_value();
-    auto function_metadata = transform_function_metadata(function);
-
-    auto function_tokens = TokenStream { part.function().value };
-    auto arguments = parse_a_comma_separated_list_of_component_values(function_tokens);
-
-    if (arguments.size() > function_metadata.parameters.size()) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<transform-function>"_fly_string,
-            .value_string = part.function().original_source_text(),
-            .description = MUST(String::formatted("Too many arguments to {}. max: {}", part.function().name, function_metadata.parameters.size())),
-        });
-        return nullptr;
-    }
-
-    if (arguments.size() < function_metadata.parameters.size() && function_metadata.parameters[arguments.size()].required) {
-        ErrorReporter::the().report(InvalidValueError {
-            .value_type = "<transform-function>"_fly_string,
-            .value_string = part.function().original_source_text(),
-            .description = MUST(String::formatted("Required parameter at position {} is missing", arguments.size())),
-        });
-        return nullptr;
-    }
-
-    StyleValueVector values;
-    for (auto argument_index = 0u; argument_index < arguments.size(); ++argument_index) {
-        TokenStream argument_tokens { arguments[argument_index] };
-        argument_tokens.discard_whitespace();
-
-        switch (function_metadata.parameters[argument_index].type) {
-        case TransformFunctionParameterType::Angle: {
-            // These are `<angle> | <zero>` in the spec, so we have to check for both kinds.
-            if (auto angle_value = parse_angle_value(argument_tokens, infinite_range)) {
-                values.append(angle_value.release_nonnull());
-                break;
-            }
-            if (argument_tokens.next_token().is(Token::Type::Number) && argument_tokens.next_token().token().number_value() == 0) {
-                argument_tokens.discard_a_token(); // 0
-                values.append(AngleStyleValue::create(Angle::make_degrees(0)));
-                break;
-            }
-            return nullptr;
-        }
-        case TransformFunctionParameterType::Length:
-        case TransformFunctionParameterType::LengthNone: {
-            if (auto length_value = parse_length_value(argument_tokens, infinite_range)) {
-                values.append(length_value.release_nonnull());
-                break;
-            }
-            if (function_metadata.parameters[argument_index].type == TransformFunctionParameterType::LengthNone
-                && argument_tokens.next_token().is_ident("none"sv)) {
-
-                argument_tokens.discard_a_token(); // none
-                values.append(KeywordStyleValue::create(Keyword::None));
-                break;
-            }
-            return nullptr;
-        }
-        case TransformFunctionParameterType::LengthPercentage: {
-            if (auto length_percentage_value = parse_length_percentage_value(argument_tokens, infinite_range, infinite_range)) {
-                values.append(length_percentage_value.release_nonnull());
-                break;
-            }
-            return nullptr;
-        }
-        case TransformFunctionParameterType::Number: {
-            if (auto number_value = parse_number_value(argument_tokens, infinite_range)) {
-                values.append(number_value.release_nonnull());
-                break;
-            }
-            return nullptr;
-        }
-        case TransformFunctionParameterType::NumberPercentage: {
-            if (auto number_percentage_value = parse_number_percentage_value(argument_tokens, infinite_range, infinite_range)) {
-                values.append(number_percentage_value.release_nonnull());
-                break;
-            }
-            return nullptr;
-        }
-        }
-
-        argument_tokens.discard_whitespace();
-        if (argument_tokens.has_next_token())
-            return nullptr;
-    }
-
     transaction.commit();
-    return TransformationStyleValue::create(PropertyID::Transform, function, move(values));
+    return transformations.value_at(0, false);
 }
 
 // https://drafts.csswg.org/css-transforms-1/#typedef-transform-list
