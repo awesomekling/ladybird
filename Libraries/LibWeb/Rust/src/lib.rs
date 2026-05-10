@@ -1359,54 +1359,6 @@ pub unsafe extern "C" fn rust_css_parse_dashed_ident(
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_unicode_range(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    range_callback: unsafe extern "C" fn(ctx: *mut c_void, unicode_range: *const CssUnicodeRange),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_a_unicode_range(input, |unicode_range| {
-                range_callback(ctx, &raw const unicode_range);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_unicode_range_list(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    range_callback: unsafe extern "C" fn(ctx: *mut c_void, unicode_range: *const CssUnicodeRange),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_a_unicode_range_list(input, |unicode_range| {
-                range_callback(ctx, &raw const unicode_range);
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_url_function(
     input: *const u8,
     input_len: usize,

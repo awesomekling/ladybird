@@ -245,9 +245,6 @@ private:
     Optional<Descriptor> convert_to_descriptor(AtRuleID, Declaration const&);
 
     RefPtr<StyleValue const> parse_source_size_value(TokenStream<ComponentValue>&);
-    Optional<Gfx::UnicodeRange> parse_unicode_range(TokenStream<ComponentValue>&);
-    Vector<Gfx::UnicodeRange> parse_unicode_ranges(TokenStream<ComponentValue>&);
-    RefPtr<UnicodeRangeStyleValue const> parse_unicode_range_value(TokenStream<ComponentValue>&);
 
     RefPtr<StyleValue const> parse_value(ValueType, TokenStream<ComponentValue>&);
 

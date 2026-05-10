@@ -233,46 +233,6 @@ Optional<Vector<ComponentValue>> Parser::parse_declaration_value(TokenStream<Com
     return top_level_declaration_value;
 }
 
-// https://www.w3.org/TR/css-syntax-3/#urange-syntax
-Optional<Gfx::UnicodeRange> Parser::parse_unicode_range(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_unicode_range = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto maybe_unicode_range = RustComponentValueParser::parse_a_unicode_range(serialized_unicode_range.bytes_as_string_view(), "utf-8"sv);
-    if (!maybe_unicode_range.has_value())
-        return {};
-
-    transaction.commit();
-    return maybe_unicode_range.release_value();
-}
-
-Vector<Gfx::UnicodeRange> Parser::parse_unicode_ranges(TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    while (tokens.has_next_token())
-        tokens.discard_a_token();
-
-    auto serialized_unicode_ranges = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto maybe_unicode_ranges = RustComponentValueParser::parse_a_unicode_range_list(serialized_unicode_ranges.bytes_as_string_view(), "utf-8"sv);
-    if (!maybe_unicode_ranges.has_value())
-        return {};
-
-    transaction.commit();
-    return maybe_unicode_ranges.release_value();
-}
-
-RefPtr<UnicodeRangeStyleValue const> Parser::parse_unicode_range_value(TokenStream<ComponentValue>& tokens)
-{
-    if (auto range = parse_unicode_range(tokens); range.has_value())
-        return UnicodeRangeStyleValue::create(range.release_value());
-    return nullptr;
-}
-
 RefPtr<StyleValue const> Parser::parse_integer_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
 {
     auto start = tokens.current_index();

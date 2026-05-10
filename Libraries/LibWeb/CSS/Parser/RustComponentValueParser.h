@@ -1187,8 +1187,6 @@ public:
     static Optional<FlyString> parse_a_custom_property_name(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
-    static Optional<Gfx::UnicodeRange> parse_a_unicode_range(StringView input, StringView encoding);
-    static Optional<Vector<Gfx::UnicodeRange>> parse_a_unicode_range_list(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<URL> parse_an_import_url(StringView input, StringView encoding);
     static Optional<ImportRulePrelude> parse_an_import_rule_prelude(StringView input, StringView encoding);
