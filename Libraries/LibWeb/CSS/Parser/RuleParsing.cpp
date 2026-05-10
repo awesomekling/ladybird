@@ -858,9 +858,8 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
             }
 
             at_rule.for_each_as_declaration_list([&](Declaration const& declaration) {
-                auto value_source = declaration.original_value_text.value_or_lazy_evaluated([&] {
-                    return serialize_component_values_for_reparsing(declaration.value);
-                });
+                VERIFY(declaration.original_value_text.has_value());
+                auto const& value_source = *declaration.original_value_text;
 
                 if (declaration.important == Important::Yes) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
