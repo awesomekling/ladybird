@@ -1082,23 +1082,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 VERIFY_NOT_REACHED();
             };
             auto discard_rust_owned_property_value_tokens = [&] {
-                if (property_ids.size() > 1) {
-                    tokens.discard_a_token();
-                    return;
-                }
-
                 while (tokens.has_next_token())
                     tokens.discard_a_token();
             };
             auto discard_rust_view_timeline_inset_value_tokens = [&] {
-                if (property_ids.size() > 1) {
-                    for (size_t i = 0; i < rust_style_value->view_timeline_insets.size(); ++i) {
-                        tokens.discard_whitespace();
-                        tokens.discard_a_token();
-                    }
-                    return;
-                }
-
                 while (tokens.has_next_token())
                     tokens.discard_a_token();
             };
