@@ -17,7 +17,6 @@
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/RustComponentValueParser.h>
-#include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 
@@ -107,23 +106,33 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         TokenStream value_tokens { component_values };
         auto maybe_value = [&]() -> Optional<MediaFeatureValue> {
             auto context_guard = push_temporary_value_parsing_context(SpecialContext::MediaCondition);
+            auto parse_calculated_value_with_context = [&](CalculationContext&& calculation_context) -> RefPtr<StyleValue const> {
+                value_tokens.discard_whitespace();
+                if (!value_tokens.has_next_token())
+                    return nullptr;
+
+                auto calculated_value = parse_calculated_value(value_tokens.next_token(), move(calculation_context));
+                if (!calculated_value)
+                    return nullptr;
+                value_tokens.discard_a_token();
+                return calculated_value;
+            };
 
             switch (syntax_kind) {
             case FFI::CssMediaFeatureValueSyntaxKind::Boolean: {
-                value_tokens.discard_whitespace();
-                if (auto integer = parse_integer_value(value_tokens, infinite_integer_range)) {
-                    if (integer->is_calculated() || first_is_one_of(integer->as_integer().integer(), 0, 1))
-                        return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
-                }
-                return {};
-            }
-            case FFI::CssMediaFeatureValueSyntaxKind::Integer:
-                if (auto integer = parse_integer_value(value_tokens, infinite_integer_range))
+                auto integer = parse_calculated_value_with_context({ .resolve_numbers_as_integers = true, .accepted_ranges_by_type = { { ValueType::Integer, infinite_range } } });
+                if (integer)
                     return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
                 return {};
+            }
+            case FFI::CssMediaFeatureValueSyntaxKind::Integer: {
+                auto integer = parse_calculated_value_with_context({ .resolve_numbers_as_integers = true, .accepted_ranges_by_type = { { ValueType::Integer, infinite_range } } });
+                if (integer)
+                    return MediaFeatureValue(MediaFeatureValue::Type::Integer, integer.release_nonnull());
+                return {};
+            }
             case FFI::CssMediaFeatureValueSyntaxKind::Length: {
-                value_tokens.discard_whitespace();
-                if (auto length = parse_length_value(value_tokens, infinite_range))
+                if (auto length = parse_calculated_value_with_context({ .accepted_ranges_by_type = { { ValueType::Length, infinite_range } } }))
                     return MediaFeatureValue(MediaFeatureValue::Type::Length, length.release_nonnull());
 
                 if (value_tokens.has_next_token()) {
@@ -144,8 +153,8 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
                 return {};
             }
             case FFI::CssMediaFeatureValueSyntaxKind::Resolution: {
-                value_tokens.discard_whitespace();
-                if (auto resolution = parse_resolution_value(value_tokens, infinite_range))
+                auto resolution = parse_calculated_value_with_context({ .accepted_ranges_by_type = { { ValueType::Resolution, infinite_range } } });
+                if (resolution)
                     return MediaFeatureValue(MediaFeatureValue::Type::Resolution, resolution.release_nonnull());
                 return {};
             }
