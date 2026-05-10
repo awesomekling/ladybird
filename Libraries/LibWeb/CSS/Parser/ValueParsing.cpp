@@ -2589,45 +2589,6 @@ RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& 
 // https://www.w3.org/TR/css-values-4/#position
 RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<ComponentValue>& tokens, PositionParsingMode position_parsing_mode)
 {
-    auto position_transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-
-    auto parse_position_edge = [](TokenStream<ComponentValue>& tokens) -> Optional<PositionEdge> {
-        auto transaction = tokens.begin_transaction();
-        auto& token = tokens.consume_a_token();
-        if (!token.is(Token::Type::Ident))
-            return {};
-        auto keyword = keyword_from_string(token.token().ident());
-        if (!keyword.has_value())
-            return {};
-        transaction.commit();
-        return keyword_to_position_edge(*keyword);
-    };
-
-    auto is_horizontal = [](PositionEdge edge, bool accept_center) -> bool {
-        switch (edge) {
-        case PositionEdge::Left:
-        case PositionEdge::Right:
-            return true;
-        case PositionEdge::Center:
-            return accept_center;
-        default:
-            return false;
-        }
-    };
-
-    auto is_vertical = [](PositionEdge edge, bool accept_center) -> bool {
-        switch (edge) {
-        case PositionEdge::Top:
-        case PositionEdge::Bottom:
-            return true;
-        case PositionEdge::Center:
-            return accept_center;
-        default:
-            return false;
-        }
-    };
-
     // <position> = [
     //   [ left | center | right | top | bottom | <length-percentage> ]
     // |
@@ -2639,274 +2600,80 @@ RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<Compon
     //   [ [ left | right ] <length-percentage> ] &&
     //   [ [ top | bottom ] <length-percentage> ]
     // ]
-
-    // [ left | center | right | top | bottom | <length-percentage> ]
-    auto alternative_1 = [&]() -> RefPtr<PositionStyleValue const> {
-        auto transaction = tokens.begin_transaction();
-
-        tokens.discard_whitespace();
-
-        // [ left | center | right | top | bottom ]
-        if (auto maybe_edge = parse_position_edge(tokens); maybe_edge.has_value()) {
-            auto edge = maybe_edge.release_value();
-            transaction.commit();
-
-            // [ left | right ]
-            if (is_horizontal(edge, false))
-                return PositionStyleValue::create(EdgeStyleValue::create(edge, {}), EdgeStyleValue::create(PositionEdge::Center, {}));
-
-            // [ top | bottom ]
-            if (is_vertical(edge, false))
-                return PositionStyleValue::create(EdgeStyleValue::create(PositionEdge::Center, {}), EdgeStyleValue::create(edge, {}));
-
-            // [ center ]
-            VERIFY(edge == PositionEdge::Center);
-            return PositionStyleValue::create(EdgeStyleValue::create(PositionEdge::Center, {}), EdgeStyleValue::create(PositionEdge::Center, {}));
-        }
-
-        // [ <length-percentage> ]
-        if (auto maybe_percentage = parse_length_percentage_value(tokens, infinite_range, infinite_range)) {
-            transaction.commit();
-            return PositionStyleValue::create(EdgeStyleValue::create({}, maybe_percentage), EdgeStyleValue::create(PositionEdge::Center, {}));
-        }
-
+    auto transaction = tokens.begin_transaction();
+    auto serialized_position = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto property_id = position_parsing_mode == PositionParsingMode::BackgroundPosition
+        ? PropertyID::BackgroundPosition
+        : PropertyID::ObjectPosition;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_position.bytes_as_string_view());
+    if (!rust_style_value.has_value()
+        || rust_style_value->kind != FFI::CssStyleValueKind::Position
+        || rust_style_value->positions.size() != 1)
         return nullptr;
+
+    auto materialize_position_edge = [](RustComponentValueParser::RustPositionEdge edge) -> Optional<PositionEdge> {
+        switch (edge) {
+        case RustComponentValueParser::RustPositionEdge::None:
+            return {};
+        case RustComponentValueParser::RustPositionEdge::Center:
+            return PositionEdge::Center;
+        case RustComponentValueParser::RustPositionEdge::Left:
+            return PositionEdge::Left;
+        case RustComponentValueParser::RustPositionEdge::Right:
+            return PositionEdge::Right;
+        case RustComponentValueParser::RustPositionEdge::Top:
+            return PositionEdge::Top;
+        case RustComponentValueParser::RustPositionEdge::Bottom:
+            return PositionEdge::Bottom;
+        }
+        VERIFY_NOT_REACHED();
     };
 
-    // [ left | center | right ] && [ top | center | bottom ]
-    auto alternative_2 = [&]() -> RefPtr<PositionStyleValue const> {
-        auto transaction = tokens.begin_transaction();
-
-        tokens.discard_whitespace();
-
-        // Parse out two position edges
-        auto maybe_first_edge = parse_position_edge(tokens);
-        if (!maybe_first_edge.has_value())
-            return nullptr;
-
-        auto first_edge = maybe_first_edge.release_value();
-        tokens.discard_whitespace();
-
-        auto maybe_second_edge = parse_position_edge(tokens);
-        if (!maybe_second_edge.has_value())
-            return nullptr;
-
-        auto second_edge = maybe_second_edge.release_value();
-
-        // If 'left' or 'right' is given, that position is X and the other is Y.
-        // Conversely -
-        // If 'top' or 'bottom' is given, that position is Y and the other is X.
-        if (is_vertical(first_edge, false) || is_horizontal(second_edge, false))
-            swap(first_edge, second_edge);
-
-        // [ left | center | right ] [ top | bottom | center ]
-        if (is_horizontal(first_edge, true) && is_vertical(second_edge, true)) {
-            transaction.commit();
-            return PositionStyleValue::create(EdgeStyleValue::create(first_edge, {}), EdgeStyleValue::create(second_edge, {}));
-        }
-
-        return nullptr;
-    };
-
-    // [ left | center | right | <length-percentage> ]
-    // [ top | center | bottom | <length-percentage> ]
-    auto alternative_3 = [&]() -> RefPtr<PositionStyleValue const> {
-        auto transaction = tokens.begin_transaction();
-
-        auto parse_position_or_length = [&](bool as_horizontal) -> RefPtr<EdgeStyleValue const> {
-            tokens.discard_whitespace();
-
-            if (auto maybe_position = parse_position_edge(tokens); maybe_position.has_value()) {
-                auto position = maybe_position.release_value();
-                bool valid = as_horizontal ? is_horizontal(position, true) : is_vertical(position, true);
-                if (!valid)
-                    return nullptr;
-                return EdgeStyleValue::create(position, {});
-            }
-
-            auto maybe_length = parse_length_percentage_value(tokens, infinite_range, infinite_range);
-            if (!maybe_length)
+    auto materialize_length_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_length_percentage_value(value_tokens, infinite_range, infinite_range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
                 return nullptr;
+            return parsed;
+        }
 
-            return EdgeStyleValue::create({}, maybe_length);
-        };
-
-        // [ left | center | right | <length-percentage> ]
-        auto horizontal_edge = parse_position_or_length(true);
-        if (!horizontal_edge)
+        if (!value.numeric_value.has_value())
             return nullptr;
 
-        // [ top | center | bottom | <length-percentage> ]
-        auto vertical_edge = parse_position_or_length(false);
-        if (!vertical_edge)
+        if (value.primitive_kind == FFI::CssPrimitiveValueKind::Percentage)
+            return PercentageStyleValue::create(Percentage { *value.numeric_value });
+
+        if (value.primitive_kind != FFI::CssPrimitiveValueKind::Length)
             return nullptr;
 
-        transaction.commit();
-        return PositionStyleValue::create(horizontal_edge.release_nonnull(), vertical_edge.release_nonnull());
+        auto length_unit = string_to_length_unit(value.source_or_unit);
+        if (!length_unit.has_value())
+            return nullptr;
+        return LengthStyleValue::create(Length { *value.numeric_value, length_unit.release_value() });
     };
 
-    // [ [ left | right ] <length-percentage> ] &&
-    // [ [ top | bottom ] <length-percentage> ]
-    auto alternative_4 = [&]() -> RefPtr<PositionStyleValue const> {
-        struct PositionAndLength {
-            PositionEdge position;
-            NonnullRefPtr<StyleValue const> length;
-        };
-
-        auto parse_position_and_length = [&]() -> Optional<PositionAndLength> {
-            tokens.discard_whitespace();
-
-            auto maybe_position = parse_position_edge(tokens);
-            if (!maybe_position.has_value())
-                return {};
-
-            tokens.discard_whitespace();
-
-            auto maybe_length = parse_length_percentage_value(tokens, infinite_range, infinite_range);
-            if (!maybe_length)
-                return {};
-
-            return PositionAndLength {
-                .position = maybe_position.release_value(),
-                .length = maybe_length.release_nonnull(),
-            };
-        };
-
-        auto transaction = tokens.begin_transaction();
-
-        auto maybe_group1 = parse_position_and_length();
-        if (!maybe_group1.has_value())
-            return nullptr;
-
-        auto maybe_group2 = parse_position_and_length();
-        if (!maybe_group2.has_value())
-            return nullptr;
-
-        auto group1 = maybe_group1.release_value();
-        auto group2 = maybe_group2.release_value();
-
-        // [ [ left | right ] <length-percentage> ] [ [ top | bottom ] <length-percentage> ]
-        if (is_horizontal(group1.position, false) && is_vertical(group2.position, false)) {
-            transaction.commit();
-            return PositionStyleValue::create(EdgeStyleValue::create(group1.position, group1.length), EdgeStyleValue::create(group2.position, group2.length));
+    auto materialize_position_component = [&](RustComponentValueParser::RustPositionComponent const& component) -> RefPtr<EdgeStyleValue const> {
+        RefPtr<StyleValue const> offset;
+        if (component.offset.has_value()) {
+            offset = materialize_length_percentage(*component.offset);
+            if (!offset)
+                return nullptr;
         }
+        return EdgeStyleValue::create(materialize_position_edge(component.edge), offset);
+    };
 
-        // [ [ top | bottom ] <length-percentage> ] [ [ left | right ] <length-percentage> ]
-        if (is_vertical(group1.position, false) && is_horizontal(group2.position, false)) {
-            transaction.commit();
-            return PositionStyleValue::create(EdgeStyleValue::create(group2.position, group2.length), EdgeStyleValue::create(group1.position, group1.length));
-        }
-
+    auto const& rust_position = rust_style_value->positions[0];
+    auto x = materialize_position_component(rust_position.x);
+    auto y = materialize_position_component(rust_position.y);
+    if (!x || !y)
         return nullptr;
-    };
 
-    // The extra 3-value syntax that's allowed for background-position:
-    // [ center | [ left | right ] <length-percentage>? ] &&
-    // [ center | [ top | bottom ] <length-percentage>? ]
-    auto alternative_5_for_background_position = [&]() -> RefPtr<PositionStyleValue const> {
-        auto transaction = tokens.begin_transaction();
-
-        struct PositionAndMaybeLength {
-            PositionEdge position;
-            RefPtr<StyleValue const> length;
-        };
-
-        // [ <position> <length-percentage>? ]
-        auto parse_position_and_maybe_length = [&]() -> Optional<PositionAndMaybeLength> {
-            auto inner_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-
-            auto maybe_position = parse_position_edge(tokens);
-            if (!maybe_position.has_value())
-                return {};
-
-            tokens.discard_whitespace();
-
-            auto maybe_length = parse_length_percentage_value(tokens, infinite_range, infinite_range);
-            if (maybe_length) {
-                // 'center' cannot be followed by a <length-percentage>
-                if (maybe_position.value() == PositionEdge::Center && maybe_length)
-                    return {};
-            }
-
-            inner_transaction.commit();
-            return PositionAndMaybeLength {
-                .position = maybe_position.release_value(),
-                .length = maybe_length,
-            };
-        };
-
-        auto maybe_group1 = parse_position_and_maybe_length();
-        if (!maybe_group1.has_value())
-            return nullptr;
-
-        auto maybe_group2 = parse_position_and_maybe_length();
-        if (!maybe_group2.has_value())
-            return nullptr;
-
-        auto group1 = maybe_group1.release_value();
-        auto group2 = maybe_group2.release_value();
-
-        // 2-value or 4-value if both <length-percentage>s are present or missing.
-        if ((group1.length && group2.length) || (!group1.length && !group2.length))
-            return nullptr;
-
-        // If 'left' or 'right' is given, that position is X and the other is Y.
-        // Conversely -
-        // If 'top' or 'bottom' is given, that position is Y and the other is X.
-        if (is_vertical(group1.position, false) || is_horizontal(group2.position, false))
-            swap(group1, group2);
-
-        // [ center | [ left | right ] ]
-        if (!is_horizontal(group1.position, true))
-            return nullptr;
-
-        // [ center | [ top | bottom ] ]
-        if (!is_vertical(group2.position, true))
-            return nullptr;
-
-        auto to_style_value = [&](PositionAndMaybeLength const& group) -> NonnullRefPtr<EdgeStyleValue const> {
-            if (group.position == PositionEdge::Center)
-                return EdgeStyleValue::create(PositionEdge::Center, {});
-
-            return EdgeStyleValue::create(group.position, group.length);
-        };
-
-        transaction.commit();
-        return PositionStyleValue::create(to_style_value(group1), to_style_value(group2));
-    };
-
-    // Note: The alternatives must be attempted in this order since shorter alternatives can match a prefix of longer ones.
-    auto validate_parsed_position = [&](RefPtr<PositionStyleValue const> position) -> RefPtr<PositionStyleValue const> {
-        if (!position)
-            return nullptr;
-
-        // AD-HOC: <position> is also used as a prefix in shorthands such as
-        // `background`, where `/ <background-size>` belongs to the caller. The
-        // Rust parser validates the exact token slice consumed by the C++
-        // materializer until Rust also owns the surrounding shorthand parser.
-        auto serialized_position = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        auto allow_background_position_3_value_syntax = position_parsing_mode == PositionParsingMode::BackgroundPosition;
-        if (RustComponentValueParser::parse_position(serialized_position.bytes_as_string_view(), "utf-8"sv, allow_background_position_3_value_syntax) == FFI::CssPositionValueKind::Invalid)
-            return nullptr;
-
-        position_transaction.commit();
-        return position;
-    };
-
-    if (auto position = alternative_4())
-        return validate_parsed_position(position);
-    if (position_parsing_mode == PositionParsingMode::BackgroundPosition) {
-        if (auto position = alternative_5_for_background_position())
-            return validate_parsed_position(position);
-    }
-    if (auto position = alternative_3())
-        return validate_parsed_position(position);
-    if (auto position = alternative_2())
-        return validate_parsed_position(position);
-    if (auto position = alternative_1())
-        return validate_parsed_position(position);
-    return nullptr;
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+    transaction.commit();
+    return PositionStyleValue::create(x.release_nonnull(), y.release_nonnull());
 }
 
 RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens)
