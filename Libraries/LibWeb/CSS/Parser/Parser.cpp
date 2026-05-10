@@ -248,20 +248,6 @@ String Parser::serialize_component_values_for_reparsing(ReadonlySpan<ComponentVa
     return builder.to_string_without_validation();
 }
 
-OwnPtr<BooleanExpression> Parser::materialize_rust_supports_condition(Vector<ComponentValue> const& component_values)
-{
-    auto serialized_supports_condition = serialize_component_values_for_reparsing(component_values);
-
-    m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(serialized_supports_condition.bytes_as_string_view(), "utf-8"sv, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
-        TokenStream<ComponentValue> token_stream { component_values };
-        return parse_supports_feature(token_stream, move(supports_feature));
-    });
-    m_rule_context.take_last();
-
-    return maybe_condition;
-}
-
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-feature
 OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentValue>& tokens, Optional<RustComponentValueParser::SupportsFeature>&& feature)
 {
@@ -349,30 +335,6 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
     }
 
     VERIFY_NOT_REACHED();
-}
-
-// https://drafts.csswg.org/css-conditional-5/#typedef-supports-decl
-OwnPtr<Supports::Declaration> Parser::parse_supports_declaration(TokenStream<ComponentValue>& tokens)
-{
-    // `<supports-decl> = ( <declaration> )`
-    // NB: Here, we only care about the <declaration> part.
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    auto declaration_start = tokens.current_index();
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is(Token::Type::Semicolon))
-            return {};
-        tokens.discard_a_token();
-    }
-
-    auto serialized_declaration = serialize_component_values_for_reparsing(tokens.tokens_since(declaration_start));
-    auto declaration = RustComponentValueParser::parse_a_declaration(serialized_declaration.bytes_as_string_view(), "utf-8"sv, m_rule_context);
-    if (!declaration.has_value())
-        return {};
-
-    transaction.commit();
-    return Supports::Declaration::create(move(serialized_declaration), convert_to_style_property(declaration.value()).has_value());
 }
 
 Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<ComponentValue>& input, Optional<Token::Type> stop_token)

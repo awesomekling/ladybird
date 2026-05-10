@@ -3972,34 +3972,11 @@ OwnPtr<BooleanExpression> Parser::parse_if_condition(TokenStream<ComponentValue>
                 return nullptr;
 
             auto const& function = maybe_function_token.function();
-            TokenStream argument_tokens { function.value };
-
-            // supports( [ <ident> : <declaration-value> ] | <supports-condition> )
-            if (function.name.equals_ignoring_ascii_case("supports"sv)) {
-                // [ <ident> : <declaration-value> ]
-                m_rule_context.append(RuleContext::SupportsCondition);
-                auto maybe_supports_declaration = parse_supports_declaration(argument_tokens);
-                m_rule_context.take_last();
-
-                if (maybe_supports_declaration)
-                    return maybe_supports_declaration;
-
-                // <supports-condition>
-                if (auto maybe_supports_condition = materialize_rust_supports_condition(function.value))
-                    return maybe_supports_condition;
-
-                return nullptr;
-            }
-
-            // media( <media-feature> | <media-condition> )
-            if (function.name.equals_ignoring_ascii_case("media"sv)) {
-                auto serialized_media_test = serialize_component_values_for_reparsing(function.value);
-                return RustComponentValueParser::parse_a_media_test(serialized_media_test.bytes_as_string_view(), "utf-8"sv, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
-                    return materialize_rust_media_feature_test(move(media_feature_test));
-                });
-            }
 
             // FIXME: Support style()
+            if (function.name.equals_ignoring_ascii_case("style"sv))
+                return nullptr;
+
             return nullptr;
         });
 

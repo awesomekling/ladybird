@@ -1176,7 +1176,7 @@ impl ComponentValueParser {
 
         // `<test>`
         if let Some(test) = self.parse_test(test_kind) {
-            return Some(BooleanExpression::Test(test));
+            return Some(test);
         }
 
         // `<general-enclosed>`
@@ -1187,10 +1187,10 @@ impl ComponentValueParser {
         None
     }
 
-    pub(super) fn parse_test(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpressionTest> {
+    pub(super) fn parse_test(&mut self, test_kind: BooleanExpressionTestKind) -> Option<BooleanExpression> {
         match test_kind {
-            BooleanExpressionTestKind::SupportsFeature => self.parse_supports_feature(),
-            BooleanExpressionTestKind::MediaFeature => self.parse_media_feature(),
+            BooleanExpressionTestKind::SupportsFeature => self.parse_supports_feature().map(BooleanExpression::Test),
+            BooleanExpressionTestKind::MediaFeature => self.parse_media_feature().map(BooleanExpression::Test),
             BooleanExpressionTestKind::IfTest => self.parse_if_test(),
         }
     }
@@ -1282,7 +1282,7 @@ impl ComponentValueParser {
     }
 
     // https://drafts.csswg.org/css-values-5/#typedef-if-condition
-    pub(super) fn parse_if_test(&mut self) -> Option<BooleanExpressionTest> {
+    pub(super) fn parse_if_test(&mut self) -> Option<BooleanExpression> {
         // <if-test> =
         //   supports( [ <ident> : <declaration-value> ] | <supports-condition> ) |
         //   media( <media-feature> | <media-condition> ) |
@@ -1297,32 +1297,56 @@ impl ComponentValueParser {
                 crate::css_parser::parser_emitters::parse_declaration_from_component_values(&function.value)
             {
                 self.index += 1;
-                return Some(BooleanExpressionTest::SupportsFeature(
+                return Some(BooleanExpression::Test(BooleanExpressionTest::SupportsFeature(
                     SupportsFeature::Declaration(declaration),
                     vec![component_value],
-                ));
+                )));
             }
 
-            self.index += 1;
-            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
-        }
-
-        if function.name.eq_ignore_ascii_case("media") {
             let mut parser = ComponentValueParser::new(function.value.clone());
-            if let Some(media_feature) = parser.parse_media_feature()
+            if let Some(expression) = parser.parse_boolean_expression(BooleanExpressionTestKind::SupportsFeature)
                 && !parser.has_next_component_value()
             {
                 self.index += 1;
-                return Some(media_feature);
+                return Some(expression);
             }
 
             self.index += 1;
-            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
+            return Some(BooleanExpression::Test(BooleanExpressionTest::IfTest(vec![
+                component_value,
+            ])));
+        }
+
+        if function.name.eq_ignore_ascii_case("media") {
+            if let Some(media_feature) = component_values_parse_as_media_feature(&function.value) {
+                self.index += 1;
+                return Some(BooleanExpression::Test(BooleanExpressionTest::MediaFeature(Box::new(
+                    MediaFeatureTest {
+                        component_value,
+                        kind: media_feature,
+                    },
+                ))));
+            }
+
+            let mut parser = ComponentValueParser::new(function.value.clone());
+            if let Some(expression) = parser.parse_boolean_expression(BooleanExpressionTestKind::MediaFeature)
+                && !parser.has_next_component_value()
+            {
+                self.index += 1;
+                return Some(expression);
+            }
+
+            self.index += 1;
+            return Some(BooleanExpression::Test(BooleanExpressionTest::IfTest(vec![
+                component_value,
+            ])));
         }
 
         if function.name.eq_ignore_ascii_case("style") {
             self.index += 1;
-            return Some(BooleanExpressionTest::IfTest(vec![component_value]));
+            return Some(BooleanExpression::Test(BooleanExpressionTest::IfTest(vec![
+                component_value,
+            ])));
         }
 
         None
