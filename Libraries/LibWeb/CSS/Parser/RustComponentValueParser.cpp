@@ -927,6 +927,42 @@ DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rul
     return metadata;
 }
 
+Optional<RustComponentValueParser::DescriptorSyntax> RustComponentValueParser::parse_descriptor_syntax(AtRuleID at_rule_id, DescriptorID descriptor_id, StringView input, StringView encoding)
+{
+    Optional<DescriptorSyntax> descriptor_syntax;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_descriptor_syntax(
+        static_cast<u8>(to_underlying(at_rule_id)),
+        static_cast<u8>(to_underlying(descriptor_id)),
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &descriptor_syntax,
+        [](void* raw_descriptor_syntax, FFI::CssDescriptorSyntaxKind kind, u16 property_id, FFI::CssDescriptorValueType value_type, u8 const* value_ptr, size_t value_len) {
+            auto& descriptor_syntax = *static_cast<Optional<DescriptorSyntax>*>(raw_descriptor_syntax);
+            switch (kind) {
+            case FFI::CssDescriptorSyntaxKind::Keyword: {
+                auto keyword = keyword_from_string({ value_ptr, value_len });
+                if (!keyword.has_value())
+                    return;
+                descriptor_syntax = DescriptorSyntax { .syntax = keyword.release_value() };
+                return;
+            }
+            case FFI::CssDescriptorSyntaxKind::Property:
+                descriptor_syntax = DescriptorSyntax { .syntax = static_cast<PropertyID>(property_id) };
+                return;
+            case FFI::CssDescriptorSyntaxKind::ValueType:
+                descriptor_syntax = DescriptorSyntax { .syntax = descriptor_value_type_from_ffi(value_type) };
+                return;
+            }
+        });
+
+    if (!parsed || !descriptor_syntax.has_value())
+        return {};
+    return descriptor_syntax;
+}
+
 static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType);
 static CrossOriginModifierValue cross_origin_modifier_value_from_rust(FFI::CssUrlCrossOriginModifierValue);
 static ReferrerPolicyModifierValue referrer_policy_modifier_value_from_rust(FFI::CssUrlReferrerPolicyModifierValue);

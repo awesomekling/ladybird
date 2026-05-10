@@ -328,6 +328,140 @@ where
     })
 }
 
+pub(crate) fn parse_descriptor_syntax<F>(
+    at_rule_id: u8,
+    descriptor_id: u8,
+    filtered_input: &[u8],
+    mut callback: F,
+) -> bool
+where
+    F: FnMut(CssDescriptorSyntaxKind, u16, CssDescriptorValueType, &str),
+{
+    let Some(at_rule_id) = at_rule_id_from_u8(at_rule_id) else {
+        return false;
+    };
+    let Some(descriptor_id) = descriptor_id_from_u8(descriptor_id) else {
+        return false;
+    };
+    if !generated_at_rule_supports_descriptor(at_rule_id, descriptor_id) {
+        return false;
+    }
+
+    let mut matched_syntax = None;
+    if !generated_for_each_descriptor_syntax(at_rule_id, descriptor_id, |syntax| {
+        if matched_syntax.is_some() {
+            return;
+        }
+
+        if descriptor_syntax_matches(&syntax, filtered_input) {
+            matched_syntax = Some(syntax);
+        }
+    }) {
+        return false;
+    }
+
+    match matched_syntax {
+        Some(DescriptorSyntax::Keyword(keyword)) => {
+            callback(
+                CssDescriptorSyntaxKind::Keyword,
+                0,
+                CssDescriptorValueType::CounterStyleSystem,
+                keyword,
+            );
+            true
+        }
+        Some(DescriptorSyntax::Property(property_id)) => {
+            callback(
+                CssDescriptorSyntaxKind::Property,
+                property_id as u16,
+                CssDescriptorValueType::CounterStyleSystem,
+                "",
+            );
+            true
+        }
+        Some(DescriptorSyntax::ValueType(value_type)) => {
+            callback(CssDescriptorSyntaxKind::ValueType, 0, value_type, "");
+            true
+        }
+        None => false,
+    }
+}
+
+fn descriptor_syntax_matches(syntax: &DescriptorSyntax, filtered_input: &[u8]) -> bool {
+    match syntax {
+        DescriptorSyntax::Keyword(keyword) => {
+            let (mut parser, _) = parser_from_filtered_input(filtered_input);
+            let component_values = parser.parse_a_list_of_component_values();
+            matches!(
+                strip_whitespace(&component_values),
+                [ComponentValue::PreservedToken(Token {
+                    token_type: TokenType::Ident { value },
+                    ..
+                })] if value.eq_ignore_ascii_case(keyword)
+            )
+        }
+        DescriptorSyntax::Property(property_id) => {
+            matches!(
+                parse_rust_owned_style_value_for_property(&[*property_id as u16], filtered_input),
+                RustOwnedStyleValueParseResult::Parsed(_)
+            )
+        }
+        DescriptorSyntax::ValueType(value_type) => descriptor_value_type_matches(*value_type, filtered_input),
+    }
+}
+
+fn descriptor_value_type_matches(value_type: CssDescriptorValueType, filtered_input: &[u8]) -> bool {
+    match value_type {
+        CssDescriptorValueType::CounterStyleAdditiveSymbols => {
+            parse_rust_owned_counter_style_additive_symbols_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::CounterStyleNegative => {
+            parse_rust_owned_counter_style_negative_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::CounterStyleSystem => {
+            parse_rust_owned_counter_style_system_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::CounterStyleName => {
+            let mut counter_style_name = None;
+            parse_a_counter_style_name(filtered_input, |name| {
+                counter_style_name = Some(name.to_string());
+            }) && counter_style_name.is_some()
+        }
+        CssDescriptorValueType::CounterStylePad => {
+            parse_rust_owned_counter_style_pad_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::CounterStyleRange => {
+            parse_rust_owned_counter_style_range_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::CropOrCross => {
+            let mut crop_or_cross = None;
+            parse_crop_or_cross(filtered_input, |kind| {
+                crop_or_cross = Some(kind);
+            }) && crop_or_cross.is_some()
+        }
+        CssDescriptorValueType::FamilyName => {
+            let mut family_name = None;
+            parse_a_family_name(filtered_input, |name, is_string| {
+                family_name = Some((name.to_string(), is_string));
+            }) && family_name.is_some()
+        }
+        CssDescriptorValueType::FontSrcList => parse_rust_owned_font_src_list_descriptor(filtered_input).is_some(),
+        CssDescriptorValueType::FontWeightAbsolutePair => {
+            parse_rust_owned_font_weight_absolute_pair_descriptor(filtered_input).is_some()
+        }
+        CssDescriptorValueType::Length => parse_rust_owned_length_descriptor_value(filtered_input).is_some(),
+        CssDescriptorValueType::OptionalDeclarationValue => parse_optional_declaration_value_descriptor(filtered_input),
+        CssDescriptorValueType::PageSize => parse_rust_owned_page_size_descriptor(filtered_input).is_some(),
+        CssDescriptorValueType::PositivePercentage => {
+            parse_rust_owned_positive_percentage_descriptor_value(filtered_input).is_some()
+        }
+        CssDescriptorValueType::String => parse_rust_owned_string_descriptor(filtered_input).is_some(),
+        CssDescriptorValueType::Symbol => parse_rust_owned_counter_style_symbol_descriptor(filtered_input).is_some(),
+        CssDescriptorValueType::Symbols => parse_rust_owned_counter_style_symbols_descriptor(filtered_input).is_some(),
+        CssDescriptorValueType::UnicodeRangeTokens => parse_a_unicode_range_list(filtered_input, |_| {}),
+    }
+}
+
 pub(crate) struct DescriptorResultCallbacks<K, S, C, F, U, M, O, T> {
     pub(crate) kind_callback: K,
     pub(crate) source_callback: S,

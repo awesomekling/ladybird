@@ -478,6 +478,43 @@ pub unsafe extern "C" fn rust_css_for_each_descriptor_syntax(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_descriptor_syntax(
+    at_rule_id: u8,
+    descriptor_id: u8,
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssDescriptorSyntaxKind,
+        property_id: u16,
+        value_type: CssDescriptorValueType,
+        value: *const u8,
+        value_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_descriptor_syntax(
+                at_rule_id,
+                descriptor_id,
+                input,
+                |kind, property_id, value_type, value| {
+                    callback(ctx, kind, property_id, value_type, value.as_ptr(), value.len());
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 /// - Parameters provided to callbacks must be valid pointers
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_descriptor_result(

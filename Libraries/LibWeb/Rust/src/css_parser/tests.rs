@@ -11,18 +11,19 @@ use super::{
     CssColorSchemeValue, CssColorSchemeValueKind, CssColorValueKind, CssContainValue, CssContainValueKind,
     CssContainerTypeValueKind, CssCounterStyleKind, CssCounterStyleNegativeSymbolCount, CssCounterStyleRangeKind,
     CssCounterStyleSymbolsType, CssCounterStyleSystemKind, CssCropOrCrossKind, CssDescriptorResultKind,
-    CssDescriptorValueType, CssDisplayBox, CssDisplayInside, CssDisplayInternal, CssDisplayListItem, CssDisplayOutside,
-    CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind, CssFontLanguageOverrideKind, CssFontSourceKind,
-    CssFontTech, CssFontVariantAlternatesValueKind, CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind,
-    CssFontVariantNumericValueKind, CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis,
-    CssGridAutoFlowDense, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind,
-    CssImageSetValueKind, CssMediaFeatureValueKind, CssMediaFeatureValuePayloadKind, CssMediaFeatureValueSyntaxKind,
-    CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind,
-    CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSizeKeyword, CssPageSizeOrientation,
-    CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind,
-    CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind,
-    CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue,
-    CssRatioValueKind, CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
+    CssDescriptorSyntaxKind, CssDescriptorValueType, CssDisplayBox, CssDisplayInside, CssDisplayInternal,
+    CssDisplayListItem, CssDisplayOutside, CssDisplayValueKind, CssEasingValueKind, CssFitContentValueKind,
+    CssFontLanguageOverrideKind, CssFontSourceKind, CssFontTech, CssFontVariantAlternatesValueKind,
+    CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
+    CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowAxis, CssGridAutoFlowDense,
+    CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind,
+    CssMediaFeatureValueKind, CssMediaFeatureValuePayloadKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery,
+    CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind,
+    CssPagePseudoClassKind, CssPageSizeKeyword, CssPageSizeOrientation, CssPaintOrderKeyword, CssPaintOrderValue,
+    CssPaintOrderValueKind, CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue,
+    CssPositionValueKind, CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind,
+    CssPrimitiveValueOptions, CssPrimitiveValueType, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
+    CssRectValueKind, CssRepeatStyleRepetition, CssRepeatStyleValueKind, CssScrollFunctionAxisKind,
     CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
     CssSelectorEventKind, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind,
     CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
@@ -98,20 +99,21 @@ use super::{
     parse_columns_value, parse_contain_value, parse_container_rule_prelude, parse_container_type_value,
     parse_content_value, parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols,
     parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols,
-    parse_counter_style_system, parse_crop_or_cross, parse_cursor_value, parse_descriptor_result, parse_display_value,
-    parse_easing_value, parse_empty_prelude, parse_filter_value_list_value, parse_fit_content_value,
-    parse_flex_flow_value, parse_flex_shorthand_value, parse_font_feature_values_family_name_list,
-    parse_font_feature_values_feature_value, parse_font_shorthand, parse_font_weight_absolute_pair,
-    parse_generated_property_value, parse_grid_auto_flow_value, parse_grid_auto_track_sizes_value,
-    parse_grid_placement_shorthand, parse_grid_template_shorthand, parse_grid_track_placement_value,
-    parse_grid_track_size_list_value, parse_image_set_value, parse_layer_shorthand, parse_length_descriptor,
-    parse_list_style_value, parse_math_depth_value, parse_optional_declaration_value_descriptor,
-    parse_overflow_clip_margin_value, parse_page_size_descriptor, parse_paint_order_value, parse_place_content_value,
-    parse_place_items_value, parse_place_self_value, parse_position_anchor_value, parse_position_area_value,
-    parse_position_try_fallbacks_value, parse_position_try_order_value, parse_position_value,
-    parse_position_visibility_value, parse_positional_value_list_shorthand, parse_positive_percentage_descriptor,
-    parse_primitive_value, parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix,
-    parse_rect_value, parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
+    parse_counter_style_system, parse_crop_or_cross, parse_cursor_value, parse_descriptor_result,
+    parse_descriptor_syntax, parse_display_value, parse_easing_value, parse_empty_prelude,
+    parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
+    parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
+    parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
+    parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_template_shorthand,
+    parse_grid_track_placement_value, parse_grid_track_size_list_value, parse_image_set_value, parse_layer_shorthand,
+    parse_length_descriptor, parse_list_style_value, parse_math_depth_value,
+    parse_optional_declaration_value_descriptor, parse_overflow_clip_margin_value, parse_page_size_descriptor,
+    parse_paint_order_value, parse_place_content_value, parse_place_items_value, parse_place_self_value,
+    parse_position_anchor_value, parse_position_area_value, parse_position_try_fallbacks_value,
+    parse_position_try_order_value, parse_position_value, parse_position_visibility_value,
+    parse_positional_value_list_shorthand, parse_positive_percentage_descriptor, parse_primitive_value,
+    parse_primitive_value_prefix, parse_quotes_value, parse_ratio_value_prefix, parse_rect_value,
+    parse_repeat_style_value, parse_rotate_value, parse_rust_owned_coordinating_value_list_shorthand,
     parse_rust_owned_counter_style_additive_symbols_descriptor, parse_rust_owned_counter_style_negative_descriptor,
     parse_rust_owned_counter_style_pad_descriptor, parse_rust_owned_counter_style_range_descriptor,
     parse_rust_owned_counter_style_symbol_descriptor, parse_rust_owned_counter_style_symbols_descriptor,
@@ -2006,6 +2008,73 @@ fn generated_descriptor_metadata_knows_syntax_options() {
         |item| syntax.push(item)
     ));
     assert!(matches!(syntax[0], DescriptorSyntax::Property(PropertyId::Margin)));
+}
+
+#[test]
+fn parses_generated_descriptor_syntax_in_rust() {
+    let mut parsed = None;
+    assert!(parse_descriptor_syntax(
+        AtRuleId::FontFace as u8,
+        DescriptorId::FontWeight as u8,
+        "auto".as_bytes(),
+        |kind, property_id, value_type, keyword| {
+            parsed = Some((kind, property_id, value_type, keyword.to_string()));
+        },
+    ));
+    assert_eq!(
+        parsed,
+        Some((
+            CssDescriptorSyntaxKind::Keyword,
+            0,
+            CssDescriptorValueType::CounterStyleSystem,
+            "auto".to_string(),
+        ))
+    );
+
+    parsed = None;
+    assert!(parse_descriptor_syntax(
+        AtRuleId::FontFace as u8,
+        DescriptorId::FontWeight as u8,
+        "normal bold".as_bytes(),
+        |kind, property_id, value_type, keyword| {
+            parsed = Some((kind, property_id, value_type, keyword.to_string()));
+        },
+    ));
+    assert_eq!(
+        parsed,
+        Some((
+            CssDescriptorSyntaxKind::ValueType,
+            0,
+            CssDescriptorValueType::FontWeightAbsolutePair,
+            String::new(),
+        ))
+    );
+
+    parsed = None;
+    assert!(parse_descriptor_syntax(
+        AtRuleId::Page as u8,
+        DescriptorId::Margin as u8,
+        "1in".as_bytes(),
+        |kind, property_id, value_type, keyword| {
+            parsed = Some((kind, property_id, value_type, keyword.to_string()));
+        },
+    ));
+    assert_eq!(
+        parsed,
+        Some((
+            CssDescriptorSyntaxKind::Property,
+            PropertyId::Margin as u16,
+            CssDescriptorValueType::CounterStyleSystem,
+            String::new(),
+        ))
+    );
+
+    assert!(!parse_descriptor_syntax(
+        AtRuleId::FontFace as u8,
+        DescriptorId::FontWeight as u8,
+        "auto bold".as_bytes(),
+        |_, _, _, _| {},
+    ));
 }
 
 #[test]

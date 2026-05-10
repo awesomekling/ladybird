@@ -477,7 +477,13 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
         ? ComputationContext { .length_resolution_context = Length::ResolutionContext::for_document(*m_document) }
         : Optional<ComputationContext> {};
 
+    auto serialized_descriptor_value = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto descriptor_syntax = RustComponentValueParser::parse_descriptor_syntax(at_rule_id, descriptor_name_and_id.id(), serialized_descriptor_value.bytes_as_string_view(), "utf-8"sv);
+
     for (auto const& option : metadata.syntax) {
+        if (!descriptor_syntax.has_value() || option != descriptor_syntax->syntax)
+            continue;
+
         auto syntax_transaction = transaction.create_child();
         auto parsed_style_value = option.visit(
             [&](Keyword keyword) {
