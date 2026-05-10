@@ -795,11 +795,6 @@ Optional<RustComponentValueParser::PropertyKeyword> RustComponentValueParser::pa
     return property_keyword;
 }
 
-bool RustComponentValueParser::property_accepts_keyword(PropertyID property_id, Keyword keyword)
-{
-    return parse_property_keyword_value({ &property_id, 1 }, string_from_keyword(keyword)).has_value();
-}
-
 static DescriptorMetadata::ValueType descriptor_value_type_from_ffi(FFI::CssDescriptorValueType value_type)
 {
     switch (value_type) {
@@ -1108,47 +1103,6 @@ static Optional<ValueType> value_type_from_rust_property_value_type_name(StringV
 #undef __TRY_VALUE_TYPE
 
     return {};
-}
-
-Optional<RustComponentValueParser::GeneratedPropertyValue> RustComponentValueParser::parse_generated_property_value(ReadonlySpan<PropertyID> property_ids, StringView input)
-{
-    Vector<u16, 4> ffi_property_ids;
-    for (auto property_id : property_ids)
-        ffi_property_ids.append(static_cast<u16>(to_underlying(property_id)));
-
-    Optional<GeneratedPropertyValue> generated_property_value;
-    auto input_bytes = input.bytes();
-    FFI::rust_css_parse_generated_property_value(
-        ffi_property_ids.data(),
-        ffi_property_ids.size(),
-        input_bytes.data(),
-        input_bytes.size(),
-        &generated_property_value,
-        [](void* raw_generated_property_value, FFI::CssGeneratedPropertyValueKind kind, u16 property_id, u8 const* value_ptr, size_t value_len, u8 const* value_type_ptr, size_t value_type_len) {
-            auto& generated_property_value = *static_cast<Optional<GeneratedPropertyValue>*>(raw_generated_property_value);
-            GeneratedPropertyValue value {
-                .kind = kind,
-                .property_id = static_cast<PropertyID>(property_id),
-            };
-
-            if (kind == FFI::CssGeneratedPropertyValueKind::Keyword) {
-                auto keyword = keyword_from_string({ value_ptr, value_len });
-                if (!keyword.has_value())
-                    return;
-                value.keyword = keyword.release_value();
-            } else if (kind == FFI::CssGeneratedPropertyValueKind::CustomIdent) {
-                value.custom_ident = fly_string_from_ffi_bytes(value_ptr, value_len);
-            } else if (kind == FFI::CssGeneratedPropertyValueKind::ValueType) {
-                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
-                if (!value_type.has_value())
-                    return;
-                value.value_type = value_type.release_value();
-            }
-
-            generated_property_value = move(value);
-        });
-
-    return generated_property_value;
 }
 
 Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::parse_style_value_for_property(ReadonlySpan<PropertyID> property_ids, StringView input,
@@ -5813,27 +5767,6 @@ Optional<FlyString> RustComponentValueParser::parse_a_layer_name(StringView inpu
         filtered_input_bytes.data(),
         filtered_input_bytes.size(),
         allow_blank_layer_name == AllowBlankLayerName::Yes,
-        &name,
-        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
-            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
-            name = fly_string_from_ffi_bytes(name_ptr, name_len);
-        });
-
-    if (!parsed)
-        return {};
-
-    return name;
-}
-
-Optional<FlyString> RustComponentValueParser::parse_an_import_layer(StringView input, StringView encoding)
-{
-    Optional<FlyString> name;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_import_layer(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
         &name,
         [](void* raw_name, u8 const* name_ptr, size_t name_len) {
             auto& name = *static_cast<Optional<FlyString>*>(raw_name);

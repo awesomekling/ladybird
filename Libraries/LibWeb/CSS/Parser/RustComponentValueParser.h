@@ -72,14 +72,6 @@ public:
         FlyString custom_ident;
     };
 
-    struct GeneratedPropertyValue {
-        FFI::CssGeneratedPropertyValueKind kind;
-        PropertyID property_id;
-        Optional<Keyword> keyword;
-        Optional<FlyString> custom_ident;
-        Optional<ValueType> value_type;
-    };
-
     enum class RustDisplayValueKind : u8 {
         Invalid,
         Box,
@@ -1156,13 +1148,11 @@ public:
     static Optional<SelectorList> parse_a_selector_list(StringView input, StringView encoding, SelectorType, SelectorParsingMode, HashTable<FlyString> const& declared_namespaces);
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);
     static Optional<PropertyKeyword> parse_property_keyword_value(ReadonlySpan<PropertyID>, StringView keyword);
-    static bool property_accepts_keyword(PropertyID, Keyword);
     static bool at_rule_supports_descriptor(AtRuleID, DescriptorID);
     static bool descriptor_allows_arbitrary_substitution_functions(AtRuleID, DescriptorID);
     static Optional<DescriptorValue> parse_descriptor(AtRuleID, DescriptorID, StringView input, StringView encoding);
     static Optional<PropertyID> property_accepting_type(ReadonlySpan<PropertyID>, ValueType);
     static Optional<PropertyCustomIdent> parse_property_custom_ident_value(ReadonlySpan<PropertyID>, StringView input);
-    static Optional<GeneratedPropertyValue> parse_generated_property_value(ReadonlySpan<PropertyID>, StringView input);
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input,
         bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
@@ -1197,7 +1187,6 @@ public:
     static Optional<Vector<FontVariantNumericValue>> parse_a_font_variant_numeric(StringView input, StringView encoding);
     static Optional<Vector<FontVariantLigaturesValue>> parse_a_font_variant_ligatures(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_layer_name(StringView input, StringView encoding, AllowBlankLayerName);
-    static Optional<FlyString> parse_an_import_layer(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_a_layer_name_list(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);

@@ -49,29 +49,29 @@ pub use css_parser::{
     CssDescriptorValueType, CssEasingValueKind, CssFitContentValueKind, CssFontFamilyValueKind,
     CssFontLanguageOverrideKind, CssFontSourceKind, CssFontStyleKind, CssFontTech, CssFontVariantAlternatesValueKind,
     CssFontVariantEastAsianValueKind, CssFontVariantLigaturesValueKind, CssFontVariantNumericValueKind,
-    CssFontVariantSimpleValueKind, CssGeneratedPropertyValueKind, CssGridAutoFlowValueKind,
-    CssGridTrackPlacementValueKind, CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature,
-    CssMediaFeatureComparison, CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue,
-    CssMediaFeatureValueKind, CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind,
-    CssNonnegativeIntegerSymbolPairOrder, CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind,
-    CssPageSelector, CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind,
-    CssParsedColorKind, CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind,
-    CssPositionVisibilityValue, CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions,
-    CssPrimitiveValueType, CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind,
-    CssRectValueKind, CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind,
-    CssScrollFunctionAxisKind, CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind,
-    CssScrollbarGutterValueKind, CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace,
-    CssSelectorNamespaceType, CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode,
-    CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
-    CssTextUnderlinePositionVertical, CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue,
-    CssTextWrapValueKind, CssTimelineNameItemKind, CssTimelineNameValueKind, CssTimelineScopeValueKind,
-    CssTouchActionKeyword, CssTouchActionValue, CssTouchActionValueKind, CssTransformFunctionValueKind,
-    CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
-    CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
-    CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
-    CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
-    CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
+    CssFontVariantSimpleValueKind, CssGridAutoFlowValueKind, CssGridTrackPlacementValueKind,
+    CssGridTrackSizeListValueKind, CssImageSetValueKind, CssMediaFeature, CssMediaFeatureComparison,
+    CssMediaFeatureNameKind, CssMediaFeatureSyntaxKind, CssMediaFeatureValue, CssMediaFeatureValueKind,
+    CssMediaFeatureValueSyntaxKind, CssMediaQuery, CssMediaTypeKind, CssNonnegativeIntegerSymbolPairOrder,
+    CssOpenTypeSettingsKind, CssOpenTypeTaggedValueKind, CssPagePseudoClassKind, CssPageSelector,
+    CssPageSizeDescriptorKind, CssPaintOrderKeyword, CssPaintOrderValue, CssPaintOrderValueKind, CssParsedColorKind,
+    CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
+    CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
+    CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
+    CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
+    CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+    CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
+    CssSimpleSelectorKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode, CssSyntaxNodeKind,
+    CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue, CssTextUnderlinePositionVertical,
+    CssTextWrapModeValue, CssTextWrapStyleValue, CssTextWrapValue, CssTextWrapValueKind, CssTimelineNameItemKind,
+    CssTimelineNameValueKind, CssTimelineScopeValueKind, CssTouchActionKeyword, CssTouchActionValue,
+    CssTouchActionValueKind, CssTransformFunctionValueKind, CssTransformLonghandValueKind,
+    CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind, CssTransitionPropertyValueKind, CssUnicodeRange,
+    CssUrlCrossOriginModifierValue, CssUrlFunction, CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind,
+    CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind, CssViewFunctionInsetKind, CssViewFunctionInsetPosition,
+    CssViewFunctionValue, CssViewFunctionValueKind, CssViewTimelineInsetValue, CssViewTimelineInsetValueKind,
+    CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue, CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind,
+    CssWillChangeValueKind,
 };
 pub use css_tokenizer::{CssHashType, CssNumberType, CssToken, CssTokenType};
 
@@ -644,51 +644,6 @@ pub unsafe extern "C" fn rust_css_parse_property_custom_ident_value(
 
             css_parser::parse_property_custom_ident_value(property_ids, input, |property_id, custom_ident| {
                 callback(ctx, property_id, custom_ident.as_ptr(), custom_ident.len());
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `property_ids` and `property_ids_len` must point to valid PropertyID values
-/// - `input` and `input_len` must point to a valid string
-/// - Parameters provided to `callback` must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_generated_property_value(
-    property_ids: *const u16,
-    property_ids_len: usize,
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    callback: unsafe extern "C" fn(
-        ctx: *mut c_void,
-        kind: CssGeneratedPropertyValueKind,
-        property_id: u16,
-        value: *const u8,
-        value_len: usize,
-        value_type: *const u8,
-        value_type_len: usize,
-    ),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(property_ids) = slice_from_raw(property_ids, property_ids_len) else {
-                return false;
-            };
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_generated_property_value(property_ids, input, |kind, property_id, value, value_type| {
-                callback(
-                    ctx,
-                    kind,
-                    property_id,
-                    value.as_ptr(),
-                    value.len(),
-                    value_type.as_ptr(),
-                    value_type.len(),
-                );
             })
         })
     }
@@ -2517,30 +2472,6 @@ pub unsafe extern "C" fn rust_css_parse_layer_name(
             };
 
             css_parser::parse_a_layer_name(input, allow_blank_layer_name, |name| {
-                name_callback(ctx, name.as_ptr(), name.len());
-            })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-/// - `ctx` must be a valid pointer to a CallbackContext
-/// - Parameters provided to callbacks must be valid pointers
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_import_layer(
-    input: *const u8,
-    input_len: usize,
-    ctx: *mut c_void,
-    name_callback: unsafe extern "C" fn(ctx: *mut c_void, name_ptr: *const u8, name_len: usize),
-) -> bool {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return false;
-            };
-
-            css_parser::parse_an_import_layer(input, |name| {
                 name_callback(ctx, name.as_ptr(), name.len());
             })
         })
