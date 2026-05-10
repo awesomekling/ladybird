@@ -547,6 +547,7 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
     Optional<FlyString> syntax_maybe;
     Optional<bool> inherits_maybe;
     RefPtr<StyleValue const> initial_value_maybe;
+    Optional<String> initial_value_source_maybe;
 
     rule.for_each_as_declaration_list([&](auto& declaration) {
         if (auto descriptor = convert_to_descriptor(AtRuleID::Property, declaration); descriptor.has_value()) {
@@ -570,6 +571,7 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
             }
             if (descriptor->descriptor_name_and_id.id() == DescriptorID::InitialValue) {
                 initial_value_maybe = *descriptor->value;
+                initial_value_source_maybe = declaration.original_value_text;
                 return;
             }
         }
@@ -604,8 +606,10 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         if (!initial_value_maybe->is_unresolved())
             return {};
         auto const& initial_value_component_values = initial_value_maybe->as_unresolved().values();
-        auto serialized_initial_value = serialize_component_values_for_reparsing(initial_value_component_values);
-        if (!RustComponentValueParser::syntax_matches(serialized_initial_value, maybe_syntax->to_string(), LimitSingleComponentIdentToCustomIdent::Yes))
+        auto initial_value_source = initial_value_source_maybe.value_or_lazy_evaluated([&] {
+            return serialize_component_values_for_reparsing(initial_value_component_values);
+        });
+        if (!RustComponentValueParser::syntax_matches(initial_value_source, maybe_syntax->to_string(), LimitSingleComponentIdentToCustomIdent::Yes))
             return {};
 
         auto parsed_initial_value = CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_component_values, *maybe_syntax);
@@ -901,22 +905,24 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
             }
 
             at_rule.for_each_as_declaration_list([&](Declaration const& declaration) {
-                auto serialized_value = serialize_component_values_for_reparsing(declaration.value);
+                auto value_source = declaration.original_value_text.value_or_lazy_evaluated([&] {
+                    return serialize_component_values_for_reparsing(declaration.value);
+                });
 
                 if (declaration.important == Important::Yes) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = serialized_value,
+                        .prelude = value_source,
                         .description = "Declarations in @font-feature-values rules cannot be marked !important."_string,
                     });
                     return;
                 }
 
-                auto values = RustComponentValueParser::parse_font_feature_values_feature_value(serialized_value.bytes_as_string_view(), "utf-8"sv);
+                auto values = RustComponentValueParser::parse_font_feature_values_feature_value(value_source.bytes_as_string_view(), "utf-8"sv);
                 if (!values.has_value()) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = serialized_value,
+                        .prelude = value_source,
                         .description = "Feature value entry must be a non-negative integer."_string,
                     });
                     return;
@@ -925,7 +931,7 @@ GC::Ptr<CSSFontFeatureValuesRule> Parser::convert_to_font_feature_values_rule(At
                 if (values->size() > max_value_count) {
                     ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
                         .rule_name = MUST(String::formatted("@{}", at_rule.name)),
-                        .prelude = serialized_value,
+                        .prelude = value_source,
                         .description = MUST(String::formatted("Too many feature values provided (maximum {})."_string, max_value_count)),
                     });
 
