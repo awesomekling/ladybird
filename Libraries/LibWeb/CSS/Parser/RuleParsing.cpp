@@ -521,7 +521,6 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
     Optional<FlyString> syntax_maybe;
     Optional<bool> inherits_maybe;
     RefPtr<StyleValue const> initial_value_maybe;
-    Optional<String> initial_value_source_maybe;
 
     rule.for_each_as_declaration_list([&](auto& declaration) {
         if (auto descriptor = convert_to_descriptor(AtRuleID::Property, declaration); descriptor.has_value()) {
@@ -545,7 +544,6 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
             }
             if (descriptor->descriptor_name_and_id.id() == DescriptorID::InitialValue) {
                 initial_value_maybe = *descriptor->value;
-                initial_value_source_maybe = declaration.original_value_text;
                 return;
             }
         }
@@ -579,13 +577,9 @@ GC::Ptr<CSSPropertyRule> Parser::convert_to_property_rule(AtRule const& rule)
         if (!initial_value_maybe->is_unresolved())
             return {};
         auto const& initial_value_component_values = initial_value_maybe->as_unresolved().values();
-        auto initial_value_source = initial_value_source_maybe.value_or_lazy_evaluated([&] {
-            return serialize_component_values_for_reparsing(initial_value_component_values);
-        });
-        if (!RustComponentValueParser::syntax_matches(initial_value_source, maybe_syntax->to_string(), LimitSingleComponentIdentToCustomIdent::Yes))
-            return {};
-
         auto parsed_initial_value = CSS::Parser::parse_with_a_syntax(parsing_params, initial_value_component_values, *maybe_syntax);
+        if (parsed_initial_value->is_guaranteed_invalid())
+            return {};
         if (maybe_syntax->type() != CSS::Parser::SyntaxNode::NodeType::Universal) {
             if (parsed_initial_value->type() == CSS::StyleValue::Type::Unresolved || !parsed_initial_value->is_computationally_independent())
                 return {};
