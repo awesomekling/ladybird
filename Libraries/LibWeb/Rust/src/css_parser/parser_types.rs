@@ -1719,6 +1719,12 @@ pub enum CssRuleEventKind {
     FontFeatureValuesFamilyName,
     ContainerCondition,
     ContainerConditionEnd,
+    ImportUrl,
+    ImportUrlModifier,
+    ImportLayer,
+    ImportSupportsDeclaration,
+    ImportSupportsConditionEnd,
+    ImportMediaQueryListEnd,
     MediaQueryListEnd,
     SupportsConditionEnd,
 }

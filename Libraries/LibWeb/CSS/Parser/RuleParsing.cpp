@@ -250,12 +250,10 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
         return {};
     }
 
-    auto serialized_import_prelude = serialize_component_values_for_reparsing(rule.prelude);
-    auto import_prelude = RustComponentValueParser::parse_an_import_rule_prelude(serialized_import_prelude.bytes_as_string_view(), "utf-8"sv);
-    if (!import_prelude.has_value()) {
+    if (!rule.rust_import_url.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@import"_fly_string,
-            .prelude = serialized_import_prelude,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Unable to parse prelude."_string,
         });
         return {};
@@ -263,21 +261,18 @@ GC::Ptr<CSSImportRule> Parser::convert_to_import_rule(AtRule const& rule)
 
     // <import-conditions> = [ supports( [ <supports-condition> | <declaration> ] ) ]?
     //                      <media-query-list>?
-    RefPtr<Supports> supports {};
-    if (import_prelude->supports.has_value()) {
-        supports = parse_a_supports_from_string(import_prelude->supports->bytes_as_string_view(), "utf-8"sv);
-        if (!supports) {
-            m_rule_context.append(RuleContext::SupportsCondition);
-            auto supports_declaration = RustComponentValueParser::parse_a_declaration(import_prelude->supports->bytes_as_string_view(), "utf-8"sv, m_rule_context);
-            m_rule_context.take_last();
-            if (supports_declaration.has_value())
-                supports = Supports::create(Supports::Declaration::create(import_prelude->supports.value(), convert_to_style_property(supports_declaration.release_value()).has_value()));
-        }
+    auto supports = rule.rust_import_supports_condition;
+    if (!supports && rule.rust_import_supports_declaration.has_value()) {
+        m_rule_context.append(RuleContext::SupportsCondition);
+        auto supports_declaration = RustComponentValueParser::parse_a_declaration(rule.rust_import_supports_declaration->bytes_as_string_view(), "utf-8"sv, m_rule_context);
+        m_rule_context.take_last();
+        if (supports_declaration.has_value())
+            supports = Supports::create(Supports::Declaration::create(rule.rust_import_supports_declaration.value(), convert_to_style_property(supports_declaration.release_value()).has_value()));
     }
 
-    auto media_query_list = parse_a_media_query_list_from_string(import_prelude->media_query_list.bytes_as_string_view(), "utf-8"sv);
+    auto media_query_list = rule.rust_import_media_query_list.value_or({});
 
-    return CSSImportRule::create(realm(), move(import_prelude->url), const_cast<DOM::Document*>(m_document.ptr()), move(import_prelude->layer), move(supports), MediaList::create(realm(), move(media_query_list)));
+    return CSSImportRule::create(realm(), rule.rust_import_url.value(), const_cast<DOM::Document*>(m_document.ptr()), rule.rust_import_layer, move(supports), MediaList::create(realm(), move(media_query_list)));
 }
 
 template<typename NestedDeclarationsRule>

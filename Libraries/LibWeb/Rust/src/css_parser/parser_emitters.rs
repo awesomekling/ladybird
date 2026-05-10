@@ -554,6 +554,122 @@ pub(super) fn emit_rule<E, C>(
                     }
                 }
             }
+            if at_rule.name.eq_ignore_ascii_case("import") {
+                let mut parser = ComponentValueParser::new(at_rule.prelude.clone());
+                let valid_import_prelude = (|| {
+                    let url_function = parser.parse_an_import_url_prefix()?;
+                    let (name_ptr, name_len) = string_parts(&url_function.url);
+                    event_callback(CssRuleEvent {
+                        kind: CssRuleEventKind::ImportUrl,
+                        name_ptr,
+                        name_len,
+                        value_ptr: std::ptr::null(),
+                        value_len: 0,
+                        keyframe_selector: 0.0,
+                        page_pseudo_class: CssPagePseudoClassKind::Left,
+                        important: url_function.function_type == CssUrlFunctionType::Src,
+                        is_block_rule: false,
+                    });
+                    for modifier in &url_function.request_url_modifiers {
+                        let modifier = modifier.as_ffi();
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::ImportUrlModifier,
+                            name_ptr: modifier.integrity_ptr,
+                            name_len: modifier.kind as usize,
+                            value_ptr: modifier.integrity_ptr,
+                            value_len: match modifier.kind {
+                                CssUrlModifierKind::CrossOrigin => modifier.cross_origin_value as usize,
+                                CssUrlModifierKind::Integrity => modifier.integrity_len,
+                                CssUrlModifierKind::ReferrerPolicy => modifier.referrer_policy_value as usize,
+                            },
+                            keyframe_selector: 0.0,
+                            page_pseudo_class: CssPagePseudoClassKind::Left,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    }
+
+                    parser.discard_whitespace();
+                    let saved_index = parser.index;
+                    if let Some(layer_name) = parser.parse_an_import_layer_prefix() {
+                        let (name_ptr, name_len) = string_parts(&layer_name);
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::ImportLayer,
+                            name_ptr,
+                            name_len,
+                            value_ptr: std::ptr::null(),
+                            value_len: 0,
+                            keyframe_selector: 0.0,
+                            page_pseudo_class: CssPagePseudoClassKind::Left,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    } else {
+                        parser.index = saved_index;
+                    }
+
+                    parser.discard_whitespace();
+                    if let Some(ComponentValue::Function(function)) = parser.next_component_value()
+                        && function.name.eq_ignore_ascii_case("supports")
+                    {
+                        let mut supports_parser = ComponentValueParser::new(function.value.clone());
+                        if supports_parser
+                            .parse_a_boolean_expression(BooleanExpressionTestKind::SupportsFeature)
+                            .is_some()
+                            && !supports_parser.has_next_component_value()
+                        {
+                            let boolean_expression = supports_parser
+                                .boolean_expression
+                                .take()
+                                .expect("parsed expression must be present");
+                            emit_boolean_expression(
+                                &boolean_expression,
+                                filtered_input,
+                                boolean_expression_event_callback,
+                                component_value_callback,
+                                media_feature_callback,
+                                media_feature_value_callback,
+                            );
+                            event_callback(CssRuleEvent::new(CssRuleEventKind::ImportSupportsConditionEnd));
+                        } else {
+                            let supports_source =
+                                serialize_component_values_for_reparsing(&function.value, filtered_input)?;
+                            let (value_ptr, value_len) = string_parts(&supports_source);
+                            event_callback(CssRuleEvent {
+                                kind: CssRuleEventKind::ImportSupportsDeclaration,
+                                name_ptr: std::ptr::null(),
+                                name_len: 0,
+                                value_ptr,
+                                value_len,
+                                keyframe_selector: 0.0,
+                                page_pseudo_class: CssPagePseudoClassKind::Left,
+                                important: false,
+                                is_block_rule: false,
+                            });
+                        }
+                        parser.index += 1;
+                    }
+
+                    if parser.has_next_component_value() {
+                        for group in split_component_values_on_comma(parser.remaining_component_values()) {
+                            emit_media_query_syntax(
+                                component_values_parse_as_media_query(group.to_vec()),
+                                filtered_input,
+                                media_query_callback,
+                                boolean_expression_event_callback,
+                                media_feature_callback,
+                                media_feature_value_callback,
+                                component_value_callback,
+                            );
+                        }
+                    }
+                    event_callback(CssRuleEvent::new(CssRuleEventKind::ImportMediaQueryListEnd));
+                    Some(())
+                })();
+                if valid_import_prelude.is_none() {
+                    // Leave the typed import fields empty so C++ reports the invalid prelude.
+                }
+            }
             if at_rule.name.eq_ignore_ascii_case("container") {
                 let conditions: Option<Vec<_>> = {
                     let groups = split_component_values_on_comma(&at_rule.prelude);

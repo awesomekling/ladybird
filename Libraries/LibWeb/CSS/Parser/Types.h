@@ -18,6 +18,7 @@
 #include <LibWeb/CSS/Parser/Token.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/StyleProperty.h>
+#include <LibWeb/CSS/URL.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::CSS::Parser {
@@ -53,6 +54,11 @@ struct AtRule {
     Optional<Vector<RustContainerRulePreludeCondition>> rust_container_rule_prelude_conditions;
     Optional<Vector<NonnullRefPtr<MediaQuery>>> rust_media_query_list;
     RefPtr<Supports> rust_supports_condition;
+    Optional<URL> rust_import_url;
+    Optional<FlyString> rust_import_layer;
+    RefPtr<Supports> rust_import_supports_condition;
+    Optional<String> rust_import_supports_declaration;
+    Optional<Vector<NonnullRefPtr<MediaQuery>>> rust_import_media_query_list;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;

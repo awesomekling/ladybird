@@ -5943,6 +5943,9 @@ struct RuleEventBuilder {
     AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature;
     Optional<FlyString> current_page_selector_name;
     Vector<PagePseudoClass> current_page_selector_pseudo_classes;
+    Optional<URL::Type> current_import_url_type;
+    Optional<String> current_import_url;
+    Vector<RequestURLModifier> current_import_url_modifiers;
 
     RustBooleanExpressionBuilder* current_boolean_expression_builder()
     {
@@ -5964,10 +5967,11 @@ struct RuleEventBuilder {
         auto& rule = stack.last().rule;
         VERIFY(rule.has_value());
         auto& at_rule = rule->get<AtRule>();
-        VERIFY(at_rule.rust_media_query_list.has_value());
-        VERIFY(!at_rule.rust_media_query_list->is_empty());
+        auto& media_query_list = at_rule.name.equals_ignoring_ascii_case("import"sv) ? at_rule.rust_import_media_query_list : at_rule.rust_media_query_list;
+        VERIFY(media_query_list.has_value());
+        VERIFY(!media_query_list->is_empty());
 
-        auto& media_query = at_rule.rust_media_query_list->last();
+        auto& media_query = media_query_list->last();
         if (media_condition_builder->invalid || !media_condition_builder->stack.is_empty() || !media_condition_builder->root) {
             media_query->set_negated_for_parser(true);
             media_query->set_media_type_for_parser(MediaQuery::MediaType {
@@ -5999,7 +6003,11 @@ struct RuleEventBuilder {
         }
 
         VERIFY(supports_condition_builder->component_value_builder.stack.is_empty());
-        at_rule.rust_supports_condition = Supports::create(supports_condition_builder->root.release_nonnull());
+        auto supports = Supports::create(supports_condition_builder->root.release_nonnull());
+        if (at_rule.name.equals_ignoring_ascii_case("import"sv))
+            at_rule.rust_import_supports_condition = move(supports);
+        else
+            at_rule.rust_supports_condition = move(supports);
         supports_condition_builder = {};
     }
 
@@ -6022,6 +6030,21 @@ struct RuleEventBuilder {
         VERIFY(container_condition_builder->component_value_builder.stack.is_empty());
         at_rule.rust_container_rule_prelude_conditions->last().query = ContainerQuery::create(container_condition_builder->root.release_nonnull());
         container_condition_builder = {};
+    }
+
+    void finish_import_url()
+    {
+        if (!current_import_url.has_value())
+            return;
+
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        VERIFY(current_import_url_type.has_value());
+        at_rule.rust_import_url = URL { current_import_url.release_value(), current_import_url_type.release_value(), move(current_import_url_modifiers) };
+        current_import_url_type = {};
+        current_import_url_modifiers.clear();
     }
 
     void append_rule(Rule completed_rule)
@@ -6109,6 +6132,11 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_container_rule_prelude_conditions = {},
                 .rust_media_query_list = {},
                 .rust_supports_condition = {},
+                .rust_import_url = {},
+                .rust_import_layer = {},
+                .rust_import_supports_condition = {},
+                .rust_import_supports_declaration = {},
+                .rust_import_media_query_list = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6118,6 +6146,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         builder.finish_media_condition();
         builder.finish_supports_condition();
         builder.finish_container_condition();
+        builder.finish_import_url();
         auto frame = builder.stack.take_last();
         VERIFY(frame.type == RuleEventBuilder::FrameType::AtRule);
         builder.append_rule(frame.rule.release_value());
@@ -6325,6 +6354,46 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
     case FFI::CssRuleEventKind::ContainerConditionEnd:
         builder.finish_container_condition();
         break;
+    case FFI::CssRuleEventKind::ImportUrl:
+        builder.current_import_url_type = event.important ? URL::Type::Src : URL::Type::Url;
+        builder.current_import_url = string_from_ffi_bytes(event.name_ptr, event.name_len);
+        builder.current_import_url_modifiers.clear();
+        break;
+    case FFI::CssRuleEventKind::ImportUrlModifier:
+        switch (static_cast<FFI::CssUrlModifierKind>(event.name_len)) {
+        case FFI::CssUrlModifierKind::CrossOrigin:
+            builder.current_import_url_modifiers.append(RequestURLModifier::create_cross_origin(cross_origin_modifier_value_from_rust(static_cast<FFI::CssUrlCrossOriginModifierValue>(event.value_len))));
+            break;
+        case FFI::CssUrlModifierKind::Integrity:
+            builder.current_import_url_modifiers.append(RequestURLModifier::create_integrity(fly_string_from_ffi_bytes(event.value_ptr, event.value_len)));
+            break;
+        case FFI::CssUrlModifierKind::ReferrerPolicy:
+            builder.current_import_url_modifiers.append(RequestURLModifier::create_referrer_policy(referrer_policy_modifier_value_from_rust(static_cast<FFI::CssUrlReferrerPolicyModifierValue>(event.value_len))));
+            break;
+        }
+        break;
+    case FFI::CssRuleEventKind::ImportLayer: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_import_layer = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
+        break;
+    }
+    case FFI::CssRuleEventKind::ImportSupportsDeclaration: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_import_supports_declaration = string_from_ffi_bytes(event.value_ptr, event.value_len);
+        break;
+    }
+    case FFI::CssRuleEventKind::ImportSupportsConditionEnd:
+        builder.finish_supports_condition();
+        break;
+    case FFI::CssRuleEventKind::ImportMediaQueryListEnd:
+        builder.finish_media_condition();
+        break;
     case FFI::CssRuleEventKind::MediaQueryListEnd:
         builder.finish_media_condition();
         break;
@@ -6342,9 +6411,10 @@ static void apply_rule_media_query(RuleEventBuilder& builder, FFI::CssMediaQuery
     auto& rule = builder.stack.last().rule;
     VERIFY(rule.has_value());
     auto& at_rule = rule->get<AtRule>();
-    VERIFY(at_rule.name.equals_ignoring_ascii_case("media"sv));
-    if (!at_rule.rust_media_query_list.has_value())
-        at_rule.rust_media_query_list = Vector<NonnullRefPtr<MediaQuery>> {};
+    VERIFY(at_rule.name.equals_ignoring_ascii_case("media"sv) || at_rule.name.equals_ignoring_ascii_case("import"sv));
+    auto& media_query_list = at_rule.name.equals_ignoring_ascii_case("import"sv) ? at_rule.rust_import_media_query_list : at_rule.rust_media_query_list;
+    if (!media_query_list.has_value())
+        media_query_list = Vector<NonnullRefPtr<MediaQuery>> {};
 
     auto media_query = MediaQuery::create();
     media_query->set_negated_for_parser(rust_media_query->is_negated);
@@ -6356,7 +6426,7 @@ static void apply_rule_media_query(RuleEventBuilder& builder, FFI::CssMediaQuery
         });
     }
 
-    at_rule.rust_media_query_list->append(move(media_query));
+    media_query_list->append(move(media_query));
 
     if (rust_media_query->has_media_condition) {
         builder.media_condition_builder = RustBooleanExpressionBuilder {
@@ -6378,7 +6448,7 @@ static void apply_rule_supports_condition_start(RuleEventBuilder& builder)
     auto& rule = builder.stack.last().rule;
     VERIFY(rule.has_value());
     auto& at_rule = rule->get<AtRule>();
-    VERIFY(at_rule.name.equals_ignoring_ascii_case("supports"sv));
+    VERIFY(at_rule.name.equals_ignoring_ascii_case("supports"sv) || at_rule.name.equals_ignoring_ascii_case("import"sv));
 
     builder.supports_condition_builder = RustBooleanExpressionBuilder {
         .parse_test = [&builder](Optional<RustComponentValueParser::MediaFeatureTest>&&, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
@@ -6413,7 +6483,7 @@ static void apply_rule_boolean_expression_event(RuleEventBuilder& builder, FFI::
         auto& rule = builder.stack.last().rule;
         VERIFY(rule.has_value());
         auto& at_rule = rule->get<AtRule>();
-        if (at_rule.name.equals_ignoring_ascii_case("supports"sv))
+        if (at_rule.name.equals_ignoring_ascii_case("supports"sv) || at_rule.name.equals_ignoring_ascii_case("import"sv))
             apply_rule_supports_condition_start(builder);
         if (at_rule.name.equals_ignoring_ascii_case("container"sv))
             apply_rule_container_condition_start(builder);
@@ -6454,6 +6524,9 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(!builder.media_condition_builder.has_value());
     VERIFY(!builder.supports_condition_builder.has_value());
     VERIFY(!builder.container_condition_builder.has_value());
+    VERIFY(!builder.current_import_url_type.has_value());
+    VERIFY(!builder.current_import_url.has_value());
+    VERIFY(builder.current_import_url_modifiers.is_empty());
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 
