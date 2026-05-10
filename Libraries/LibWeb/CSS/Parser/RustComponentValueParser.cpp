@@ -756,21 +756,6 @@ Optional<SelectorList> RustComponentValueParser::parse_a_selector_list(StringVie
     return builder.root_selector_list.release_value();
 }
 
-FFI::CssValueTypeSyntaxKind RustComponentValueParser::parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>& tokens)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return FFI::CssValueTypeSyntaxKind::Invalid;
-
-    auto component_value_source = tokens.next_token().original_source_text();
-    auto component_value_source_bytes = component_value_source.bytes();
-    return FFI::rust_css_parse_value_type(
-        component_value_source_bytes.data(),
-        component_value_source_bytes.size(),
-        value_type_id);
-}
-
 Optional<RustComponentValueParser::PropertyKeyword> RustComponentValueParser::parse_property_keyword_value(ReadonlySpan<PropertyID> property_ids, StringView keyword)
 {
     Vector<u16, 4> ffi_property_ids;
@@ -4916,22 +4901,6 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_an_if_condition(String
         });
 }
 
-OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
-{
-    return parse_a_boolean_expression(
-        input,
-        encoding,
-        MatchResult::Unknown,
-        [parse_test = move(parse_test)](Optional<MediaFeatureTest>&& media_feature, Optional<SupportsFeature>&&, Vector<ComponentValue>&&) mutable -> OwnPtr<BooleanExpression> {
-            if (!media_feature.has_value())
-                return nullptr;
-            return parse_test(media_feature.release_value());
-        },
-        [](u8 const* input, size_t input_size, void* context, auto event_callback, auto, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
-            FFI::rust_css_parse_media_condition(input, input_size, context, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
-        });
-}
-
 struct SizesAttributeBuilder {
     Vector<RustComponentValueParser::SizesAttributeItem> items;
     Optional<RustComponentValueParser::SizesAttributeItem> current_item;
@@ -5422,27 +5391,6 @@ Optional<FlyString> RustComponentValueParser::parse_an_opentype_tag(StringView i
         return {};
 
     return opentype_tag;
-}
-
-Optional<FlyString> RustComponentValueParser::parse_a_counter_style_name(StringView input, StringView encoding)
-{
-    Optional<FlyString> name;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_counter_style_name(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &name,
-        [](void* raw_name, u8 const* name_ptr, size_t name_len) {
-            auto& name = *static_cast<Optional<FlyString>*>(raw_name);
-            name = fly_string_from_ffi_bytes(name_ptr, name_len);
-        });
-
-    if (!parsed)
-        return {};
-
-    return name;
 }
 
 Optional<RustComponentValueParser::CounterFunction> RustComponentValueParser::parse_a_counter(StringView input, StringView encoding)
