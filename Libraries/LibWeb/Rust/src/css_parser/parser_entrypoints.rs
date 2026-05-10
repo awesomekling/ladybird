@@ -4230,26 +4230,35 @@ pub(super) fn component_values_parse_as_position(
     //   [ [ left | right ] <length-percentage> ] &&
     //   [ [ top | bottom ] <length-percentage> ]
     // ]
-    let mut parser = ComponentValueParser::new(component_values.to_vec());
+    let component_values = component_values.to_vec();
+    let parse_position_alternative = |consume: fn(&mut ComponentValueParser) -> bool| {
+        let mut parser = ComponentValueParser::new(component_values.clone());
+        consume(&mut parser) && parser_has_no_remaining_component_values(&mut parser)
+    };
 
     // Note: The alternatives must be attempted in this order since shorter alternatives can match a prefix of longer ones.
-    if consume_position_alternative_4(&mut parser) {
-        return parser_has_no_remaining_component_values(&mut parser);
+    if parse_position_alternative(consume_position_alternative_4) {
+        return true;
     }
 
-    if allow_background_position_3_value_syntax && consume_position_alternative_5_for_background_position(&mut parser) {
-        return parser_has_no_remaining_component_values(&mut parser);
+    if allow_background_position_3_value_syntax {
+        let mut parser = ComponentValueParser::new(component_values.clone());
+        if consume_position_alternative_5_for_background_position(&mut parser)
+            && parser_has_no_remaining_component_values(&mut parser)
+        {
+            return true;
+        }
     }
 
-    if consume_position_alternative_3(&mut parser) {
-        return parser_has_no_remaining_component_values(&mut parser);
+    if parse_position_alternative(consume_position_alternative_3) {
+        return true;
     }
 
-    if consume_position_alternative_2(&mut parser) {
-        return parser_has_no_remaining_component_values(&mut parser);
+    if parse_position_alternative(consume_position_alternative_2) {
+        return true;
     }
 
-    consume_position_alternative_1(&mut parser) && parser_has_no_remaining_component_values(&mut parser)
+    parse_position_alternative(consume_position_alternative_1)
 }
 
 pub(super) fn parse_rust_owned_position_value(
@@ -5282,7 +5291,7 @@ fn rust_owned_gradient_header_color_interpolation_method(
         return Some(component_values);
     }
 
-    (1..component_values.len()).find_map(|split| {
+    (1..component_values.len()).rev().find_map(|split| {
         if component_values_parse_as_color_interpolation_method(&component_values[..split]) {
             return Some(component_values[..split].to_vec());
         }

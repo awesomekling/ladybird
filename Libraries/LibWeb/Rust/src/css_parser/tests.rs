@@ -3053,7 +3053,7 @@ fn parses_style_values_with_rust_owned_ast() {
     assert!(!gradient.is_webkit_prefixed);
     assert_eq!(gradient.color_stop_group_index, 1);
     let header = gradient.header.as_ref().unwrap();
-    assert_eq!(header.component_values.len(), 5);
+    assert_eq!(header.component_values.len(), 7);
     assert!(header.color_interpolation_method.is_some());
     assert_eq!(
         header.linear_direction,
@@ -3064,6 +3064,13 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(gradient.groups.len(), 3);
     let gradient = parse_rust_owned_image("linear-gradient(in oklab 45deg, black, white)").unwrap();
     let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(
+        &header.linear_direction,
+        Some(RustOwnedLinearGradientDirection::AngleOrZero(component_values)) if component_values.len() == 1
+    ));
+    let gradient = parse_rust_owned_image("linear-gradient(in hsl longer hue 45deg, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(header.color_interpolation_method.is_some());
     assert!(matches!(
         &header.linear_direction,
         Some(RustOwnedLinearGradientDirection::AngleOrZero(component_values)) if component_values.len() == 1
@@ -3083,6 +3090,16 @@ fn parses_style_values_with_rust_owned_ast() {
         )]
     );
     assert!(matches!(&header.radial_position, Some(component_values) if component_values.len() == 2));
+    let gradient = parse_rust_owned_image("radial-gradient(at right center in lab, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(&header.radial_position, Some(component_values) if component_values.len() == 2));
+    assert!(header.color_interpolation_method.is_some());
+    let gradient = parse_rust_owned_image("radial-gradient(at center center, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(&header.radial_position, Some(component_values) if component_values.len() == 2));
+    let gradient = parse_rust_owned_image("radial-gradient(at left 50% top 50%, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(&header.radial_position, Some(component_values) if component_values.len() == 4));
     assert_eq!(
         parse_rust_owned_style_value(
             &[PropertyId::BackgroundImage],

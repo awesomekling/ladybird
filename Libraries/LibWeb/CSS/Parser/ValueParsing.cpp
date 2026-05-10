@@ -35,7 +35,6 @@
 #include <LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorMixStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
-#include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
@@ -54,12 +53,10 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LightDarkStyleValue.h>
-#include <LibWeb/CSS/StyleValues/LinearGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpacityValueStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
-#include <LibWeb/CSS/StyleValues/RadialGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RadialSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
@@ -2572,14 +2569,28 @@ RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<Comp
             return image_set;
     }
 
-    if (auto linear_gradient = parse_linear_gradient_function(tokens))
-        return linear_gradient;
+    auto parse_single_rust_image_component = [&]() -> RefPtr<AbstractImageStyleValue const> {
+        tokens.discard_whitespace();
+        if (tokens.is_empty())
+            return nullptr;
 
-    if (auto conic_gradient = parse_conic_gradient_function(tokens))
-        return conic_gradient;
+        if (tokens.next_token().is_function("image-set"sv) || tokens.next_token().is_function("-webkit-image-set"sv))
+            return nullptr;
 
-    if (auto radial_gradient = parse_radial_gradient_function(tokens))
-        return radial_gradient;
+        auto transaction = tokens.begin_transaction();
+        auto const& component_value = tokens.consume_a_token();
+        auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
+        auto value = parse_css_value_for_property(PropertyID::BorderImageSource, component_value_tokens);
+        component_value_tokens.discard_whitespace();
+        if (!value || component_value_tokens.has_next_token() || !value->is_abstract_image())
+            return nullptr;
+
+        transaction.commit();
+        return static_ptr_cast<AbstractImageStyleValue const>(value);
+    };
+
+    if (auto image = parse_single_rust_image_component())
+        return image;
 
     return nullptr;
 }

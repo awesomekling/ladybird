@@ -1782,7 +1782,14 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 auto materialize_component_values = [&](Vector<ComponentValue> const& component_values, auto parser) -> RefPtr<StyleValue const> {
                     if (component_values.is_empty())
                         return nullptr;
-                    TokenStream value_tokens { component_values };
+                    Vector<ComponentValue> separated_component_values;
+                    separated_component_values.ensure_capacity(component_values.size() * 2 - 1);
+                    for (auto const& component_value : component_values) {
+                        if (!separated_component_values.is_empty())
+                            separated_component_values.append(Token::create_whitespace(" "_string));
+                        separated_component_values.append(component_value);
+                    }
+                    TokenStream value_tokens { separated_component_values };
                     auto parsed_value = parser(value_tokens);
                     value_tokens.discard_whitespace();
                     if (!parsed_value || value_tokens.has_next_token())
@@ -1790,14 +1797,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return parsed_value.release_nonnull();
                 };
                 auto materialize_color_interpolation_method = [&]() -> RefPtr<ColorInterpolationMethodStyleValue const> {
-                    if (rust_gradient->color_interpolation_method_component_values.is_empty())
-                        return nullptr;
-                    TokenStream method_tokens { rust_gradient->color_interpolation_method_component_values };
-                    auto color_interpolation_method = parse_color_interpolation_method_value(method_tokens);
-                    method_tokens.discard_whitespace();
-                    if (!color_interpolation_method || method_tokens.has_next_token())
-                        return nullptr;
-                    return color_interpolation_method.release_nonnull();
+                    return static_ptr_cast<ColorInterpolationMethodStyleValue const>(materialize_component_values(rust_gradient->color_interpolation_method_component_values, [&](TokenStream<ComponentValue>& method_tokens) {
+                        return parse_color_interpolation_method_value(method_tokens);
+                    }));
                 };
                 auto materialize_angle_or_zero = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                     auto stripped_angle_component_values = remove_whitespace_component_values(component_values);
@@ -1808,14 +1810,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     });
                 };
                 auto materialize_position = [&](Vector<ComponentValue> const& component_values) -> RefPtr<PositionStyleValue const> {
-                    if (component_values.is_empty())
-                        return nullptr;
-                    TokenStream position_tokens { component_values };
-                    auto position = parse_position_value(position_tokens);
-                    position_tokens.discard_whitespace();
-                    if (!position || position_tokens.has_next_token())
-                        return nullptr;
-                    return position.release_nonnull();
+                    return static_ptr_cast<PositionStyleValue const>(materialize_component_values(component_values, [&](TokenStream<ComponentValue>& position_tokens) {
+                        return parse_position_value(position_tokens);
+                    }));
                 };
                 auto materialize_length_percentage = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
                     return materialize_component_values(component_values, [&](TokenStream<ComponentValue>& value_tokens) {
@@ -1937,7 +1934,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         ending_shape = *rust_gradient->radial_shape == RustComponentValueParser::RustRadialGradientShape::Circle
                             ? RadialGradientStyleValue::EndingShape::Circle
                             : RadialGradientStyleValue::EndingShape::Ellipse;
-                    } else if (rust_gradient->color_stop_group_index > 0) {
+                    } else {
                         ending_shape = size->components().size() == 1 && size->components()[0].has<NonnullRefPtr<StyleValue const>>()
                             ? RadialGradientStyleValue::EndingShape::Circle
                             : RadialGradientStyleValue::EndingShape::Ellipse;
