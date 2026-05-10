@@ -221,7 +221,7 @@ private:
         PropertyID property;
         RefPtr<StyleValue const> style_value;
     };
-    Optional<PropertyAndValue> parse_css_value_for_properties(ReadonlySpan<PropertyID>, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    Optional<PropertyAndValue> parse_css_value_for_property_with_id(PropertyID, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_builtin_value(TokenStream<ComponentValue>&);
     Optional<FlyString> parse_custom_ident(TokenStream<ComponentValue>&, ReadonlySpan<StringView> blacklist, Optional<StringView> original_source_text = {});
     Optional<FlyString> parse_dashed_ident(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});

@@ -120,12 +120,12 @@ RefPtr<StyleValue const> Parser::parse_all_as_single_keyword_value(TokenStream<C
 
 RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
-    return parse_css_value_for_properties({ &property_id, 1 }, tokens, original_source_text)
+    return parse_css_value_for_property_with_id(property_id, tokens, original_source_text)
         .map([](auto&& it) { return it.style_value; })
         .value_or(nullptr);
 }
 
-Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
+Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_property_with_id(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     tokens.discard_whitespace();
 
@@ -141,7 +141,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             source = generated_source->bytes_as_string_view();
         }
         if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property(
-                property_ids,
+                { &property_id, 1 },
                 source,
                 context_allows_quirky_length(),
                 context_allows_quirky_color(),
