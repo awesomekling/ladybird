@@ -482,7 +482,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                 return parse_all_as_single_keyword_value(tokens, keyword);
             },
             [&](PropertyID property_id) -> RefPtr<StyleValue const> {
-                auto value_or_error = parse_css_value(property_id, tokens);
+                auto value_or_error = parse_css_value(property_id, tokens, MUST(String::from_utf8(original_source_text)));
                 if (value_or_error.is_error())
                     return nullptr;
                 auto value_for_property = value_or_error.release_value();

@@ -135,14 +135,14 @@ RefPtr<StyleValueList const> Parser::parse_simple_comma_separated_value_list(Pro
     });
 }
 
-RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
-    return parse_css_value_for_properties({ &property_id, 1 }, tokens)
+    return parse_css_value_for_properties({ &property_id, 1 }, tokens, original_source_text)
         .map([](auto&& it) { return it.style_value; })
         .value_or(nullptr);
 }
 
-Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens)
+Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto any_property_accepts_type = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<PropertyID> {
         return RustComponentValueParser::property_accepting_type(property_ids, value_type);
@@ -164,24 +164,18 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
     {
         auto generated_transaction = tokens.begin_transaction();
-        auto has_view_timeline_inset_property = [&] {
-            for (auto property_id : property_ids) {
-                if (property_id == PropertyID::ViewTimelineInset)
-                    return true;
-            }
-            return false;
-        };
-        auto source = property_ids.size() == 1
-            ? serialize_component_values_for_reparsing(tokens.remaining_tokens())
-            : has_view_timeline_inset_property()
-            ? serialize_component_values_for_reparsing(tokens.remaining_tokens())
-            : [&] {
-                  auto component_value_source = peek_token.original_source_text();
-                  return component_value_source.is_empty() ? peek_token.to_string() : component_value_source;
-              }();
+        auto has_original_source_text = original_source_text.has_value() && !original_source_text->is_empty();
+        Optional<String> generated_source;
+        StringView source;
+        if (has_original_source_text) {
+            source = original_source_text.value();
+        } else {
+            generated_source = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+            source = generated_source->bytes_as_string_view();
+        }
         if (auto rust_style_value = RustComponentValueParser::parse_style_value_for_property(
                 property_ids,
-                source.bytes_as_string_view(),
+                source,
                 context_allows_quirky_length(),
                 context_allows_quirky_color(),
                 is_parsing_svg_presentation_attribute(),
@@ -7068,12 +7062,16 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return UnresolvedStyleValue::create(move(remaining_tokens), substitution_presence, move(original_source_text));
     }
 
+    Optional<StringView> original_source_text_view;
+    if (original_source_text.has_value() && !original_source_text->is_empty())
+        original_source_text_view = original_source_text.value().bytes_as_string_view();
+
     tokens.discard_whitespace();
     if (!tokens.has_next_token())
         return ParseError::SyntaxError;
 
     if (property_uses_rust_owned_whole_grammar(property_id))
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_css_value_for_property(property_id, tokens); });
+        return parse_all_as(tokens, [this, property_id, original_source_text_view](auto& tokens) { return parse_css_value_for_property(property_id, tokens, original_source_text_view); });
 
     // Special-case property handling
     switch (property_id) {
