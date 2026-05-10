@@ -123,18 +123,6 @@ RefPtr<StyleValue const> Parser::parse_all_as_single_keyword_value(TokenStream<C
     return keyword_value;
 }
 
-RefPtr<StyleValueList const> Parser::parse_simple_comma_separated_value_list(PropertyID property_id, TokenStream<ComponentValue>& tokens)
-{
-    return parse_comma_separated_value_list(tokens, [this, property_id](auto& tokens) -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        if (auto value = parse_css_value_for_property(property_id, tokens)) {
-            transaction.commit();
-            return value;
-        }
-        return nullptr;
-    });
-}
-
 RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     return parse_css_value_for_properties({ &property_id, 1 }, tokens, original_source_text)
@@ -6926,16 +6914,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     default:
         break;
     }
-
-    if (property_multiplicity(property_id) == PropertyMultiplicity::CoordinatingList
-        && !property_is_shorthand(property_id)
-        && !first_is_one_of(property_id,
-            PropertyID::AnimationName,
-            PropertyID::ScrollTimelineName,
-            PropertyID::TransitionBehavior,
-            PropertyID::TransitionProperty,
-            PropertyID::ViewTimelineName))
-        return parse_all_as(tokens, [this, property_id](auto& tokens) { return parse_simple_comma_separated_value_list(property_id, tokens); });
 
     {
         auto transaction = tokens.begin_transaction();

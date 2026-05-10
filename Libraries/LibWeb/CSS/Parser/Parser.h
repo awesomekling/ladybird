@@ -272,7 +272,6 @@ private:
 
     using ParseFunction = AK::Function<RefPtr<StyleValue const>(TokenStream<ComponentValue>&)>;
     RefPtr<StyleValueList const> parse_comma_separated_value_list(TokenStream<ComponentValue>&, ParseFunction);
-    RefPtr<StyleValueList const> parse_simple_comma_separated_value_list(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
 
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
