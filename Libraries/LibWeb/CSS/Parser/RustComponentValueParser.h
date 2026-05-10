@@ -1148,7 +1148,6 @@ public:
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
-    static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
     static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
