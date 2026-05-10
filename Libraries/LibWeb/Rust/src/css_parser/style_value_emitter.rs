@@ -22,6 +22,7 @@ const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_FROM_ANGLE: u8 = 11;
 const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_POSITION: u8 = 12;
 const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_POSITION: u8 = 13;
 const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_SIZE_COMPONENT: u8 = 14;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_COLOR_STOP_GROUP: u8 = 15;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -4490,6 +4491,10 @@ fn callback_gradient_metadata<C, S, E>(
         &[],
         "",
     );
+
+    for group in gradient.groups.iter().skip(gradient.color_stop_group_index) {
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_GRADIENT_COLOR_STOP_GROUP, group);
+    }
 
     let Some(header) = &gradient.header else {
         return;

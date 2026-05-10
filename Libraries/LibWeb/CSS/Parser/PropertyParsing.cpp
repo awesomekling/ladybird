@@ -1736,17 +1736,13 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 return ImageStyleValue::create(*typed_url);
             };
             auto materialize_rust_gradient_from_component_values = [&](Optional<RustComponentValueParser::RustGradient> const& rust_gradient, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
-                if (source_component_values.is_empty())
-                    return nullptr;
-
-                auto stripped_component_values = remove_whitespace_component_values(source_component_values);
-                if (stripped_component_values.size() != 1 || !stripped_component_values[0].is_function())
-                    return nullptr;
                 if (!rust_gradient.has_value())
                     return nullptr;
 
-                auto const& function = stripped_component_values[0].function();
-                auto function_name = function.name.bytes_as_string_view();
+                auto stripped_component_values = remove_whitespace_component_values(source_component_values);
+                auto function_name = stripped_component_values.size() == 1 && stripped_component_values[0].is_function()
+                    ? stripped_component_values[0].function().name.bytes_as_string_view()
+                    : ""sv;
                 auto context_guard = push_temporary_value_parsing_context(FunctionContext { function_name });
 
                 auto gradient_repeating = rust_gradient->is_repeating ? GradientRepeating::Yes : GradientRepeating::No;
@@ -1754,25 +1750,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     ? LinearGradientStyleValue::GradientType::WebKit
                     : LinearGradientStyleValue::GradientType::Standard;
 
-                TokenStream gradient_value_tokens { function.value };
-                auto const groups = parse_a_comma_separated_list_of_component_values(gradient_value_tokens);
-                if (groups.is_empty() || rust_gradient->color_stop_group_index >= groups.size())
+                if (rust_gradient->color_stop_component_value_groups.is_empty())
                     return nullptr;
 
-                auto remaining_groups_as_component_values = [&](size_t start_index) {
-                    Vector<ComponentValue> component_values;
-                    size_t current_group_index = 0;
-                    for (auto const& component_value : function.value) {
-                        if (component_value.is(Token::Type::Comma)) {
-                            ++current_group_index;
-                            if (current_group_index <= start_index)
-                                continue;
-                        }
-                        if (current_group_index >= start_index)
-                            component_values.append(component_value);
-                    }
-                    return component_values;
-                };
                 auto materialize_component_values = [&](Vector<ComponentValue> const& component_values, auto parser) -> RefPtr<StyleValue const> {
                     if (component_values.is_empty())
                         return nullptr;
@@ -1812,6 +1792,81 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return materialize_component_values(component_values, [&](TokenStream<ComponentValue>& value_tokens) {
                         return parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
                     });
+                };
+                auto materialize_color_stop_list = [&](auto parse_position) -> Optional<Vector<ColorStopListElement>> {
+                    enum class ElementType {
+                        Garbage,
+                        ColorStop,
+                        ColorHint,
+                    };
+
+                    auto materialize_color_stop_list_element = [&](Vector<ComponentValue> const& group, ColorStopListElement& element) -> ElementType {
+                        Vector<ComponentValue> component_values = group;
+                        TokenStream tokens { component_values };
+
+                        tokens.discard_whitespace();
+                        if (!tokens.has_next_token())
+                            return ElementType::Garbage;
+
+                        RefPtr<StyleValue const> color;
+                        RefPtr<StyleValue const> position;
+                        RefPtr<StyleValue const> second_position;
+                        if (position = parse_position(tokens); position) {
+                            tokens.discard_whitespace();
+                            if (!tokens.has_next_token()) {
+                                element.transition_hint = position;
+                                return ElementType::ColorHint;
+                            }
+
+                            auto maybe_color = parse_color_value(tokens);
+                            tokens.discard_whitespace();
+                            if (!maybe_color || tokens.has_next_token())
+                                return ElementType::Garbage;
+                            color = maybe_color.release_nonnull();
+                        } else {
+                            auto maybe_color = parse_color_value(tokens);
+                            if (!maybe_color)
+                                return ElementType::Garbage;
+                            color = maybe_color.release_nonnull();
+                            tokens.discard_whitespace();
+
+                            for (auto* stop_position : Array { &position, &second_position }) {
+                                if (!tokens.has_next_token())
+                                    break;
+                                *stop_position = parse_position(tokens);
+                                if (!*stop_position)
+                                    return ElementType::Garbage;
+                                tokens.discard_whitespace();
+                            }
+
+                            if (tokens.has_next_token())
+                                return ElementType::Garbage;
+                        }
+
+                        element.color_stop = ColorStopListElement::ColorStop { color, position, second_position };
+                        return ElementType::ColorStop;
+                    };
+
+                    ColorStopListElement first_element {};
+                    if (materialize_color_stop_list_element(rust_gradient->color_stop_component_value_groups[0], first_element) != ElementType::ColorStop)
+                        return {};
+
+                    Vector<ColorStopListElement> color_stops { first_element };
+                    for (size_t i = 1; i < rust_gradient->color_stop_component_value_groups.size(); ++i) {
+                        ColorStopListElement list_element {};
+                        auto element_type = materialize_color_stop_list_element(rust_gradient->color_stop_component_value_groups[i], list_element);
+                        if (element_type == ElementType::ColorHint) {
+                            if (++i >= rust_gradient->color_stop_component_value_groups.size())
+                                return {};
+                            if (materialize_color_stop_list_element(rust_gradient->color_stop_component_value_groups[i], list_element) != ElementType::ColorStop)
+                                return {};
+                        } else if (element_type != ElementType::ColorStop) {
+                            return {};
+                        }
+                        color_stops.append(list_element);
+                    }
+
+                    return color_stops;
                 };
                 auto materialize_gradient_side_or_corner = [](RustComponentValueParser::RustGradientSideOrCorner side_or_corner) {
                     switch (side_or_corner) {
@@ -1872,11 +1927,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     }
 
-                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
-                    TokenStream color_stop_tokens { color_stop_component_values };
-                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
-                    color_stop_tokens.discard_whitespace();
-                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                    auto color_stops = materialize_color_stop_list([&](TokenStream<ComponentValue>& tokens) {
+                        return parse_length_percentage_value(tokens, infinite_range, infinite_range);
+                    });
+                    if (color_stops.has_value())
                         return LinearGradientStyleValue::create(move(gradient_direction), move(*color_stops), linear_gradient_type, gradient_repeating, move(color_interpolation_method));
                     return nullptr;
                 }
@@ -1897,11 +1951,19 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!position)
                         return nullptr;
 
-                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
-                    TokenStream color_stop_tokens { color_stop_component_values };
-                    auto color_stops = parse_angular_color_stop_list(color_stop_tokens);
-                    color_stop_tokens.discard_whitespace();
-                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                    auto color_stops = materialize_color_stop_list([&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
+                        if (tokens.next_token().is(Token::Type::Number)) {
+                            auto transaction = tokens.begin_transaction();
+                            auto numeric_value = tokens.consume_a_token().token().number_value();
+                            if (numeric_value == 0) {
+                                transaction.commit();
+                                return AngleStyleValue::create(Angle::make_degrees(0));
+                            }
+                        }
+
+                        return parse_angle_percentage_value(tokens, infinite_range, infinite_range);
+                    });
+                    if (color_stops.has_value())
                         return ConicGradientStyleValue::create(move(from_angle), position.release_nonnull(), move(*color_stops), gradient_repeating, move(color_interpolation_method));
                     return nullptr;
                 }
@@ -1940,11 +2002,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (!position)
                         return nullptr;
 
-                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
-                    TokenStream color_stop_tokens { color_stop_component_values };
-                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
-                    color_stop_tokens.discard_whitespace();
-                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                    auto color_stops = materialize_color_stop_list([&](TokenStream<ComponentValue>& tokens) {
+                        return parse_length_percentage_value(tokens, infinite_range, infinite_range);
+                    });
+                    if (color_stops.has_value())
                         return RadialGradientStyleValue::create(ending_shape, size, position.release_nonnull(), move(*color_stops), gradient_repeating, move(color_interpolation_method));
                     return nullptr;
                 }

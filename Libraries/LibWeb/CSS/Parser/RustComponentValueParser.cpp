@@ -1120,6 +1120,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListGradientConicPosition = 12,
             SourceComponentValueListGradientRadialPosition = 13,
             SourceComponentValueListGradientRadialSizeComponent = 14,
+            SourceComponentValueListGradientColorStopGroup = 15,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1299,6 +1300,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY(active_gradient);
                 VERIFY(!active_gradient->radial_size_components.is_empty());
                 source_component_values_target = &active_gradient->radial_size_components.last().length_percentage_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientColorStopGroup:
+                VERIFY(active_gradient);
+                active_gradient->color_stop_component_value_groups.append({});
+                source_component_values_target = &active_gradient->color_stop_component_value_groups.last();
                 source_component_value_target = SourceComponentValueTarget::Image;
                 return;
             default:

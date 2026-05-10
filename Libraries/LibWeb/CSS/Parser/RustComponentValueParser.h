@@ -548,6 +548,7 @@ public:
         Optional<RustRadialGradientShape> radial_shape;
         Vector<RustGradientRadialSizeComponent> radial_size_components;
         Vector<ComponentValue> radial_position_component_values;
+        Vector<Vector<ComponentValue>> color_stop_component_value_groups;
     };
 
     struct RustImageSetOption {
