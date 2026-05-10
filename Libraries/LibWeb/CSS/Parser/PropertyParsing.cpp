@@ -6845,10 +6845,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
         }
 
         // Custom idents
-        auto original_source_text = peek_token.original_source_text();
-        auto source = original_source_text.is_empty() ? peek_token.to_string() : original_source_text;
-        if (auto property_custom_ident = RustComponentValueParser::parse_property_custom_ident_value(property_ids, source.bytes_as_string_view()); property_custom_ident.has_value()) {
+        Optional<String> generated_source;
+        StringView source;
+        if (original_source_text.has_value()) {
+            source = *original_source_text;
+        } else {
+            auto token_original_source_text = peek_token.original_source_text();
+            if (token_original_source_text.is_empty()) {
+                generated_source = peek_token.to_string();
+                source = generated_source->bytes_as_string_view();
+            } else {
+                source = token_original_source_text;
+            }
+        }
+        if (auto property_custom_ident = RustComponentValueParser::parse_property_custom_ident_value(property_ids, source); property_custom_ident.has_value()) {
             tokens.discard_a_token();
+            if (original_source_text.has_value()) {
+                while (tokens.has_next_token())
+                    tokens.discard_a_token();
+            }
             return PropertyAndValue { property_custom_ident->property_id, CustomIdentStyleValue::create(property_custom_ident->custom_ident) };
         }
     }

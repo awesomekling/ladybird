@@ -3161,16 +3161,27 @@ RefPtr<StyleValue const> Parser::parse_builtin_value(TokenStream<ComponentValue>
 }
 
 // https://www.w3.org/TR/css-values-4/#custom-idents
-Optional<FlyString> Parser::parse_custom_ident(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist)
+Optional<FlyString> Parser::parse_custom_ident(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
 
     auto const& component_value = tokens.next_token();
-    auto original_source_text = component_value.original_source_text();
-    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
+    Optional<String> generated_source;
+    StringView source;
+    if (original_source_text.has_value()) {
+        source = *original_source_text;
+    } else {
+        auto token_original_source_text = component_value.original_source_text();
+        if (token_original_source_text.is_empty()) {
+            generated_source = component_value.to_string();
+            source = generated_source->bytes_as_string_view();
+        } else {
+            source = token_original_source_text;
+        }
+    }
 
-    auto custom_ident = RustComponentValueParser::parse_a_custom_ident(source.bytes_as_string_view(), "utf-8"sv);
+    auto custom_ident = RustComponentValueParser::parse_a_custom_ident(source, "utf-8"sv);
     if (!custom_ident.has_value())
         return {};
 
@@ -3180,14 +3191,15 @@ Optional<FlyString> Parser::parse_custom_ident(TokenStream<ComponentValue>& toke
     }
 
     tokens.discard_a_token();
+    discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
 
     transaction.commit();
     return custom_ident;
 }
 
-RefPtr<CustomIdentStyleValue const> Parser::parse_custom_ident_value(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist)
+RefPtr<CustomIdentStyleValue const> Parser::parse_custom_ident_value(TokenStream<ComponentValue>& tokens, ReadonlySpan<StringView> blacklist, Optional<StringView> original_source_text)
 {
-    if (auto custom_ident = parse_custom_ident(tokens, blacklist); custom_ident.has_value())
+    if (auto custom_ident = parse_custom_ident(tokens, blacklist, original_source_text); custom_ident.has_value())
         return CustomIdentStyleValue::create(custom_ident.release_value());
     return nullptr;
 }
@@ -3270,7 +3282,7 @@ RefPtr<RandomValueSharingStyleValue const> Parser::parse_random_value_sharing(To
 }
 
 // https://drafts.csswg.org/css-values-4/#typedef-dashed-ident
-Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& tokens)
+Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // The <dashed-ident> production is a <custom-ident>, with all the case-sensitivity that implies, with the
     // additional restriction that it must start with two dashes (U+002D HYPHEN-MINUS).
@@ -3278,23 +3290,35 @@ Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& toke
     tokens.discard_whitespace();
 
     auto const& component_value = tokens.next_token();
-    auto original_source_text = component_value.original_source_text();
-    auto source = original_source_text.is_empty() ? component_value.to_string() : original_source_text;
+    Optional<String> generated_source;
+    StringView source;
+    if (original_source_text.has_value()) {
+        source = *original_source_text;
+    } else {
+        auto token_original_source_text = component_value.original_source_text();
+        if (token_original_source_text.is_empty()) {
+            generated_source = component_value.to_string();
+            source = generated_source->bytes_as_string_view();
+        } else {
+            source = token_original_source_text;
+        }
+    }
 
-    auto dashed_ident = RustComponentValueParser::parse_a_dashed_ident(source.bytes_as_string_view(), "utf-8"sv);
+    auto dashed_ident = RustComponentValueParser::parse_a_dashed_ident(source, "utf-8"sv);
     if (!dashed_ident.has_value())
         return {};
     tokens.discard_a_token();
+    discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
 
     transaction.commit();
     return dashed_ident;
 }
 
-RefPtr<CustomIdentStyleValue const> Parser::parse_dashed_ident_value(TokenStream<ComponentValue>& tokens)
+RefPtr<CustomIdentStyleValue const> Parser::parse_dashed_ident_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
-    if (auto dashed_ident = parse_dashed_ident(tokens); dashed_ident.has_value()) {
+    if (auto dashed_ident = parse_dashed_ident(tokens, original_source_text); dashed_ident.has_value()) {
         transaction.commit();
         return CustomIdentStyleValue::create(*dashed_ident);
     }
@@ -4294,9 +4318,9 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_counter_style_value(tokens, original_source_text);
     case ValueType::CustomIdent:
         // FIXME: Figure out how to pass the blacklist here
-        return parse_custom_ident_value(tokens, {});
+        return parse_custom_ident_value(tokens, {}, original_source_text);
     case ValueType::DashedIdent:
-        return parse_dashed_ident_value(tokens);
+        return parse_dashed_ident_value(tokens, original_source_text);
     case ValueType::EasingFunction:
         return parse_easing_value(tokens, original_source_text);
     case ValueType::FilterValueList:
