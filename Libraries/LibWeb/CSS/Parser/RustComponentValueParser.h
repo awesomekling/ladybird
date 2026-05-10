@@ -1147,11 +1147,6 @@ public:
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
-    static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
-    static Optional<Vector<FontVariantAlternatesValue>> parse_a_font_variant_alternates(StringView input, StringView encoding);
-    static Optional<Vector<FontVariantEastAsianValue>> parse_a_font_variant_east_asian(StringView input, StringView encoding);
-    static Optional<Vector<FontVariantNumericValue>> parse_a_font_variant_numeric(StringView input, StringView encoding);
-    static Optional<Vector<FontVariantLigaturesValue>> parse_a_font_variant_ligatures(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_counter_style_name(StringView input, StringView encoding);
     static Optional<CounterStyle> parse_a_counter_style(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);

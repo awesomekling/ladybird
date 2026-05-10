@@ -2582,352 +2582,6 @@ RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>&
     return URLStyleValue::create(url.release_value());
 }
 
-static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
-{
-    switch (font_style) {
-    case FFI::CssFontStyleKind::Normal:
-        return FontStyleKeyword::Normal;
-    case FFI::CssFontStyleKind::Italic:
-        return FontStyleKeyword::Italic;
-    case FFI::CssFontStyleKind::Left:
-        return FontStyleKeyword::Left;
-    case FFI::CssFontStyleKind::Right:
-        return FontStyleKeyword::Right;
-    case FFI::CssFontStyleKind::Oblique:
-        return FontStyleKeyword::Oblique;
-    }
-    VERIFY_NOT_REACHED();
-}
-
-RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // https://drafts.csswg.org/css-fonts/#font-style-prop
-    // normal | italic | left | right | oblique <angle [-90deg,90deg]>?
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    auto start = tokens.current_index();
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    tokens.discard_a_token();
-    Optional<String> serialized_font_style;
-    auto font_style_source = original_source_text.value_or_lazy_evaluated([&] {
-        serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-        return serialized_font_style->bytes_as_string_view();
-    });
-    auto font_style = RustComponentValueParser::parse_a_font_style(font_style_source, "utf-8"sv);
-
-    if (!font_style.has_value())
-        return nullptr;
-
-    if (font_style->kind == FFI::CssFontStyleKind::Oblique) {
-        auto angle_transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-        if (tokens.has_next_token()) {
-            auto angle_start = tokens.current_index();
-            tokens.discard_a_token();
-            auto font_style_with_angle_source = original_source_text.value_or_lazy_evaluated([&] {
-                serialized_font_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-                return serialized_font_style->bytes_as_string_view();
-            });
-            auto maybe_font_style_with_angle = RustComponentValueParser::parse_a_font_style(font_style_with_angle_source, "utf-8"sv);
-            if (maybe_font_style_with_angle.has_value() && maybe_font_style_with_angle->has_angle) {
-                Vector<ComponentValue> angle_component_values;
-                for (auto const& component_value : tokens.tokens_since(angle_start))
-                    angle_component_values.append(component_value);
-                TokenStream<ComponentValue> angle_tokens { angle_component_values };
-                auto angle_value = parse_angle_value(angle_tokens, { .min = -90, .max = 90 });
-                angle_tokens.discard_whitespace();
-                if (angle_value && !angle_tokens.has_next_token()) {
-                    angle_transaction.commit();
-                    transaction.commit();
-                    return FontStyleStyleValue::create(font_style_keyword_from_rust(font_style->kind), angle_value.release_nonnull());
-                }
-            }
-        }
-    }
-
-    transaction.commit();
-    return FontStyleStyleValue::create(font_style_keyword_from_rust(font_style->kind));
-}
-
-RefPtr<StyleValue const> Parser::parse_font_variant_alternates_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // 6.8 https://drafts.csswg.org/css-fonts/#font-variant-alternates-prop
-    // [ stylistic(<feature-value-name>) || historical-forms || styleset(<feature-value-name>#) || character-variant(<feature-value-name>#) || swash(<feature-value-name>) || ornaments(<feature-value-name>) || annotation(<feature-value-name>) ]
-    // <feature-value-name> = <ident>
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    Optional<Vector<RustComponentValueParser::FontVariantAlternatesValue>> parsed_values;
-
-    if (original_source_text.has_value()) {
-        parsed_values = RustComponentValueParser::parse_a_font_variant_alternates(*original_source_text, "utf-8"sv);
-        if (!parsed_values.has_value())
-            return nullptr;
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-    } else {
-        while (tokens.has_next_token()) {
-            auto component_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            tokens.discard_a_token();
-
-            auto serialized_font_variant_alternates = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto maybe_values = RustComponentValueParser::parse_a_font_variant_alternates(serialized_font_variant_alternates.bytes_as_string_view(), "utf-8"sv);
-            if (!maybe_values.has_value())
-                break;
-
-            component_transaction.commit();
-            parsed_values = maybe_values.release_value();
-        }
-    }
-
-    if (!parsed_values.has_value())
-        return nullptr;
-
-    StyleValueVector values;
-    for (auto const& value : *parsed_values) {
-        if (value.kind == FFI::CssFontVariantAlternatesValueKind::HistoricalForms) {
-            values.append(KeywordStyleValue::create(Keyword::HistoricalForms));
-            continue;
-        }
-
-        StyleValueVector feature_value_names;
-        feature_value_names.ensure_capacity(value.feature_value_names.size());
-        for (auto const& feature_value_name : value.feature_value_names)
-            feature_value_names.append(CustomIdentStyleValue::create(feature_value_name));
-
-        FlyString function_name;
-        switch (value.kind) {
-        case FFI::CssFontVariantAlternatesValueKind::Stylistic:
-            function_name = "stylistic"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::Styleset:
-            function_name = "styleset"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::CharacterVariant:
-            function_name = "character-variant"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::Swash:
-            function_name = "swash"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::Ornaments:
-            function_name = "ornaments"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::Annotation:
-            function_name = "annotation"_fly_string;
-            break;
-        case FFI::CssFontVariantAlternatesValueKind::HistoricalForms:
-            VERIFY_NOT_REACHED();
-        }
-
-        values.append(FunctionStyleValue::create(move(function_name), StyleValueList::create(move(feature_value_names), StyleValueList::Separator::Comma)));
-    }
-
-    transaction.commit();
-    return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-}
-
-RefPtr<StyleValue const> Parser::parse_font_variant_east_asian_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // 6.10 https://drafts.csswg.org/css-fonts/#propdef-font-variant-east-asian
-    // [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
-    // <east-asian-variant-values> = [ jis78 | jis83 | jis90 | jis04 | simplified | traditional ]
-    // <east-asian-width-values>   = [ full-width | proportional-width ]
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    Optional<Vector<RustComponentValueParser::FontVariantEastAsianValue>> parsed_values;
-
-    if (original_source_text.has_value()) {
-        parsed_values = RustComponentValueParser::parse_a_font_variant_east_asian(*original_source_text, "utf-8"sv);
-        if (!parsed_values.has_value())
-            return nullptr;
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-    } else {
-        while (tokens.has_next_token()) {
-            auto component_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            tokens.discard_a_token();
-
-            auto serialized_font_variant_east_asian = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto maybe_values = RustComponentValueParser::parse_a_font_variant_east_asian(serialized_font_variant_east_asian.bytes_as_string_view(), "utf-8"sv);
-            if (!maybe_values.has_value())
-                break;
-
-            component_transaction.commit();
-            parsed_values = maybe_values.release_value();
-        }
-    }
-
-    if (!parsed_values.has_value())
-        return nullptr;
-
-    StyleValueTuple tuple;
-    tuple.resize_with_default_value(3, nullptr);
-
-    for (auto const& value : *parsed_values) {
-        auto maybe_keyword = keyword_from_string(value.value);
-        if (!maybe_keyword.has_value())
-            return nullptr;
-        auto style_value = KeywordStyleValue::create(*maybe_keyword);
-        switch (value.kind) {
-        case FFI::CssFontVariantEastAsianValueKind::Variant:
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Variant] = style_value;
-            break;
-        case FFI::CssFontVariantEastAsianValueKind::Width:
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Width] = style_value;
-            break;
-        case FFI::CssFontVariantEastAsianValueKind::Ruby:
-            tuple[TupleStyleValue::Indices::FontVariantEastAsian::Ruby] = style_value;
-            break;
-        }
-    }
-
-    transaction.commit();
-    return TupleStyleValue::create(tuple);
-}
-
-RefPtr<StyleValue const> Parser::parse_font_variant_numeric_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // 6.7 https://drafts.csswg.org/css-fonts/#propdef-font-variant-numeric
-    // [ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero]
-    // <numeric-figure-values>       = [ lining-nums | oldstyle-nums ]
-    // <numeric-spacing-values>      = [ proportional-nums | tabular-nums ]
-    // <numeric-fraction-values>     = [ diagonal-fractions | stacked-fractions ]
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    Optional<Vector<RustComponentValueParser::FontVariantNumericValue>> parsed_values;
-
-    if (original_source_text.has_value()) {
-        parsed_values = RustComponentValueParser::parse_a_font_variant_numeric(*original_source_text, "utf-8"sv);
-        if (!parsed_values.has_value())
-            return nullptr;
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-    } else {
-        while (tokens.has_next_token()) {
-            auto component_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            tokens.discard_a_token();
-
-            auto serialized_font_variant_numeric = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto maybe_values = RustComponentValueParser::parse_a_font_variant_numeric(serialized_font_variant_numeric.bytes_as_string_view(), "utf-8"sv);
-            if (!maybe_values.has_value())
-                break;
-
-            component_transaction.commit();
-            parsed_values = maybe_values.release_value();
-        }
-    }
-
-    if (!parsed_values.has_value())
-        return nullptr;
-
-    StyleValueTuple tuple;
-    tuple.resize_with_default_value(5, nullptr);
-
-    for (auto const& value : *parsed_values) {
-        auto maybe_keyword = keyword_from_string(value.value);
-        if (!maybe_keyword.has_value())
-            return nullptr;
-        auto style_value = KeywordStyleValue::create(*maybe_keyword);
-        switch (value.kind) {
-        case FFI::CssFontVariantNumericValueKind::Figure:
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Figure] = style_value;
-            break;
-        case FFI::CssFontVariantNumericValueKind::Spacing:
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Spacing] = style_value;
-            break;
-        case FFI::CssFontVariantNumericValueKind::Fraction:
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Fraction] = style_value;
-            break;
-        case FFI::CssFontVariantNumericValueKind::Ordinal:
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::Ordinal] = style_value;
-            break;
-        case FFI::CssFontVariantNumericValueKind::SlashedZero:
-            tuple[TupleStyleValue::Indices::FontVariantNumeric::SlashedZero] = style_value;
-            break;
-        }
-    }
-
-    transaction.commit();
-    return TupleStyleValue::create(tuple);
-}
-
-RefPtr<StyleValue const> Parser::parse_font_variant_ligatures_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // 6.4 https://drafts.csswg.org/css-fonts/#propdef-font-variant-ligatures
-    // [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]
-    // <common-lig-values>       = [ common-ligatures | no-common-ligatures ]
-    // <discretionary-lig-values> = [ discretionary-ligatures | no-discretionary-ligatures ]
-    // <historical-lig-values>   = [ historical-ligatures | no-historical-ligatures ]
-    // <contextual-alt-values>   = [ contextual | no-contextual ]
-    auto transaction = tokens.begin_transaction();
-    auto start = tokens.current_index();
-    Optional<Vector<RustComponentValueParser::FontVariantLigaturesValue>> parsed_values;
-
-    if (original_source_text.has_value()) {
-        parsed_values = RustComponentValueParser::parse_a_font_variant_ligatures(*original_source_text, "utf-8"sv);
-        if (!parsed_values.has_value())
-            return nullptr;
-        while (tokens.has_next_token())
-            tokens.discard_a_token();
-    } else {
-        while (tokens.has_next_token()) {
-            auto component_transaction = tokens.begin_transaction();
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-            tokens.discard_a_token();
-
-            auto serialized_font_variant_ligatures = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-            auto maybe_values = RustComponentValueParser::parse_a_font_variant_ligatures(serialized_font_variant_ligatures.bytes_as_string_view(), "utf-8"sv);
-            if (!maybe_values.has_value())
-                break;
-
-            component_transaction.commit();
-            parsed_values = maybe_values.release_value();
-        }
-    }
-
-    if (!parsed_values.has_value())
-        return nullptr;
-
-    StyleValueTuple tuple;
-    tuple.resize_with_default_value(4, nullptr);
-
-    for (auto const& value : *parsed_values) {
-        auto maybe_keyword = keyword_from_string(value.value);
-        if (!maybe_keyword.has_value())
-            return nullptr;
-        auto style_value = KeywordStyleValue::create(*maybe_keyword);
-        switch (value.kind) {
-        case FFI::CssFontVariantLigaturesValueKind::Common:
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Common] = style_value;
-            break;
-        case FFI::CssFontVariantLigaturesValueKind::Discretionary:
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Discretionary] = style_value;
-            break;
-        case FFI::CssFontVariantLigaturesValueKind::Historical:
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Historical] = style_value;
-            break;
-        case FFI::CssFontVariantLigaturesValueKind::Contextual:
-            tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual] = style_value;
-            break;
-        }
-    }
-
-    transaction.commit();
-    return TupleStyleValue::create(tuple);
-}
-
 RefPtr<StyleValue const> Parser::parse_builtin_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
@@ -3673,6 +3327,44 @@ RefPtr<StyleValue const> Parser::parse_symbol_value(TokenStream<ComponentValue>&
     return nullptr;
 }
 
+RefPtr<StyleValue const> Parser::parse_rust_owned_property_value_prefix(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
+{
+    if (original_source_text.has_value())
+        return parse_css_value_for_property(property_id, tokens, original_source_text);
+
+    auto transaction = tokens.begin_transaction();
+    tokens.discard_whitespace();
+    auto start = tokens.current_index();
+    RefPtr<StyleValue const> parsed_value;
+
+    while (tokens.has_next_token()) {
+        auto component_transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        tokens.discard_a_token();
+
+        auto serialized_value = Parser::serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        Vector<ComponentValue> value_tokens;
+        for (auto const& token : tokens.tokens_since(start))
+            value_tokens.append(token);
+        TokenStream<ComponentValue> value_token_stream { value_tokens };
+        auto maybe_value = parse_css_value_for_property(property_id, value_token_stream, serialized_value.bytes_as_string_view());
+        value_token_stream.discard_whitespace();
+        if (!maybe_value || value_token_stream.has_next_token())
+            break;
+
+        component_transaction.commit();
+        parsed_value = maybe_value.release_nonnull();
+    }
+
+    if (!parsed_value)
+        return nullptr;
+
+    transaction.commit();
+    return parsed_value;
+}
+
 RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto parse_rust_owned_property_value = [&](PropertyID property_id, auto accepts_value) -> RefPtr<StyleValue const> {
@@ -3720,7 +3412,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Flex:
         return parse_flex_value(tokens, infinite_range, original_source_text);
     case ValueType::FontStyle:
-        return parse_font_style_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::FontStyle, tokens, original_source_text);
     case ValueType::FontKerningValue:
         return parse_rust_owned_property_value(PropertyID::FontKerning, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontOpticalSizingValue:
@@ -3732,7 +3424,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FontWidthCss3:
         return parse_rust_owned_property_value(PropertyID::FontWidth, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantAlternates:
-        return parse_font_variant_alternates_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::FontVariantAlternates, tokens, original_source_text);
     case ValueType::FontVariantCapsValue:
         return parse_rust_owned_property_value(PropertyID::FontVariantCaps, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantCss2:
@@ -3740,13 +3432,13 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
             return value.is_keyword() && first_is_one_of(value.to_keyword(), Keyword::Normal, Keyword::SmallCaps);
         });
     case ValueType::FontVariantEastAsian:
-        return parse_font_variant_east_asian_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::FontVariantEastAsian, tokens, original_source_text);
     case ValueType::FontVariantEmojiValue:
         return parse_rust_owned_property_value(PropertyID::FontVariantEmoji, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::FontVariantLigatures:
-        return parse_font_variant_ligatures_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::FontVariantLigatures, tokens, original_source_text);
     case ValueType::FontVariantNumeric:
-        return parse_font_variant_numeric_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::FontVariantNumeric, tokens, original_source_text);
     case ValueType::FontVariantPositionValue:
         return parse_rust_owned_property_value(PropertyID::FontVariantPosition, [](StyleValue const& value) { return value.is_keyword(); });
     case ValueType::Frequency:

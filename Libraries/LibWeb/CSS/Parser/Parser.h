@@ -208,6 +208,7 @@ private:
     RefPtr<StyleValue const> parse_source_size_value(TokenStream<ComponentValue>&);
 
     RefPtr<StyleValue const> parse_value(ValueType, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_rust_owned_property_value_prefix(PropertyID, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     Optional<URL> parse_url_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
@@ -293,11 +294,6 @@ private:
     RefPtr<StyleValueList const> parse_simple_comma_separated_value_list(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
 
-    RefPtr<StyleValue const> parse_font_style_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_font_variant_alternates_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_font_variant_east_asian_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_symbol_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
