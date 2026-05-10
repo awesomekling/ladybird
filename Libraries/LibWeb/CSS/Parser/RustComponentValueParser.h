@@ -1117,7 +1117,6 @@ public:
         size_t consumed_byte_length { 0 };
     };
 
-    static Optional<ComponentValue> parse_a_component_value(StringView input, StringView encoding);
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
     static Optional<SelectorList> parse_a_selector_list(StringView input, StringView encoding, SelectorType, SelectorParsingMode, HashTable<FlyString> const& declared_namespaces);

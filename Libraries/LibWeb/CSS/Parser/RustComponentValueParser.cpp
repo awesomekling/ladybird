@@ -731,29 +731,6 @@ Optional<SelectorList> RustComponentValueParser::parse_a_selector_list(StringVie
     return builder.root_selector_list.release_value();
 }
 
-Optional<ComponentValue> RustComponentValueParser::parse_a_component_value(StringView input, StringView encoding)
-{
-    ComponentValueBuilder builder;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    FFI::rust_css_parse_component_value(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &builder,
-        [](void* raw_builder, FFI::CssComponentValue const* component_value) {
-            auto& builder = *static_cast<ComponentValueBuilder*>(raw_builder);
-            append_component_value_token(builder, component_value->kind, RustTokenizer::token_from_ffi(component_value->token));
-        });
-
-    VERIFY(builder.stack.is_empty());
-    if (builder.root_values.is_empty())
-        return {};
-
-    VERIFY(builder.root_values.size() == 1);
-    return builder.root_values.take_first();
-}
-
 FFI::CssValueTypeSyntaxKind RustComponentValueParser::parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();

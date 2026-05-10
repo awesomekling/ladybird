@@ -414,7 +414,15 @@ Optional<StyleProperty> Parser::parse_as_supports_condition()
 
 Optional<ComponentValue> Parser::parse_as_component_value()
 {
-    return RustComponentValueParser::parse_a_component_value(m_input, m_encoding);
+    auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
+    component_values.remove_all_matching([](auto const& component_value) {
+        return component_value.is(Token::Type::Whitespace);
+    });
+
+    if (component_values.size() != 1)
+        return {};
+
+    return component_values.take_first();
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-comma-separated-list-of-component-values
