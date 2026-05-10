@@ -179,6 +179,7 @@ impl CssRuleEvent {
             name_ptr: std::ptr::null(),
             name_len: 0,
             keyframe_selector: 0.0,
+            page_pseudo_class: CssPagePseudoClassKind::Left,
             important: false,
             is_block_rule: false,
         }

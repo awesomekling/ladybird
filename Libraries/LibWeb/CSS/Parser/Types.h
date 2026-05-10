@@ -12,6 +12,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <LibWeb/CSS/PageSelector.h>
 #include <LibWeb/CSS/Parser/Token.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/StyleProperty.h>
@@ -40,6 +41,7 @@ struct AtRule {
     Optional<FlyString> rust_namespace_uri;
     Optional<FlyString> rust_custom_property_name;
     Optional<FlyString> rust_counter_style_name;
+    Optional<PageSelectorList> rust_page_selectors;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;

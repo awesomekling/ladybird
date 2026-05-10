@@ -5987,6 +5987,8 @@ struct RuleEventBuilder {
     Vector<RuleOrListOfDeclarations> rules_or_lists_of_declarations;
     Vector<Frame> stack;
     ComponentValueBuilder component_value_builder;
+    Optional<FlyString> current_page_selector_name;
+    Vector<PagePseudoClass> current_page_selector_pseudo_classes;
 
     void append_rule(Rule completed_rule)
     {
@@ -6068,6 +6070,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .rust_namespace_uri = {},
                 .rust_custom_property_name = {},
                 .rust_counter_style_name = {},
+                .rust_page_selectors = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6228,6 +6231,34 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         at_rule.rust_counter_style_name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
         break;
     }
+    case FFI::CssRuleEventKind::PageSelectorList: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_page_selectors = PageSelectorList {};
+        break;
+    }
+    case FFI::CssRuleEventKind::PageSelectorStart: {
+        if (event.name_len > 0)
+            builder.current_page_selector_name = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
+        else
+            builder.current_page_selector_name = {};
+        builder.current_page_selector_pseudo_classes.clear();
+        break;
+    }
+    case FFI::CssRuleEventKind::PageSelectorEnd: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        VERIFY(at_rule.rust_page_selectors.has_value());
+        at_rule.rust_page_selectors->empend(move(builder.current_page_selector_name), move(builder.current_page_selector_pseudo_classes));
+        break;
+    }
+    case FFI::CssRuleEventKind::PagePseudoClass:
+        builder.current_page_selector_pseudo_classes.append(page_pseudo_class_from_rust(event.page_pseudo_class));
+        break;
     }
 }
 

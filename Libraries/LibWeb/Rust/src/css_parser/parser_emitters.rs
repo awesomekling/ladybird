@@ -357,6 +357,7 @@ pub(super) fn emit_rule<E, C>(
                 name_ptr,
                 name_len,
                 keyframe_selector: 0.0,
+                page_pseudo_class: CssPagePseudoClassKind::Left,
                 important: false,
                 is_block_rule: at_rule.is_block_rule,
             });
@@ -381,6 +382,7 @@ pub(super) fn emit_rule<E, C>(
                             name_ptr,
                             name_len,
                             keyframe_selector: 0.0,
+                            page_pseudo_class: CssPagePseudoClassKind::Left,
                             important: false,
                             is_block_rule: false,
                         });
@@ -396,6 +398,7 @@ pub(super) fn emit_rule<E, C>(
                     name_ptr,
                     name_len,
                     keyframe_selector: 0.0,
+                    page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
                     is_block_rule: false,
                 });
@@ -411,6 +414,7 @@ pub(super) fn emit_rule<E, C>(
                         name_ptr,
                         name_len,
                         keyframe_selector: 0.0,
+                        page_pseudo_class: CssPagePseudoClassKind::Left,
                         important: false,
                         is_block_rule: false,
                     });
@@ -421,6 +425,7 @@ pub(super) fn emit_rule<E, C>(
                     name_ptr,
                     name_len,
                     keyframe_selector: 0.0,
+                    page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
                     is_block_rule: false,
                 });
@@ -434,6 +439,7 @@ pub(super) fn emit_rule<E, C>(
                     name_ptr,
                     name_len,
                     keyframe_selector: 0.0,
+                    page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
                     is_block_rule: false,
                 });
@@ -447,9 +453,42 @@ pub(super) fn emit_rule<E, C>(
                     name_ptr,
                     name_len,
                     keyframe_selector: 0.0,
+                    page_pseudo_class: CssPagePseudoClassKind::Left,
                     important: false,
                     is_block_rule: false,
                 });
+            }
+            if at_rule.name.eq_ignore_ascii_case("page")
+                && let Some(selectors) = ComponentValueParser::new(at_rule.prelude.clone()).parse_a_page_selector_list()
+            {
+                event_callback(CssRuleEvent::new(CssRuleEventKind::PageSelectorList));
+                for selector in selectors {
+                    let (name_ptr, name_len) = selector
+                        .name
+                        .as_ref()
+                        .map_or((std::ptr::null(), 0), |name| string_parts(name));
+                    event_callback(CssRuleEvent {
+                        kind: CssRuleEventKind::PageSelectorStart,
+                        name_ptr,
+                        name_len,
+                        keyframe_selector: 0.0,
+                        page_pseudo_class: CssPagePseudoClassKind::Left,
+                        important: false,
+                        is_block_rule: false,
+                    });
+                    for pseudo_class in selector.pseudo_classes {
+                        event_callback(CssRuleEvent {
+                            kind: CssRuleEventKind::PagePseudoClass,
+                            name_ptr: std::ptr::null(),
+                            name_len: 0,
+                            keyframe_selector: 0.0,
+                            page_pseudo_class: pseudo_class,
+                            important: false,
+                            is_block_rule: false,
+                        });
+                    }
+                    event_callback(CssRuleEvent::new(CssRuleEventKind::PageSelectorEnd));
+                }
             }
             emit_component_value_list(
                 &at_rule.prelude,
@@ -476,6 +515,7 @@ pub(super) fn emit_rule<E, C>(
                         name_ptr: std::ptr::null(),
                         name_len: 0,
                         keyframe_selector: selector,
+                        page_pseudo_class: CssPagePseudoClassKind::Left,
                         important: false,
                         is_block_rule: false,
                     });
@@ -545,6 +585,7 @@ pub(super) fn emit_declaration<E, C>(
         name_ptr,
         name_len,
         keyframe_selector: 0.0,
+        page_pseudo_class: CssPagePseudoClassKind::Left,
         important: declaration.important,
         is_block_rule: false,
     });

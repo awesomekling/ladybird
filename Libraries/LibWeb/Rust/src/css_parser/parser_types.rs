@@ -1712,6 +1712,10 @@ pub enum CssRuleEventKind {
     NamespaceUri,
     CustomPropertyName,
     CounterStyleName,
+    PageSelectorList,
+    PageSelectorStart,
+    PageSelectorEnd,
+    PagePseudoClass,
 }
 
 #[repr(C)]
@@ -1720,6 +1724,7 @@ pub struct CssRuleEvent {
     pub name_ptr: *const u8,
     pub name_len: usize,
     pub keyframe_selector: f64,
+    pub page_pseudo_class: CssPagePseudoClassKind,
     pub important: bool,
     pub is_block_rule: bool,
 }
