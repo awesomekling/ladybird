@@ -1053,11 +1053,6 @@ public:
         FFI::CssScrollFunctionAxisKind axis;
     };
 
-    struct ViewTimelineInset {
-        FFI::CssViewTimelineInsetValueKind kind;
-        size_t count { 0 };
-    };
-
     struct ViewFunction {
         FFI::CssViewFunctionValueKind kind;
         FFI::CssScrollFunctionAxisKind axis;
@@ -1140,7 +1135,6 @@ public:
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);
     static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
-    static ViewTimelineInset parse_view_timeline_inset_prefix(StringView input, StringView encoding);
     static ViewFunction parse_view_function(StringView input, StringView encoding);
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);

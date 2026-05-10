@@ -1002,51 +1002,6 @@ RefPtr<StyleValue const> Parser::parse_time_percentage_value(TokenStream<Compone
     return nullptr;
 }
 
-// https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
-RefPtr<StyleValue const> Parser::parse_view_timeline_inset_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // [ [ auto | <length-percentage> ]{1,2} ]
-    auto transaction = tokens.begin_transaction();
-
-    Optional<String> serialized_view_timeline_inset;
-    auto view_timeline_inset_source = original_source_text.has_value() && !original_source_text->is_empty()
-        ? original_source_text.value()
-        : [&] {
-              serialized_view_timeline_inset = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-              return serialized_view_timeline_inset->bytes_as_string_view();
-          }();
-    auto view_timeline_inset = RustComponentValueParser::parse_view_timeline_inset_prefix(view_timeline_inset_source, "utf-8"sv);
-    if (view_timeline_inset.kind == FFI::CssViewTimelineInsetValueKind::Invalid)
-        return nullptr;
-
-    StyleValueVector inset_values;
-
-    while (inset_values.size() < view_timeline_inset.count) {
-        tokens.discard_whitespace();
-
-        if (tokens.next_token().is_ident("auto"sv)) {
-            tokens.discard_a_token(); // auto
-            inset_values.append(KeywordStyleValue::create(Keyword::Auto));
-            continue;
-        }
-
-        if (auto length_percentage = parse_length_percentage_value(tokens, infinite_range, infinite_range)) {
-            inset_values.append(length_percentage.release_nonnull());
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    transaction.commit();
-
-    // If the second value is omitted, it is set to the first.
-    if (inset_values.size() == 1)
-        return StyleValueList::create({ inset_values[0], inset_values[0] }, StyleValueList::Separator::Space);
-
-    return StyleValueList::create(move(inset_values), StyleValueList::Separator::Space);
-}
-
 RefPtr<StyleValue const> Parser::parse_keyword_value(TokenStream<ComponentValue>& tokens)
 {
     tokens.discard_whitespace();
@@ -1184,7 +1139,7 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
             argument_tokens.discard_a_token();
         }
 
-        auto inset_value = parse_view_timeline_inset_value(argument_tokens);
+        auto inset_value = parse_rust_owned_property_value_prefix(PropertyID::ViewTimelineInset, argument_tokens);
         if (!inset_value)
             return nullptr;
 
@@ -3206,7 +3161,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::ViewFunction:
         return parse_view_function_value(tokens, original_source_text);
     case ValueType::ViewTimelineInset:
-        return parse_view_timeline_inset_value(tokens, original_source_text);
+        return parse_rust_owned_property_value_prefix(PropertyID::ViewTimelineInset, tokens, original_source_text);
     }
     VERIFY_NOT_REACHED();
 }

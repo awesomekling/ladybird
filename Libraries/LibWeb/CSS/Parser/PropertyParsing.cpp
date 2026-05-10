@@ -1036,7 +1036,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         argument_tokens.discard_a_token();
                     }
 
-                    auto inset_value = parse_view_timeline_inset_value(argument_tokens);
+                    auto inset_value = parse_rust_owned_property_value_prefix(PropertyID::ViewTimelineInset, argument_tokens);
                     if (!inset_value)
                         return nullptr;
 
