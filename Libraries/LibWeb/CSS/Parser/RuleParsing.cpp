@@ -1067,8 +1067,9 @@ Optional<Parser::FunctionPrelude> Parser::parse_function_prelude(TokenStream<Com
             // If a default value and a parameter type are both provided, then the default value must parse successfully
             // according to that parameter type’s syntax. Otherwise, the @function rule is invalid.
             // FIXME: Chrome allows ASFs regardless of the parameter's type
-            auto serialized_default_value = serialize_component_values_for_css_type_reparsing(default_value.value());
-            if (!RustComponentValueParser::syntax_matches(serialized_default_value, type->to_string(), LimitSingleComponentIdentToCustomIdent::No))
+            auto parsed_default_value = parse_according_to_syntax_node(default_value_tokens, *type);
+            default_value_tokens.discard_whitespace();
+            if (!parsed_default_value || !default_value_tokens.is_empty())
                 return {};
         }
 
