@@ -3049,6 +3049,7 @@ fn parses_style_values_with_rust_owned_ast() {
     assert_eq!(gradient.kind, RustOwnedGradientKind::Linear);
     assert!(!gradient.is_repeating);
     assert!(!gradient.is_webkit_prefixed);
+    assert_eq!(gradient.color_stop_group_index, 1);
     assert_eq!(gradient.groups.len(), 3);
     assert_eq!(
         parse_rust_owned_style_value(

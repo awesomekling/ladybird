@@ -5228,14 +5228,11 @@ fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
         _ => return None,
     };
 
-    let valid = match kind {
+    let color_stop_group_index = match kind {
         RustOwnedGradientKind::Linear => parse_linear_gradient_function(function, is_webkit_prefixed),
         RustOwnedGradientKind::Radial => parse_radial_gradient_function(function),
         RustOwnedGradientKind::Conic => parse_conic_gradient_function(function),
-    };
-    if !valid {
-        return None;
-    }
+    }?;
 
     let groups = split_component_values_on_comma(&function.value)
         .into_iter()
@@ -5246,59 +5243,63 @@ fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
         kind,
         is_repeating,
         is_webkit_prefixed,
+        color_stop_group_index,
         groups,
     })
 }
 
-fn parse_linear_gradient_function(function: &Function, is_webkit_prefixed: bool) -> bool {
+fn parse_linear_gradient_function(function: &Function, is_webkit_prefixed: bool) -> Option<usize> {
     // https://drafts.csswg.org/css-images-4/#typedef-linear-gradient-syntax
     // <linear-gradient-syntax> = [ [ <angle> | <zero> | to <side-or-corner> ] || <color-interpolation-method> ]? , <color-stop-list>
     let groups = split_component_values_on_comma(&function.value);
     if groups.is_empty() {
-        return false;
+        return None;
     }
 
     if parse_linear_color_stop_list(&groups) {
-        return true;
+        return Some(0);
     }
 
-    groups.len() > 1
+    (groups.len() > 1
         && component_values_parse_as_linear_gradient_header(groups[0], is_webkit_prefixed)
-        && parse_linear_color_stop_list(&groups[1..])
+        && parse_linear_color_stop_list(&groups[1..]))
+    .then_some(1)
 }
 
-fn parse_conic_gradient_function(function: &Function) -> bool {
+fn parse_conic_gradient_function(function: &Function) -> Option<usize> {
     // https://drafts.csswg.org/css-images-4/#typedef-conic-gradient-syntax
     // conic-gradient( [ [ [ from [ <angle> | <zero> ] ]? [ at <position> ]? ] || <color-interpolation-method> ]? , <angular-color-stop-list> )
     let groups = split_component_values_on_comma(&function.value);
     if groups.is_empty() {
-        return false;
+        return None;
     }
 
     if parse_angular_color_stop_list(&groups) {
-        return true;
+        return Some(0);
     }
 
-    groups.len() > 1
+    (groups.len() > 1
         && component_values_parse_as_conic_gradient_header(groups[0])
-        && parse_angular_color_stop_list(&groups[1..])
+        && parse_angular_color_stop_list(&groups[1..]))
+    .then_some(1)
 }
 
-fn parse_radial_gradient_function(function: &Function) -> bool {
+fn parse_radial_gradient_function(function: &Function) -> Option<usize> {
     // https://drafts.csswg.org/css-images-4/#typedef-radial-gradient-syntax
     // <radial-gradient-syntax> = [ [ [ <radial-shape> || <radial-size> ]? [ at <position> ]? ] || <color-interpolation-method> ]? , <color-stop-list>
     let groups = split_component_values_on_comma(&function.value);
     if groups.is_empty() {
-        return false;
+        return None;
     }
 
     if parse_linear_color_stop_list(&groups) {
-        return true;
+        return Some(0);
     }
 
-    groups.len() > 1
+    (groups.len() > 1
         && component_values_parse_as_radial_gradient_header(groups[0])
-        && parse_linear_color_stop_list(&groups[1..])
+        && parse_linear_color_stop_list(&groups[1..]))
+    .then_some(1)
 }
 
 fn parse_linear_color_stop_list(groups: &[&[ComponentValue]]) -> bool {

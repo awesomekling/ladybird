@@ -397,6 +397,7 @@ pub(crate) struct RustOwnedGradient {
     pub(crate) kind: RustOwnedGradientKind,
     pub(crate) is_repeating: bool,
     pub(crate) is_webkit_prefixed: bool,
+    pub(crate) color_stop_group_index: usize,
     pub(crate) groups: Vec<Vec<ComponentValue>>,
 }
 
