@@ -3525,10 +3525,7 @@ pub(super) fn rust_owned_image_style_value_kind(
         let gradient = component_value_parse_as_image_gradient_value(component_value)?;
         return Some(RustOwnedStyleValueKind::Image(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
-            source: Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?),
+            source: Some(String::new()),
             url: None,
             gradient: Some(gradient),
             image_set: None,
@@ -3558,10 +3555,7 @@ pub(super) fn rust_owned_image_from_component_value(
     if component_value_parse_as_image_gradient(component_value) {
         return Some(RustOwnedImage {
             kind: RustOwnedImageKind::Gradient,
-            source: Some(serialize_component_values_for_reparsing(
-                std::slice::from_ref(component_value),
-                filtered_input_string,
-            )?),
+            source: Some(String::new()),
             url: None,
             gradient: component_value_parse_as_image_gradient_value(component_value),
             image_set: None,
