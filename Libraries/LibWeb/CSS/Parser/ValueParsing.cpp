@@ -2200,115 +2200,71 @@ RefPtr<StyleValue const> Parser::parse_corner_shape_value(TokenStream<ComponentV
     return value;
 }
 
+static NonnullRefPtr<StyleValue const> materialize_rust_counter_style(Optional<RustComponentValueParser::CounterStyle> const& maybe_counter_style)
+{
+    if (!maybe_counter_style.has_value())
+        return CounterStyleStyleValue::create("decimal"_fly_string);
+
+    auto counter_style = *maybe_counter_style;
+    if (counter_style.kind == FFI::CssCounterStyleKind::Name) {
+        auto counter_style_name = counter_style.name;
+
+        // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
+        // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
+        // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
+        // @counter-style rule, and in the counter() functions.
+
+        // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
+        auto const& keyword = keyword_from_string(counter_style_name);
+        if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
+            counter_style_name = counter_style_name.to_ascii_lowercase();
+
+        return CounterStyleStyleValue::create(counter_style_name);
+    }
+
+    VERIFY(counter_style.kind == FFI::CssCounterStyleKind::SymbolsFunction);
+    auto symbols_type = [&] {
+        switch (counter_style.symbols_type) {
+        case FFI::CssCounterStyleSymbolsType::Cyclic:
+            return SymbolsType::Cyclic;
+        case FFI::CssCounterStyleSymbolsType::Numeric:
+            return SymbolsType::Numeric;
+        case FFI::CssCounterStyleSymbolsType::Alphabetic:
+            return SymbolsType::Alphabetic;
+        case FFI::CssCounterStyleSymbolsType::Symbolic:
+            return SymbolsType::Symbolic;
+        case FFI::CssCounterStyleSymbolsType::Fixed:
+            return SymbolsType::Fixed;
+        }
+        VERIFY_NOT_REACHED();
+    }();
+    return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
+}
+
 // https://drafts.csswg.org/css-lists-3/#counter-functions
 RefPtr<StyleValue const> Parser::parse_counter_value(TokenStream<ComponentValue>& tokens)
 {
-    auto parse_counter_name = [this](TokenStream<ComponentValue>& tokens) -> Optional<FlyString> {
-        // https://drafts.csswg.org/css-lists-3/#typedef-counter-name
-        // Counters are referred to in CSS syntax using the <counter-name> type, which represents
-        // their name as a <custom-ident>. A <counter-name> name cannot match the keyword none;
-        // such an identifier is invalid as a <counter-name>.
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        auto counter_name = parse_custom_ident_value(tokens, { { "none"sv } });
-        if (!counter_name)
-            return {};
-
-        tokens.discard_whitespace();
-        if (tokens.has_next_token())
-            return {};
-
-        transaction.commit();
-        return counter_name->custom_ident();
-    };
-
-    auto parse_counter_style = [this](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        auto transaction = tokens.begin_transaction();
-        tokens.discard_whitespace();
-
-        auto counter_style = parse_counter_style_value(tokens);
-        if (!counter_style)
-            return {};
-
-        tokens.discard_whitespace();
-        if (tokens.has_next_token())
-            return {};
-
-        transaction.commit();
-        return counter_style.release_nonnull();
-    };
-
+    // counter() = counter( <counter-name>, <counter-style>? )
+    // counters() = counters( <counter-name>, <string>, <counter-style>? )
     auto transaction = tokens.begin_transaction();
-    auto const& token = tokens.consume_a_token();
-    if (token.is_function("counter"sv)) {
-        // counter() = counter( <counter-name>, <counter-style>? )
-        auto& function = token.function();
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
+    tokens.discard_whitespace();
+    auto serialized_counter = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    auto counter = RustComponentValueParser::parse_a_counter(serialized_counter.bytes_as_string_view(), "utf-8"sv);
+    if (!counter.has_value())
+        return nullptr;
 
-        TokenStream function_tokens { function.value };
-        auto function_values = parse_a_comma_separated_list_of_component_values(function_tokens);
-        if (function_values.is_empty() || function_values.size() > 2)
-            return nullptr;
+    auto counter_style = materialize_rust_counter_style(counter->counter_style);
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 
-        TokenStream name_tokens { function_values[0] };
-        auto counter_name = parse_counter_name(name_tokens);
-        if (!counter_name.has_value())
-            return nullptr;
-
-        RefPtr<StyleValue const> counter_style;
-        if (function_values.size() > 1) {
-            TokenStream counter_style_tokens { function_values[1] };
-            counter_style = parse_counter_style(counter_style_tokens);
-            if (!counter_style)
-                return nullptr;
-        } else {
-            // In both cases, if the <counter-style> argument is omitted it defaults to `decimal`.
-            counter_style = CounterStyleStyleValue::create("decimal"_fly_string);
-        }
-
-        transaction.commit();
-        return CounterStyleValue::create_counter(counter_name.release_value(), counter_style.release_nonnull());
+    transaction.commit();
+    switch (counter->function) {
+    case RustComponentValueParser::RustCounterFunctionKind::Counter:
+        return CounterStyleValue::create_counter(counter->name, counter_style);
+    case RustComponentValueParser::RustCounterFunctionKind::Counters:
+        return CounterStyleValue::create_counters(counter->name, counter->join_string, counter_style);
     }
-
-    if (token.is_function("counters"sv)) {
-        // counters() = counters( <counter-name>, <string>, <counter-style>? )
-        auto& function = token.function();
-        auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
-
-        TokenStream function_tokens { function.value };
-        auto function_values = parse_a_comma_separated_list_of_component_values(function_tokens);
-        if (function_values.size() < 2 || function_values.size() > 3)
-            return nullptr;
-
-        TokenStream name_tokens { function_values[0] };
-        auto counter_name = parse_counter_name(name_tokens);
-        if (!counter_name.has_value())
-            return nullptr;
-
-        TokenStream string_tokens { function_values[1] };
-        string_tokens.discard_whitespace();
-        auto join_string = parse_string_value(string_tokens);
-        string_tokens.discard_whitespace();
-        if (!join_string || string_tokens.has_next_token())
-            return nullptr;
-
-        RefPtr<StyleValue const> counter_style;
-        if (function_values.size() > 2) {
-            TokenStream counter_style_tokens { function_values[2] };
-            counter_style = parse_counter_style(counter_style_tokens);
-            if (!counter_style)
-                return nullptr;
-        } else {
-            // In both cases, if the <counter-style> argument is omitted it defaults to `decimal`.
-            counter_style = CounterStyleStyleValue::create("decimal"_fly_string);
-        }
-
-        transaction.commit();
-        return CounterStyleValue::create_counters(counter_name.release_value(), join_string->string_value(), counter_style.release_nonnull());
-    }
-
-    return nullptr;
+    VERIFY_NOT_REACHED();
 }
 
 // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style-name
@@ -2357,45 +2313,9 @@ RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<Component
     if (!maybe_counter_style.has_value())
         return nullptr;
 
-    auto counter_style = maybe_counter_style.release_value();
-    if (counter_style.kind == FFI::CssCounterStyleKind::Name) {
-        auto counter_style_name = counter_style.name;
-
-        // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
-        // Counter style names are case-sensitive. However, the names defined in this specification are ASCII lowercased
-        // on parse wherever they are used as counter styles, e.g. in the list-style set of properties, in the
-        // @counter-style rule, and in the counter() functions.
-
-        // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
-        auto const& keyword = keyword_from_string(counter_style_name);
-        if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
-            counter_style_name = counter_style_name.to_ascii_lowercase();
-
-        transaction.commit();
-        return CounterStyleStyleValue::create(counter_style_name);
-    }
-
-    if (counter_style.kind == FFI::CssCounterStyleKind::SymbolsFunction) {
-        auto symbols_type = [&] {
-            switch (counter_style.symbols_type) {
-            case FFI::CssCounterStyleSymbolsType::Cyclic:
-                return SymbolsType::Cyclic;
-            case FFI::CssCounterStyleSymbolsType::Numeric:
-                return SymbolsType::Numeric;
-            case FFI::CssCounterStyleSymbolsType::Alphabetic:
-                return SymbolsType::Alphabetic;
-            case FFI::CssCounterStyleSymbolsType::Symbolic:
-                return SymbolsType::Symbolic;
-            case FFI::CssCounterStyleSymbolsType::Fixed:
-                return SymbolsType::Fixed;
-            }
-            VERIFY_NOT_REACHED();
-        }();
-        transaction.commit();
-        return CounterStyleStyleValue::create(CounterStyleStyleValue::SymbolsFunction { symbols_type, move(counter_style.symbols) });
-    }
-
-    VERIFY_NOT_REACHED();
+    auto counter_style = materialize_rust_counter_style(maybe_counter_style);
+    transaction.commit();
+    return counter_style;
 }
 
 // https://drafts.csswg.org/css-values-4/#ratios

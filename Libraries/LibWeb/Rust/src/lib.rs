@@ -2945,6 +2945,90 @@ pub unsafe extern "C" fn rust_css_parse_counter_style(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to callbacks must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_counter(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    counter_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        function: u8,
+        name_ptr: *const u8,
+        name_len: usize,
+        join_string_ptr: *const u8,
+        join_string_len: usize,
+    ),
+    counter_style_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCounterStyleKind,
+        symbols_type: CssCounterStyleSymbolsType,
+        name_ptr: *const u8,
+        name_len: usize,
+    ),
+    symbol_callback: unsafe extern "C" fn(ctx: *mut c_void, symbol_ptr: *const u8, symbol_len: usize),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            let Some(counter) = css_parser::parse_rust_owned_counter_function(input) else {
+                return false;
+            };
+
+            let function = match counter.function {
+                css_parser::RustOwnedCounterFunctionKind::Counter => 0,
+                css_parser::RustOwnedCounterFunctionKind::Counters => 1,
+            };
+            let (join_string_ptr, join_string_len) = counter
+                .join_string
+                .as_ref()
+                .map_or((std::ptr::null(), 0), |join_string| {
+                    (join_string.as_ptr(), join_string.len())
+                });
+            counter_callback(
+                ctx,
+                function,
+                counter.counter_name.as_ptr(),
+                counter.counter_name.len(),
+                join_string_ptr,
+                join_string_len,
+            );
+
+            if let Some(counter_style) = counter.counter_style.as_ref() {
+                match counter_style {
+                    css_parser::CounterStyle::Name(name) => counter_style_callback(
+                        ctx,
+                        CssCounterStyleKind::Name,
+                        CssCounterStyleSymbolsType::Symbolic,
+                        name.as_ptr(),
+                        name.len(),
+                    ),
+                    css_parser::CounterStyle::SymbolsFunction { symbols_type, symbols } => {
+                        counter_style_callback(
+                            ctx,
+                            CssCounterStyleKind::SymbolsFunction,
+                            *symbols_type,
+                            std::ptr::null(),
+                            0,
+                        );
+                        for symbol in symbols {
+                            symbol_callback(ctx, symbol.as_ptr(), symbol.len());
+                        }
+                    }
+                }
+            }
+
+            true
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_css_parse_optional_declaration_value_descriptor(
     input: *const u8,

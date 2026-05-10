@@ -6,7 +6,7 @@
 
 use super::*;
 
-pub(super) fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+pub(crate) fn parse_rust_owned_counter_function(filtered_input: &[u8]) -> Option<RustOwnedCounterFunction> {
     // https://drafts.csswg.org/css-lists-3/#counter-functions
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     let component_values = parser.parse_a_list_of_component_values();
@@ -16,21 +16,21 @@ pub(super) fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]
 
     if function.name.eq_ignore_ascii_case("counter") {
         // counter() = counter( <counter-name>, <counter-style>? )
-        return Some(RustOwnedStyleValueKind::Counter(rust_owned_counter_function_value(
-            function,
-            filtered_input_string,
-        )?));
+        return rust_owned_counter_function_value(function, filtered_input_string);
     }
 
     if function.name.eq_ignore_ascii_case("counters") {
         // counters() = counters( <counter-name>, <string>, <counter-style>? )
-        return Some(RustOwnedStyleValueKind::Counter(rust_owned_counters_function_value(
-            function,
-            filtered_input_string,
-        )?));
+        return rust_owned_counters_function_value(function, filtered_input_string);
     }
 
     None
+}
+
+pub(super) fn rust_owned_counter_function_style_value_kind(filtered_input: &[u8]) -> Option<RustOwnedStyleValueKind> {
+    Some(RustOwnedStyleValueKind::Counter(parse_rust_owned_counter_function(
+        filtered_input,
+    )?))
 }
 
 pub(super) fn rust_owned_counter_function_value(

@@ -6019,6 +6019,47 @@ Optional<RustComponentValueParser::CounterStyle> RustComponentValueParser::parse
     return counter_style;
 }
 
+Optional<RustComponentValueParser::CounterFunction> RustComponentValueParser::parse_a_counter(StringView input, StringView encoding)
+{
+    Optional<CounterFunction> counter;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_counter(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &counter,
+        [](void* raw_counter, u8 function, u8 const* name_ptr, size_t name_len, u8 const* join_string_ptr, size_t join_string_len) {
+            auto& counter = *static_cast<Optional<CounterFunction>*>(raw_counter);
+            counter = CounterFunction {
+                .function = static_cast<RustCounterFunctionKind>(function),
+                .name = fly_string_from_ffi_bytes(name_ptr, name_len),
+                .join_string = join_string_len > 0 ? fly_string_from_ffi_bytes(join_string_ptr, join_string_len) : FlyString {},
+            };
+        },
+        [](void* raw_counter, FFI::CssCounterStyleKind kind, FFI::CssCounterStyleSymbolsType symbols_type, u8 const* name_ptr, size_t name_len) {
+            auto& counter = *static_cast<Optional<CounterFunction>*>(raw_counter);
+            VERIFY(counter.has_value());
+            counter->counter_style = CounterStyle {
+                .kind = kind,
+                .symbols_type = symbols_type,
+                .name = fly_string_from_ffi_bytes(name_ptr, name_len),
+                .symbols = {},
+            };
+        },
+        [](void* raw_counter, u8 const* symbol_ptr, size_t symbol_len) {
+            auto& counter = *static_cast<Optional<CounterFunction>*>(raw_counter);
+            VERIFY(counter.has_value());
+            VERIFY(counter->counter_style.has_value());
+            counter->counter_style->symbols.append(fly_string_from_ffi_bytes(symbol_ptr, symbol_len));
+        });
+
+    if (!parsed || !counter.has_value())
+        return {};
+
+    return counter;
+}
+
 bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

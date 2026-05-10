@@ -101,6 +101,7 @@ use parser_urls_fonts::*;
 #[cfg(test)]
 use style_value_emitter::emit_rust_owned_style_value;
 use style_value_emitter::emit_rust_owned_style_value_with_calculation_callback;
+pub(crate) use style_value_longhands::parse_rust_owned_counter_function;
 use style_value_longhands::*;
 pub(crate) use style_value_parser::component_values_match_syntax;
 use style_value_parser::{
@@ -120,6 +121,7 @@ pub(crate) use style_value_shorthands::{
     parse_grid_template_shorthand, parse_layer_shorthand, parse_positional_value_list_shorthand,
     parse_rust_owned_coordinating_value_list_shorthand, parse_rust_owned_positional_value_list_shorthand,
 };
+pub(crate) use style_values::RustOwnedCounterFunctionKind;
 use style_values::*;
 
 pub(crate) fn emit_component_values<F>(component_values: &[ComponentValue], filtered_input: &str, callback: &mut F)
