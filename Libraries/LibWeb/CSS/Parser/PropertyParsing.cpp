@@ -6771,9 +6771,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 break;
             }
+            case FFI::CssStyleValueKind::ColorFunction:
+                if (rust_style_value->value_type.has_value() && *rust_style_value->value_type == ValueType::Color) {
+                    auto color = materialize_rust_style_color({
+                        .is_simple = false,
+                        .source = rust_style_value->string.map([](auto const& string) { return string.to_string(); }),
+                        .source_component_values = rust_style_value->source_component_values,
+                    });
+                    if (color) {
+                        discard_rust_owned_property_value_tokens();
+                        generated_transaction.commit();
+                        return PropertyAndValue { rust_style_value->property_id, color.release_nonnull() };
+                    }
+                }
+                break;
             case FFI::CssStyleValueKind::Anchor:
             case FFI::CssStyleValueKind::AnchorSize:
-            case FFI::CssStyleValueKind::ColorFunction:
             case FFI::CssStyleValueKind::MathFunction:
             case FFI::CssStyleValueKind::Primitive:
             case FFI::CssStyleValueKind::TreeCountingFunction:

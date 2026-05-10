@@ -2051,6 +2051,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 value.url = image_url_from_callback_payload();
             } else if (kind == FFI::CssStyleValueKind::CounterStyleName) {
                 value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+            } else if (kind == FFI::CssStyleValueKind::ColorFunction) {
+                auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
+                if (!value_type.has_value())
+                    return;
+                value.value_type = value_type.release_value();
+                if (value_len > 0)
+                    value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
+                style_value = move(value);
+                note_source_component_values_target(style_value->source_component_values);
+                return;
             } else if (kind == FFI::CssStyleValueKind::EasingFunction) {
                 if (!style_value.has_value())
                     style_value = move(value);
@@ -3925,12 +3935,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     return;
                 style_value->generated_value_list_value_types.append(value_type.release_value());
                 return;
-            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Anchor, FFI::CssStyleValueKind::AnchorSize, FFI::CssStyleValueKind::ColorFunction, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction, FFI::CssStyleValueKind::TreeCountingFunction)) {
+            } else if (first_is_one_of(kind, FFI::CssStyleValueKind::Anchor, FFI::CssStyleValueKind::AnchorSize, FFI::CssStyleValueKind::Primitive, FFI::CssStyleValueKind::MathFunction, FFI::CssStyleValueKind::TreeCountingFunction)) {
                 auto value_type = value_type_from_rust_property_value_type_name({ value_type_ptr, value_type_len });
                 if (!value_type.has_value())
                     return;
                 value.value_type = value_type.release_value();
-                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::AnchorSize || kind == FFI::CssStyleValueKind::ColorFunction || kind == FFI::CssStyleValueKind::MathFunction) && value_len > 0)
+                if ((kind == FFI::CssStyleValueKind::Anchor || kind == FFI::CssStyleValueKind::AnchorSize || kind == FFI::CssStyleValueKind::MathFunction) && value_len > 0)
                     value.string = fly_string_from_ffi_bytes(value_ptr, value_len);
                 if (kind == FFI::CssStyleValueKind::TreeCountingFunction) {
                     if (color_red == static_cast<u8>(RustTreeCountingFunction::SiblingCount))
