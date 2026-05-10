@@ -1749,35 +1749,107 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (stripped_component_values.size() != 1 || !stripped_component_values[0].is_function())
                     return nullptr;
 
-                auto function_name = stripped_component_values[0].function().name.bytes_as_string_view();
-                auto unprefixed_function_name = function_name;
-                if (unprefixed_function_name.starts_with("-webkit-"sv))
-                    unprefixed_function_name = unprefixed_function_name.substring_view(8);
-                if (unprefixed_function_name.starts_with("repeating-"sv))
-                    unprefixed_function_name = unprefixed_function_name.substring_view(10);
+                auto const& function = stripped_component_values[0].function();
+                auto function_name = function.name.bytes_as_string_view();
+                auto context_guard = push_temporary_value_parsing_context(FunctionContext { function_name });
 
-                TokenStream gradient_tokens { source_component_values };
-                RefPtr<AbstractImageStyleValue const> gradient;
-                if (unprefixed_function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
-                    auto linear_gradient = parse_linear_gradient_function(gradient_tokens);
-                    if (linear_gradient)
-                        gradient = linear_gradient.release_nonnull();
-                } else if (unprefixed_function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
-                    auto radial_gradient = parse_radial_gradient_function(gradient_tokens);
-                    if (radial_gradient)
-                        gradient = radial_gradient.release_nonnull();
-                } else if (unprefixed_function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
-                    auto conic_gradient = parse_conic_gradient_function(gradient_tokens);
-                    if (conic_gradient)
-                        gradient = conic_gradient.release_nonnull();
-                } else {
-                    return nullptr;
+                auto gradient_repeating = GradientRepeating::No;
+                auto linear_gradient_type = LinearGradientStyleValue::GradientType::Standard;
+                if (function_name.starts_with("-webkit-"sv, CaseSensitivity::CaseInsensitive)) {
+                    linear_gradient_type = LinearGradientStyleValue::GradientType::WebKit;
+                    function_name = function_name.substring_view(8);
+                }
+                if (function_name.starts_with("repeating-"sv, CaseSensitivity::CaseInsensitive)) {
+                    gradient_repeating = GradientRepeating::Yes;
+                    function_name = function_name.substring_view(10);
                 }
 
-                gradient_tokens.discard_whitespace();
-                if (!gradient || gradient_tokens.has_next_token())
+                TokenStream gradient_value_tokens { function.value };
+                auto const groups = parse_a_comma_separated_list_of_component_values(gradient_value_tokens);
+                if (groups.is_empty())
                     return nullptr;
-                return gradient.release_nonnull();
+
+                auto remaining_groups_as_tokens = [&](size_t start_index) {
+                    Vector<ComponentValue> component_values;
+                    for (size_t index = start_index; index < groups.size(); ++index) {
+                        if (index != start_index)
+                            component_values.append(ComponentValue { Token::create(Token::Type::Comma, ","_string) });
+                        component_values.extend(groups[index]);
+                    }
+                    return TokenStream { move(component_values) };
+                };
+                auto materialize_gradient_with_cpp_parser = [&]() -> RefPtr<AbstractImageStyleValue const> {
+                    auto unprefixed_function_name = function.name.bytes_as_string_view();
+                    if (unprefixed_function_name.starts_with("-webkit-"sv, CaseSensitivity::CaseInsensitive))
+                        unprefixed_function_name = unprefixed_function_name.substring_view(8);
+                    if (unprefixed_function_name.starts_with("repeating-"sv, CaseSensitivity::CaseInsensitive))
+                        unprefixed_function_name = unprefixed_function_name.substring_view(10);
+
+                    TokenStream gradient_tokens { source_component_values };
+                    RefPtr<AbstractImageStyleValue const> gradient;
+                    if (unprefixed_function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
+                        auto linear_gradient = parse_linear_gradient_function(gradient_tokens);
+                        if (linear_gradient)
+                            gradient = linear_gradient.release_nonnull();
+                    } else if (unprefixed_function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
+                        auto radial_gradient = parse_radial_gradient_function(gradient_tokens);
+                        if (radial_gradient)
+                            gradient = radial_gradient.release_nonnull();
+                    } else if (unprefixed_function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
+                        auto conic_gradient = parse_conic_gradient_function(gradient_tokens);
+                        if (conic_gradient)
+                            gradient = conic_gradient.release_nonnull();
+                    } else {
+                        return nullptr;
+                    }
+
+                    gradient_tokens.discard_whitespace();
+                    if (!gradient || gradient_tokens.has_next_token())
+                        return nullptr;
+                    return gradient.release_nonnull();
+                };
+
+                if (function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
+                    LinearGradientStyleValue::GradientDirection gradient_direction = linear_gradient_type == LinearGradientStyleValue::GradientType::Standard
+                        ? SideOrCorner::Bottom
+                        : SideOrCorner::Top;
+
+                    auto color_stop_tokens = remaining_groups_as_tokens(0);
+                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
+                    color_stop_tokens.discard_whitespace();
+                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                        return LinearGradientStyleValue::create(move(gradient_direction), move(*color_stops), linear_gradient_type, gradient_repeating, nullptr);
+
+                    return materialize_gradient_with_cpp_parser();
+                }
+
+                if (linear_gradient_type == LinearGradientStyleValue::GradientType::WebKit)
+                    return nullptr;
+
+                if (function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
+                    auto color_stop_tokens = remaining_groups_as_tokens(0);
+                    auto color_stops = parse_angular_color_stop_list(color_stop_tokens);
+                    color_stop_tokens.discard_whitespace();
+                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                        return ConicGradientStyleValue::create(nullptr, PositionStyleValue::create_center(), move(*color_stops), gradient_repeating, nullptr);
+
+                    return materialize_gradient_with_cpp_parser();
+                }
+
+                if (function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
+                    auto color_stop_tokens = remaining_groups_as_tokens(0);
+                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
+                    color_stop_tokens.discard_whitespace();
+                    if (color_stops.has_value() && !color_stop_tokens.has_next_token()) {
+                        auto ending_shape = RadialGradientStyleValue::EndingShape::Circle;
+                        auto size = RadialSizeStyleValue::create({ RadialExtent::FarthestCorner });
+                        return RadialGradientStyleValue::create(ending_shape, size, PositionStyleValue::create_center(), move(*color_stops), gradient_repeating, nullptr);
+                    }
+
+                    return materialize_gradient_with_cpp_parser();
+                }
+
+                return materialize_gradient_with_cpp_parser();
             };
             auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
