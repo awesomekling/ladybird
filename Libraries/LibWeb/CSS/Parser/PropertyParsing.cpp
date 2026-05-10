@@ -15,6 +15,7 @@
 
 #include <AK/Debug.h>
 #include <AK/QuickSort.h>
+#include <AK/StringBuilder.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -90,6 +91,18 @@ namespace Web::CSS::Parser {
 static bool property_uses_rust_owned_whole_grammar(PropertyID property_id)
 {
     return property_id != PropertyID::All && property_id != PropertyID::Custom;
+}
+
+static Optional<String> component_values_original_source_text(ReadonlySpan<ComponentValue const> component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values) {
+        auto original_source_text = component_value.original_source_text();
+        if (original_source_text.is_empty())
+            return {};
+        builder.append(original_source_text);
+    }
+    return builder.to_string_without_validation();
 }
 
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
@@ -6740,8 +6753,15 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         }
                     }
 
+                    Optional<String> original_component_value_source;
+                    if (original_source_text.has_value())
+                        original_component_value_source = component_values_original_source_text(component_values);
+                    Optional<StringView> original_component_value_source_view;
+                    if (original_component_value_source.has_value())
+                        original_component_value_source_view = original_component_value_source->bytes_as_string_view();
+
                     TokenStream value_tokens { component_values };
-                    auto value = parse_value(rust_style_value->generated_value_list_value_types[i], value_tokens);
+                    auto value = parse_value(rust_style_value->generated_value_list_value_types[i], value_tokens, original_component_value_source_view);
                     value_tokens.discard_whitespace();
                     if (!value)
                         break;
