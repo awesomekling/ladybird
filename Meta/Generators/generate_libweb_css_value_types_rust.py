@@ -13,7 +13,7 @@ from typing import TextIO
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from Generators.generate_libweb_css_value_types_parsing import json_is_valid
+from Generators.generate_libweb_css_value_types import json_is_valid
 from Utils.utils import title_casify
 
 

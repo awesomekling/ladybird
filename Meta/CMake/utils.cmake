@@ -113,6 +113,30 @@ function(invoke_py_generator name script primary_source header implementation)
     )
 endfunction()
 
+function(invoke_py_header_generator name script primary_source header)
+    cmake_parse_arguments(invoke_py_header_generator "" "" "arguments;dependencies" ${ARGN})
+
+    add_custom_command(
+        OUTPUT "${header}"
+        COMMAND ${Python3_EXECUTABLE}
+                "${LADYBIRD_SOURCE_DIR}/Meta/Generators/${script}"
+                -h "${header}.tmp"
+                ${invoke_py_header_generator_arguments}
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${header}.tmp" "${header}"
+        COMMAND "${CMAKE_COMMAND}" -E remove "${header}.tmp"
+        VERBATIM
+        DEPENDS
+            "${LADYBIRD_SOURCE_DIR}/Meta/Generators/${script}"
+            ${invoke_py_header_generator_dependencies}
+            "${primary_source}"
+    )
+
+    add_custom_target("generate_${name}" DEPENDS "${header}")
+    add_dependencies(ladybird_codegen_accumulator "generate_${name}")
+    list(APPEND CURRENT_LIB_GENERATED "${name}")
+    set(CURRENT_LIB_GENERATED ${CURRENT_LIB_GENERATED} PARENT_SCOPE)
+endfunction()
+
 function(invoke_idl_generator cpp_name idl_name generator primary_source header implementation idl)
     cmake_parse_arguments(invoke_idl_generator "" "" "arguments;dependencies" ${ARGN})
 

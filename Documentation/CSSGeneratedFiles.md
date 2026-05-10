@@ -394,11 +394,10 @@ The generated code provides:
 ## ValueTypes.json
 
 This is a JSON object with the keys being value type names, and the values being the definition of the value type.
-It generates Parser/GeneratedValueTypesParsing.h and Parser/GeneratedValueTypesParsing.cpp
+It generates `GeneratedValueTypes.h`.
 
-NOTE: The generated parsing code is limited to the information given by the CSS value definition grammar, if there are
-additional requirements not representable in this grammar (e.g. bespoke resultant StyleValue types, default value
-handling, etc) parsing will need to be implemented manually.
+NOTE: Rust generates and owns the parser grammar matching for these value types. The C++ generated output only exposes
+the value-type names needed by CSSOM materialization.
 
 Each value type has the following properties:
 | Field       | Required | Description                                                       |
@@ -408,6 +407,4 @@ Each value type has the following properties:
 | `__comment` | No       | Strings, for when you want to leave a note.                       |
 
 The generated code provides:
-- A `GenerateValueTypes` enum, listing each of the generated value types.
-- For each of those...
-  - A `CSS::Parser::Parser::parse_foo_value` method to parse the value type.
+- `ENUMERATE_GENERATED_CSS_VALUE_TYPES`, listing each generated value type for `ValueType`.

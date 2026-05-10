@@ -77,12 +77,11 @@ function (generate_css_implementation)
         arguments -j "${LIBWEB_INPUT_FOLDER}/CSS/TransformFunctions.json"
     )
 
-    invoke_py_generator(
-        "GeneratedValueTypesParsing.cpp"
-        "generate_libweb_css_value_types_parsing.py"
+    invoke_py_header_generator(
+        "GeneratedValueTypes.h"
+        "generate_libweb_css_value_types.py"
         "${LIBWEB_INPUT_FOLDER}/CSS/ValueTypes.json"
-        "CSS/Parser/GeneratedValueTypesParsing.h"
-        "CSS/Parser/GeneratedValueTypesParsing.cpp"
+        "CSS/GeneratedValueTypes.h"
         arguments -j "${LIBWEB_INPUT_FOLDER}/CSS/ValueTypes.json"
     )
 

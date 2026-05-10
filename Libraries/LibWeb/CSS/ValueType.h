@@ -9,7 +9,7 @@
 #include <AK/Format.h>
 #include <AK/Optional.h>
 #include <AK/Types.h>
-#include <LibWeb/CSS/Parser/GeneratedValueTypesParsing.h>
+#include <LibWeb/CSS/GeneratedValueTypes.h>
 
 namespace Web::CSS {
 

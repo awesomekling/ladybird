@@ -1227,6 +1227,7 @@ set(GENERATED_SOURCES
     CSS/GeneratedCSSNumericFactoryMethods.idl
     CSS/GeneratedCSSStyleProperties.cpp
     CSS/GeneratedCSSStyleProperties.idl
+    CSS/GeneratedValueTypes.h
     CSS/Keyword.cpp
     CSS/MediaFeatureID.cpp
     CSS/PropertyID.cpp
