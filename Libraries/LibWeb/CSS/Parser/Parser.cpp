@@ -903,7 +903,7 @@ RefPtr<StyleValue const> Parser::parse_as_css_value(PropertyID property_id)
 {
     auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     auto tokens = TokenStream(component_values);
-    auto parsed_value = parse_css_value(property_id, tokens);
+    auto parsed_value = parse_css_value(property_id, tokens, {}, m_input.bytes_as_string_view());
     if (parsed_value.is_error())
         return nullptr;
     return parsed_value.release_value();

@@ -7014,7 +7014,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     return OptionalNone {};
 }
 
-Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<String> original_source_text)
+Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(PropertyID property_id, TokenStream<ComponentValue>& tokens, Optional<String> original_source_text, Optional<StringView> rust_parse_source_text)
 {
     auto context_guard = push_temporary_value_parsing_context(property_id);
 
@@ -7062,16 +7062,18 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return UnresolvedStyleValue::create(move(remaining_tokens), substitution_presence, move(original_source_text));
     }
 
-    Optional<StringView> original_source_text_view;
-    if (original_source_text.has_value() && !original_source_text->is_empty())
-        original_source_text_view = original_source_text.value().bytes_as_string_view();
+    Optional<StringView> rust_parse_source_text_view;
+    if (rust_parse_source_text.has_value() && !rust_parse_source_text->is_empty())
+        rust_parse_source_text_view = rust_parse_source_text.value();
+    else if (original_source_text.has_value() && !original_source_text->is_empty())
+        rust_parse_source_text_view = original_source_text.value().bytes_as_string_view();
 
     tokens.discard_whitespace();
     if (!tokens.has_next_token())
         return ParseError::SyntaxError;
 
     if (property_uses_rust_owned_whole_grammar(property_id))
-        return parse_all_as(tokens, [this, property_id, original_source_text_view](auto& tokens) { return parse_css_value_for_property(property_id, tokens, original_source_text_view); });
+        return parse_all_as(tokens, [this, property_id, rust_parse_source_text_view](auto& tokens) { return parse_css_value_for_property(property_id, tokens, rust_parse_source_text_view); });
 
     // Special-case property handling
     switch (property_id) {
