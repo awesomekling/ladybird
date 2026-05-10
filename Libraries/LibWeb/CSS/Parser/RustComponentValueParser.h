@@ -1038,13 +1038,6 @@ public:
         bool percentages_resolve_to_value_type { false };
     };
 
-    struct ImportRulePrelude {
-        URL url;
-        Optional<FlyString> layer;
-        Optional<String> supports;
-        String media_query_list;
-    };
-
     struct FamilyName {
         FlyString name;
         bool is_string { false };
@@ -1154,7 +1147,6 @@ public:
     static Optional<FlyString> parse_a_custom_ident(StringView input, StringView encoding);
     static Optional<FlyString> parse_a_dashed_ident(StringView input, StringView encoding);
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
-    static Optional<ImportRulePrelude> parse_an_import_rule_prelude(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<FontStyle> parse_a_font_style(StringView input, StringView encoding);
     static Optional<Vector<FontVariantAlternatesValue>> parse_a_font_variant_alternates(StringView input, StringView encoding);
