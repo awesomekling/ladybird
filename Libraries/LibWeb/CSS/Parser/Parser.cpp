@@ -205,6 +205,18 @@ AK::Function<bool(Declaration const&)> Parser::rust_supports_declaration_parser(
     };
 }
 
+Optional<String> Parser::component_values_original_source_text(ReadonlySpan<ComponentValue const> component_values)
+{
+    StringBuilder builder;
+    for (auto const& component_value : component_values) {
+        auto original_source_text = component_value.original_source_text();
+        if (original_source_text.is_empty())
+            return {};
+        builder.append(original_source_text);
+    }
+    return builder.to_string_without_validation();
+}
+
 static void serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
 {
     if (component_value.is_token()) {

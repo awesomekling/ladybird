@@ -335,8 +335,9 @@ static Vector<ComponentValue> replace_an_attr_function(DOM::AbstractElement& ele
         syntax = AttrUnit { "%"_fly_string };
     } else if (first_argument_tokens.next_token().is_function("type"sv)) {
         auto const& type_function = first_argument_tokens.consume_a_token().function();
-        auto serialized_syntax = Parser::serialize_component_values_for_reparsing(type_function.value);
-        if (auto parsed_syntax = RustComponentValueParser::parse_as_syntax(serialized_syntax.bytes_as_string_view(), "utf-8"sv, LimitSingleComponentIdentToCustomIdent::No)) {
+        auto syntax_source = Parser::component_values_original_source_text(type_function.value)
+                                 .value_or_lazy_evaluated([&] { return Parser::serialize_component_values_for_reparsing(type_function.value); });
+        if (auto parsed_syntax = RustComponentValueParser::parse_as_syntax(syntax_source.bytes_as_string_view(), "utf-8"sv, LimitSingleComponentIdentToCustomIdent::No)) {
             syntax = parsed_syntax.release_nonnull();
         } else {
             return failure();
@@ -728,8 +729,9 @@ Vector<ComponentValue> substitute_arbitrary_substitution_functions(DOM::Abstract
 
 Optional<ArbitrarySubstitutionFunctionArguments> parse_according_to_argument_grammar(ArbitrarySubstitutionFunction function, Vector<ComponentValue> const& values)
 {
-    auto serialized_values = Parser::serialize_component_values_for_reparsing(values);
-    auto serialized_bytes = serialized_values.bytes();
+    auto values_source = Parser::component_values_original_source_text(values)
+                             .value_or_lazy_evaluated([&] { return Parser::serialize_component_values_for_reparsing(values); });
+    auto serialized_bytes = values_source.bytes();
 
     auto parse_declaration_value_arguments = [&](ArbitrarySubstitutionFunction function_id) -> Optional<DeclarationValueList> {
         struct CallbackContext {

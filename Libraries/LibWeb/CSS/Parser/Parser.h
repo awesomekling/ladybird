@@ -187,6 +187,7 @@ public:
     static ParseErrorOr<void> collect_arbitrary_substitution_function_presence(Vector<ComponentValue> const&, SubstitutionFunctionsPresence&);
     static ParseErrorOr<void> collect_arbitrary_substitution_function_presence(ComponentValue const&, SubstitutionFunctionsPresence&);
 
+    static Optional<String> component_values_original_source_text(ReadonlySpan<ComponentValue const>);
     static String serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const>);
 
 private:
