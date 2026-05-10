@@ -2463,45 +2463,76 @@ RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<Comp
 RefPtr<StyleValue const> Parser::parse_paint_value(TokenStream<ComponentValue>& tokens)
 {
     // `<paint> = none | <color> | <url> [none | <color>]? | context-fill | context-stroke`
+    auto transaction = tokens.begin_transaction();
+    tokens.discard_whitespace();
 
-    auto parse_color_or_none = [&]() -> Optional<RefPtr<StyleValue const>> {
-        if (auto color = parse_color_value(tokens))
-            return color;
+    auto serialized_paint = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+    PropertyID property_id = PropertyID::Fill;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_paint.bytes_as_string_view(), context_allows_quirky_length(), context_allows_quirky_color(), is_parsing_svg_presentation_attribute(), is_parsing_svg_presentation_attribute());
+    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::Paint)
+        return nullptr;
 
-        // NOTE: <color> also accepts identifiers, so we do this identifier check last.
-        if (tokens.next_token().is(Token::Type::Ident)) {
-            auto maybe_keyword = keyword_from_string(tokens.next_token().token().ident());
-            if (maybe_keyword.has_value()) {
-                // FIXME: Accept `context-fill` and `context-stroke`
-                switch (*maybe_keyword) {
-                case Keyword::None:
-                    tokens.discard_a_token();
-                    return KeywordStyleValue::create(*maybe_keyword);
-                default:
-                    return nullptr;
-                }
-            }
+    auto materialize_rust_style_color = [&](RustComponentValueParser::RustStyleColor const& color) -> RefPtr<StyleValue const> {
+        if (!color.is_simple) {
+            if (!color.source.has_value() || color.source_component_values.is_empty())
+                return nullptr;
+            TokenStream color_tokens { color.source_component_values };
+            auto value = parse_color_value(color_tokens);
+            color_tokens.discard_whitespace();
+            if (!value || color_tokens.has_next_token())
+                return nullptr;
+            return value.release_nonnull();
         }
 
-        return OptionalNone {};
+        switch (color.kind) {
+        case FFI::CssParsedColorKind::Invalid:
+            return nullptr;
+        case FFI::CssParsedColorKind::Rgba: {
+            Optional<FlyString> name;
+            if (color.name.has_value())
+                name = FlyString::from_utf8_without_validation(color.name->bytes());
+            return ColorStyleValue::create_from_color({ color.red, color.green, color.blue, color.alpha }, ColorSyntax::Legacy, move(name));
+        }
+        case FFI::CssParsedColorKind::Keyword: {
+            if (!color.name.has_value())
+                return nullptr;
+            auto keyword = keyword_from_string(*color.name);
+            if (!keyword.has_value())
+                return nullptr;
+            return KeywordStyleValue::create(*keyword);
+        }
+        }
+        VERIFY_NOT_REACHED();
     };
 
-    // FIXME: Allow context-fill/context-stroke here
-    if (auto color_or_none = parse_color_or_none(); color_or_none.has_value())
-        return *color_or_none;
-
-    if (auto url = parse_url_value(tokens)) {
-        tokens.discard_whitespace();
-        if (auto color_or_none = parse_color_or_none(); color_or_none == nullptr) {
-            // Fail to parse if the fallback is invalid, but otherwise ignore it.
+    RefPtr<StyleValue const> value;
+    if (rust_style_value->paint_is_none) {
+        value = KeywordStyleValue::create(Keyword::None);
+    } else if (rust_style_value->paint_color.has_value()) {
+        value = materialize_rust_style_color(*rust_style_value->paint_color);
+    } else if (rust_style_value->paint_url_source.has_value()) {
+        auto maybe_url = rust_style_value->paint_url.has_value()
+            ? rust_style_value->paint_url
+            : RustComponentValueParser::parse_a_url_function(rust_style_value->paint_url_source->bytes_as_string_view(), "utf-8"sv);
+        if (!maybe_url.has_value())
             return nullptr;
-        } else if (color_or_none.has_value() && *color_or_none && (*color_or_none)->has_color()) {
-            return URLStyleValue::create(url->as_url().url(), color_or_none->release_nonnull());
+
+        RefPtr<StyleValue const> paint_fallback;
+        if (rust_style_value->paint_fallback_color.has_value()) {
+            paint_fallback = materialize_rust_style_color(*rust_style_value->paint_fallback_color);
+            if (!paint_fallback)
+                return nullptr;
         }
-        return url;
+        value = URLStyleValue::create(maybe_url.release_value(), paint_fallback);
     }
 
-    return nullptr;
+    if (!value)
+        return nullptr;
+
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
+    transaction.commit();
+    return value;
 }
 
 // https://www.w3.org/TR/css-values-4/#position
