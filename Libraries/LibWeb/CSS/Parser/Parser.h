@@ -236,7 +236,7 @@ private:
 
     RefPtr<StyleValue const> parse_source_size_value(TokenStream<ComponentValue>&);
 
-    RefPtr<StyleValue const> parse_value(ValueType, TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_value(ValueType, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     Optional<GridSize> parse_grid_track_breadth(TokenStream<ComponentValue>&);
     Optional<GridSize> parse_grid_inflexible_breadth(TokenStream<ComponentValue>&);

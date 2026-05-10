@@ -923,7 +923,7 @@ RefPtr<StyleValue const> Parser::parse_as_type(ValueType value_type)
 {
     auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     TokenStream tokens { component_values };
-    return parse_value(value_type, tokens);
+    return parse_value(value_type, tokens, m_input.bytes_as_string_view());
 }
 
 // https://html.spec.whatwg.org/multipage/images.html#parsing-a-sizes-attribute

@@ -4106,11 +4106,11 @@ RefPtr<StyleValue const> Parser::parse_transform_list_value(TokenStream<Componen
     return value;
 }
 
-RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto parse_rust_owned_property_value = [&](PropertyID property_id, auto accepts_value) -> RefPtr<StyleValue const> {
         auto transaction = tokens.begin_transaction();
-        auto value = parse_css_value_for_property(property_id, tokens);
+        auto value = parse_css_value_for_property(property_id, tokens, original_source_text);
         if (!value || !accepts_value(*value))
             return nullptr;
 
@@ -4147,7 +4147,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::EasingFunction:
         return parse_easing_value(tokens);
     case ValueType::FilterValueList:
-        return parse_css_value_for_property(PropertyID::Filter, tokens);
+        return parse_css_value_for_property(PropertyID::Filter, tokens, original_source_text);
     case ValueType::FitContent:
         return parse_rust_owned_property_value(PropertyID::Width, [](StyleValue const& value) { return (value.is_keyword() && value.to_keyword() == Keyword::FitContent) || (value.is_function() && value.as_function().name() == "fit-content"_fly_string); });
     case ValueType::Flex:
