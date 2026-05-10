@@ -429,6 +429,7 @@ pub(crate) enum RustOwnedLinearGradientDirection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum RustOwnedGradientSideOrCorner {
     Top,
     Bottom,
@@ -441,6 +442,7 @@ pub(crate) enum RustOwnedGradientSideOrCorner {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum RustOwnedRadialGradientShape {
     Circle,
     Ellipse,
@@ -489,6 +491,7 @@ pub(crate) struct RustOwnedBasicShapePolygonPoint {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
 pub(crate) enum RustOwnedBasicShapeRadialExtent {
     ClosestCorner,
     ClosestSide,

@@ -211,6 +211,49 @@ public:
         ImageSet,
     };
 
+    enum class RustGradientKind : u8 {
+        Linear,
+        Radial,
+        Conic,
+    };
+
+    enum class RustGradientEventKind : u8 {
+        Header,
+        LinearDirection,
+        ConicFromAngle,
+        ConicPosition,
+        RadialShape,
+        RadialSizeComponent,
+        RadialPosition,
+        ColorInterpolationMethod,
+    };
+
+    enum class RustLinearGradientDirectionKind : u8 {
+        AngleOrZero,
+        SideOrCorner,
+    };
+
+    enum class RustGradientSideOrCorner : u8 {
+        Top,
+        Bottom,
+        Left,
+        Right,
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight,
+    };
+
+    enum class RustRadialGradientShape : u8 {
+        Circle,
+        Ellipse,
+    };
+
+    enum class RustGradientRadialSizeComponentKind : u8 {
+        Extent,
+        LengthPercentage,
+    };
+
     enum class RustListStyleTypeKind : u8 {
         None,
         String,
@@ -485,11 +528,34 @@ public:
         Optional<u8> grid_auto_flow_dense;
     };
 
+    struct RustGradientRadialSizeComponent {
+        RustGradientRadialSizeComponentKind kind { RustGradientRadialSizeComponentKind::Extent };
+        RustBasicShapeRadialExtent extent { RustBasicShapeRadialExtent::ClosestSide };
+        Vector<ComponentValue> length_percentage_component_values;
+    };
+
+    struct RustGradient {
+        RustGradientKind kind { RustGradientKind::Linear };
+        bool is_repeating { false };
+        bool is_webkit_prefixed { false };
+        size_t color_stop_group_index { 0 };
+        Vector<ComponentValue> color_interpolation_method_component_values;
+        Optional<RustLinearGradientDirectionKind> linear_direction_kind;
+        Optional<RustGradientSideOrCorner> linear_side_or_corner;
+        Vector<ComponentValue> linear_angle_component_values;
+        Vector<ComponentValue> conic_from_angle_component_values;
+        Vector<ComponentValue> conic_position_component_values;
+        Optional<RustRadialGradientShape> radial_shape;
+        Vector<RustGradientRadialSizeComponent> radial_size_components;
+        Vector<ComponentValue> radial_position_component_values;
+    };
+
     struct RustImageSetOption {
         RustImageKind image_kind { RustImageKind::Url };
         String image_source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Optional<RustGradient> gradient;
         Optional<String> resolution;
         Vector<ComponentValue> resolution_component_values;
         Optional<String> type;
@@ -500,6 +566,7 @@ public:
         String image_source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Optional<RustGradient> gradient;
         Vector<RustImageSetOption> image_set_options;
         Optional<RustNestedPrimitiveValue> x;
         Optional<RustNestedPrimitiveValue> y;
@@ -529,6 +596,7 @@ public:
         Optional<String> image_source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Optional<RustGradient> gradient;
         Vector<RustImageSetOption> image_set_options;
         Vector<RustBackgroundSize> background_sizes;
         Vector<RustPosition> positions;
@@ -646,6 +714,7 @@ public:
         String source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Optional<RustGradient> gradient;
         Vector<RustImageSetOption> image_set_options;
         RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
         FlyString counter_name;
@@ -755,6 +824,7 @@ public:
         Optional<String> list_style_image_source;
         Optional<URL> list_style_image_source_url;
         Vector<ComponentValue> list_style_image_source_component_values;
+        Optional<RustGradient> list_style_image_gradient;
         Vector<RustImageSetOption> list_style_image_source_image_set_options;
         Optional<RustListStyleTypeKind> list_style_type_kind;
         Optional<String> list_style_type_string;
@@ -776,6 +846,7 @@ public:
         Optional<String> border_image_source_source;
         Optional<URL> border_image_source_source_url;
         Vector<ComponentValue> border_image_source_source_component_values;
+        Optional<RustGradient> border_image_source_gradient;
         Vector<RustImageSetOption> border_image_source_source_image_set_options;
         bool border_image_shorthand_has_slice { false };
         bool border_image_shorthand_has_width { false };
@@ -849,6 +920,7 @@ public:
         Optional<String> shape_outside_image_source;
         Optional<URL> shape_outside_image_source_url;
         Vector<ComponentValue> shape_outside_image_source_component_values;
+        Optional<RustGradient> shape_outside_image_gradient;
         Vector<RustImageSetOption> shape_outside_image_source_image_set_options;
         Optional<RustBasicShapeKind> shape_outside_basic_shape_kind;
         Optional<u8> shape_outside_basic_shape_fill_rule;
@@ -875,6 +947,7 @@ public:
         Optional<String> image_source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Optional<RustGradient> image_gradient;
         Optional<URL> url;
         Vector<RustPosition> positions;
         Vector<RustPositionComponent> position_components;

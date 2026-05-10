@@ -2009,4 +2009,5 @@ pub enum CssStyleValueKind {
     GridPlacementShorthand,
     GridTemplateShorthand,
     GeneratedValueList,
+    Gradient,
 }

@@ -16,6 +16,12 @@ const SOURCE_COMPONENT_VALUE_LIST_NESTED_PRIMITIVE: u8 = 5;
 const SOURCE_COMPONENT_VALUE_LIST_SHORTHAND_ITEM: u8 = 6;
 const SOURCE_COMPONENT_VALUE_LIST_OPEN_TYPE_TAG_VALUE: u8 = 7;
 const SOURCE_COMPONENT_VALUE_LIST_SECONDARY_NESTED_PRIMITIVE: u8 = 8;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_COLOR_INTERPOLATION_METHOD: u8 = 9;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_LINEAR_ANGLE: u8 = 10;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_FROM_ANGLE: u8 = 11;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_POSITION: u8 = 12;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_POSITION: u8 = 13;
+const SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_SIZE_COMPONENT: u8 = 14;
 
 struct SourceComponentValueEmitter<'a, S, E> {
     filtered_input: &'a str,
@@ -698,6 +704,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                                 source_component_value_emitter
                                     .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
                             }
+                            if let Some(gradient) = &option.image.gradient {
+                                callback_gradient_metadata(
+                                    callback,
+                                    &mut source_component_value_emitter,
+                                    property_id,
+                                    gradient,
+                                );
+                            }
                             if !option.resolution_component_values.is_empty() {
                                 source_component_value_emitter.emit(
                                     SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
@@ -707,6 +721,14 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
                         }
                     } else if !image.component_values.is_empty() {
                         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+                    }
+                    if let Some(gradient) = &image.gradient {
+                        callback_gradient_metadata(
+                            callback,
+                            &mut source_component_value_emitter,
+                            property_id,
+                            gradient,
+                        );
                     }
                 }
             }
@@ -4427,6 +4449,230 @@ fn callback_corner_shape_style_value<C, D, S, E>(
     }
 }
 
+fn callback_gradient_metadata<C, S, E>(
+    callback: &mut C,
+    source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
+    property_id: u16,
+    gradient: &RustOwnedGradient,
+) where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    enum GradientEventKind {
+        Header,
+        LinearDirection,
+        ConicFromAngle,
+        ConicPosition,
+        RadialShape,
+        RadialSizeComponent,
+        RadialPosition,
+        ColorInterpolationMethod,
+    }
+
+    enum LinearDirectionKind {
+        AngleOrZero,
+        SideOrCorner,
+    }
+
+    callback(
+        CssStyleValueKind::Gradient,
+        property_id,
+        CssPrimitiveValueKind::Invalid,
+        true,
+        gradient.color_stop_group_index as f64,
+        false,
+        0.0,
+        GradientEventKind::Header as u8,
+        gradient.kind as u8,
+        gradient.is_repeating as u8,
+        gradient.is_webkit_prefixed as u8,
+        &[],
+        "",
+    );
+
+    let Some(header) = &gradient.header else {
+        return;
+    };
+
+    if let Some(color_interpolation_method) = &header.color_interpolation_method {
+        callback(
+            CssStyleValueKind::Gradient,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GradientEventKind::ColorInterpolationMethod as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        );
+        source_component_value_emitter.emit(
+            SOURCE_COMPONENT_VALUE_LIST_GRADIENT_COLOR_INTERPOLATION_METHOD,
+            color_interpolation_method,
+        );
+    }
+
+    if let Some(linear_direction) = &header.linear_direction {
+        match linear_direction {
+            RustOwnedLinearGradientDirection::AngleOrZero(component_values) => {
+                callback(
+                    CssStyleValueKind::Gradient,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    GradientEventKind::LinearDirection as u8,
+                    LinearDirectionKind::AngleOrZero as u8,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+                source_component_value_emitter
+                    .emit(SOURCE_COMPONENT_VALUE_LIST_GRADIENT_LINEAR_ANGLE, component_values);
+            }
+            RustOwnedLinearGradientDirection::SideOrCorner(side_or_corner) => callback(
+                CssStyleValueKind::Gradient,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                GradientEventKind::LinearDirection as u8,
+                LinearDirectionKind::SideOrCorner as u8,
+                *side_or_corner as u8,
+                0,
+                &[],
+                "",
+            ),
+        }
+    }
+
+    if let Some(component_values) = &header.conic_from_angle {
+        callback(
+            CssStyleValueKind::Gradient,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GradientEventKind::ConicFromAngle as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        );
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_FROM_ANGLE, component_values);
+    }
+
+    if let Some(component_values) = &header.conic_position {
+        callback(
+            CssStyleValueKind::Gradient,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GradientEventKind::ConicPosition as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        );
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_GRADIENT_CONIC_POSITION, component_values);
+    }
+
+    if let Some(shape) = header.radial_shape {
+        callback(
+            CssStyleValueKind::Gradient,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GradientEventKind::RadialShape as u8,
+            shape as u8,
+            0,
+            0,
+            &[],
+            "",
+        );
+    }
+
+    for size_component in &header.radial_size {
+        match size_component {
+            RustOwnedRadialGradientSizeComponent::Extent(extent) => callback(
+                CssStyleValueKind::Gradient,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                GradientEventKind::RadialSizeComponent as u8,
+                0,
+                *extent as u8,
+                0,
+                &[],
+                "",
+            ),
+            RustOwnedRadialGradientSizeComponent::LengthPercentage(component_values) => {
+                callback(
+                    CssStyleValueKind::Gradient,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    GradientEventKind::RadialSizeComponent as u8,
+                    1,
+                    0,
+                    0,
+                    &[],
+                    "",
+                );
+                source_component_value_emitter.emit(
+                    SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_SIZE_COMPONENT,
+                    component_values,
+                );
+            }
+        }
+    }
+
+    if let Some(component_values) = &header.radial_position {
+        callback(
+            CssStyleValueKind::Gradient,
+            property_id,
+            CssPrimitiveValueKind::Invalid,
+            false,
+            0.0,
+            false,
+            0.0,
+            GradientEventKind::RadialPosition as u8,
+            0,
+            0,
+            0,
+            &[],
+            "",
+        );
+        source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_GRADIENT_RADIAL_POSITION, component_values);
+    }
+}
+
 fn callback_image_style_value<C, S, E>(
     callback: &mut C,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
@@ -4455,6 +4701,9 @@ fn callback_image_style_value<C, S, E>(
     );
     if !image.component_values.is_empty() {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
+    if let Some(gradient) = &image.gradient {
+        callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
     }
 }
 
@@ -4488,6 +4737,9 @@ fn callback_image_set_style_value<C, S, E>(
         );
         if !option.image.component_values.is_empty() {
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+        }
+        if let Some(gradient) = &option.image.gradient {
+            callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
         }
         if !option.resolution_component_values.is_empty() {
             source_component_value_emitter.emit(
@@ -4558,6 +4810,9 @@ fn callback_cursor_style_value<C, S, E>(
                     source_component_value_emitter
                         .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
                 }
+                if let Some(gradient) = &option.image.gradient {
+                    callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
+                }
                 if !option.resolution_component_values.is_empty() {
                     source_component_value_emitter.emit(
                         SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
@@ -4567,6 +4822,9 @@ fn callback_cursor_style_value<C, S, E>(
             }
         } else if !image.image.component_values.is_empty() {
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.image.component_values);
+        }
+        if let Some(gradient) = &image.image.gradient {
+            callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
         }
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
             callback_nested_primitive_with_source_component_values(
@@ -4665,6 +4923,9 @@ fn callback_list_style_image<C, S, E>(
                     source_component_value_emitter
                         .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
                 }
+                if let Some(gradient) = &option.image.gradient {
+                    callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
+                }
                 if !option.resolution_component_values.is_empty() {
                     source_component_value_emitter.emit(
                         SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
@@ -4674,6 +4935,9 @@ fn callback_list_style_image<C, S, E>(
             }
         } else if !image.component_values.is_empty() {
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+        }
+        if let Some(gradient) = &image.gradient {
+            callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
         }
     }
 }
@@ -4895,6 +5159,9 @@ fn callback_content_image_event<C, S, E>(
             if !option.image.component_values.is_empty() {
                 source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
             }
+            if let Some(gradient) = &option.image.gradient {
+                callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
+            }
             if !option.resolution_component_values.is_empty() {
                 source_component_value_emitter.emit(
                     SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
@@ -4906,6 +5173,9 @@ fn callback_content_image_event<C, S, E>(
     }
     if !image.component_values.is_empty() {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
+    if let Some(gradient) = &image.gradient {
+        callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
     }
 }
 
@@ -5321,6 +5591,9 @@ fn callback_shape_outside_image_event<C, S, E>(
             if !option.image.component_values.is_empty() {
                 source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
             }
+            if let Some(gradient) = &option.image.gradient {
+                callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
+            }
             if !option.resolution_component_values.is_empty() {
                 source_component_value_emitter.emit(
                     SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
@@ -5330,6 +5603,9 @@ fn callback_shape_outside_image_event<C, S, E>(
         }
     } else if !image.component_values.is_empty() {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
+    }
+    if let Some(gradient) = &image.gradient {
+        callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
     }
 }
 

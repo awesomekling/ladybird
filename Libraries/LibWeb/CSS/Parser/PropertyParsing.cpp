@@ -1741,134 +1741,243 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return nullptr;
                 return ImageStyleValue::create(*typed_url);
             };
-            auto materialize_rust_gradient_from_component_values = [&](Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_gradient_from_component_values = [&](Optional<RustComponentValueParser::RustGradient> const& rust_gradient, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 if (source_component_values.is_empty())
                     return nullptr;
 
                 auto stripped_component_values = remove_whitespace_component_values(source_component_values);
                 if (stripped_component_values.size() != 1 || !stripped_component_values[0].is_function())
                     return nullptr;
+                if (!rust_gradient.has_value())
+                    return nullptr;
 
                 auto const& function = stripped_component_values[0].function();
                 auto function_name = function.name.bytes_as_string_view();
                 auto context_guard = push_temporary_value_parsing_context(FunctionContext { function_name });
 
-                auto gradient_repeating = GradientRepeating::No;
-                auto linear_gradient_type = LinearGradientStyleValue::GradientType::Standard;
-                if (function_name.starts_with("-webkit-"sv, CaseSensitivity::CaseInsensitive)) {
-                    linear_gradient_type = LinearGradientStyleValue::GradientType::WebKit;
-                    function_name = function_name.substring_view(8);
-                }
-                if (function_name.starts_with("repeating-"sv, CaseSensitivity::CaseInsensitive)) {
-                    gradient_repeating = GradientRepeating::Yes;
-                    function_name = function_name.substring_view(10);
-                }
+                auto gradient_repeating = rust_gradient->is_repeating ? GradientRepeating::Yes : GradientRepeating::No;
+                auto linear_gradient_type = rust_gradient->is_webkit_prefixed
+                    ? LinearGradientStyleValue::GradientType::WebKit
+                    : LinearGradientStyleValue::GradientType::Standard;
 
                 TokenStream gradient_value_tokens { function.value };
                 auto const groups = parse_a_comma_separated_list_of_component_values(gradient_value_tokens);
-                if (groups.is_empty())
+                if (groups.is_empty() || rust_gradient->color_stop_group_index >= groups.size())
                     return nullptr;
 
-                auto remaining_groups_as_tokens = [&](size_t start_index) {
+                auto remaining_groups_as_component_values = [&](size_t start_index) {
                     Vector<ComponentValue> component_values;
-                    for (size_t index = start_index; index < groups.size(); ++index) {
-                        if (index != start_index)
-                            component_values.append(ComponentValue { Token::create(Token::Type::Comma, ","_string) });
-                        component_values.extend(groups[index]);
+                    size_t current_group_index = 0;
+                    for (auto const& component_value : function.value) {
+                        if (component_value.is(Token::Type::Comma)) {
+                            ++current_group_index;
+                            if (current_group_index <= start_index)
+                                continue;
+                        }
+                        if (current_group_index >= start_index)
+                            component_values.append(component_value);
                     }
-                    return TokenStream { move(component_values) };
+                    return component_values;
                 };
-                auto materialize_gradient_with_cpp_parser = [&]() -> RefPtr<AbstractImageStyleValue const> {
-                    auto unprefixed_function_name = function.name.bytes_as_string_view();
-                    if (unprefixed_function_name.starts_with("-webkit-"sv, CaseSensitivity::CaseInsensitive))
-                        unprefixed_function_name = unprefixed_function_name.substring_view(8);
-                    if (unprefixed_function_name.starts_with("repeating-"sv, CaseSensitivity::CaseInsensitive))
-                        unprefixed_function_name = unprefixed_function_name.substring_view(10);
-
-                    TokenStream gradient_tokens { source_component_values };
-                    RefPtr<AbstractImageStyleValue const> gradient;
-                    if (unprefixed_function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
-                        auto linear_gradient = parse_linear_gradient_function(gradient_tokens);
-                        if (linear_gradient)
-                            gradient = linear_gradient.release_nonnull();
-                    } else if (unprefixed_function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
-                        auto radial_gradient = parse_radial_gradient_function(gradient_tokens);
-                        if (radial_gradient)
-                            gradient = radial_gradient.release_nonnull();
-                    } else if (unprefixed_function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
-                        auto conic_gradient = parse_conic_gradient_function(gradient_tokens);
-                        if (conic_gradient)
-                            gradient = conic_gradient.release_nonnull();
-                    } else {
+                auto materialize_component_values = [&](Vector<ComponentValue> const& component_values, auto parser) -> RefPtr<StyleValue const> {
+                    if (component_values.is_empty())
                         return nullptr;
+                    TokenStream value_tokens { component_values };
+                    auto parsed_value = parser(value_tokens);
+                    value_tokens.discard_whitespace();
+                    if (!parsed_value || value_tokens.has_next_token())
+                        return nullptr;
+                    return parsed_value.release_nonnull();
+                };
+                auto materialize_color_interpolation_method = [&]() -> RefPtr<ColorInterpolationMethodStyleValue const> {
+                    if (rust_gradient->color_interpolation_method_component_values.is_empty())
+                        return nullptr;
+                    TokenStream method_tokens { rust_gradient->color_interpolation_method_component_values };
+                    auto color_interpolation_method = parse_color_interpolation_method_value(method_tokens);
+                    method_tokens.discard_whitespace();
+                    if (!color_interpolation_method || method_tokens.has_next_token())
+                        return nullptr;
+                    return color_interpolation_method.release_nonnull();
+                };
+                auto materialize_angle_or_zero = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
+                    auto stripped_angle_component_values = remove_whitespace_component_values(component_values);
+                    if (stripped_angle_component_values.size() == 1 && stripped_angle_component_values[0].is(Token::Type::Number) && stripped_angle_component_values[0].token().number_value() == 0)
+                        return AngleStyleValue::create(Angle::make_degrees(0));
+                    return materialize_component_values(component_values, [&](TokenStream<ComponentValue>& value_tokens) {
+                        return parse_angle_value(value_tokens, infinite_range);
+                    });
+                };
+                auto materialize_position = [&](Vector<ComponentValue> const& component_values) -> RefPtr<PositionStyleValue const> {
+                    if (component_values.is_empty())
+                        return nullptr;
+                    TokenStream position_tokens { component_values };
+                    auto position = parse_position_value(position_tokens);
+                    position_tokens.discard_whitespace();
+                    if (!position || position_tokens.has_next_token())
+                        return nullptr;
+                    return position.release_nonnull();
+                };
+                auto materialize_length_percentage = [&](Vector<ComponentValue> const& component_values) -> RefPtr<StyleValue const> {
+                    return materialize_component_values(component_values, [&](TokenStream<ComponentValue>& value_tokens) {
+                        return parse_length_percentage_value(value_tokens, non_negative_range, non_negative_range);
+                    });
+                };
+                auto materialize_gradient_side_or_corner = [](RustComponentValueParser::RustGradientSideOrCorner side_or_corner) {
+                    switch (side_or_corner) {
+                    case RustComponentValueParser::RustGradientSideOrCorner::Top:
+                        return SideOrCorner::Top;
+                    case RustComponentValueParser::RustGradientSideOrCorner::Bottom:
+                        return SideOrCorner::Bottom;
+                    case RustComponentValueParser::RustGradientSideOrCorner::Left:
+                        return SideOrCorner::Left;
+                    case RustComponentValueParser::RustGradientSideOrCorner::Right:
+                        return SideOrCorner::Right;
+                    case RustComponentValueParser::RustGradientSideOrCorner::TopLeft:
+                        return SideOrCorner::TopLeft;
+                    case RustComponentValueParser::RustGradientSideOrCorner::TopRight:
+                        return SideOrCorner::TopRight;
+                    case RustComponentValueParser::RustGradientSideOrCorner::BottomLeft:
+                        return SideOrCorner::BottomLeft;
+                    case RustComponentValueParser::RustGradientSideOrCorner::BottomRight:
+                        return SideOrCorner::BottomRight;
                     }
-
-                    gradient_tokens.discard_whitespace();
-                    if (!gradient || gradient_tokens.has_next_token())
-                        return nullptr;
-                    return gradient.release_nonnull();
+                    VERIFY_NOT_REACHED();
+                };
+                auto materialize_radial_extent = [](RustComponentValueParser::RustBasicShapeRadialExtent extent) {
+                    switch (extent) {
+                    case RustComponentValueParser::RustBasicShapeRadialExtent::ClosestCorner:
+                        return RadialExtent::ClosestCorner;
+                    case RustComponentValueParser::RustBasicShapeRadialExtent::ClosestSide:
+                        return RadialExtent::ClosestSide;
+                    case RustComponentValueParser::RustBasicShapeRadialExtent::FarthestCorner:
+                        return RadialExtent::FarthestCorner;
+                    case RustComponentValueParser::RustBasicShapeRadialExtent::FarthestSide:
+                        return RadialExtent::FarthestSide;
+                    }
+                    VERIFY_NOT_REACHED();
                 };
 
-                if (function_name.equals_ignoring_ascii_case("linear-gradient"sv)) {
+                RefPtr<ColorInterpolationMethodStyleValue const> color_interpolation_method;
+                if (!rust_gradient->color_interpolation_method_component_values.is_empty()) {
+                    color_interpolation_method = materialize_color_interpolation_method();
+                    if (!color_interpolation_method)
+                        return nullptr;
+                }
+
+                if (rust_gradient->kind == RustComponentValueParser::RustGradientKind::Linear) {
                     LinearGradientStyleValue::GradientDirection gradient_direction = linear_gradient_type == LinearGradientStyleValue::GradientType::Standard
                         ? SideOrCorner::Bottom
                         : SideOrCorner::Top;
+                    if (rust_gradient->linear_direction_kind.has_value()) {
+                        if (*rust_gradient->linear_direction_kind == RustComponentValueParser::RustLinearGradientDirectionKind::AngleOrZero) {
+                            auto angle = materialize_angle_or_zero(rust_gradient->linear_angle_component_values);
+                            if (!angle)
+                                return nullptr;
+                            gradient_direction = angle.release_nonnull();
+                        } else {
+                            if (!rust_gradient->linear_side_or_corner.has_value())
+                                return nullptr;
+                            gradient_direction = materialize_gradient_side_or_corner(*rust_gradient->linear_side_or_corner);
+                        }
+                    }
 
-                    auto color_stop_tokens = remaining_groups_as_tokens(0);
+                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
+                    TokenStream color_stop_tokens { color_stop_component_values };
                     auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
                     color_stop_tokens.discard_whitespace();
                     if (color_stops.has_value() && !color_stop_tokens.has_next_token())
-                        return LinearGradientStyleValue::create(move(gradient_direction), move(*color_stops), linear_gradient_type, gradient_repeating, nullptr);
-
-                    return materialize_gradient_with_cpp_parser();
+                        return LinearGradientStyleValue::create(move(gradient_direction), move(*color_stops), linear_gradient_type, gradient_repeating, move(color_interpolation_method));
+                    return nullptr;
                 }
 
-                if (linear_gradient_type == LinearGradientStyleValue::GradientType::WebKit)
+                if (rust_gradient->is_webkit_prefixed)
                     return nullptr;
 
-                if (function_name.equals_ignoring_ascii_case("conic-gradient"sv)) {
-                    auto color_stop_tokens = remaining_groups_as_tokens(0);
+                if (rust_gradient->kind == RustComponentValueParser::RustGradientKind::Conic) {
+                    RefPtr<StyleValue const> from_angle;
+                    if (!rust_gradient->conic_from_angle_component_values.is_empty()) {
+                        from_angle = materialize_angle_or_zero(rust_gradient->conic_from_angle_component_values);
+                        if (!from_angle)
+                            return nullptr;
+                    }
+                    auto position = !rust_gradient->conic_position_component_values.is_empty()
+                        ? materialize_position(rust_gradient->conic_position_component_values)
+                        : PositionStyleValue::create_center();
+                    if (!position)
+                        return nullptr;
+
+                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
+                    TokenStream color_stop_tokens { color_stop_component_values };
                     auto color_stops = parse_angular_color_stop_list(color_stop_tokens);
                     color_stop_tokens.discard_whitespace();
                     if (color_stops.has_value() && !color_stop_tokens.has_next_token())
-                        return ConicGradientStyleValue::create(nullptr, PositionStyleValue::create_center(), move(*color_stops), gradient_repeating, nullptr);
-
-                    return materialize_gradient_with_cpp_parser();
+                        return ConicGradientStyleValue::create(move(from_angle), position.release_nonnull(), move(*color_stops), gradient_repeating, move(color_interpolation_method));
+                    return nullptr;
                 }
 
-                if (function_name.equals_ignoring_ascii_case("radial-gradient"sv)) {
-                    auto color_stop_tokens = remaining_groups_as_tokens(0);
-                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
-                    color_stop_tokens.discard_whitespace();
-                    if (color_stops.has_value() && !color_stop_tokens.has_next_token()) {
-                        auto ending_shape = RadialGradientStyleValue::EndingShape::Circle;
-                        auto size = RadialSizeStyleValue::create({ RadialExtent::FarthestCorner });
-                        return RadialGradientStyleValue::create(ending_shape, size, PositionStyleValue::create_center(), move(*color_stops), gradient_repeating, nullptr);
+                if (rust_gradient->kind == RustComponentValueParser::RustGradientKind::Radial) {
+                    Vector<RadialSizeStyleValue::Component> size_components;
+                    size_components.ensure_capacity(rust_gradient->radial_size_components.size());
+                    for (auto const& component : rust_gradient->radial_size_components) {
+                        if (component.kind == RustComponentValueParser::RustGradientRadialSizeComponentKind::Extent) {
+                            size_components.append(materialize_radial_extent(component.extent));
+                            continue;
+                        }
+                        auto length_percentage = materialize_length_percentage(component.length_percentage_component_values);
+                        if (!length_percentage)
+                            return nullptr;
+                        size_components.append(length_percentage.release_nonnull());
+                    }
+                    if (size_components.is_empty())
+                        size_components.append(RadialExtent::FarthestCorner);
+                    auto size = RadialSizeStyleValue::create(move(size_components));
+
+                    auto ending_shape = RadialGradientStyleValue::EndingShape::Circle;
+                    if (rust_gradient->radial_shape.has_value()) {
+                        ending_shape = *rust_gradient->radial_shape == RustComponentValueParser::RustRadialGradientShape::Circle
+                            ? RadialGradientStyleValue::EndingShape::Circle
+                            : RadialGradientStyleValue::EndingShape::Ellipse;
+                    } else if (rust_gradient->color_stop_group_index > 0) {
+                        ending_shape = size->components().size() == 1 && size->components()[0].has<NonnullRefPtr<StyleValue const>>()
+                            ? RadialGradientStyleValue::EndingShape::Circle
+                            : RadialGradientStyleValue::EndingShape::Ellipse;
                     }
 
-                    return materialize_gradient_with_cpp_parser();
+                    auto position = !rust_gradient->radial_position_component_values.is_empty()
+                        ? materialize_position(rust_gradient->radial_position_component_values)
+                        : PositionStyleValue::create_center();
+                    if (!position)
+                        return nullptr;
+
+                    auto color_stop_component_values = remaining_groups_as_component_values(rust_gradient->color_stop_group_index);
+                    TokenStream color_stop_tokens { color_stop_component_values };
+                    auto color_stops = parse_linear_color_stop_list(color_stop_tokens);
+                    color_stop_tokens.discard_whitespace();
+                    if (color_stops.has_value() && !color_stop_tokens.has_next_token())
+                        return RadialGradientStyleValue::create(ending_shape, size, position.release_nonnull(), move(*color_stops), gradient_repeating, move(color_interpolation_method));
+                    return nullptr;
                 }
 
-                return materialize_gradient_with_cpp_parser();
+                return nullptr;
             };
-            auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Optional<RustComponentValueParser::RustGradient> const& gradient, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
                     return materialize_rust_url_image(typed_url);
                 case RustComponentValueParser::RustImageKind::Gradient:
-                    return materialize_rust_gradient_from_component_values(source_component_values);
+                    return materialize_rust_gradient_from_component_values(gradient, source_component_values);
                 case RustComponentValueParser::RustImageKind::ImageSet:
                     return nullptr;
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_image_from_component_values = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
+            auto materialize_rust_image_from_component_values = [&](RustComponentValueParser::RustImageKind kind, Optional<URL> const& typed_url, Optional<RustComponentValueParser::RustGradient> const& gradient, Vector<ComponentValue> const& source_component_values) -> RefPtr<AbstractImageStyleValue const> {
                 switch (kind) {
                 case RustComponentValueParser::RustImageKind::Url:
-                    return materialize_rust_image(kind, typed_url, source_component_values);
+                    return materialize_rust_image(kind, typed_url, gradient, source_component_values);
                 case RustComponentValueParser::RustImageKind::Gradient:
                 case RustComponentValueParser::RustImageKind::ImageSet:
-                    return materialize_rust_image(kind, typed_url, source_component_values);
+                    return materialize_rust_image(kind, typed_url, gradient, source_component_values);
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -1880,7 +1989,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     if (option.image_kind == RustComponentValueParser::RustImageKind::Url && option.image_url.has_value()) {
                         image = ImageStyleValue::create(*option.image_url);
                     } else if (!option.image_source_component_values.is_empty()) {
-                        image = materialize_rust_image(option.image_kind, option.image_url, option.image_source_component_values);
+                        image = materialize_rust_image(option.image_kind, option.image_url, option.gradient, option.image_source_component_values);
                     } else {
                         return nullptr;
                     }
@@ -2306,7 +2415,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (event.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !event.image_set_options.is_empty())
                             value = materialize_rust_image_set_options(event.image_set_options);
                         else
-                            value = materialize_rust_image_from_component_values(event.image_kind, event.image_url, event.image_source_component_values);
+                            value = materialize_rust_image_from_component_values(event.image_kind, event.image_url, event.gradient, event.image_source_component_values);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
@@ -2353,7 +2462,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     if (*rust_style_value->shape_outside_image_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->shape_outside_image_source_image_set_options.is_empty())
                         return materialize_rust_image_set_options(rust_style_value->shape_outside_image_source_image_set_options);
-                    return materialize_rust_image_from_component_values(*rust_style_value->shape_outside_image_source_kind, rust_style_value->shape_outside_image_source_url, rust_style_value->shape_outside_image_source_component_values);
+                    return materialize_rust_image_from_component_values(*rust_style_value->shape_outside_image_source_kind, rust_style_value->shape_outside_image_source_url, rust_style_value->shape_outside_image_gradient, rust_style_value->shape_outside_image_source_component_values);
                 }
 
                 RefPtr<StyleValue const> basic_shape_value;
@@ -2814,7 +2923,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         return nullptr;
                     if (*rust_style_value->list_style_image_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->list_style_image_source_image_set_options.is_empty())
                         return materialize_rust_image_set_options(rust_style_value->list_style_image_source_image_set_options);
-                    return materialize_rust_image_from_component_values(*rust_style_value->list_style_image_source_kind, rust_style_value->list_style_image_source_url, rust_style_value->list_style_image_source_component_values);
+                    return materialize_rust_image_from_component_values(*rust_style_value->list_style_image_source_kind, rust_style_value->list_style_image_source_url, rust_style_value->list_style_image_gradient, rust_style_value->list_style_image_source_component_values);
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -3428,6 +3537,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             switch (rust_style_value->kind) {
             case FFI::CssStyleValueKind::Invalid:
                 break;
+            case FFI::CssStyleValueKind::Gradient:
+                break;
             case FFI::CssStyleValueKind::BackgroundSize: {
                 if (!rust_style_value->background_sizes.is_empty()) {
                     StyleValueVector values;
@@ -3567,7 +3678,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     }
                 }
                 if (rust_style_value->image_kind.has_value() && rust_style_value->image_source.has_value()) {
-                    if (auto value = materialize_rust_image_from_component_values(*rust_style_value->image_kind, rust_style_value->image_url, rust_style_value->image_source_component_values)) {
+                    if (auto value = materialize_rust_image_from_component_values(*rust_style_value->image_kind, rust_style_value->image_url, rust_style_value->image_gradient, rust_style_value->image_source_component_values)) {
                         if (*rust_style_value->image_kind == RustComponentValueParser::RustImageKind::Url || !rust_style_value->image_source_component_values.is_empty())
                             discard_rust_owned_property_value_tokens();
                         generated_transaction.commit();
@@ -4393,7 +4504,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (*rust_style_value->border_image_source_source_kind == RustComponentValueParser::RustImageKind::ImageSet && !rust_style_value->border_image_source_source_image_set_options.is_empty())
                             source = materialize_rust_image_set_options(rust_style_value->border_image_source_source_image_set_options);
                         else
-                            source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_source_component_values);
+                            source = materialize_rust_image_from_component_values(*rust_style_value->border_image_source_source_kind, rust_style_value->border_image_source_source_url, rust_style_value->border_image_source_gradient, rust_style_value->border_image_source_source_component_values);
                         break;
                     }
                 } else {
@@ -4654,7 +4765,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (cursor_image.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !cursor_image.image_set_options.is_empty())
                             image = materialize_rust_image_set_options(cursor_image.image_set_options);
                         else
-                            image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_url, cursor_image.image_source_component_values);
+                            image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_url, cursor_image.gradient, cursor_image.image_source_component_values);
                         if (!image)
                             break;
 
@@ -4999,7 +5110,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         if (*item.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !item.image_set_options.is_empty())
                             image = materialize_rust_image_set_options(item.image_set_options);
                         else
-                            image = materialize_rust_image_from_component_values(*item.image_kind, item.image_url, item.image_source_component_values);
+                            image = materialize_rust_image_from_component_values(*item.image_kind, item.image_url, item.gradient, item.image_source_component_values);
                         if (image)
                             return image;
                     }

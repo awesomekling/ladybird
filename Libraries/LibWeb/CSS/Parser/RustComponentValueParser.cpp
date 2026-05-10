@@ -1215,6 +1215,12 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             SourceComponentValueListShorthandItem = 6,
             SourceComponentValueListOpenTypeTagValue = 7,
             SourceComponentValueListSecondaryNestedPrimitive = 8,
+            SourceComponentValueListGradientColorInterpolationMethod = 9,
+            SourceComponentValueListGradientLinearAngle = 10,
+            SourceComponentValueListGradientConicFromAngle = 11,
+            SourceComponentValueListGradientConicPosition = 12,
+            SourceComponentValueListGradientRadialPosition = 13,
+            SourceComponentValueListGradientRadialSizeComponent = 14,
         };
 
         Optional<RustStyleValue> style_value;
@@ -1224,6 +1230,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
         Vector<ComponentValue>* source_component_values_target { nullptr };
         Vector<ComponentValue> pending_nested_primitive_source_component_values;
         Vector<ComponentValue> pending_secondary_nested_primitive_source_component_values;
+        RustGradient* active_gradient { nullptr };
 
         void flush_source_component_values()
         {
@@ -1364,6 +1371,37 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             case SourceComponentValueListOpenTypeTagValue:
                 source_component_value_target = SourceComponentValueTarget::OpenTypeTagValue;
                 return;
+            case SourceComponentValueListGradientColorInterpolationMethod:
+                VERIFY(active_gradient);
+                source_component_values_target = &active_gradient->color_interpolation_method_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientLinearAngle:
+                VERIFY(active_gradient);
+                source_component_values_target = &active_gradient->linear_angle_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientConicFromAngle:
+                VERIFY(active_gradient);
+                source_component_values_target = &active_gradient->conic_from_angle_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientConicPosition:
+                VERIFY(active_gradient);
+                source_component_values_target = &active_gradient->conic_position_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientRadialPosition:
+                VERIFY(active_gradient);
+                source_component_values_target = &active_gradient->radial_position_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
+            case SourceComponentValueListGradientRadialSizeComponent:
+                VERIFY(active_gradient);
+                VERIFY(!active_gradient->radial_size_components.is_empty());
+                source_component_values_target = &active_gradient->radial_size_components.last().length_percentage_component_values;
+                source_component_value_target = SourceComponentValueTarget::Image;
+                return;
             default:
                 VERIFY_NOT_REACHED();
             }
@@ -1422,6 +1460,84 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto note_source_component_values_target = [&](Vector<ComponentValue>& component_values) {
                 context.source_component_values_target = &component_values;
             };
+            auto note_active_gradient = [&](RustGradient& gradient) {
+                context.active_gradient = &gradient;
+            };
+            auto active_gradient_target = [&]() -> RustGradient* {
+                if (!style_value.has_value())
+                    return nullptr;
+
+                if (style_value->kind == FFI::CssStyleValueKind::Image) {
+                    if (style_value->image_kind == RustImageKind::ImageSet) {
+                        if (style_value->image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->image_gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::Content) {
+                    if (style_value->content_events.is_empty())
+                        return nullptr;
+                    if (style_value->content_events.last().image_kind == RustImageKind::ImageSet) {
+                        if (style_value->content_events.last().image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->content_events.last().image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->content_events.last().gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::Cursor) {
+                    if (style_value->cursor_images.is_empty())
+                        return nullptr;
+                    if (style_value->cursor_images.last().image_kind == RustImageKind::ImageSet) {
+                        if (style_value->cursor_images.last().image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->cursor_images.last().image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->cursor_images.last().gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::ListStyle) {
+                    if (style_value->list_style_image_source_kind == RustImageKind::ImageSet) {
+                        if (style_value->list_style_image_source_image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->list_style_image_source_image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->list_style_image_gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::BorderImage) {
+                    if (style_value->border_image_source_source_kind == RustImageKind::ImageSet) {
+                        if (style_value->border_image_source_source_image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->border_image_source_source_image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->border_image_source_gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside) {
+                    if (style_value->shape_outside_image_source_kind == RustImageKind::ImageSet) {
+                        if (style_value->shape_outside_image_source_image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->shape_outside_image_source_image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->shape_outside_image_gradient.ptr();
+                }
+
+                if (style_value->kind == FFI::CssStyleValueKind::LayerShorthand) {
+                    if (style_value->layer_shorthand_items.is_empty())
+                        return nullptr;
+                    if (style_value->layer_shorthand_items.last().image_kind == RustImageKind::ImageSet) {
+                        if (style_value->layer_shorthand_items.last().image_set_options.is_empty())
+                            return nullptr;
+                        return style_value->layer_shorthand_items.last().image_set_options.last().gradient.ptr();
+                    }
+                    return style_value->layer_shorthand_items.last().gradient.ptr();
+                }
+
+                return nullptr;
+            };
             auto image_url_from_callback_payload = [&]() -> Optional<URL> {
                 enum : u8 {
                     NoURL,
@@ -1458,13 +1574,16 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         ++metadata_index;
                     }
                 }
-                return RustImageSetOption {
+                auto option = RustImageSetOption {
                     .image_kind = static_cast<RustImageKind>(image_kind),
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
                     .image_url = image_url_from_callback_payload(),
                     .resolution = move(resolution),
                     .type = move(type),
                 };
+                if (option.image_kind == RustImageKind::Gradient)
+                    option.gradient = RustGradient {};
+                return option;
             };
             auto shorthand_property_id_from_callback_payload = [&]() {
                 return static_cast<PropertyID>(static_cast<u16>(color_red) | (static_cast<u16>(color_green) << 8));
@@ -1472,6 +1591,58 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
             auto layer_index_from_callback_payload = [&]() {
                 return static_cast<size_t>(static_cast<u16>(color_blue) | (static_cast<u16>(color_alpha) << 8));
             };
+
+            if (kind == FFI::CssStyleValueKind::Gradient) {
+                auto event_kind = static_cast<RustGradientEventKind>(color_red);
+                if (event_kind == RustGradientEventKind::Header) {
+                    auto* gradient = active_gradient_target();
+                    if (!gradient)
+                        return;
+
+                    gradient->kind = static_cast<RustGradientKind>(color_green);
+                    gradient->is_repeating = color_blue != 0;
+                    gradient->is_webkit_prefixed = color_alpha != 0;
+                    gradient->color_stop_group_index = has_numeric_value ? static_cast<size_t>(numeric_value) : 0;
+                    note_active_gradient(*gradient);
+                    return;
+                }
+
+                auto* gradient = context.active_gradient;
+                if (!gradient)
+                    return;
+
+                if (event_kind == RustGradientEventKind::ColorInterpolationMethod) {
+                    return;
+                }
+
+                if (event_kind == RustGradientEventKind::LinearDirection) {
+                    gradient->linear_direction_kind = static_cast<RustLinearGradientDirectionKind>(color_green);
+                    if (*gradient->linear_direction_kind == RustLinearGradientDirectionKind::SideOrCorner)
+                        gradient->linear_side_or_corner = static_cast<RustGradientSideOrCorner>(color_blue);
+                    return;
+                }
+
+                if (event_kind == RustGradientEventKind::ConicFromAngle || event_kind == RustGradientEventKind::ConicPosition || event_kind == RustGradientEventKind::RadialPosition)
+                    return;
+
+                if (event_kind == RustGradientEventKind::RadialShape) {
+                    gradient->radial_shape = static_cast<RustRadialGradientShape>(color_green);
+                    return;
+                }
+
+                if (event_kind == RustGradientEventKind::RadialSizeComponent) {
+                    auto component_kind = static_cast<RustGradientRadialSizeComponentKind>(color_green);
+                    RustGradientRadialSizeComponent component {
+                        .kind = component_kind,
+                    };
+                    if (component_kind == RustGradientRadialSizeComponentKind::Extent)
+                        component.extent = static_cast<RustBasicShapeRadialExtent>(color_blue);
+                    gradient->radial_size_components.append(move(component));
+                    return;
+                }
+
+                VERIFY_NOT_REACHED();
+            }
 
             if (style_value.has_value() && style_value->kind == FFI::CssStyleValueKind::ComponentShorthand && kind != FFI::CssStyleValueKind::ComponentShorthand) {
                 VERIFY(!style_value->component_shorthand_items.is_empty());
@@ -1723,6 +1894,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         item.image_kind = static_cast<RustImageKind>(color_red);
                         item.image_source = string_from_ffi_bytes(value_ptr, value_len);
                         item.image_url = image_url_from_callback_payload();
+                        if (*item.image_kind == RustImageKind::Gradient)
+                            item.gradient = RustGradient {};
                         note_source_component_values_target(item.image_source_component_values);
                     }
                     return;
@@ -1831,6 +2004,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
                 value.image_source = string_from_ffi_bytes(value_ptr, value_len);
                 value.image_url = image_url_from_callback_payload();
+                if (value.image_kind == RustImageKind::Gradient)
+                    value.image_gradient = RustGradient {};
                 style_value = move(value);
                 note_source_component_values_target(style_value->image_source_component_values);
                 return;
@@ -2481,6 +2656,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->list_style_image_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->list_style_image_source = string_from_ffi_bytes(value_ptr, value_len);
                         style_value->list_style_image_source_url = image_url_from_callback_payload();
+                        if (*style_value->list_style_image_source_kind == RustImageKind::Gradient)
+                            style_value->list_style_image_gradient = RustGradient {};
                         note_source_component_values_target(style_value->list_style_image_source_component_values);
                     }
                 } else {
@@ -2607,6 +2784,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         style_value->border_image_source_source_kind = static_cast<RustImageKind>(color_blue);
                         style_value->border_image_source_source = string_from_ffi_bytes(value_ptr, value_len);
                         style_value->border_image_source_source_url = image_url_from_callback_payload();
+                        if (*style_value->border_image_source_source_kind == RustImageKind::Gradient)
+                            style_value->border_image_source_gradient = RustGradient {};
                         note_source_component_values_target(style_value->border_image_source_source_component_values);
                     }
                     break;
@@ -2826,6 +3005,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     style_value->shape_outside_image_source_kind = static_cast<RustImageKind>(color_green);
                     style_value->shape_outside_image_source = string_from_ffi_bytes(value_ptr, value_len);
                     style_value->shape_outside_image_source_url = image_url_from_callback_payload();
+                    if (*style_value->shape_outside_image_source_kind == RustImageKind::Gradient)
+                        style_value->shape_outside_image_gradient = RustGradient {};
                     note_source_component_values_target(style_value->shape_outside_image_source_component_values);
                     break;
                 case RustShapeOutsideEventKind::ImageSetOption:
@@ -2940,8 +3121,11 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         .source = string_from_ffi_bytes(value_ptr, value_len),
                         .image_url = image_url_from_callback_payload(),
                     });
-                    if (static_cast<RustContentEventKind>(color_red) == RustContentEventKind::ItemImage)
+                    if (static_cast<RustContentEventKind>(color_red) == RustContentEventKind::ItemImage) {
+                        if (style_value->content_events.last().image_kind == RustImageKind::Gradient)
+                            style_value->content_events.last().gradient = RustGradient {};
                         note_source_component_values_target(style_value->content_events.last().image_source_component_values);
+                    }
                     break;
                 case RustContentEventKind::ItemCounter:
                 case RustContentEventKind::AltTextCounter:
@@ -3137,6 +3321,8 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     .image_source = string_from_ffi_bytes(value_ptr, value_len),
                     .image_url = image_url_from_callback_payload(),
                 };
+                if (image.image_kind == RustImageKind::Gradient)
+                    image.gradient = RustGradient {};
                 style_value->cursor_images.append(move(image));
                 note_source_component_values_target(style_value->cursor_images.last().image_source_component_values);
                 return;
