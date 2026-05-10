@@ -413,38 +413,6 @@ CSSRule* Parser::parse_as_css_rule()
     return {};
 }
 
-Optional<Rule> Parser::parse_as_rule()
-{
-    return RustComponentValueParser::parse_a_rule(m_input, m_encoding, rust_media_feature_test_parser(), rust_supports_feature_parser(), rust_supports_declaration_parser());
-}
-
-Optional<Declaration> Parser::parse_as_declaration()
-{
-    return RustComponentValueParser::parse_a_declaration(m_input, m_encoding);
-}
-
-Vector<RuleOrListOfDeclarations> Parser::parse_as_blocks_contents()
-{
-    return RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, rust_media_feature_test_parser(), rust_supports_feature_parser(), rust_supports_declaration_parser());
-}
-
-Vector<Rule> Parser::parse_as_rules()
-{
-    return RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding, rust_media_feature_test_parser(), rust_supports_feature_parser(), rust_supports_declaration_parser());
-}
-
-Optional<StyleProperty> Parser::parse_as_supports_condition()
-{
-    m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_declaration = RustComponentValueParser::parse_a_declaration(m_input, m_encoding, m_rule_context);
-    m_rule_context.take_last();
-    if (maybe_declaration.has_value()) {
-        if (auto maybe_property_and_name = convert_to_style_property(maybe_declaration.release_value()); maybe_property_and_name.has_value())
-            return maybe_property_and_name->property;
-    }
-    return {};
-}
-
 Optional<ComponentValue> Parser::parse_as_component_value()
 {
     auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
