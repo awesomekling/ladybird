@@ -966,13 +966,19 @@ RefPtr<StyleValue const> Parser::parse_time_percentage_value(TokenStream<Compone
 }
 
 // https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
-RefPtr<StyleValue const> Parser::parse_view_timeline_inset_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_view_timeline_inset_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // [ [ auto | <length-percentage> ]{1,2} ]
     auto transaction = tokens.begin_transaction();
 
-    auto serialized_view_timeline_inset = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    auto view_timeline_inset = RustComponentValueParser::parse_view_timeline_inset_prefix(serialized_view_timeline_inset.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_view_timeline_inset;
+    auto view_timeline_inset_source = original_source_text.has_value() && !original_source_text->is_empty()
+        ? original_source_text.value()
+        : [&] {
+              serialized_view_timeline_inset = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+              return serialized_view_timeline_inset->bytes_as_string_view();
+          }();
+    auto view_timeline_inset = RustComponentValueParser::parse_view_timeline_inset_prefix(view_timeline_inset_source, "utf-8"sv);
     if (view_timeline_inset.kind == FFI::CssViewTimelineInsetValueKind::Invalid)
         return nullptr;
 
@@ -2098,14 +2104,20 @@ static NonnullRefPtr<StyleValue const> materialize_rust_counter_style(Optional<R
 }
 
 // https://drafts.csswg.org/css-lists-3/#counter-functions
-RefPtr<StyleValue const> Parser::parse_counter_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_counter_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // counter() = counter( <counter-name>, <counter-style>? )
     // counters() = counters( <counter-name>, <string>, <counter-style>? )
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
-    auto serialized_counter = serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    auto counter = RustComponentValueParser::parse_a_counter(serialized_counter.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_counter;
+    auto counter_source = original_source_text.has_value() && !original_source_text->is_empty()
+        ? original_source_text.value()
+        : [&] {
+              serialized_counter = serialize_component_values_for_reparsing(tokens.remaining_tokens());
+              return serialized_counter->bytes_as_string_view();
+          }();
+    auto counter = RustComponentValueParser::parse_a_counter(counter_source, "utf-8"sv);
     if (!counter.has_value())
         return nullptr;
 
@@ -2320,7 +2332,7 @@ RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<Compon
     return static_ptr_cast<PositionStyleValue const>(value);
 }
 
-RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
     tokens.discard_whitespace();
@@ -2328,9 +2340,15 @@ RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>&
         return nullptr;
 
     auto const& component_value = tokens.consume_a_token();
-    auto serialized_easing = serialize_component_values_for_reparsing({ &component_value, 1 });
+    Optional<String> serialized_easing;
+    auto easing_source = original_source_text.has_value() && !original_source_text->is_empty()
+        ? original_source_text.value()
+        : [&] {
+              serialized_easing = serialize_component_values_for_reparsing({ &component_value, 1 });
+              return serialized_easing->bytes_as_string_view();
+          }();
     PropertyID property_id = PropertyID::Animation;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_easing.bytes_as_string_view());
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, easing_source);
     if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::CoordinatingValueListShorthand)
         return nullptr;
 
@@ -2487,12 +2505,18 @@ RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>&
 }
 
 // https://drafts.csswg.org/css-values-4/#url-value
-Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens)
+Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
     auto const& component_value = tokens.next_token();
-    auto serialized_url = serialize_component_values_for_reparsing({ &component_value, 1 });
-    auto maybe_url = RustComponentValueParser::parse_a_url_function(serialized_url.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_url;
+    auto url_source = original_source_text.has_value() && !original_source_text->is_empty()
+        ? original_source_text.value()
+        : [&] {
+              serialized_url = serialize_component_values_for_reparsing({ &component_value, 1 });
+              return serialized_url->bytes_as_string_view();
+          }();
+    auto maybe_url = RustComponentValueParser::parse_a_url_function(url_source, "utf-8"sv);
     if (!maybe_url.has_value())
         return {};
 
@@ -2501,9 +2525,9 @@ Optional<URL> Parser::parse_url_function(TokenStream<ComponentValue>& tokens)
     return maybe_url.release_value();
 }
 
-RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>& tokens)
+RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
-    auto url = parse_url_function(tokens);
+    auto url = parse_url_function(tokens, original_source_text);
     if (!url.has_value())
         return nullptr;
     return URLStyleValue::create(url.release_value());
@@ -4003,7 +4027,7 @@ RefPtr<StyleValue const> Parser::parse_opacity_value_value(TokenStream<Component
 }
 
 // https://drafts.csswg.org/css-fonts/#typedef-opentype-tag
-RefPtr<StringStyleValue const> Parser::parse_opentype_tag_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StringStyleValue const> Parser::parse_opentype_tag_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // <opentype-tag> = <string>
     auto transaction = tokens.begin_transaction();
@@ -4013,8 +4037,14 @@ RefPtr<StringStyleValue const> Parser::parse_opentype_tag_value(TokenStream<Comp
         return nullptr;
     tokens.discard_a_token();
 
-    auto serialized_opentype_tag = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto opentype_tag = RustComponentValueParser::parse_an_opentype_tag(serialized_opentype_tag.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_opentype_tag;
+    auto opentype_tag_source = original_source_text.has_value() && !original_source_text->is_empty()
+        ? original_source_text.value()
+        : [&] {
+              serialized_opentype_tag = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+              return serialized_opentype_tag->bytes_as_string_view();
+          }();
+    auto opentype_tag = RustComponentValueParser::parse_an_opentype_tag(opentype_tag_source, "utf-8"sv);
     if (!opentype_tag.has_value())
         return nullptr;
 
@@ -4136,7 +4166,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::CornerShape:
         return parse_rust_owned_property_value(PropertyID::CornerTopLeftShape, [](StyleValue const& value) { return value.is_keyword() || value.is_superellipse(); });
     case ValueType::Counter:
-        return parse_counter_value(tokens);
+        return parse_counter_value(tokens, original_source_text);
     case ValueType::CounterStyle:
         return parse_counter_style_value(tokens);
     case ValueType::CustomIdent:
@@ -4145,7 +4175,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::DashedIdent:
         return parse_dashed_ident_value(tokens);
     case ValueType::EasingFunction:
-        return parse_easing_value(tokens);
+        return parse_easing_value(tokens, original_source_text);
     case ValueType::FilterValueList:
         return parse_css_value_for_property(PropertyID::Filter, tokens, original_source_text);
     case ValueType::FitContent:
@@ -4195,7 +4225,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::OpacityValue:
         return parse_rust_owned_property_value(PropertyID::Opacity, [](StyleValue const& value) { return value.is_opacity_value(); });
     case ValueType::OpentypeTag:
-        return parse_opentype_tag_value(tokens);
+        return parse_opentype_tag_value(tokens, original_source_text);
     case ValueType::Paint:
         return parse_paint_value(tokens);
     case ValueType::Percentage:
@@ -4223,11 +4253,11 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::TransformList:
         return parse_transform_list_value(tokens);
     case ValueType::Url:
-        return parse_url_value(tokens);
+        return parse_url_value(tokens, original_source_text);
     case ValueType::ViewFunction:
         return parse_view_function_value(tokens);
     case ValueType::ViewTimelineInset:
-        return parse_view_timeline_inset_value(tokens);
+        return parse_view_timeline_inset_value(tokens, original_source_text);
     }
     VERIFY_NOT_REACHED();
 }

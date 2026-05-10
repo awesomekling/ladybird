@@ -267,8 +267,8 @@ private:
     GridTrackSizeList parse_grid_auto_track_list(TokenStream<ComponentValue>&);
     GridTrackSizeList parse_explicit_track_list(TokenStream<ComponentValue>&);
 
-    Optional<URL> parse_url_function(TokenStream<ComponentValue>&);
-    RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&);
+    Optional<URL> parse_url_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
+    RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
     RefPtr<BorderRadiusRectStyleValue const> parse_border_radius_rect_value(TokenStream<ComponentValue>&);
     RefPtr<RadialSizeStyleValue const> parse_radial_size(TokenStream<ComponentValue>&);
@@ -313,7 +313,7 @@ private:
     RefPtr<StyleValue const> parse_color_mix_function(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_light_dark_color_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_color_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_counter_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_counter_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     Optional<FlyString> parse_counter_style_name(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&);
@@ -332,7 +332,7 @@ private:
         BackgroundPosition,
     };
     RefPtr<PositionStyleValue const> parse_position_value(TokenStream<ComponentValue>&, PositionParsingMode = PositionParsingMode::Normal);
-    RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&);
+    RefPtr<StringStyleValue const> parse_opentype_tag_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_opacity_value_value(TokenStream<ComponentValue>&);
 
     RefPtr<StyleValue const> parse_anchor(TokenStream<ComponentValue>&);
@@ -354,7 +354,7 @@ private:
 
     RefPtr<StyleValue const> parse_number_percentage_none_value(TokenStream<ComponentValue>& tokens);
 
-    RefPtr<StyleValue const> parse_view_timeline_inset_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_view_timeline_inset_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<FunctionStyleValue const> parse_scroll_function_value(TokenStream<ComponentValue>&);
     RefPtr<FunctionStyleValue const> parse_view_function_value(TokenStream<ComponentValue>&);
 
@@ -369,7 +369,7 @@ private:
     RefPtr<StyleValue const> parse_font_variant_emoji(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_ligatures_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_font_variant_numeric_value(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_easing_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&);
 
