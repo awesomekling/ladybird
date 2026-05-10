@@ -144,23 +144,8 @@ RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID propert
 
 Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
-    auto any_property_accepts_type = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<PropertyID> {
-        return RustComponentValueParser::property_accepting_type(property_ids, value_type);
-    };
-    auto property_numeric_metadata = [](ReadonlySpan<PropertyID> property_ids, ValueType value_type) -> Optional<RustComponentValueParser::PropertyNumericMetadata> {
-        return RustComponentValueParser::property_numeric_metadata(property_ids, value_type);
-    };
     tokens.discard_whitespace();
     auto& peek_token = tokens.next_token();
-
-    auto parse_for_type = [&](ValueType const type) -> Optional<PropertyAndValue> {
-        if (auto property = any_property_accepts_type(property_ids, type); property.has_value()) {
-            auto context_guard = push_temporary_value_parsing_context(*property);
-            if (auto maybe_parsed_value = parse_value(type, tokens, original_source_text))
-                return PropertyAndValue { *property, maybe_parsed_value };
-        }
-        return OptionalNone {};
-    };
 
     {
         auto generated_transaction = tokens.begin_transaction();
@@ -6938,97 +6923,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
             return PropertyAndValue { property_custom_ident->property_id, CustomIdentStyleValue::create(property_custom_ident->custom_ident) };
         }
     }
-
-    // <integer>/<number> come before <length>, so that 0 is not interpreted as a <length> in case both are allowed.
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Integer); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (auto value = parse_integer_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Number); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (auto value = parse_number_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Angle); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (metadata->percentages_resolve_to_value_type) {
-            VERIFY(metadata->percentage_range.has_value());
-            if (auto value = parse_angle_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
-                return PropertyAndValue { metadata->property_id, value };
-        }
-
-        if (auto value = parse_angle_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Flex); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (auto value = parse_flex_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Frequency); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (metadata->percentages_resolve_to_value_type) {
-            VERIFY(metadata->percentage_range.has_value());
-            if (auto value = parse_frequency_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
-                return PropertyAndValue { metadata->property_id, value };
-        }
-
-        if (auto value = parse_frequency_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto parsed = parse_for_type(ValueType::FitContent); parsed.has_value())
-        return parsed.release_value();
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Length); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (metadata->percentages_resolve_to_value_type) {
-            VERIFY(metadata->percentage_range.has_value());
-            if (auto value = parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
-                return PropertyAndValue { metadata->property_id, value };
-        }
-
-        if (auto value = parse_length_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Resolution); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-
-        if (auto value = parse_resolution_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Time); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-        if (metadata->percentages_resolve_to_value_type) {
-            VERIFY(metadata->percentage_range.has_value());
-            if (auto value = parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value()))
-                return PropertyAndValue { metadata->property_id, value };
-        }
-
-        if (auto value = parse_time_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    // <percentage> is checked after the <foo-percentage> types.
-    if (auto metadata = property_numeric_metadata(property_ids, ValueType::Percentage); metadata.has_value()) {
-        auto context_guard = push_temporary_value_parsing_context(metadata->property_id);
-
-        if (auto value = parse_percentage_value(tokens, metadata->range))
-            return PropertyAndValue { metadata->property_id, value };
-    }
-
-    if (auto parsed = parse_for_type(ValueType::Paint); parsed.has_value())
-        return parsed.release_value();
-
-    if (auto parsed = parse_for_type(ValueType::Anchor); parsed.has_value())
-        return parsed.release_value();
 
     return OptionalNone {};
 }
