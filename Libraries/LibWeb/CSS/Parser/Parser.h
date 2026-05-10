@@ -143,6 +143,7 @@ public:
     NonnullRefPtr<StyleValue const> parse_with_a_syntax(Vector<ComponentValue> const& input, SyntaxNode const& syntax);
 
     RefPtr<CalculatedStyleValue const> parse_calculated_value(ComponentValue const&, CalculationContext&&);
+    RefPtr<CalculatedStyleValue const> materialize_descriptor_calculation_tree(RustComponentValueParser::DescriptorResultItem const&, ValueType, NumericRange);
     RefPtr<TreeCountingFunctionStyleValue const> parse_tree_counting_function(TokenStream<ComponentValue>&, TreeCountingFunctionStyleValue::ComputedType);
 
     OwnPtr<BooleanExpression> parse_if_condition(TokenStream<ComponentValue>&);
