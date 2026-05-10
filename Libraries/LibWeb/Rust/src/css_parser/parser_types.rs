@@ -1708,6 +1708,8 @@ pub enum CssRuleEventKind {
     LayerName,
     KeyframesName,
     KeyframeSelector,
+    NamespacePrefix,
+    NamespaceUri,
 }
 
 #[repr(C)]

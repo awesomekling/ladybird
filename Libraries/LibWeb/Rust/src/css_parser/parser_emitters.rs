@@ -400,6 +400,31 @@ pub(super) fn emit_rule<E, C>(
                     is_block_rule: false,
                 });
             }
+            if at_rule.name.eq_ignore_ascii_case("namespace")
+                && let Some((prefix, namespace_uri)) =
+                    ComponentValueParser::new(at_rule.prelude.clone()).parse_a_namespace_rule_prelude()
+            {
+                if let Some(prefix) = prefix {
+                    let (name_ptr, name_len) = string_parts(&prefix);
+                    event_callback(CssRuleEvent {
+                        kind: CssRuleEventKind::NamespacePrefix,
+                        name_ptr,
+                        name_len,
+                        keyframe_selector: 0.0,
+                        important: false,
+                        is_block_rule: false,
+                    });
+                }
+                let (name_ptr, name_len) = string_parts(&namespace_uri);
+                event_callback(CssRuleEvent {
+                    kind: CssRuleEventKind::NamespaceUri,
+                    name_ptr,
+                    name_len,
+                    keyframe_selector: 0.0,
+                    important: false,
+                    is_block_rule: false,
+                });
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,

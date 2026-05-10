@@ -432,18 +432,16 @@ GC::Ptr<CSSNamespaceRule> Parser::convert_to_namespace_rule(AtRule const& rule)
         return {};
     }
 
-    auto serialized_namespace_rule_prelude = serialize_component_values_for_reparsing(rule.prelude);
-    auto namespace_rule_prelude = RustComponentValueParser::parse_a_namespace_rule_prelude(serialized_namespace_rule_prelude.bytes_as_string_view(), "utf-8"sv);
-    if (!namespace_rule_prelude.has_value()) {
+    if (!rule.rust_namespace_uri.has_value()) {
         ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
             .rule_name = "@namespace"_fly_string,
-            .prelude = serialized_namespace_rule_prelude,
+            .prelude = serialize_component_values_for_reparsing(rule.prelude),
             .description = "Unable to parse prelude."_string,
         });
         return {};
     }
 
-    return CSSNamespaceRule::create(realm(), move(namespace_rule_prelude->prefix), namespace_rule_prelude->namespace_uri);
+    return CSSNamespaceRule::create(realm(), rule.rust_namespace_prefix, rule.rust_namespace_uri.value());
 }
 
 template<typename NestedDeclarationsRule>

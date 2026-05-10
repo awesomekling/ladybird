@@ -36,6 +36,8 @@ struct AtRule {
     Vector<RuleOrListOfDeclarations> child_rules_and_lists_of_declarations;
     Optional<Vector<FlyString>> rust_layer_names;
     Optional<FlyString> rust_keyframes_name;
+    Optional<FlyString> rust_namespace_prefix;
+    Optional<FlyString> rust_namespace_uri;
     bool is_block_rule { false };
 
     void for_each(AtRuleVisitor&& visit_at_rule, QualifiedRuleVisitor&& visit_qualified_rule, DeclarationVisitor&& visit_declaration) const;

@@ -1038,11 +1038,6 @@ public:
         bool percentages_resolve_to_value_type { false };
     };
 
-    struct NamespaceRulePrelude {
-        Optional<FlyString> prefix;
-        FlyString namespace_uri;
-    };
-
     struct ImportRulePrelude {
         URL url;
         Optional<FlyString> layer;
@@ -1184,7 +1179,6 @@ public:
     static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
-    static Optional<NamespaceRulePrelude> parse_a_namespace_rule_prelude(StringView input, StringView encoding);
     static Optional<Vector<FlyString>> parse_font_feature_values_family_name_list(StringView input, StringView encoding);
     static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
     static Optional<Vector<ContainerRulePreludeCondition>> parse_container_rule_prelude(StringView input, StringView encoding);

@@ -5920,31 +5920,6 @@ Optional<RustComponentValueParser::SimpleColor> RustComponentValueParser::parse_
     return color;
 }
 
-Optional<RustComponentValueParser::NamespaceRulePrelude> RustComponentValueParser::parse_a_namespace_rule_prelude(StringView input, StringView encoding)
-{
-    NamespaceRulePrelude namespace_rule_prelude;
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    auto parsed = FFI::rust_css_parse_namespace_rule_prelude(
-        filtered_input_bytes.data(),
-        filtered_input_bytes.size(),
-        &namespace_rule_prelude,
-        [](void* raw_namespace_rule_prelude, u8 const* prefix_ptr, size_t prefix_len) {
-            auto& namespace_rule_prelude = *static_cast<NamespaceRulePrelude*>(raw_namespace_rule_prelude);
-            namespace_rule_prelude.prefix = fly_string_from_ffi_bytes(prefix_ptr, prefix_len);
-        },
-        [](void* raw_namespace_rule_prelude, u8 const* namespace_uri_ptr, size_t namespace_uri_len) {
-            auto& namespace_rule_prelude = *static_cast<NamespaceRulePrelude*>(raw_namespace_rule_prelude);
-            namespace_rule_prelude.namespace_uri = fly_string_from_ffi_bytes(namespace_uri_ptr, namespace_uri_len);
-        });
-
-    if (!parsed)
-        return {};
-
-    return namespace_rule_prelude;
-}
-
 Optional<Vector<FlyString>> RustComponentValueParser::parse_font_feature_values_family_name_list(StringView input, StringView encoding)
 {
     Vector<FlyString> family_names;
@@ -6110,6 +6085,8 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
                 .child_rules_and_lists_of_declarations = {},
                 .rust_layer_names = {},
                 .rust_keyframes_name = {},
+                .rust_namespace_prefix = {},
+                .rust_namespace_uri = {},
                 .is_block_rule = event.is_block_rule,
             } },
         });
@@ -6236,6 +6213,22 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         if (!qualified_rule.rust_keyframe_selectors.has_value())
             qualified_rule.rust_keyframe_selectors = Vector<Percentage> {};
         qualified_rule.rust_keyframe_selectors->append(Percentage(event.keyframe_selector));
+        break;
+    }
+    case FFI::CssRuleEventKind::NamespacePrefix: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_namespace_prefix = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
+        break;
+    }
+    case FFI::CssRuleEventKind::NamespaceUri: {
+        VERIFY(!builder.stack.is_empty());
+        auto& rule = builder.stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        at_rule.rust_namespace_uri = fly_string_from_ffi_bytes(event.name_ptr, event.name_len);
         break;
     }
     }
