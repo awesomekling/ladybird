@@ -2992,6 +2992,47 @@ impl ComponentValueParser {
         Some((container_name, container_query))
     }
 
+    pub(super) fn parse_container_rule_prelude_item_condition(
+        &mut self,
+    ) -> Option<(Option<String>, Option<BooleanExpression>)> {
+        // https://drafts.csswg.org/css-conditional-5/#container-rule
+        // <container-condition> = [ <container-name>? <container-query>? ]!
+        // https://drafts.csswg.org/css-conditional-5/#container-name
+        // <container-name> = <custom-ident>
+        self.discard_whitespace();
+
+        let container_name = match self.next_component_value() {
+            Some(ComponentValue::PreservedToken(Token {
+                token_type: TokenType::Ident { value },
+                ..
+            })) if is_valid_custom_ident(value, &["none", "and", "not", "or"]) => {
+                let container_name = value.clone();
+                self.index += 1;
+                self.discard_whitespace();
+                Some(container_name)
+            }
+            _ => None,
+        };
+
+        let container_query = if self.has_next_component_value() {
+            let mut query_parser = ComponentValueParser::new(self.component_values[self.index..].to_vec());
+            let query = query_parser.parse_media_condition()?;
+            if query_parser.has_next_component_value() {
+                return None;
+            }
+            self.index = self.component_values.len();
+            Some(query)
+        } else {
+            None
+        };
+
+        if container_name.is_none() && container_query.is_none() {
+            return None;
+        }
+
+        Some((container_name, container_query))
+    }
+
     // https://drafts.csswg.org/mediaqueries-5/#typedef-general-enclosed
     pub(super) fn parse_general_enclosed(&mut self) -> Option<ComponentValue> {
         // <general-enclosed> = [ <function-token> <any-value>? ) ] | [ ( <any-value>? ) ]

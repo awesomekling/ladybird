@@ -563,7 +563,7 @@ pub(super) fn emit_rule<E, C>(
                         let mut conditions = Vec::with_capacity(groups.len());
                         for group in groups {
                             let mut parser = ComponentValueParser::new(group.to_vec());
-                            let Some(condition) = parser.parse_container_rule_prelude_item(filtered_input) else {
+                            let Some(condition) = parser.parse_container_rule_prelude_item_condition() else {
                                 conditions.clear();
                                 break;
                             };
@@ -576,20 +576,28 @@ pub(super) fn emit_rule<E, C>(
                     for (name, query) in conditions {
                         let (name_ptr, name_len) =
                             name.as_ref().map_or((std::ptr::null(), 0), |name| string_parts(name));
-                        let (value_ptr, value_len) = query
-                            .as_ref()
-                            .map_or((std::ptr::null(), 0), |query| string_parts(query));
                         event_callback(CssRuleEvent {
                             kind: CssRuleEventKind::ContainerCondition,
                             name_ptr,
                             name_len,
-                            value_ptr,
-                            value_len,
+                            value_ptr: std::ptr::null(),
+                            value_len: 0,
                             keyframe_selector: 0.0,
                             page_pseudo_class: CssPagePseudoClassKind::Left,
                             important: false,
                             is_block_rule: false,
                         });
+                        if let Some(query) = query {
+                            emit_boolean_expression(
+                                &query,
+                                filtered_input,
+                                boolean_expression_event_callback,
+                                component_value_callback,
+                                media_feature_callback,
+                                media_feature_value_callback,
+                            );
+                            event_callback(CssRuleEvent::new(CssRuleEventKind::ContainerConditionEnd));
+                        }
                     }
                 }
             }

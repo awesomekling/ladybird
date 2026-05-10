@@ -7,6 +7,7 @@
 #include <AK/StringBuilder.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/CSS/CharacterTypes.h>
+#include <LibWeb/CSS/ContainerQuery.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Keyword.h>
 #include <LibWeb/CSS/Length.h>
@@ -5937,6 +5938,7 @@ struct RuleEventBuilder {
     ComponentValueBuilder component_value_builder;
     Optional<RustBooleanExpressionBuilder> media_condition_builder;
     Optional<RustBooleanExpressionBuilder> supports_condition_builder;
+    Optional<RustBooleanExpressionBuilder> container_condition_builder;
     AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> parse_media_feature_test;
     AK::Function<OwnPtr<BooleanExpression>(Vector<ComponentValue>&&)> parse_supports_feature;
     Optional<FlyString> current_page_selector_name;
@@ -5948,6 +5950,8 @@ struct RuleEventBuilder {
             return &*media_condition_builder;
         if (supports_condition_builder.has_value())
             return &*supports_condition_builder;
+        if (container_condition_builder.has_value())
+            return &*container_condition_builder;
         return nullptr;
     }
 
@@ -5997,6 +6001,27 @@ struct RuleEventBuilder {
         VERIFY(supports_condition_builder->component_value_builder.stack.is_empty());
         at_rule.rust_supports_condition = Supports::create(supports_condition_builder->root.release_nonnull());
         supports_condition_builder = {};
+    }
+
+    void finish_container_condition()
+    {
+        if (!container_condition_builder.has_value())
+            return;
+
+        VERIFY(!stack.is_empty());
+        auto& rule = stack.last().rule;
+        VERIFY(rule.has_value());
+        auto& at_rule = rule->get<AtRule>();
+        VERIFY(at_rule.rust_container_rule_prelude_conditions.has_value());
+        VERIFY(!at_rule.rust_container_rule_prelude_conditions->is_empty());
+        if (container_condition_builder->invalid || !container_condition_builder->stack.is_empty() || !container_condition_builder->root) {
+            container_condition_builder = {};
+            return;
+        }
+
+        VERIFY(container_condition_builder->component_value_builder.stack.is_empty());
+        at_rule.rust_container_rule_prelude_conditions->last().query = ContainerQuery::create(container_condition_builder->root.release_nonnull());
+        container_condition_builder = {};
     }
 
     void append_rule(Rule completed_rule)
@@ -6092,6 +6117,7 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
         VERIFY(!builder.stack.is_empty());
         builder.finish_media_condition();
         builder.finish_supports_condition();
+        builder.finish_container_condition();
         auto frame = builder.stack.take_last();
         VERIFY(frame.type == RuleEventBuilder::FrameType::AtRule);
         builder.append_rule(frame.rule.release_value());
@@ -6293,10 +6319,12 @@ static void apply_rule_event(RuleEventBuilder& builder, FFI::CssRuleEvent const&
             at_rule.rust_container_rule_prelude_conditions = Vector<RustContainerRulePreludeCondition> {};
         at_rule.rust_container_rule_prelude_conditions->append({
             .name = event.name_len > 0 ? Optional<FlyString> { fly_string_from_ffi_bytes(event.name_ptr, event.name_len) } : OptionalNone {},
-            .query = event.value_len > 0 ? Optional<String> { string_from_ffi_bytes(event.value_ptr, event.value_len) } : OptionalNone {},
         });
         break;
     }
+    case FFI::CssRuleEventKind::ContainerConditionEnd:
+        builder.finish_container_condition();
+        break;
     case FFI::CssRuleEventKind::MediaQueryListEnd:
         builder.finish_media_condition();
         break;
@@ -6360,6 +6388,24 @@ static void apply_rule_supports_condition_start(RuleEventBuilder& builder)
     };
 }
 
+static void apply_rule_container_condition_start(RuleEventBuilder& builder)
+{
+    builder.finish_container_condition();
+
+    VERIFY(!builder.stack.is_empty());
+    auto& rule = builder.stack.last().rule;
+    VERIFY(rule.has_value());
+    auto& at_rule = rule->get<AtRule>();
+    VERIFY(at_rule.name.equals_ignoring_ascii_case("container"sv));
+
+    builder.container_condition_builder = RustBooleanExpressionBuilder {
+        .parse_test = [](Optional<RustComponentValueParser::MediaFeatureTest>&&, Vector<ComponentValue>&&) -> OwnPtr<BooleanExpression> {
+            return nullptr;
+        },
+        .result_for_general_enclosed = MatchResult::False,
+    };
+}
+
 static void apply_rule_boolean_expression_event(RuleEventBuilder& builder, FFI::CssBooleanExpressionEventKind event)
 {
     if (!builder.current_boolean_expression_builder()) {
@@ -6369,6 +6415,8 @@ static void apply_rule_boolean_expression_event(RuleEventBuilder& builder, FFI::
         auto& at_rule = rule->get<AtRule>();
         if (at_rule.name.equals_ignoring_ascii_case("supports"sv))
             apply_rule_supports_condition_start(builder);
+        if (at_rule.name.equals_ignoring_ascii_case("container"sv))
+            apply_rule_container_condition_start(builder);
     }
 
     auto boolean_expression_builder = builder.current_boolean_expression_builder();
@@ -6405,6 +6453,7 @@ static void verify_rule_event_builder_is_empty(RuleEventBuilder const& builder)
     VERIFY(builder.stack.is_empty());
     VERIFY(!builder.media_condition_builder.has_value());
     VERIFY(!builder.supports_condition_builder.has_value());
+    VERIFY(!builder.container_condition_builder.has_value());
     VERIFY(builder.component_value_builder.stack.is_empty());
 }
 

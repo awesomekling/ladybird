@@ -34,7 +34,7 @@ using DeclarationVisitor = AK::Function<void(Declaration const&)>;
 
 struct RustContainerRulePreludeCondition {
     Optional<FlyString> name;
-    Optional<String> query;
+    RefPtr<ContainerQuery> query;
 };
 
 // https://drafts.csswg.org/css-syntax/#ref-for-at-rule%E2%91%A0%E2%91%A1

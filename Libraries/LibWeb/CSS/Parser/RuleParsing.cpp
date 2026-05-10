@@ -643,19 +643,7 @@ GC::Ptr<CSSContainerRule> Parser::convert_to_container_rule(AtRule const& rule, 
     conditions.ensure_capacity(prelude_conditions->size());
 
     for (auto& prelude_condition : prelude_conditions.value()) {
-        RefPtr<ContainerQuery> container_query;
-        if (prelude_condition.query.has_value()) {
-            auto query_condition = RustComponentValueParser::parse_a_container_condition(prelude_condition.query.value().bytes_as_string_view(), "utf-8"sv);
-            if (!query_condition) {
-                ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
-                    .rule_name = "@container"_fly_string,
-                    .prelude = prelude_stream.dump_string(),
-                    .description = prelude_condition.name.has_value() ? "Trailing tokens after name and query."_string : "Missing container name or query."_string,
-                });
-                return nullptr;
-            }
-            container_query = ContainerQuery::create(query_condition.release_nonnull());
-        }
+        auto container_query = prelude_condition.query;
 
         if (!prelude_condition.name.has_value() && !container_query) {
             ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
