@@ -7,7 +7,6 @@
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
-#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/Parser/TokenStream.h>
@@ -31,20 +30,24 @@ RefPtr<StyleValue const> Parser::parse_according_to_syntax_node(TokenStream<Comp
 
     switch (syntax_node.type()) {
     case SyntaxNode::NodeType::Universal: {
-        auto declaration_value = Vector<ComponentValue> { tokens.remaining_tokens() };
-        auto serialized_declaration_value = serialize_component_values_for_reparsing(declaration_value);
-        if (!RustComponentValueParser::syntax_matches(serialized_declaration_value, "*"sv, LimitSingleComponentIdentToCustomIdent::No))
+        Vector<ComponentValue> remaining_tokens { tokens.remaining_tokens() };
+        TokenStream declaration_value_tokens { remaining_tokens };
+        auto declaration_value = parse_declaration_value(declaration_value_tokens);
+        if (!declaration_value.has_value())
+            return nullptr;
+        declaration_value_tokens.discard_whitespace();
+        if (!declaration_value_tokens.is_empty())
             return nullptr;
 
         SubstitutionFunctionsPresence substitution_functions_presence;
-        if (collect_arbitrary_substitution_function_presence(declaration_value, substitution_functions_presence).is_error())
+        if (collect_arbitrary_substitution_function_presence(declaration_value.value(), substitution_functions_presence).is_error())
             return nullptr;
 
         while (tokens.has_next_token())
             tokens.discard_a_token();
 
         transaction.commit();
-        return UnresolvedStyleValue::create(move(declaration_value), substitution_functions_presence);
+        return UnresolvedStyleValue::create(declaration_value.release_value(), substitution_functions_presence);
     }
     case SyntaxNode::NodeType::Ident: {
         auto const& ident_node = as<IdentSyntaxNode>(syntax_node);
