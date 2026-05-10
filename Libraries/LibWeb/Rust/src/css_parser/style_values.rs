@@ -358,6 +358,7 @@ pub(crate) struct RustOwnedImage {
     pub(crate) source: Option<String>,
     pub(crate) url: Option<RustOwnedUrlPayload>,
     pub(crate) gradient: Option<RustOwnedGradient>,
+    pub(crate) image_set: Option<RustOwnedImageSet>,
     pub(crate) component_values: Vec<ComponentValue>,
 }
 
@@ -367,6 +368,7 @@ impl PartialEq for RustOwnedImage {
             && self.source == other.source
             && self.url == other.url
             && self.gradient == other.gradient
+            && self.image_set == other.image_set
     }
 }
 

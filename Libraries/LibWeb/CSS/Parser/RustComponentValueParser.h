@@ -485,15 +485,6 @@ public:
         Optional<u8> grid_auto_flow_dense;
     };
 
-    struct RustCursorImage {
-        RustImageKind image_kind { RustImageKind::Url };
-        String image_source;
-        Optional<URL> image_url;
-        Vector<ComponentValue> image_source_component_values;
-        Optional<RustNestedPrimitiveValue> x;
-        Optional<RustNestedPrimitiveValue> y;
-    };
-
     struct RustImageSetOption {
         RustImageKind image_kind { RustImageKind::Url };
         String image_source;
@@ -502,6 +493,16 @@ public:
         Optional<String> resolution;
         Vector<ComponentValue> resolution_component_values;
         Optional<String> type;
+    };
+
+    struct RustCursorImage {
+        RustImageKind image_kind { RustImageKind::Url };
+        String image_source;
+        Optional<URL> image_url;
+        Vector<ComponentValue> image_source_component_values;
+        Vector<RustImageSetOption> image_set_options;
+        Optional<RustNestedPrimitiveValue> x;
+        Optional<RustNestedPrimitiveValue> y;
     };
 
     struct RustBackgroundSize {
@@ -592,6 +593,7 @@ public:
         CounterStyleName,
         CounterStyleSymbols,
         CounterStyleSymbol,
+        ImageSetOption,
     };
 
     enum class RustCounterFunctionKind : u8 {
@@ -642,6 +644,7 @@ public:
         String source;
         Optional<URL> image_url;
         Vector<ComponentValue> image_source_component_values;
+        Vector<RustImageSetOption> image_set_options;
         RustCounterFunctionKind counter_function { RustCounterFunctionKind::Counter };
         FlyString counter_name;
         FlyString counter_join_string;

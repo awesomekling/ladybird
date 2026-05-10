@@ -1247,10 +1247,21 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 break;
             case SourceComponentValueTarget::ImageSetResolution:
                 VERIFY(style_value.has_value());
-                VERIFY(style_value->kind == FFI::CssStyleValueKind::Image);
-                VERIFY(style_value->image_kind == RustImageKind::ImageSet);
-                VERIFY(!style_value->image_set_options.is_empty());
-                style_value->image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                if (style_value->kind == FFI::CssStyleValueKind::Content) {
+                    VERIFY(!style_value->content_events.is_empty());
+                    VERIFY(!style_value->content_events.last().image_set_options.is_empty());
+                    style_value->content_events.last().image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else if (style_value->kind == FFI::CssStyleValueKind::Cursor) {
+                    VERIFY(!style_value->cursor_images.is_empty());
+                    VERIFY(style_value->cursor_images.last().image_kind == RustImageKind::ImageSet);
+                    VERIFY(!style_value->cursor_images.last().image_set_options.is_empty());
+                    style_value->cursor_images.last().image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                } else {
+                    VERIFY(style_value->kind == FFI::CssStyleValueKind::Image);
+                    VERIFY(style_value->image_kind == RustImageKind::ImageSet);
+                    VERIFY(!style_value->image_set_options.is_empty());
+                    style_value->image_set_options.last().resolution_component_values = move(source_component_value_builder.root_values);
+                }
                 break;
             case SourceComponentValueTarget::NestedPrimitive:
                 pending_nested_primitive_source_component_values = move(source_component_value_builder.root_values);
@@ -1420,6 +1431,27 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 }
 
                 return URL { string_from_ffi_bytes(value_ptr, value_len), url_type, {} };
+            };
+            auto image_set_option_metadata_from_callback_payload = [&]() {
+                Optional<String> resolution;
+                Optional<String> type;
+                if (value_type_len > 0) {
+                    size_t metadata_index = 0;
+                    for (auto metadata : StringView { value_type_ptr, value_type_len }.split_view('\0', SplitBehavior::KeepEmpty)) {
+                        if (metadata_index == 0 && !metadata.is_empty())
+                            resolution = String::from_utf8_without_validation(metadata.bytes());
+                        else if (metadata_index == 1 && !metadata.is_empty())
+                            type = String::from_utf8_without_validation(metadata.bytes());
+                        ++metadata_index;
+                    }
+                }
+                return RustImageSetOption {
+                    .image_kind = static_cast<RustImageKind>(color_green),
+                    .image_source = string_from_ffi_bytes(value_ptr, value_len),
+                    .image_url = image_url_from_callback_payload(),
+                    .resolution = move(resolution),
+                    .type = move(type),
+                };
             };
             auto shorthand_property_id_from_callback_payload = [&]() {
                 return static_cast<PropertyID>(static_cast<u16>(color_red) | (static_cast<u16>(color_green) << 8));
@@ -1774,25 +1806,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                         VERIFY(style_value->image_kind == RustImageKind::ImageSet);
                     }
 
-                    Optional<String> resolution;
-                    Optional<String> type;
-                    if (value_type_len > 0) {
-                        size_t metadata_index = 0;
-                        for (auto metadata : StringView { value_type_ptr, value_type_len }.split_view('\0', SplitBehavior::KeepEmpty)) {
-                            if (metadata_index == 0 && !metadata.is_empty())
-                                resolution = String::from_utf8_without_validation(metadata.bytes());
-                            else if (metadata_index == 1 && !metadata.is_empty())
-                                type = String::from_utf8_without_validation(metadata.bytes());
-                            ++metadata_index;
-                        }
-                    }
-                    style_value->image_set_options.append({
-                        .image_kind = static_cast<RustImageKind>(color_green),
-                        .image_source = string_from_ffi_bytes(value_ptr, value_len),
-                        .image_url = image_url_from_callback_payload(),
-                        .resolution = move(resolution),
-                        .type = move(type),
-                    });
+                    style_value->image_set_options.append(image_set_option_metadata_from_callback_payload());
                     note_source_component_values_target(style_value->image_set_options.last().image_source_component_values);
                     return;
                 }
@@ -2919,6 +2933,13 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     VERIFY(style_value->content_events.last().counter_style.has_value());
                     style_value->content_events.last().counter_style->symbols.append(fly_string_from_ffi_bytes(value_ptr, value_len));
                     break;
+                case RustContentEventKind::ImageSetOption:
+                    VERIFY(!style_value->content_events.is_empty());
+                    VERIFY(style_value->content_events.last().kind == RustContentEventKind::ItemImage);
+                    VERIFY(style_value->content_events.last().image_kind == RustImageKind::ImageSet);
+                    style_value->content_events.last().image_set_options.append(image_set_option_metadata_from_callback_payload());
+                    note_source_component_values_target(style_value->content_events.last().image_set_options.last().image_source_component_values);
+                    break;
                 }
                 return;
             } else if (kind == FFI::CssStyleValueKind::FontVariant) {
@@ -3033,6 +3054,7 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                     Predefined,
                     ImageCoordinateX,
                     ImageCoordinateY,
+                    ImageSetOption,
                 };
 
                 if (!style_value.has_value())
@@ -3056,6 +3078,14 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 if (color_red == ImageCoordinateY) {
                     VERIFY(!style_value->cursor_images.is_empty());
                     style_value->cursor_images.last().y = nested_primitive_value_from_callback_payload();
+                    return;
+                }
+
+                if (color_red == ImageSetOption) {
+                    VERIFY(!style_value->cursor_images.is_empty());
+                    VERIFY(style_value->cursor_images.last().image_kind == RustImageKind::ImageSet);
+                    style_value->cursor_images.last().image_set_options.append(image_set_option_metadata_from_callback_payload());
+                    note_source_component_values_target(style_value->cursor_images.last().image_set_options.last().image_source_component_values);
                     return;
                 }
 

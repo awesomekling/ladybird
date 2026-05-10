@@ -1785,16 +1785,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     return materialize_rust_url_image(typed_url);
                 case RustComponentValueParser::RustImageKind::Gradient:
                     return materialize_rust_gradient_from_component_values(source_component_values);
-                case RustComponentValueParser::RustImageKind::ImageSet: {
-                    if (source_component_values.is_empty())
-                        return nullptr;
-                    TokenStream image_set_tokens { source_component_values };
-                    auto image_set = parse_image_set_function(image_set_tokens);
-                    image_set_tokens.discard_whitespace();
-                    if (!image_set || image_set_tokens.has_next_token())
-                        return nullptr;
-                    return image_set.release_nonnull();
-                }
+                case RustComponentValueParser::RustImageKind::ImageSet:
+                    return nullptr;
                 }
                 VERIFY_NOT_REACHED();
             };
@@ -1808,10 +1800,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 }
                 VERIFY_NOT_REACHED();
             };
-            auto materialize_rust_image_set = [&]() -> RefPtr<ImageSetStyleValue const> {
+            auto materialize_rust_image_set_options = [&](Vector<RustComponentValueParser::RustImageSetOption> const& rust_image_set_options) -> RefPtr<ImageSetStyleValue const> {
                 Vector<ImageSetStyleValue::Option> options;
-                options.ensure_capacity(rust_style_value->image_set_options.size());
-                for (auto const& option : rust_style_value->image_set_options) {
+                options.ensure_capacity(rust_image_set_options.size());
+                for (auto const& option : rust_image_set_options) {
                     RefPtr<AbstractImageStyleValue const> image;
                     if (option.image_kind == RustComponentValueParser::RustImageKind::Url && option.image_url.has_value()) {
                         image = ImageStyleValue::create(*option.image_url);
@@ -1845,6 +1837,9 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                 if (options.is_empty())
                     return nullptr;
                 return ImageSetStyleValue::create(move(options));
+            };
+            auto materialize_rust_image_set = [&]() -> RefPtr<ImageSetStyleValue const> {
+                return materialize_rust_image_set_options(rust_style_value->image_set_options);
             };
             auto materialize_rust_basic_shape = [&](RustComponentValueParser::RustBasicShapeKind kind, Optional<u8> fill_rule_value, Vector<RustComponentValueParser::RustBasicShapeRectangleComponent> const& rectangle_components, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_horizontal_radii, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& rectangle_border_radius_vertical_radii, bool radial_shape_is_typed, Vector<RustComponentValueParser::RustBasicShapeRadiusComponent> const& radial_shape_radius, Optional<RustComponentValueParser::RustPosition> const& radial_shape_position, Vector<RustComponentValueParser::RustNestedPrimitiveValue> const& polygon_coordinates, Optional<String> const& path_data_string) -> RefPtr<StyleValue const> {
                 auto materialize_rust_fill_rule = [](Optional<u8> fill_rule_value) -> Optional<Gfx::WindingRule> {
@@ -2236,7 +2231,10 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                         content_values.append(StringStyleValue::create(event.source));
                         break;
                     case RustComponentValueParser::RustContentEventKind::ItemImage:
-                        value = materialize_rust_image_from_component_values(event.image_kind, event.image_url, event.image_source_component_values);
+                        if (event.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !event.image_set_options.is_empty())
+                            value = materialize_rust_image_set_options(event.image_set_options);
+                        else
+                            value = materialize_rust_image_from_component_values(event.image_kind, event.image_url, event.image_source_component_values);
                         if (!value)
                             return nullptr;
                         content_values.append(value.release_nonnull());
@@ -2260,6 +2258,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     case RustComponentValueParser::RustContentEventKind::CounterStyleName:
                     case RustComponentValueParser::RustContentEventKind::CounterStyleSymbols:
                     case RustComponentValueParser::RustContentEventKind::CounterStyleSymbol:
+                    case RustComponentValueParser::RustContentEventKind::ImageSetOption:
                         return nullptr;
                     }
                 }
@@ -4572,7 +4571,11 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                     StyleValueVector cursors;
                     cursors.ensure_capacity(rust_style_value->cursor_images.size() + 1);
                     for (auto const& cursor_image : rust_style_value->cursor_images) {
-                        auto image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_url, cursor_image.image_source_component_values);
+                        RefPtr<AbstractImageStyleValue const> image;
+                        if (cursor_image.image_kind == RustComponentValueParser::RustImageKind::ImageSet && !cursor_image.image_set_options.is_empty())
+                            image = materialize_rust_image_set_options(cursor_image.image_set_options);
+                        else
+                            image = materialize_rust_image_from_component_values(cursor_image.image_kind, cursor_image.image_url, cursor_image.image_source_component_values);
                         if (!image)
                             break;
 

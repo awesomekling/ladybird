@@ -4149,6 +4149,7 @@ const CURSOR_CALLBACK_IMAGE: u8 = 0;
 const CURSOR_CALLBACK_PREDEFINED: u8 = 1;
 const CURSOR_CALLBACK_IMAGE_COORDINATE_X: u8 = 2;
 const CURSOR_CALLBACK_IMAGE_COORDINATE_Y: u8 = 3;
+const CURSOR_CALLBACK_IMAGE_SET_OPTION: u8 = 4;
 const CONTENT_CALLBACK_NORMAL: u8 = 0;
 const CONTENT_CALLBACK_NONE: u8 = 1;
 const CONTENT_CALLBACK_ITEM_QUOTE: u8 = 2;
@@ -4161,6 +4162,7 @@ const CONTENT_CALLBACK_COUNTER_JOIN_STRING: u8 = 8;
 const CONTENT_CALLBACK_COUNTER_STYLE_NAME: u8 = 9;
 const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOLS: u8 = 10;
 const CONTENT_CALLBACK_COUNTER_STYLE_SYMBOL: u8 = 11;
+const CONTENT_CALLBACK_IMAGE_SET_OPTION: u8 = 12;
 const COUNTER_CALLBACK_FUNCTION: u8 = 0;
 const COUNTER_CALLBACK_JOIN_STRING: u8 = 1;
 const COUNTER_CALLBACK_STYLE_NAME: u8 = 2;
@@ -4496,7 +4498,39 @@ fn callback_cursor_style_value<C, S, E>(
             payload.as_bytes(),
             "",
         );
-        if !image.image.component_values.is_empty() {
+        if image.image.kind == RustOwnedImageKind::ImageSet
+            && let Some(image_set) = image.image.image_set.as_ref()
+        {
+            for option in &image_set.options {
+                let (_, url_function_type, image_source) = image_callback_payload(&option.image);
+                let metadata = image_set_option_metadata(option);
+                callback(
+                    CssStyleValueKind::Cursor,
+                    property_id,
+                    CssPrimitiveValueKind::Invalid,
+                    false,
+                    0.0,
+                    false,
+                    0.0,
+                    CURSOR_CALLBACK_IMAGE_SET_OPTION,
+                    option.image.kind as u8,
+                    0,
+                    url_function_type,
+                    image_source.as_bytes(),
+                    &metadata,
+                );
+                if !option.image.component_values.is_empty() {
+                    source_component_value_emitter
+                        .emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+                }
+                if !option.resolution_component_values.is_empty() {
+                    source_component_value_emitter.emit(
+                        SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                        &option.resolution_component_values,
+                    );
+                }
+            }
+        } else if !image.image.component_values.is_empty() {
             source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.image.component_values);
         }
         if let (Some(x), Some(y)) = (&image.x, &image.y) {
@@ -4770,6 +4804,39 @@ fn callback_content_image_event<C, S, E>(
         payload.as_bytes(),
         "",
     );
+    if image.kind == RustOwnedImageKind::ImageSet
+        && let Some(image_set) = image.image_set.as_ref()
+    {
+        for option in &image_set.options {
+            let (_, url_function_type, image_source) = image_callback_payload(&option.image);
+            let metadata = image_set_option_metadata(option);
+            callback(
+                CssStyleValueKind::Content,
+                property_id,
+                CssPrimitiveValueKind::Invalid,
+                false,
+                0.0,
+                false,
+                0.0,
+                CONTENT_CALLBACK_IMAGE_SET_OPTION,
+                option.image.kind as u8,
+                0,
+                url_function_type,
+                image_source.as_bytes(),
+                &metadata,
+            );
+            if !option.image.component_values.is_empty() {
+                source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &option.image.component_values);
+            }
+            if !option.resolution_component_values.is_empty() {
+                source_component_value_emitter.emit(
+                    SOURCE_COMPONENT_VALUE_LIST_IMAGE_SET_RESOLUTION,
+                    &option.resolution_component_values,
+                );
+            }
+        }
+        return;
+    }
     if !image.component_values.is_empty() {
         source_component_value_emitter.emit(SOURCE_COMPONENT_VALUE_LIST_IMAGE, &image.component_values);
     }

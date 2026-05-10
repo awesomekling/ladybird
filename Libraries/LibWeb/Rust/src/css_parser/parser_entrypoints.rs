@@ -7554,6 +7554,7 @@ pub(super) fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Opt
                 source: Some(filtered_input_to_string(filtered_input)),
                 url: None,
                 gradient: None,
+                image_set: None,
                 component_values: component_values.to_vec(),
             })),
             _ => None,
