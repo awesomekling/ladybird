@@ -2547,7 +2547,7 @@ fn parses_style_values_with_rust_owned_ast() {
             property_id: PropertyId::ListStyle,
             value: RustOwnedStyleValueKind::ListStyle(RustOwnedListStyle {
                 position: Some(RustOwnedListStylePosition::Inside),
-                image: Some(RustOwnedListStyleImage::Image(RustOwnedImage {
+                image: Some(RustOwnedListStyleImage::Image(Box::new(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
                     source: None,
                     url: Some(RustOwnedUrlPayload {
@@ -2558,7 +2558,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     gradient: None,
                     image_set: None,
                     component_values: vec![],
-                })),
+                }))),
                 list_style_type: Some(RustOwnedListStyleType::CounterStyle(CounterStyle::Name(
                     "square".to_string()
                 ))),
@@ -3050,6 +3050,9 @@ fn parses_style_values_with_rust_owned_ast() {
     assert!(!gradient.is_repeating);
     assert!(!gradient.is_webkit_prefixed);
     assert_eq!(gradient.color_stop_group_index, 1);
+    let header = gradient.header.as_ref().unwrap();
+    assert_eq!(header.component_values.len(), 5);
+    assert!(header.color_interpolation_method.is_some());
     assert_eq!(gradient.groups.len(), 3);
     assert_eq!(
         parse_rust_owned_style_value(
@@ -3547,7 +3550,7 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::BorderImage,
             value: RustOwnedStyleValueKind::BorderImage(RustOwnedBorderImage {
-                source: Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
+                source: Some(RustOwnedBorderImageSource::Image(Box::new(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
                     source: None,
                     url: Some(RustOwnedUrlPayload {
@@ -3558,7 +3561,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     gradient: None,
                     image_set: None,
                     component_values: vec![],
-                })),
+                }))),
                 slice: Some(RustOwnedBorderImageSlice {
                     values: vec![
                         RustOwnedNestedPrimitiveValue::Number(10.0),

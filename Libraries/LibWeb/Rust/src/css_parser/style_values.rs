@@ -398,6 +398,7 @@ pub(crate) struct RustOwnedGradient {
     pub(crate) is_repeating: bool,
     pub(crate) is_webkit_prefixed: bool,
     pub(crate) color_stop_group_index: usize,
+    pub(crate) header: Option<RustOwnedGradientHeader>,
     pub(crate) groups: Vec<Vec<ComponentValue>>,
 }
 
@@ -407,6 +408,12 @@ pub(crate) enum RustOwnedGradientKind {
     Linear,
     Radial,
     Conic,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RustOwnedGradientHeader {
+    pub(crate) component_values: Vec<ComponentValue>,
+    pub(crate) color_interpolation_method: Option<Vec<ComponentValue>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -483,7 +490,7 @@ pub(crate) enum RustOwnedListStylePosition {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedListStyleImage {
     None,
-    Image(RustOwnedImage),
+    Image(Box<RustOwnedImage>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -761,7 +768,7 @@ pub(crate) enum RustOwnedContentAltTextItem {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedShapeOutside {
     None,
-    Image(RustOwnedImage),
+    Image(Box<RustOwnedImage>),
     Shape {
         basic_shape: Option<Box<RustOwnedBasicShape>>,
         shape_box: Option<RustOwnedShapeBox>,
@@ -1099,7 +1106,7 @@ pub(crate) struct RustOwnedBorderImage {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RustOwnedBorderImageSource {
     None,
-    Image(RustOwnedImage),
+    Image(Box<RustOwnedImage>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

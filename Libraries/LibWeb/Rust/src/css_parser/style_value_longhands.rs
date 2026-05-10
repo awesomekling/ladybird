@@ -1951,15 +1951,15 @@ pub(super) fn consume_border_image_source(
 
     let source = serialize_consumed_component_values(parser, start, source)?;
     match rust_owned_image_style_value_kind(source.as_bytes(), &source)? {
-        RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(image)),
-        RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(RustOwnedImage {
+        RustOwnedStyleValueKind::Image(image) => Some(RustOwnedBorderImageSource::Image(Box::new(image))),
+        RustOwnedStyleValueKind::ImageSet(_) => Some(RustOwnedBorderImageSource::Image(Box::new(RustOwnedImage {
             kind: RustOwnedImageKind::ImageSet,
             source: Some(source.clone()),
             url: None,
             gradient: None,
             image_set: None,
             component_values: vec![image_component_value],
-        })),
+        }))),
         _ => None,
     }
 }

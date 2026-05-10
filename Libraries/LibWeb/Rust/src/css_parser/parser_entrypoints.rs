@@ -5234,17 +5234,42 @@ fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
         RustOwnedGradientKind::Conic => parse_conic_gradient_function(function),
     }?;
 
-    let groups = split_component_values_on_comma(&function.value)
+    let groups: Vec<Vec<ComponentValue>> = split_component_values_on_comma(&function.value)
         .into_iter()
         .map(|group| group.to_vec())
         .collect();
+
+    let header = (color_stop_group_index > 0).then(|| RustOwnedGradientHeader {
+        component_values: groups[0].clone(),
+        color_interpolation_method: rust_owned_gradient_header_color_interpolation_method(&groups[0]),
+    });
 
     Some(RustOwnedGradient {
         kind,
         is_repeating,
         is_webkit_prefixed,
         color_stop_group_index,
+        header,
         groups,
+    })
+}
+
+fn rust_owned_gradient_header_color_interpolation_method(
+    component_values: &[ComponentValue],
+) -> Option<Vec<ComponentValue>> {
+    let component_values = remove_whitespace_component_values(component_values);
+    if component_values_parse_as_color_interpolation_method(&component_values) {
+        return Some(component_values);
+    }
+
+    (1..component_values.len()).find_map(|split| {
+        if component_values_parse_as_color_interpolation_method(&component_values[..split]) {
+            return Some(component_values[..split].to_vec());
+        }
+        if component_values_parse_as_color_interpolation_method(&component_values[split..]) {
+            return Some(component_values[split..].to_vec());
+        }
+        None
     })
 }
 
@@ -7549,15 +7574,17 @@ pub(super) fn parse_rust_owned_shape_outside_value(filtered_input: &[u8]) -> Opt
 
     if let Some(value) = rust_owned_image_style_value_kind(filtered_input, filtered_input_string) {
         return match value {
-            RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(image)),
-            RustOwnedStyleValueKind::ImageSet(image_set) => Some(RustOwnedShapeOutside::Image(RustOwnedImage {
-                kind: RustOwnedImageKind::ImageSet,
-                source: Some(filtered_input_to_string(filtered_input)),
-                url: None,
-                gradient: None,
-                image_set: Some(image_set),
-                component_values: component_values.to_vec(),
-            })),
+            RustOwnedStyleValueKind::Image(image) => Some(RustOwnedShapeOutside::Image(Box::new(image))),
+            RustOwnedStyleValueKind::ImageSet(image_set) => {
+                Some(RustOwnedShapeOutside::Image(Box::new(RustOwnedImage {
+                    kind: RustOwnedImageKind::ImageSet,
+                    source: Some(filtered_input_to_string(filtered_input)),
+                    url: None,
+                    gradient: None,
+                    image_set: Some(image_set),
+                    component_values: component_values.to_vec(),
+                })))
+            }
             _ => None,
         };
     }
@@ -7967,7 +7994,9 @@ pub(super) fn rust_owned_list_style_image_from_component_value(
     source: &str,
 ) -> Option<RustOwnedListStyleImage> {
     if component_value_parse_as_list_style_image(component_value) {
-        return rust_owned_image_from_component_value(component_value, source).map(RustOwnedListStyleImage::Image);
+        return rust_owned_image_from_component_value(component_value, source)
+            .map(Box::new)
+            .map(RustOwnedListStyleImage::Image);
     }
     None
 }
