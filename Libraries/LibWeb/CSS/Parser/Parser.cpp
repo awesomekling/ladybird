@@ -151,14 +151,18 @@ GC::RootVector<GC::Ref<CSSRule>> Parser::convert_rules(Vector<Rule> const& raw_r
 
 GC::RootVector<GC::Ref<CSSRule>> Parser::parse_as_stylesheet_contents()
 {
-    return convert_rules(RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding));
+    return convert_rules(RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    }));
 }
 
 // https://drafts.csswg.org/css-syntax/#parse-a-css-stylesheet
 GC::Ref<CSS::CSSStyleSheet> Parser::parse_as_css_stylesheet(Optional<::URL::URL> location, GC::Ptr<MediaList> media_list)
 {
     // To parse a CSS stylesheet, first parse a stylesheet.
-    auto rules = RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding);
+    auto rules = RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 
     auto rule_list = CSSRuleList::create(realm(), convert_rules(rules));
     if (!media_list)
@@ -383,14 +387,19 @@ Vector<ComponentValue> Parser::consume_a_list_of_component_values(TokenStream<Co
 
 CSSRule* Parser::parse_as_css_rule()
 {
-    if (auto maybe_rule = RustComponentValueParser::parse_a_rule(m_input, m_encoding); maybe_rule.has_value())
+    if (auto maybe_rule = RustComponentValueParser::parse_a_rule(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+            return materialize_rust_media_feature_test(move(media_feature_test));
+        });
+        maybe_rule.has_value())
         return convert_to_rule<CSSNestedDeclarations>(maybe_rule.value(), Nested::No);
     return {};
 }
 
 Optional<Rule> Parser::parse_as_rule()
 {
-    return RustComponentValueParser::parse_a_rule(m_input, m_encoding);
+    return RustComponentValueParser::parse_a_rule(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 }
 
 Optional<Declaration> Parser::parse_as_declaration()
@@ -400,12 +409,16 @@ Optional<Declaration> Parser::parse_as_declaration()
 
 Vector<RuleOrListOfDeclarations> Parser::parse_as_blocks_contents()
 {
-    return RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding);
+    return RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 }
 
 Vector<Rule> Parser::parse_as_rules()
 {
-    return RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding);
+    return RustComponentValueParser::parse_a_stylesheets_contents(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 }
 
 Optional<StyleProperty> Parser::parse_as_supports_condition()
@@ -489,7 +502,9 @@ Parser::PropertiesAndCustomProperties Parser::parse_as_property_declaration_bloc
     };
 
     // 1. Let declarations be the returned declarations from invoking parse a block’s contents with string.
-    auto declarations_and_at_rules = RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, m_rule_context);
+    auto declarations_and_at_rules = RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, m_rule_context, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
 
     // 2. Let parsed declarations be a new empty list.
     PropertiesAndCustomProperties parsed_declarations;
@@ -537,7 +552,9 @@ Vector<Descriptor> Parser::parse_as_descriptor_declaration_block(AtRuleID at_rul
 
     // 1. Let declarations be the returned declarations from invoking parse a block’s contents with string.
     m_rule_context.append(context_type);
-    auto declarations_and_at_rules = RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, m_rule_context);
+    auto declarations_and_at_rules = RustComponentValueParser::parse_a_blocks_contents(m_input, m_encoding, m_rule_context, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) {
+        return materialize_rust_media_feature_test(move(media_feature_test));
+    });
     m_rule_context.take_last();
 
     // 2. Let parsed declarations be a new empty list.

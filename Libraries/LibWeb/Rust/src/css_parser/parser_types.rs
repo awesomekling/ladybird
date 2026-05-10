@@ -1718,6 +1718,7 @@ pub enum CssRuleEventKind {
     PagePseudoClass,
     FontFeatureValuesFamilyName,
     ContainerCondition,
+    MediaQueryListEnd,
 }
 
 #[repr(C)]

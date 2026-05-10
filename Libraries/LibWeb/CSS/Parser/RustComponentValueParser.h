@@ -1173,10 +1173,10 @@ public:
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
     static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
-    static Optional<Rule> parse_a_rule(StringView input, StringView encoding);
-    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding);
-    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
-    static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding);
+    static Optional<Rule> parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test);
+    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test);
+    static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, Vector<RuleContext> const& rule_context, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test);
+    static Vector<Rule> parse_a_stylesheets_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test);
 
 private:
     using BooleanExpressionEventCallback = void (*)(void*, FFI::CssBooleanExpressionEventKind);

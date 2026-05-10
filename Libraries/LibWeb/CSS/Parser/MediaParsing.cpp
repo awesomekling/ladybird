@@ -252,8 +252,19 @@ GC::Ptr<CSSMediaRule> Parser::convert_to_media_rule(AtRule const& rule, Nested n
         return nullptr;
     }
 
-    auto serialized_media_query_list = serialize_component_values_for_reparsing(rule.prelude);
-    auto media_query_list = parse_a_media_query_list_from_string(serialized_media_query_list.bytes_as_string_view(), "utf-8"sv);
+    if (!rule.rust_media_query_list.has_value()) {
+        ErrorReporter::the().report(CSS::Parser::InvalidRuleError {
+            .rule_name = "@media"_fly_string,
+            .prelude = MUST(String::join(""sv, rule.prelude)),
+            .description = "Media query list invalid."_string,
+        });
+        return nullptr;
+    }
+
+    Vector<NonnullRefPtr<MediaQuery>> media_query_list;
+    media_query_list.ensure_capacity(rule.rust_media_query_list->size());
+    for (auto& media_query : rule.rust_media_query_list.value())
+        media_query_list.unchecked_append(media_query);
     auto media_list = MediaList::create(realm(), move(media_query_list));
 
     GC::RootVector<GC::Ref<CSSRule>> child_rules { realm().heap() };

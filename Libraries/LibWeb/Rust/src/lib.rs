@@ -2074,6 +2074,13 @@ pub unsafe extern "C" fn rust_css_parse_rule(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
+    boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -2086,6 +2093,18 @@ pub unsafe extern "C" fn rust_css_parse_rule(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |media_query| {
+                    media_query_callback(ctx, &raw const media_query);
+                },
+                |event| {
+                    boolean_expression_event_callback(ctx, event);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);
@@ -2105,6 +2124,13 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
+    boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -2117,6 +2143,18 @@ pub unsafe extern "C" fn rust_css_parse_block_contents(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |media_query| {
+                    media_query_callback(ctx, &raw const media_query);
+                },
+                |event| {
+                    boolean_expression_event_callback(ctx, event);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);
@@ -2139,6 +2177,13 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
     rule_context_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
+    boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -2155,6 +2200,18 @@ pub unsafe extern "C" fn rust_css_parse_block_contents_with_context(
                 rule_context,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |media_query| {
+                    media_query_callback(ctx, &raw const media_query);
+                },
+                |event| {
+                    boolean_expression_event_callback(ctx, event);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);
@@ -2174,6 +2231,13 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
     input_len: usize,
     ctx: *mut c_void,
     event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: *const CssRuleEvent),
+    media_query_callback: unsafe extern "C" fn(ctx: *mut c_void, media_query: *const CssMediaQuery),
+    boolean_expression_event_callback: unsafe extern "C" fn(ctx: *mut c_void, event: CssBooleanExpressionEventKind),
+    media_feature_callback: unsafe extern "C" fn(ctx: *mut c_void, media_feature: *const CssMediaFeature),
+    media_feature_value_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        media_feature_value: *const CssMediaFeatureValue,
+    ),
     component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
 ) {
     unsafe {
@@ -2186,6 +2250,18 @@ pub unsafe extern "C" fn rust_css_parse_stylesheet_contents(
                 input,
                 |event| {
                     event_callback(ctx, &raw const event);
+                },
+                |media_query| {
+                    media_query_callback(ctx, &raw const media_query);
+                },
+                |event| {
+                    boolean_expression_event_callback(ctx, event);
+                },
+                |media_feature| {
+                    media_feature_callback(ctx, &raw const media_feature);
+                },
+                |media_feature_value| {
+                    media_feature_value_callback(ctx, &raw const media_feature_value);
                 },
                 |component_value| {
                     component_value_callback(ctx, &raw const component_value);

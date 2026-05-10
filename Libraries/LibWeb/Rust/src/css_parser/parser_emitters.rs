@@ -340,10 +340,15 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_rule<E, C>(
     rule: &Rule,
     filtered_input: &str,
     event_callback: &mut E,
+    media_query_callback: &mut impl FnMut(CssMediaQuery),
+    boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
+    media_feature_callback: &mut impl FnMut(CssMediaFeature),
+    media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
 ) where
     E: FnMut(CssRuleEvent),
@@ -588,6 +593,20 @@ pub(super) fn emit_rule<E, C>(
                     }
                 }
             }
+            if at_rule.name.eq_ignore_ascii_case("media") {
+                for group in split_component_values_on_comma(&at_rule.prelude) {
+                    emit_media_query_syntax(
+                        component_values_parse_as_media_query(group.to_vec()),
+                        filtered_input,
+                        media_query_callback,
+                        boolean_expression_event_callback,
+                        media_feature_callback,
+                        media_feature_value_callback,
+                        component_value_callback,
+                    );
+                }
+                event_callback(CssRuleEvent::new(CssRuleEventKind::MediaQueryListEnd));
+            }
             emit_component_value_list(
                 &at_rule.prelude,
                 filtered_input,
@@ -598,6 +617,10 @@ pub(super) fn emit_rule<E, C>(
                 &at_rule.child_rules_and_lists_of_declarations,
                 filtered_input,
                 event_callback,
+                media_query_callback,
+                boolean_expression_event_callback,
+                media_feature_callback,
+                media_feature_value_callback,
                 component_value_callback,
             );
             event_callback(CssRuleEvent::new(CssRuleEventKind::AtRuleEnd));
@@ -636,6 +659,10 @@ pub(super) fn emit_rule<E, C>(
                 &qualified_rule.child_rules,
                 filtered_input,
                 event_callback,
+                media_query_callback,
+                boolean_expression_event_callback,
+                media_feature_callback,
+                media_feature_value_callback,
                 component_value_callback,
             );
             event_callback(CssRuleEvent::new(CssRuleEventKind::QualifiedRuleEnd));
@@ -643,10 +670,15 @@ pub(super) fn emit_rule<E, C>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
     rules_or_lists_of_declarations: &[RuleOrListOfDeclarations],
     filtered_input: &str,
     event_callback: &mut E,
+    media_query_callback: &mut impl FnMut(CssMediaQuery),
+    boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
+    media_feature_callback: &mut impl FnMut(CssMediaFeature),
+    media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
 ) where
     E: FnMut(CssRuleEvent),
@@ -656,7 +688,16 @@ pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
     for rule_or_list_of_declarations in rules_or_lists_of_declarations {
         match rule_or_list_of_declarations {
             RuleOrListOfDeclarations::Rule(rule) => {
-                emit_rule(rule, filtered_input, event_callback, component_value_callback);
+                emit_rule(
+                    rule,
+                    filtered_input,
+                    event_callback,
+                    media_query_callback,
+                    boolean_expression_event_callback,
+                    media_feature_callback,
+                    media_feature_value_callback,
+                    component_value_callback,
+                );
             }
             RuleOrListOfDeclarations::ListOfDeclarations(declarations) => {
                 event_callback(CssRuleEvent::new(CssRuleEventKind::ListOfDeclarationsStart));

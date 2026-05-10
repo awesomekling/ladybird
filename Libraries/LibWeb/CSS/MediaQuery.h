@@ -19,6 +19,12 @@
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 
+namespace Web::CSS::Parser {
+
+class RustComponentValueParser;
+
+}
+
 namespace Web::CSS {
 
 // https://www.w3.org/TR/mediaqueries-4/#typedef-mf-value
@@ -182,6 +188,7 @@ private:
 
 class MediaQuery : public RefCounted<MediaQuery> {
     friend class Parser::Parser;
+    friend class Parser::RustComponentValueParser;
 
 public:
     ~MediaQuery() = default;
@@ -204,6 +211,10 @@ public:
     String to_string() const;
 
     void dump(StringBuilder&, int indent_levels = 0) const;
+
+    void set_negated_for_parser(bool negated) { m_negated = negated; }
+    void set_media_type_for_parser(MediaType media_type) { m_media_type = move(media_type); }
+    void set_media_condition_for_parser(OwnPtr<BooleanExpression> media_condition) { m_media_condition = move(media_condition); }
 
 private:
     MediaQuery() = default;

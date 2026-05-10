@@ -11568,9 +11568,20 @@ pub(crate) fn parse_a_declaration_with_context<D, C>(
     }
 }
 
-pub(crate) fn parse_a_rule<E, C>(filtered_input: &[u8], mut event_callback: E, mut component_value_callback: C)
-where
+pub(crate) fn parse_a_rule<Q, E, B, M, V, C>(
+    filtered_input: &[u8],
+    mut event_callback: E,
+    mut media_query_callback: Q,
+    mut boolean_expression_event_callback: B,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
+    mut component_value_callback: C,
+) where
+    Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    B: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -11583,16 +11594,28 @@ where
         &rule,
         filtered_input_string,
         &mut event_callback,
+        &mut media_query_callback,
+        &mut boolean_expression_event_callback,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
         &mut component_value_callback,
     );
 }
 
-pub(crate) fn parse_a_blocks_contents<E, C>(
+pub(crate) fn parse_a_blocks_contents<Q, E, B, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut media_query_callback: Q,
+    mut boolean_expression_event_callback: B,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
     mut component_value_callback: C,
 ) where
+    Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    B: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -11603,17 +11626,30 @@ pub(crate) fn parse_a_blocks_contents<E, C>(
         &rules_or_lists_of_declarations,
         filtered_input_string,
         &mut event_callback,
+        &mut media_query_callback,
+        &mut boolean_expression_event_callback,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
         &mut component_value_callback,
     );
 }
 
-pub(crate) fn parse_a_blocks_contents_with_context<E, C>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, M, V, C>(
     filtered_input: &[u8],
     rule_context: &[CssRuleContext],
     mut event_callback: E,
+    mut media_query_callback: Q,
+    mut boolean_expression_event_callback: B,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
     mut component_value_callback: C,
 ) where
+    Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    B: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -11623,16 +11659,28 @@ pub(crate) fn parse_a_blocks_contents_with_context<E, C>(
         &rules_or_lists_of_declarations,
         filtered_input_string,
         &mut event_callback,
+        &mut media_query_callback,
+        &mut boolean_expression_event_callback,
+        &mut media_feature_callback,
+        &mut media_feature_value_callback,
         &mut component_value_callback,
     );
 }
 
-pub(crate) fn parse_a_stylesheets_contents<E, C>(
+pub(crate) fn parse_a_stylesheets_contents<Q, E, B, M, V, C>(
     filtered_input: &[u8],
     mut event_callback: E,
+    mut media_query_callback: Q,
+    mut boolean_expression_event_callback: B,
+    mut media_feature_callback: M,
+    mut media_feature_value_callback: V,
     mut component_value_callback: C,
 ) where
+    Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
+    B: FnMut(CssBooleanExpressionEventKind),
+    M: FnMut(CssMediaFeature),
+    V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
@@ -11643,6 +11691,10 @@ pub(crate) fn parse_a_stylesheets_contents<E, C>(
             rule,
             filtered_input_string,
             &mut event_callback,
+            &mut media_query_callback,
+            &mut boolean_expression_event_callback,
+            &mut media_feature_callback,
+            &mut media_feature_value_callback,
             &mut component_value_callback,
         );
     }
