@@ -1065,30 +1065,40 @@ NonnullRefPtr<StyleValue const> Parser::parse_as_sizes_attribute(DOM::Element co
 
 Parser::ParseErrorOr<void> Parser::collect_arbitrary_substitution_function_presence(Vector<ComponentValue> const& component_values, SubstitutionFunctionsPresence& presence)
 {
-    auto serialized_component_values = serialize_component_values_for_reparsing(component_values);
-    auto serialized_bytes = serialized_component_values.bytes();
+    for (auto const& component_value : component_values) {
+        if (component_value.is_function()) {
+            auto const& function = component_value.function();
+            if (auto substitution_function = to_arbitrary_substitution_function(function.name); substitution_function.has_value()) {
+                if (!parse_according_to_argument_grammar(*substitution_function, function.value).has_value())
+                    return ParseError::SyntaxError;
 
-    bool attr { false };
-    bool env { false };
-    bool if_ { false };
-    bool inherit { false };
-    bool var { false };
-    if (!FFI::rust_css_collect_arbitrary_substitution_function_presence(
-            serialized_bytes.data(),
-            serialized_bytes.size(),
-            &attr,
-            &env,
-            &if_,
-            &inherit,
-            &var)) {
-        return ParseError::SyntaxError;
+                switch (*substitution_function) {
+                case ArbitrarySubstitutionFunction::Attr:
+                    presence.attr = true;
+                    break;
+                case ArbitrarySubstitutionFunction::Env:
+                    presence.env = true;
+                    break;
+                case ArbitrarySubstitutionFunction::If:
+                    presence.if_ = true;
+                    break;
+                case ArbitrarySubstitutionFunction::Inherit:
+                    presence.inherit = true;
+                    break;
+                case ArbitrarySubstitutionFunction::Var:
+                    presence.var = true;
+                    break;
+                }
+            }
+
+            TRY(collect_arbitrary_substitution_function_presence(function.value, presence));
+            continue;
+        }
+
+        if (component_value.is_block())
+            TRY(collect_arbitrary_substitution_function_presence(component_value.block().value, presence));
     }
 
-    presence.attr = attr;
-    presence.env = env;
-    presence.if_ = if_;
-    presence.inherit = inherit;
-    presence.var = var;
     return {};
 }
 
