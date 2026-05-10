@@ -156,7 +156,7 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     auto parse_for_type = [&](ValueType const type) -> Optional<PropertyAndValue> {
         if (auto property = any_property_accepts_type(property_ids, type); property.has_value()) {
             auto context_guard = push_temporary_value_parsing_context(*property);
-            if (auto maybe_parsed_value = parse_value(type, tokens))
+            if (auto maybe_parsed_value = parse_value(type, tokens, original_source_text))
                 return PropertyAndValue { *property, maybe_parsed_value };
         }
         return OptionalNone {};
@@ -197,25 +197,25 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
                 switch (*rust_style_value->value_type) {
                 case ValueType::Integer:
-                    return parse_integer_value(tokens, metadata->range);
+                    return parse_integer_value(tokens, metadata->range, source);
                 case ValueType::Number:
-                    return parse_number_value(tokens, metadata->range);
+                    return parse_number_value(tokens, metadata->range, source);
                 case ValueType::Angle:
                 case ValueType::AnglePercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
-                        return parse_angle_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                        return parse_angle_percentage_value(tokens, metadata->range, metadata->percentage_range.value(), source);
                     }
-                    return parse_angle_value(tokens, metadata->range);
+                    return parse_angle_value(tokens, metadata->range, source);
                 case ValueType::Flex:
-                    return parse_flex_value(tokens, metadata->range);
+                    return parse_flex_value(tokens, metadata->range, source);
                 case ValueType::Frequency:
                 case ValueType::FrequencyPercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
-                        return parse_frequency_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                        return parse_frequency_percentage_value(tokens, metadata->range, metadata->percentage_range.value(), source);
                     }
-                    return parse_frequency_value(tokens, metadata->range);
+                    return parse_frequency_value(tokens, metadata->range, source);
                 case ValueType::Length:
                 case ValueType::LengthPercentage:
                     if (metadata->percentages_resolve_to_value_type) {
@@ -235,22 +235,22 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
                                     return calc;
                                 }
                             }
-                            return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                            return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value(), source);
                         }
-                        return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                        return parse_length_percentage_value(tokens, metadata->range, metadata->percentage_range.value(), source);
                     }
-                    return parse_length_value(tokens, metadata->range);
+                    return parse_length_value(tokens, metadata->range, source);
                 case ValueType::Resolution:
-                    return parse_resolution_value(tokens, metadata->range);
+                    return parse_resolution_value(tokens, metadata->range, source);
                 case ValueType::Time:
                 case ValueType::TimePercentage:
                     if (metadata->percentages_resolve_to_value_type) {
                         VERIFY(metadata->percentage_range.has_value());
-                        return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value());
+                        return parse_time_percentage_value(tokens, metadata->range, metadata->percentage_range.value(), source);
                     }
-                    return parse_time_value(tokens, metadata->range);
+                    return parse_time_value(tokens, metadata->range, source);
                 case ValueType::Percentage:
-                    return parse_percentage_value(tokens, metadata->range);
+                    return parse_percentage_value(tokens, metadata->range, source);
                 case ValueType::OpacityValue:
                     return parse_opacity_value_value(tokens);
                 default:

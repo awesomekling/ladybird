@@ -318,7 +318,7 @@ private:
     RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_ratio_value(TokenStream<ComponentValue>&);
-    RefPtr<StringStyleValue const> parse_string_value(TokenStream<ComponentValue>&);
+    RefPtr<StringStyleValue const> parse_string_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     enum class AllowImageSet {
         No,
         Yes,
@@ -337,20 +337,20 @@ private:
 
     RefPtr<StyleValue const> parse_anchor(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_anchor_size(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_angle_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_angle_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_angle_range, NumericRange const& accepted_percentage_range);
-    RefPtr<StyleValue const> parse_flex_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_frequency_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_frequency_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_frequency_range, NumericRange const& accepted_percentage_range);
-    RefPtr<StyleValue const> parse_integer_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_length_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_length_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_length_range, NumericRange const& accepted_percentage_range);
-    RefPtr<StyleValue const> parse_number_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_number_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_number_range, NumericRange const& accepted_percentage_range);
-    RefPtr<StyleValue const> parse_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_resolution_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_time_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range);
-    RefPtr<StyleValue const> parse_time_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_time_range, NumericRange const& accepted_percentage_range);
+    RefPtr<StyleValue const> parse_angle_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_angle_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_angle_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_flex_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_frequency_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_frequency_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_frequency_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_integer_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_length_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_length_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_length_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_number_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_number_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_number_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_resolution_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_time_value(TokenStream<ComponentValue>&, NumericRange const& accepted_range, Optional<StringView> original_source_text = {});
+    RefPtr<StyleValue const> parse_time_percentage_value(TokenStream<ComponentValue>&, NumericRange const& accepted_time_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text = {});
 
     RefPtr<StyleValue const> parse_number_percentage_none_value(TokenStream<ComponentValue>& tokens);
 

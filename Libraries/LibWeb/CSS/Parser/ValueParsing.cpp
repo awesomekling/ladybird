@@ -89,10 +89,22 @@ static bool rust_primitive_value_prefix_matches(TokenStream<ComponentValue>& tok
     return RustComponentValueParser::parse_primitive_value_prefix(serialized_input.bytes_as_string_view(), "utf-8"sv, value_type, options) != FFI::CssPrimitiveValueKind::Invalid;
 }
 
-static bool rust_primitive_value_matches(TokenStream<ComponentValue>& tokens, size_t start, FFI::CssPrimitiveValueType value_type, FFI::CssPrimitiveValueOptions options = {})
+static bool rust_primitive_value_matches(TokenStream<ComponentValue>& tokens, size_t start, FFI::CssPrimitiveValueType value_type, FFI::CssPrimitiveValueOptions options = {}, Optional<StringView> original_source_text = {})
 {
+    if (original_source_text.has_value() && !original_source_text->is_empty())
+        return RustComponentValueParser::parse_primitive_value(*original_source_text, "utf-8"sv, value_type, options) != FFI::CssPrimitiveValueKind::Invalid;
+
     auto serialized_input = Parser::serialize_component_values_for_reparsing(tokens.tokens_since(start));
     return RustComponentValueParser::parse_primitive_value(serialized_input.bytes_as_string_view(), "utf-8"sv, value_type, options) != FFI::CssPrimitiveValueKind::Invalid;
+}
+
+static void discard_remaining_tokens_if_using_original_source(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
+{
+    if (!original_source_text.has_value())
+        return;
+
+    while (tokens.has_next_token())
+        tokens.discard_a_token();
 }
 
 static FFI::CssPrimitiveValueOptions primitive_value_options(bool allow_quirky_length = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false)
@@ -221,7 +233,7 @@ Optional<Vector<ComponentValue>> Parser::parse_declaration_value(TokenStream<Com
     return top_level_declaration_value;
 }
 
-RefPtr<StyleValue const> Parser::parse_integer_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_integer_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Integer))
@@ -232,28 +244,31 @@ RefPtr<StyleValue const> Parser::parse_integer_value(TokenStream<ComponentValue>
     auto const& peek_token = tokens.next_token();
     if (peek_token.is(Token::Type::Number) && peek_token.token().is_integer() && accepted_range.contains(peek_token.token().to_integer())) {
         tokens.discard_a_token(); // integer
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return IntegerStyleValue::create(peek_token.token().to_integer());
     }
 
     if (auto calc = parse_calculated_value(peek_token, { .resolve_numbers_as_integers = true, .accepted_ranges_by_type = { { ValueType::Integer, accepted_range } } }); calc && calc->as_calculated().resolves_to_number()) {
         tokens.discard_a_token(); // calc
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return calc;
     }
 
     if (auto tree_counting_function = parse_tree_counting_function(tokens, TreeCountingFunctionStyleValue::ComputedType::Integer); tree_counting_function) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Integer, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return tree_counting_function;
     }
 
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_number_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_number_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Number))
@@ -264,33 +279,36 @@ RefPtr<StyleValue const> Parser::parse_number_value(TokenStream<ComponentValue>&
     auto const& peek_token = tokens.next_token();
     if (peek_token.is(Token::Type::Number) && accepted_range.contains(peek_token.token().number_value())) {
         tokens.discard_a_token(); // number
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return NumberStyleValue::create(peek_token.token().number_value());
     }
 
     if (auto calc = parse_calculated_value(peek_token, { .accepted_ranges_by_type = { { ValueType::Number, accepted_range } } }); calc && calc->as_calculated().resolves_to_number()) {
         tokens.discard_a_token(); // calc
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return calc;
     }
 
     if (auto tree_counting_function = parse_tree_counting_function(tokens, TreeCountingFunctionStyleValue::ComputedType::Number); tree_counting_function) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Number, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return tree_counting_function;
     }
 
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_number_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_number_range, NumericRange const& accepted_percentage_range)
+RefPtr<StyleValue const> Parser::parse_number_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_number_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text)
 {
     // Parses [<percentage> | <number>] (which is equivalent to [<alpha-value>])
-    if (auto value = parse_number_value(tokens, accepted_number_range))
+    if (auto value = parse_number_value(tokens, accepted_number_range, original_source_text))
         return value;
-    if (auto value = parse_percentage_value(tokens, accepted_percentage_range))
+    if (auto value = parse_percentage_value(tokens, accepted_percentage_range, original_source_text))
         return value;
     return nullptr;
 }
@@ -311,7 +329,7 @@ RefPtr<StyleValue const> Parser::parse_number_percentage_none_value(TokenStream<
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Percentage))
@@ -322,15 +340,17 @@ RefPtr<StyleValue const> Parser::parse_percentage_value(TokenStream<ComponentVal
     auto const& peek_token = tokens.next_token();
     if (peek_token.is(Token::Type::Percentage) && accepted_range.contains(peek_token.token().percentage())) {
         tokens.discard_a_token(); // percentage
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return PercentageStyleValue::create(Percentage(peek_token.token().percentage()));
     }
 
     if (auto calc = parse_calculated_value(peek_token, { .accepted_ranges_by_type = { { ValueType::Percentage, accepted_range } } }); calc && calc->as_calculated().resolves_to_percentage()) {
         tokens.discard_a_token(); // calc
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return calc;
     }
 
@@ -537,7 +557,7 @@ RefPtr<StyleValue const> Parser::parse_anchor_size(TokenStream<ComponentValue>& 
     return AnchorSizeStyleValue::create(anchor_name, anchor_size, fallback_value);
 }
 
-static RefPtr<AngleStyleValue const> parse_literal_angle_value(TokenStream<ComponentValue>& tokens, bool is_parsing_svg_presentation_attribute, NumericRange const& accepted_range)
+static RefPtr<AngleStyleValue const> parse_literal_angle_value(TokenStream<ComponentValue>& tokens, bool is_parsing_svg_presentation_attribute, NumericRange const& accepted_range, Optional<StringView> original_source_text = {})
 {
     auto options = primitive_value_options(false, false, is_parsing_svg_presentation_attribute);
     auto start = tokens.current_index();
@@ -555,9 +575,10 @@ static RefPtr<AngleStyleValue const> parse_literal_angle_value(TokenStream<Compo
             if (!accepted_range.contains(angle.to_degrees()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, options))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, options, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return AngleStyleValue::create(move(angle));
         }
@@ -574,16 +595,17 @@ static RefPtr<AngleStyleValue const> parse_literal_angle_value(TokenStream<Compo
         if (!accepted_range.contains(angle.to_degrees()))
             return nullptr;
 
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, options))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, options, original_source_text))
             return nullptr;
 
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return AngleStyleValue::create(move(angle));
     }
 
     return nullptr;
 }
 
-static RefPtr<PercentageStyleValue const> parse_literal_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+static RefPtr<PercentageStyleValue const> parse_literal_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text = {})
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Percentage))
@@ -593,50 +615,53 @@ static RefPtr<PercentageStyleValue const> parse_literal_percentage_value(TokenSt
 
     if (tokens.next_token().is(Token::Type::Percentage) && accepted_range.contains(tokens.next_token().token().percentage())) {
         auto value = Percentage { tokens.consume_a_token().token().percentage() };
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Percentage, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return PercentageStyleValue::create(value);
     }
 
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_angle_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_angle_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_angle = parse_literal_angle_value(tokens, is_parsing_svg_presentation_attribute(), accepted_range))
+    if (auto literal_angle = parse_literal_angle_value(tokens, is_parsing_svg_presentation_attribute(), accepted_range, original_source_text))
         return literal_angle;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Angle, accepted_range } } }); calc && calc->as_calculated().resolves_to_angle()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, primitive_value_options(false, false, is_parsing_svg_presentation_attribute())))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, primitive_value_options(false, false, is_parsing_svg_presentation_attribute()), original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_angle_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_angle_range, NumericRange const& accepted_percentage_range)
+RefPtr<StyleValue const> Parser::parse_angle_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_angle_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_angle = parse_literal_angle_value(tokens, is_parsing_svg_presentation_attribute(), accepted_angle_range))
+    if (auto literal_angle = parse_literal_angle_value(tokens, is_parsing_svg_presentation_attribute(), accepted_angle_range, original_source_text))
         return literal_angle;
 
-    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range))
+    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range, original_source_text))
         return literal_percentage;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .percentages_resolve_as = ValueType::Angle, .accepted_ranges_by_type = { { ValueType::Angle, { accepted_angle_range } } } }); calc && calc->as_calculated().resolves_to_angle_percentage()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, primitive_value_options(false, false, is_parsing_svg_presentation_attribute())))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Angle, primitive_value_options(false, false, is_parsing_svg_presentation_attribute()), original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_flex_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_flex_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Flex))
@@ -653,9 +678,10 @@ RefPtr<StyleValue const> Parser::parse_flex_value(TokenStream<ComponentValue>& t
             if (!accepted_range.contains(flex.to_fr()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Flex))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Flex, {}, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return FlexStyleValue::create(move(flex));
         }
@@ -664,15 +690,16 @@ RefPtr<StyleValue const> Parser::parse_flex_value(TokenStream<ComponentValue>& t
 
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Flex, accepted_range } } }); calc && calc->as_calculated().resolves_to_flex()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Flex))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Flex, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-static RefPtr<FrequencyStyleValue const> parse_literal_frequency_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+static RefPtr<FrequencyStyleValue const> parse_literal_frequency_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text = {})
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Frequency))
@@ -689,9 +716,10 @@ static RefPtr<FrequencyStyleValue const> parse_literal_frequency_value(TokenStre
             if (!accepted_range.contains(frequency.to_hertz()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency, {}, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return FrequencyStyleValue::create(move(frequency));
         }
@@ -700,42 +728,44 @@ static RefPtr<FrequencyStyleValue const> parse_literal_frequency_value(TokenStre
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_frequency_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_frequency_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_frequency = parse_literal_frequency_value(tokens, accepted_range))
+    if (auto literal_frequency = parse_literal_frequency_value(tokens, accepted_range, original_source_text))
         return literal_frequency;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Frequency, accepted_range } } }); calc && calc->as_calculated().resolves_to_frequency()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_frequency_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_frequency_range, NumericRange const& accepted_percentage_range)
+RefPtr<StyleValue const> Parser::parse_frequency_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_frequency_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_frequency = parse_literal_frequency_value(tokens, accepted_frequency_range))
+    if (auto literal_frequency = parse_literal_frequency_value(tokens, accepted_frequency_range, original_source_text))
         return literal_frequency;
 
-    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range))
+    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range, original_source_text))
         return literal_percentage;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .percentages_resolve_as = ValueType::Frequency, .accepted_ranges_by_type = { { ValueType::Frequency, accepted_frequency_range } } }); calc && calc->as_calculated().resolves_to_frequency_percentage()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Frequency, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<ComponentValue>& tokens, bool context_allows_quirky_length, bool is_parsing_svg_presentation_attribute, NumericRange const& accepted_range)
+static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<ComponentValue>& tokens, bool context_allows_quirky_length, bool is_parsing_svg_presentation_attribute, NumericRange const& accepted_range, Optional<StringView> original_source_text = {})
 {
     auto options = primitive_value_options(context_allows_quirky_length, is_parsing_svg_presentation_attribute);
     auto start = tokens.current_index();
@@ -758,9 +788,10 @@ static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<Com
             if (!accepted_range.contains(length.raw_value()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return LengthStyleValue::create(length);
         }
@@ -774,9 +805,10 @@ static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<Com
             if (!accepted_range.contains(0))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return LengthStyleValue::create(Length::make_px(0));
         }
@@ -786,9 +818,10 @@ static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<Com
             if (!accepted_range.contains(nearest_value.to_double()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return LengthStyleValue::create(Length::make_px(nearest_value));
         }
@@ -803,9 +836,10 @@ static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<Com
             if (!accepted_range.contains(nearest_value.to_double()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return LengthStyleValue::create(Length::make_px(nearest_value));
         }
@@ -814,56 +848,62 @@ static RefPtr<LengthStyleValue const> parse_literal_length_value(TokenStream<Com
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_length_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_length_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_length = parse_literal_length_value(tokens, context_allows_quirky_length(), is_parsing_svg_presentation_attribute(), accepted_range))
+    if (auto literal_length = parse_literal_length_value(tokens, context_allows_quirky_length(), is_parsing_svg_presentation_attribute(), accepted_range, original_source_text))
         return literal_length;
 
     auto options = primitive_value_options(context_allows_quirky_length(), is_parsing_svg_presentation_attribute());
     auto start = tokens.current_index();
     if (tokens.next_token().is_function("anchor-size"sv)) {
-        if (auto anchor_size = parse_anchor_size(tokens); anchor_size && rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+        if (auto anchor_size = parse_anchor_size(tokens); anchor_size && rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text)) {
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             return anchor_size;
+        }
         return nullptr;
     }
 
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Length, accepted_range } } }); calc && calc->as_calculated().resolves_to_length()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_length_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_length_range, NumericRange const& accepted_percentage_range)
+RefPtr<StyleValue const> Parser::parse_length_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_length_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_length = parse_literal_length_value(tokens, context_allows_quirky_length(), is_parsing_svg_presentation_attribute(), accepted_length_range))
+    if (auto literal_length = parse_literal_length_value(tokens, context_allows_quirky_length(), is_parsing_svg_presentation_attribute(), accepted_length_range, original_source_text))
         return literal_length;
 
-    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range))
+    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range, original_source_text))
         return literal_percentage;
 
     auto options = primitive_value_options(context_allows_quirky_length(), is_parsing_svg_presentation_attribute());
     auto start = tokens.current_index();
     if (tokens.next_token().is_function("anchor-size"sv)) {
-        if (auto anchor_size = parse_anchor_size(tokens); anchor_size && rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+        if (auto anchor_size = parse_anchor_size(tokens); anchor_size && rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text)) {
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             return anchor_size;
+        }
         return nullptr;
     }
 
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .percentages_resolve_as = ValueType::Length, .accepted_ranges_by_type = { { ValueType::Length, accepted_length_range } } }); calc && calc->as_calculated().resolves_to_length_percentage()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Length, options, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_resolution_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_resolution_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Resolution))
@@ -883,9 +923,10 @@ RefPtr<StyleValue const> Parser::parse_resolution_value(TokenStream<ComponentVal
             if (dimension_token.dimension_value() < 0 || !accepted_range.contains(resolution.to_dots_per_pixel()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Resolution))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Resolution, {}, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return ResolutionStyleValue::create(move(resolution));
         }
@@ -894,15 +935,16 @@ RefPtr<StyleValue const> Parser::parse_resolution_value(TokenStream<ComponentVal
 
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Resolution, accepted_range } } }); calc && calc->as_calculated().resolves_to_resolution()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Resolution))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Resolution, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-static RefPtr<TimeStyleValue const> parse_literal_time_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+static RefPtr<TimeStyleValue const> parse_literal_time_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text = {})
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::Time))
@@ -919,9 +961,10 @@ static RefPtr<TimeStyleValue const> parse_literal_time_value(TokenStream<Compone
             if (!accepted_range.contains(time.to_seconds()))
                 return nullptr;
 
-            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time))
+            if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time, {}, original_source_text))
                 return nullptr;
 
+            discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
             transaction.commit();
             return TimeStyleValue::create(move(time));
         }
@@ -930,35 +973,37 @@ static RefPtr<TimeStyleValue const> parse_literal_time_value(TokenStream<Compone
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_time_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range)
+RefPtr<StyleValue const> Parser::parse_time_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_time = parse_literal_time_value(tokens, accepted_range))
+    if (auto literal_time = parse_literal_time_value(tokens, accepted_range, original_source_text))
         return literal_time;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .accepted_ranges_by_type = { { ValueType::Time, accepted_range } } }); calc && calc->as_calculated().resolves_to_time()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
     return nullptr;
 }
 
-RefPtr<StyleValue const> Parser::parse_time_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_time_range, NumericRange const& accepted_percentage_range)
+RefPtr<StyleValue const> Parser::parse_time_percentage_value(TokenStream<ComponentValue>& tokens, NumericRange const& accepted_time_range, NumericRange const& accepted_percentage_range, Optional<StringView> original_source_text)
 {
-    if (auto literal_time = parse_literal_time_value(tokens, accepted_time_range))
+    if (auto literal_time = parse_literal_time_value(tokens, accepted_time_range, original_source_text))
         return literal_time;
 
-    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range))
+    if (auto literal_percentage = parse_literal_percentage_value(tokens, accepted_percentage_range, original_source_text))
         return literal_percentage;
 
     auto start = tokens.current_index();
     auto transaction = tokens.begin_transaction();
     if (auto calc = parse_calculated_value(tokens.consume_a_token(), { .percentages_resolve_as = ValueType::Time, .accepted_ranges_by_type = { { ValueType::Time, accepted_time_range } } }); calc && calc->as_calculated().resolves_to_time_percentage()) {
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::Time, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         transaction.commit();
         return calc;
     }
@@ -2221,7 +2266,7 @@ RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<Component
     return counter_style;
 }
 
-RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto start = tokens.current_index();
     if (!rust_primitive_value_prefix_matches(tokens, FFI::CssPrimitiveValueType::String))
@@ -2231,8 +2276,9 @@ RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentV
     auto const& peek = tokens.next_token();
     if (peek.is(Token::Type::String)) {
         tokens.discard_a_token();
-        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::String))
+        if (!rust_primitive_value_matches(tokens, start, FFI::CssPrimitiveValueType::String, {}, original_source_text))
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
         return StringStyleValue::create(peek.token().string());
     }
 
@@ -4228,9 +4274,9 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::AnchorSize:
         return parse_anchor_size(tokens);
     case ValueType::Angle:
-        return parse_angle_value(tokens, infinite_range);
+        return parse_angle_value(tokens, infinite_range, original_source_text);
     case ValueType::AnglePercentage:
-        return parse_angle_percentage_value(tokens, infinite_range, infinite_range);
+        return parse_angle_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
     case ValueType::BackgroundPosition:
         return parse_rust_owned_property_value(PropertyID::BackgroundPosition, [](StyleValue const& value) { return value.is_position(); });
     case ValueType::BasicShape:
@@ -4255,7 +4301,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FitContent:
         return parse_rust_owned_property_value(PropertyID::Width, [](StyleValue const& value) { return (value.is_keyword() && value.to_keyword() == Keyword::FitContent) || (value.is_function() && value.as_function().name() == "fit-content"_fly_string); });
     case ValueType::Flex:
-        return parse_flex_value(tokens, infinite_range);
+        return parse_flex_value(tokens, infinite_range, original_source_text);
     case ValueType::FontStyle:
         return parse_font_style_value(tokens, original_source_text);
     case ValueType::FontKerningValue:
@@ -4283,19 +4329,19 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::FontVariantPositionValue:
         return parse_font_variant_position_value_value(tokens);
     case ValueType::Frequency:
-        return parse_frequency_value(tokens, infinite_range);
+        return parse_frequency_value(tokens, infinite_range, original_source_text);
     case ValueType::FrequencyPercentage:
-        return parse_frequency_percentage_value(tokens, infinite_range, infinite_range);
+        return parse_frequency_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
     case ValueType::Image:
         return parse_image_value(tokens);
     case ValueType::Integer:
-        return parse_integer_value(tokens, infinite_integer_range);
+        return parse_integer_value(tokens, infinite_integer_range, original_source_text);
     case ValueType::Length:
-        return parse_length_value(tokens, infinite_range);
+        return parse_length_value(tokens, infinite_range, original_source_text);
     case ValueType::LengthPercentage:
-        return parse_length_percentage_value(tokens, infinite_range, infinite_range);
+        return parse_length_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
     case ValueType::Number:
-        return parse_number_value(tokens, infinite_range);
+        return parse_number_value(tokens, infinite_range, original_source_text);
     case ValueType::OpacityValue:
         return parse_rust_owned_property_value(PropertyID::Opacity, [](StyleValue const& value) { return value.is_opacity_value(); });
     case ValueType::OpentypeTag:
@@ -4303,7 +4349,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Paint:
         return parse_paint_value(tokens);
     case ValueType::Percentage:
-        return parse_percentage_value(tokens, infinite_range);
+        return parse_percentage_value(tokens, infinite_range, original_source_text);
     case ValueType::Position:
         return parse_rust_owned_property_value(PropertyID::ObjectPosition, [](StyleValue const& value) { return value.is_position(); });
     case ValueType::Ratio:
@@ -4311,17 +4357,17 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Rect:
         return parse_rect_value(tokens);
     case ValueType::Resolution:
-        return parse_resolution_value(tokens, infinite_range);
+        return parse_resolution_value(tokens, infinite_range, original_source_text);
     case ValueType::ScrollFunction:
         return parse_scroll_function_value(tokens, original_source_text);
     case ValueType::String:
-        return parse_string_value(tokens);
+        return parse_string_value(tokens, original_source_text);
     case ValueType::Symbol:
         return parse_symbol_value(tokens);
     case ValueType::Time:
-        return parse_time_value(tokens, infinite_range);
+        return parse_time_value(tokens, infinite_range, original_source_text);
     case ValueType::TimePercentage:
-        return parse_time_percentage_value(tokens, infinite_range, infinite_range);
+        return parse_time_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
     case ValueType::TransformFunction:
         return parse_transform_function_value(tokens);
     case ValueType::TransformList:
