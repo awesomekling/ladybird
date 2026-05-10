@@ -422,7 +422,7 @@ static RefPtr<StyleValue const> materialize_descriptor_counter_style_range_bound
     }
 }
 
-Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens, Optional<String> original_source_text)
+Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_value(AtRuleID at_rule_id, DescriptorNameAndID const& descriptor_name_and_id, TokenStream<ComponentValue>& tokens, StringView original_source_text)
 {
     if (!RustComponentValueParser::at_rule_supports_descriptor(at_rule_id, descriptor_name_and_id.id())) {
         ErrorReporter::the().report(UnknownPropertyError {
@@ -475,10 +475,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
         ? ComputationContext { .length_resolution_context = Length::ResolutionContext::for_document(*m_document) }
         : Optional<ComputationContext> {};
 
-    auto descriptor_source = original_source_text.value_or_lazy_evaluated([&] {
-        return serialize_component_values_for_reparsing(tokens.remaining_tokens());
-    });
-    auto descriptor_value = RustComponentValueParser::parse_descriptor(at_rule_id, descriptor_name_and_id.id(), descriptor_source.bytes_as_string_view(), "utf-8"sv);
+    auto descriptor_value = RustComponentValueParser::parse_descriptor(at_rule_id, descriptor_name_and_id.id(), original_source_text, "utf-8"sv);
     if (descriptor_value.has_value()) {
         auto parsed_style_value = descriptor_value->syntax.visit(
             [&](Keyword keyword) {
@@ -1097,7 +1094,8 @@ Optional<Descriptor> Parser::convert_to_descriptor(AtRuleID at_rule_id, Declarat
         return {};
 
     auto value_token_stream = TokenStream(declaration.value);
-    auto value = parse_descriptor_value(at_rule_id, descriptor_name_and_id.value(), value_token_stream, declaration.original_value_text);
+    VERIFY(declaration.original_value_text.has_value());
+    auto value = parse_descriptor_value(at_rule_id, descriptor_name_and_id.value(), value_token_stream, *declaration.original_value_text);
     if (value.is_error())
         return {};
 

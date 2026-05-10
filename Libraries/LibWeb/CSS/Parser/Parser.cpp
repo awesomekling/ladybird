@@ -934,7 +934,7 @@ RefPtr<StyleValue const> Parser::parse_as_descriptor_value(AtRuleID at_rule_id, 
 {
     auto component_values = RustComponentValueParser::parse_a_list_of_component_values(m_input, m_encoding);
     auto tokens = TokenStream(component_values);
-    auto parsed_value = parse_descriptor_value(at_rule_id, descriptor_name_and_id, tokens);
+    auto parsed_value = parse_descriptor_value(at_rule_id, descriptor_name_and_id, tokens, m_input);
     if (parsed_value.is_error())
         return nullptr;
     return parsed_value.release_value();
