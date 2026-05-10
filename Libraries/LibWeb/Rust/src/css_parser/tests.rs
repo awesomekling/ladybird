@@ -41,12 +41,13 @@ use super::{
     RustOwnedAnchorFunction, RustOwnedAnchorNameOrScope, RustOwnedAnchorSizeFunction, RustOwnedAnimationName,
     RustOwnedAnimationNameItem, RustOwnedAspectRatio, RustOwnedBackgroundSize, RustOwnedBackgroundSizeList,
     RustOwnedBasicShape, RustOwnedBasicShapeFillRule, RustOwnedBasicShapeKind, RustOwnedBasicShapePolygonPoint,
-    RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset, RustOwnedBorderImageOutsetList,
-    RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList, RustOwnedBorderImageSlice, RustOwnedBorderImageSource,
-    RustOwnedBorderImageWidthList, RustOwnedBorderRadius, RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme,
-    RustOwnedColumns, RustOwnedComponentShorthandItem, RustOwnedContain, RustOwnedContainerType, RustOwnedContent,
-    RustOwnedContentItem, RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape,
-    RustOwnedCounterDefinition, RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
+    RustOwnedBasicShapeRadialExtent, RustOwnedBorder, RustOwnedBorderImage, RustOwnedBorderImageOutset,
+    RustOwnedBorderImageOutsetList, RustOwnedBorderImageRepeat, RustOwnedBorderImageRepeatList,
+    RustOwnedBorderImageSlice, RustOwnedBorderImageSource, RustOwnedBorderImageWidthList, RustOwnedBorderRadius,
+    RustOwnedBorderSpacing, RustOwnedColor, RustOwnedColorScheme, RustOwnedColumns, RustOwnedComponentShorthandItem,
+    RustOwnedContain, RustOwnedContainerType, RustOwnedContent, RustOwnedContentItem,
+    RustOwnedCoordinatingValueListShorthandItem, RustOwnedCornerShape, RustOwnedCounterDefinition,
+    RustOwnedCounterDefinitions, RustOwnedCounterFunction, RustOwnedCounterFunctionKind,
     RustOwnedCounterStyleAdditiveTuple, RustOwnedCounterStylePadDescriptor, RustOwnedCounterStyleRangeDescriptor,
     RustOwnedCounterStyleSystemDescriptor, RustOwnedCursor, RustOwnedCursorImage, RustOwnedDescriptorPrimitiveValue,
     RustOwnedDisplay, RustOwnedExplicitGridTrack, RustOwnedFilterValue, RustOwnedFilterValueList, RustOwnedFitContent,
@@ -63,16 +64,16 @@ use super::{
     RustOwnedPageSizeDescriptor, RustOwnedPaint, RustOwnedPaintOrder, RustOwnedPlaceShorthand, RustOwnedPosition,
     RustOwnedPositionAnchor, RustOwnedPositionArea, RustOwnedPositionComponent, RustOwnedPositionList,
     RustOwnedPositionListItem, RustOwnedPositionTryFallback, RustOwnedPositionTryFallbacks, RustOwnedPositionTryOrder,
-    RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue, RustOwnedRect,
-    RustOwnedRepeatStyle, RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline,
-    RustOwnedScrollbarColor, RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox,
-    RustOwnedShapeOutside, RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray,
-    RustOwnedStyleValue, RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator,
-    RustOwnedStyleValueParseResult, RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent,
-    RustOwnedTextUnderlinePosition, RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle,
-    RustOwnedTimelineName, RustOwnedTimelineNameItem, RustOwnedTouchAction, RustOwnedTransformLonghand,
-    RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin, RustOwnedTransformation,
-    RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
+    RustOwnedPositionVisibility, RustOwnedPositionalValueListShorthandItem, RustOwnedPrimitiveValue,
+    RustOwnedRadialGradientShape, RustOwnedRadialGradientSizeComponent, RustOwnedRect, RustOwnedRepeatStyle,
+    RustOwnedRepeatStyleList, RustOwnedResolvedPosition, RustOwnedScrollTimeline, RustOwnedScrollbarColor,
+    RustOwnedScrollbarGutter, RustOwnedShadow, RustOwnedShadowPlacement, RustOwnedShapeBox, RustOwnedShapeOutside,
+    RustOwnedSimpleFilterFunction, RustOwnedSingleShadow, RustOwnedStrokeDasharray, RustOwnedStyleValue,
+    RustOwnedStyleValueKind, RustOwnedStyleValueList, RustOwnedStyleValueListSeparator, RustOwnedStyleValueParseResult,
+    RustOwnedTextDecoration, RustOwnedTextDecorationLine, RustOwnedTextIndent, RustOwnedTextUnderlinePosition,
+    RustOwnedTextWrap, RustOwnedTextWrapMode, RustOwnedTextWrapStyle, RustOwnedTimelineName, RustOwnedTimelineNameItem,
+    RustOwnedTouchAction, RustOwnedTransformLonghand, RustOwnedTransformLonghandFunction, RustOwnedTransformOrigin,
+    RustOwnedTransformation, RustOwnedTransformationArgument, RustOwnedTransitionBehavior, RustOwnedTransitionProperty,
     RustOwnedTreeCountingFunction, RustOwnedTreeCountingFunctionKind, RustOwnedUrl, RustOwnedUrlPayload,
     RustOwnedViewTimeline, RustOwnedViewTimelineInset, RustOwnedWhiteSpace, RustOwnedWhiteSpaceTrim,
     SelectorCombinator, SelectorParsingMode, SelectorSyntax, SelectorType, SimpleSelectorSyntax, SyntaxNode,
@@ -2984,7 +2985,7 @@ fn parses_style_values_with_rust_owned_ast() {
         Some(RustOwnedStyleValue {
             property_id: PropertyId::Content,
             value: RustOwnedStyleValueKind::Content(RustOwnedContent::Items {
-                items: vec![RustOwnedContentItem::Image(RustOwnedImage {
+                items: vec![RustOwnedContentItem::Image(Box::new(RustOwnedImage {
                     kind: RustOwnedImageKind::Url,
                     source: None,
                     url: Some(RustOwnedUrlPayload {
@@ -2995,7 +2996,7 @@ fn parses_style_values_with_rust_owned_ast() {
                     gradient: None,
                     image_set: None,
                     component_values: vec![],
-                })],
+                }))],
                 alt_text: vec![],
             }),
         })
@@ -3067,6 +3068,21 @@ fn parses_style_values_with_rust_owned_ast() {
         &header.linear_direction,
         Some(RustOwnedLinearGradientDirection::AngleOrZero(component_values)) if component_values.len() == 1
     ));
+    let gradient = parse_rust_owned_image("conic-gradient(from 45deg at left top in oklab, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert!(matches!(&header.conic_from_angle, Some(component_values) if component_values.len() == 1));
+    assert!(matches!(&header.conic_position, Some(component_values) if component_values.len() == 2));
+    assert!(header.color_interpolation_method.is_some());
+    let gradient = parse_rust_owned_image("radial-gradient(circle closest-side at left top, black, white)").unwrap();
+    let header = gradient.gradient.as_ref().unwrap().header.as_ref().unwrap();
+    assert_eq!(header.radial_shape, Some(RustOwnedRadialGradientShape::Circle));
+    assert_eq!(
+        header.radial_size,
+        vec![RustOwnedRadialGradientSizeComponent::Extent(
+            RustOwnedBasicShapeRadialExtent::ClosestSide
+        )]
+    );
+    assert!(matches!(&header.radial_position, Some(component_values) if component_values.len() == 2));
     assert_eq!(
         parse_rust_owned_style_value(
             &[PropertyId::BackgroundImage],

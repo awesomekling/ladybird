@@ -415,6 +415,11 @@ pub(crate) struct RustOwnedGradientHeader {
     pub(crate) component_values: Vec<ComponentValue>,
     pub(crate) color_interpolation_method: Option<Vec<ComponentValue>>,
     pub(crate) linear_direction: Option<RustOwnedLinearGradientDirection>,
+    pub(crate) conic_from_angle: Option<Vec<ComponentValue>>,
+    pub(crate) conic_position: Option<Vec<ComponentValue>>,
+    pub(crate) radial_shape: Option<RustOwnedRadialGradientShape>,
+    pub(crate) radial_size: Vec<RustOwnedRadialGradientSizeComponent>,
+    pub(crate) radial_position: Option<Vec<ComponentValue>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -433,6 +438,18 @@ pub(crate) enum RustOwnedGradientSideOrCorner {
     TopRight,
     BottomLeft,
     BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RustOwnedRadialGradientShape {
+    Circle,
+    Ellipse,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RustOwnedRadialGradientSizeComponent {
+    Extent(RustOwnedBasicShapeRadialExtent),
+    LengthPercentage(Vec<ComponentValue>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -774,7 +791,7 @@ pub(crate) enum RustOwnedContent {
 pub(crate) enum RustOwnedContentItem {
     Quote(String),
     String(String),
-    Image(RustOwnedImage),
+    Image(Box<RustOwnedImage>),
     Counter(RustOwnedCounterFunction),
 }
 

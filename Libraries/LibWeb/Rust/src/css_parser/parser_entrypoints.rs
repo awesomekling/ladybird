@@ -5245,6 +5245,23 @@ fn parse_gradient_function(function: &Function) -> Option<RustOwnedGradient> {
         linear_direction: (kind == RustOwnedGradientKind::Linear)
             .then(|| rust_owned_gradient_header_linear_direction(&groups[0], is_webkit_prefixed))
             .flatten(),
+        conic_from_angle: (kind == RustOwnedGradientKind::Conic)
+            .then(|| rust_owned_gradient_header_conic_from_angle(&groups[0]))
+            .flatten(),
+        conic_position: (kind == RustOwnedGradientKind::Conic)
+            .then(|| rust_owned_gradient_header_conic_position(&groups[0]))
+            .flatten(),
+        radial_shape: (kind == RustOwnedGradientKind::Radial)
+            .then(|| rust_owned_gradient_header_radial_shape_and_size(&groups[0]).map(|(shape, _)| shape))
+            .flatten()
+            .flatten(),
+        radial_size: (kind == RustOwnedGradientKind::Radial)
+            .then(|| rust_owned_gradient_header_radial_shape_and_size(&groups[0]).map(|(_, size)| size))
+            .flatten()
+            .unwrap_or_default(),
+        radial_position: (kind == RustOwnedGradientKind::Radial)
+            .then(|| rust_owned_gradient_header_radial_position(&groups[0]))
+            .flatten(),
     });
 
     Some(RustOwnedGradient {
@@ -5302,6 +5319,122 @@ fn rust_owned_gradient_header_linear_direction(
         }
         None
     })
+}
+
+fn rust_owned_gradient_header_conic_from_angle(component_values: &[ComponentValue]) -> Option<Vec<ComponentValue>> {
+    let mut parser = ComponentValueParser::new(remove_whitespace_component_values(component_values));
+
+    while parser.has_next_component_value() {
+        if parser.consume_ident_matching("from") {
+            let angle = consume_rust_owned_angle_or_zero(&mut parser)?;
+            return Some(angle);
+        }
+
+        if parser.consume_ident_matching("at") {
+            consume_rust_owned_position_until_color_interpolation_method(&mut parser)?;
+            continue;
+        }
+
+        if consume_color_interpolation_method(&mut parser) {
+            continue;
+        }
+
+        return None;
+    }
+
+    None
+}
+
+fn rust_owned_gradient_header_conic_position(component_values: &[ComponentValue]) -> Option<Vec<ComponentValue>> {
+    let mut parser = ComponentValueParser::new(remove_whitespace_component_values(component_values));
+
+    while parser.has_next_component_value() {
+        if parser.consume_ident_matching("from") {
+            consume_rust_owned_angle_or_zero(&mut parser)?;
+            continue;
+        }
+
+        if parser.consume_ident_matching("at") {
+            return consume_rust_owned_position_until_color_interpolation_method(&mut parser);
+        }
+
+        if consume_color_interpolation_method(&mut parser) {
+            continue;
+        }
+
+        return None;
+    }
+
+    None
+}
+
+fn rust_owned_gradient_header_radial_shape_and_size(
+    component_values: &[ComponentValue],
+) -> Option<(
+    Option<RustOwnedRadialGradientShape>,
+    Vec<RustOwnedRadialGradientSizeComponent>,
+)> {
+    let mut parser = ComponentValueParser::new(remove_whitespace_component_values(component_values));
+    let mut shape = None;
+    let mut size = Vec::new();
+
+    consume_color_interpolation_method(&mut parser);
+
+    for _ in 0..2 {
+        if shape.is_none()
+            && let Some(parsed_shape) = consume_rust_owned_radial_gradient_shape(&mut parser)
+        {
+            shape = Some(parsed_shape);
+            continue;
+        }
+
+        if size.len() < 2
+            && let Some(component) = consume_rust_owned_radial_gradient_size_component(&mut parser)
+        {
+            size.push(component);
+            continue;
+        }
+
+        break;
+    }
+
+    if shape.is_none()
+        && let Some(parsed_shape) = consume_rust_owned_radial_gradient_shape(&mut parser)
+    {
+        shape = Some(parsed_shape);
+    }
+
+    if shape.is_some()
+        && size.len() == 1
+        && let Some(component) = consume_rust_owned_radial_gradient_size_component(&mut parser)
+    {
+        size.push(component);
+    }
+
+    (shape.is_some() || !size.is_empty()).then_some((shape, size))
+}
+
+fn rust_owned_gradient_header_radial_position(component_values: &[ComponentValue]) -> Option<Vec<ComponentValue>> {
+    let mut parser = ComponentValueParser::new(remove_whitespace_component_values(component_values));
+
+    consume_color_interpolation_method(&mut parser);
+
+    for _ in 0..3 {
+        if consume_rust_owned_radial_gradient_shape(&mut parser).is_some() {
+            continue;
+        }
+        if consume_rust_owned_radial_gradient_size_component(&mut parser).is_some() {
+            continue;
+        }
+        break;
+    }
+
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("at") {
+        return consume_rust_owned_position_until_color_interpolation_method(&mut parser);
+    }
+
+    None
 }
 
 fn parse_linear_gradient_function(function: &Function, is_webkit_prefixed: bool) -> Option<usize> {
@@ -5767,6 +5900,17 @@ fn consume_radial_gradient_shape(parser: &mut ComponentValueParser) -> Option<Ra
     None
 }
 
+fn consume_rust_owned_radial_gradient_shape(parser: &mut ComponentValueParser) -> Option<RustOwnedRadialGradientShape> {
+    parser.discard_whitespace();
+    if parser.consume_ident_matching("circle") {
+        return Some(RustOwnedRadialGradientShape::Circle);
+    }
+    if parser.consume_ident_matching("ellipse") {
+        return Some(RustOwnedRadialGradientShape::Ellipse);
+    }
+    None
+}
+
 fn consume_radial_gradient_size_component(parser: &mut ComponentValueParser) -> Option<bool> {
     // https://drafts.csswg.org/css-images-4/#radial-size
     // <radial-size> = <radial-extent>{1,2} | <length-percentage [0,∞]>{1,2}
@@ -5788,6 +5932,32 @@ fn consume_radial_gradient_size_component(parser: &mut ComponentValueParser) -> 
     None
 }
 
+fn consume_rust_owned_radial_gradient_size_component(
+    parser: &mut ComponentValueParser,
+) -> Option<RustOwnedRadialGradientSizeComponent> {
+    // https://drafts.csswg.org/css-images-4/#radial-size
+    // <radial-size> = <radial-extent>{1,2} | <length-percentage [0,∞]>{1,2}
+    // <radial-extent> = closest-corner | closest-side | farthest-corner | farthest-side
+    // AD-HOC: This accepts mixed <radial-extent> and <length-percentage> pairs for compatibility.
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+
+    if let Some(extent) = component_value_parse_as_radial_extent(component_value) {
+        parser.index += 1;
+        return Some(RustOwnedRadialGradientSizeComponent::Extent(extent));
+    }
+
+    if component_value_parse_as_non_negative_length_percentage(component_value) {
+        let component_value = component_value.clone();
+        parser.index += 1;
+        return Some(RustOwnedRadialGradientSizeComponent::LengthPercentage(vec![
+            component_value,
+        ]));
+    }
+
+    None
+}
+
 fn consume_angle_or_zero(parser: &mut ComponentValueParser) -> bool {
     parser.discard_whitespace();
     let Some(component_value) = parser.next_component_value() else {
@@ -5800,6 +5970,17 @@ fn consume_angle_or_zero(parser: &mut ComponentValueParser) -> bool {
     true
 }
 
+fn consume_rust_owned_angle_or_zero(parser: &mut ComponentValueParser) -> Option<Vec<ComponentValue>> {
+    parser.discard_whitespace();
+    let component_value = parser.next_component_value()?;
+    if !component_value_parse_as_angle_or_zero(component_value) {
+        return None;
+    }
+    let component_value = component_value.clone();
+    parser.index += 1;
+    Some(vec![component_value])
+}
+
 fn consume_color_interpolation_method(parser: &mut ComponentValueParser) -> bool {
     parser.discard_whitespace();
     let remaining = parser.remaining_component_values();
@@ -5810,6 +5991,21 @@ fn consume_color_interpolation_method(parser: &mut ComponentValueParser) -> bool
         }
     }
     false
+}
+
+fn consume_rust_owned_position_until_color_interpolation_method(
+    parser: &mut ComponentValueParser,
+) -> Option<Vec<ComponentValue>> {
+    parser.discard_whitespace();
+    let remaining = parser.remaining_component_values();
+    for length in (1..=remaining.len()).rev() {
+        if component_values_parse_as_position(&remaining[..length], false) {
+            let position = remaining[..length].to_vec();
+            parser.index += length;
+            return Some(position);
+        }
+    }
+    None
 }
 
 fn consume_position_until_color_interpolation_method(parser: &mut ComponentValueParser) -> bool {
@@ -8743,6 +8939,7 @@ pub(super) fn component_value_parse_as_content_item(
 
     if component_value_parse_as_content_image(component_value) {
         return rust_owned_image_from_component_value(component_value, filtered_input_string)
+            .map(Box::new)
             .map(RustOwnedContentItem::Image);
     }
 
