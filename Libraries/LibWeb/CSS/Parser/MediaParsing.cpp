@@ -37,13 +37,8 @@ NonnullRefPtr<MediaQuery> Parser::materialize_rust_media_query(RustComponentValu
 Vector<NonnullRefPtr<MediaQuery>> Parser::parse_as_media_query_list()
 {
     // https://www.w3.org/TR/mediaqueries-4/#mq-list
-    return parse_a_media_query_list_from_string(m_input, m_encoding);
-}
-
-Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(StringView input, StringView encoding)
-{
     AK::Vector<NonnullRefPtr<MediaQuery>> media_queries;
-    auto rust_media_queries = RustComponentValueParser::parse_a_media_query_list(input, encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
+    auto rust_media_queries = RustComponentValueParser::parse_a_media_query_list(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
         return materialize_rust_media_feature_test(move(media_feature_test));
     });
 
@@ -55,7 +50,7 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(S
 
 RefPtr<MediaQuery> Parser::parse_as_media_query()
 {
-    auto media_queries = parse_a_media_query_list_from_string(m_input, m_encoding);
+    auto media_queries = parse_as_media_query_list();
     if (media_queries.is_empty() && m_input.bytes_as_string_view().is_whitespace()) {
         auto media_query = MediaQuery::create();
         media_query->set_negated_for_parser(true);

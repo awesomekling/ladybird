@@ -168,13 +168,8 @@ GC::Ref<CSS::CSSStyleSheet> Parser::parse_as_css_stylesheet(Optional<::URL::URL>
 
 RefPtr<Supports> Parser::parse_as_supports()
 {
-    return parse_a_supports_from_string(m_input, m_encoding);
-}
-
-RefPtr<Supports> Parser::parse_a_supports_from_string(StringView input, StringView encoding)
-{
     m_rule_context.append(RuleContext::SupportsCondition);
-    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(input, encoding, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
+    auto maybe_condition = RustComponentValueParser::parse_a_supports_condition(m_input, m_encoding, [this](Optional<RustComponentValueParser::SupportsFeature>&& supports_feature, Vector<ComponentValue>&& component_values) -> OwnPtr<BooleanExpression> {
         TokenStream<ComponentValue> token_stream { component_values };
         return parse_supports_feature(token_stream, move(supports_feature));
     });

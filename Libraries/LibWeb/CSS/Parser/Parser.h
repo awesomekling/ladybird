@@ -194,9 +194,6 @@ private:
 
     Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(TokenStream<ComponentValue>&);
 
-    Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list_from_string(StringView, StringView encoding);
-    RefPtr<Supports> parse_a_supports_from_string(StringView, StringView encoding);
-
     enum class Nested {
         No,
         Yes,
