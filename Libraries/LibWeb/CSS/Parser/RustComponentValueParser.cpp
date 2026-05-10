@@ -5578,14 +5578,6 @@ Optional<RustComponentValueParser::CounterFunction> RustComponentValueParser::pa
     return counter;
 }
 
-bool RustComponentValueParser::parse_optional_declaration_value_descriptor(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_optional_declaration_value_descriptor(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
 RustComponentValueParser::ScrollFunction RustComponentValueParser::parse_scroll_function(StringView input, StringView encoding)
 {
     auto filtered_input = decode_and_filter_code_points(input, encoding);

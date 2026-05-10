@@ -1159,7 +1159,6 @@ public:
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
-    static bool parse_optional_declaration_value_descriptor(StringView input, StringView encoding);
     static Optional<Vector<u32>> parse_font_feature_values_feature_value(StringView input, StringView encoding);
     static Optional<Rule> parse_a_rule(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
     static Vector<RuleOrListOfDeclarations> parse_a_blocks_contents(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_media_feature_test, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_supports_feature, AK::Function<bool(Declaration const&)> supports_declaration_is_supported);
