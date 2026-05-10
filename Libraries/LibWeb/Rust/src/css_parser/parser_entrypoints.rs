@@ -8635,7 +8635,13 @@ pub(super) fn component_value_parse_as_nested_number(
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Number { number },
             ..
-        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        }) => {
+            if number.value() >= f32::MIN as f64 && number.value() <= f32::MAX as f64 {
+                Some(RustOwnedNestedPrimitiveValue::Number(number.value()))
+            } else {
+                rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)
+            }
+        }
         ComponentValue::Function(_) => parse_rust_owned_math_function(
             PropertyValueType::Number,
             std::slice::from_ref(component_value),
@@ -8688,7 +8694,13 @@ pub(super) fn component_value_parse_as_nested_number_percentage(
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Number { number },
             ..
-        }) => Some(RustOwnedNestedPrimitiveValue::Number(number.value())),
+        }) => {
+            if number.value() >= f32::MIN as f64 && number.value() <= f32::MAX as f64 {
+                Some(RustOwnedNestedPrimitiveValue::Number(number.value()))
+            } else {
+                rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)
+            }
+        }
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Percentage { number },
             ..
@@ -8776,7 +8788,9 @@ pub(super) fn component_value_parse_as_nested_integer(
         ComponentValue::PreservedToken(Token {
             token_type: TokenType::Number { number },
             ..
-        }) => numeric_value_to_i32(*number).map(RustOwnedNestedPrimitiveValue::Integer),
+        }) => numeric_value_to_i32(*number)
+            .map(RustOwnedNestedPrimitiveValue::Integer)
+            .or_else(|| rust_owned_nested_source_from_component_values(std::slice::from_ref(component_value), source)),
         ComponentValue::Function(_) => parse_rust_owned_math_function(
             PropertyValueType::Number,
             std::slice::from_ref(component_value),

@@ -2901,171 +2901,167 @@ RefPtr<PositionStyleValue const> Parser::parse_position_value(TokenStream<Compon
 RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens)
 {
     auto transaction = tokens.begin_transaction();
-
     tokens.discard_whitespace();
     if (!tokens.has_next_token())
         return nullptr;
 
-    auto serialized_easing = serialize_component_values_for_reparsing({ &tokens.next_token(), 1 });
-    if (RustComponentValueParser::parse_easing(serialized_easing.bytes_as_string_view(), "utf-8"sv) == FFI::CssEasingValueKind::Invalid)
+    auto const& component_value = tokens.consume_a_token();
+    auto serialized_easing = serialize_component_values_for_reparsing({ &component_value, 1 });
+    PropertyID property_id = PropertyID::Animation;
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, serialized_easing.bytes_as_string_view());
+    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::CoordinatingValueListShorthand)
         return nullptr;
 
-    auto const& part = tokens.consume_a_token();
-
-    if (part.is(Token::Type::Ident)) {
-        auto name = part.token().ident();
-        auto maybe_simple_easing = [&] -> RefPtr<EasingStyleValue const> {
-            if (name.equals_ignoring_ascii_case("step-start"sv))
-                return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), StepPosition::Start });
-            if (name.equals_ignoring_ascii_case("step-end"sv))
-                return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), StepPosition::End });
-            return {};
-        }();
-
-        if (!maybe_simple_easing)
-            return nullptr;
-
-        transaction.commit();
-        return maybe_simple_easing;
+    RustComponentValueParser::CoordinatingValueListShorthandItem const* easing = nullptr;
+    for (auto const& item : rust_style_value->coordinating_value_list_shorthand_items) {
+        if (item.layer_index == 0 && item.property_id == PropertyID::AnimationTimingFunction) {
+            if (easing)
+                return nullptr;
+            easing = &item;
+        }
     }
-
-    if (!part.is_function())
+    if (!easing)
         return nullptr;
 
-    TokenStream argument_tokens { part.function().value };
-    auto comma_separated_arguments = parse_a_comma_separated_list_of_component_values(argument_tokens);
+    auto parse_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_number_value(value_tokens, range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
+                return nullptr;
+            return parsed;
+        }
 
-    // Remove whitespace
-    for (auto& argument : comma_separated_arguments)
-        argument.remove_all_matching([](auto& value) { return value.is(Token::Type::Whitespace); });
+        if (value.numeric_value.has_value()) {
+            if (value.primitive_kind != FFI::CssPrimitiveValueKind::Number || !range.contains(*value.numeric_value))
+                return nullptr;
+            return NumberStyleValue::create(*value.numeric_value);
+        }
 
-    auto name = part.function().name;
-    auto context_guard = push_temporary_value_parsing_context(FunctionContext { name });
+        return nullptr;
+    };
 
-    if (name.equals_ignoring_ascii_case("linear"sv)) {
-        // linear() = linear( [ <number> && <percentage>{0,2} ]# )
-        Vector<EasingStyleValue::Linear::Stop> stops;
-        for (auto const& argument : comma_separated_arguments) {
-            TokenStream argument_tokens { argument };
+    auto parse_nested_percentage = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value) -> RefPtr<StyleValue const> {
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_percentage_value(value_tokens, infinite_range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
+                return nullptr;
+            return parsed;
+        }
 
-            RefPtr<StyleValue const> output;
-            RefPtr<StyleValue const> first_input;
-            RefPtr<StyleValue const> second_input;
+        if (value.numeric_value.has_value()) {
+            if (value.primitive_kind != FFI::CssPrimitiveValueKind::Percentage)
+                return nullptr;
+            return PercentageStyleValue::create(Percentage { *value.numeric_value });
+        }
 
-            if (auto maybe_output = parse_number_value(argument_tokens, infinite_range))
-                output = maybe_output;
+        return nullptr;
+    };
 
-            if (auto maybe_first_input = parse_percentage_value(argument_tokens, infinite_range)) {
-                first_input = maybe_first_input;
-                if (auto maybe_second_input = parse_percentage_value(argument_tokens, infinite_range)) {
-                    second_input = maybe_second_input;
+    auto parse_nested_integer = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
+        if (!value.source_component_values.is_empty()) {
+            TokenStream value_tokens { value.source_component_values };
+            auto parsed = parse_integer_value(value_tokens, range);
+            value_tokens.discard_whitespace();
+            if (!parsed || value_tokens.has_next_token())
+                return nullptr;
+            return parsed;
+        }
+
+        if (value.numeric_value.has_value()) {
+            if (value.primitive_kind != FFI::CssPrimitiveValueKind::Integer || !range.contains(*value.numeric_value))
+                return nullptr;
+            return IntegerStyleValue::create(static_cast<i32>(*value.numeric_value));
+        }
+
+        return nullptr;
+    };
+
+    auto materialize_easing = [&]() -> RefPtr<StyleValue const> {
+        enum : u8 {
+            Keyword,
+            Linear,
+            CubicBezier,
+            Steps,
+        };
+
+        switch (easing->easing_function_kind) {
+        case Keyword:
+            return EasingStyleValue::create(EasingStyleValue::Steps { IntegerStyleValue::create(1), easing->easing_function_step_position });
+        case Linear: {
+            auto context_guard = push_temporary_value_parsing_context(FunctionContext { "linear"sv });
+            Vector<EasingStyleValue::Linear::Stop> stops;
+            for (auto const& stop : easing->linear_easing_stops) {
+                auto output = parse_nested_number(stop.output, infinite_range);
+                if (!output)
+                    return nullptr;
+
+                RefPtr<StyleValue const> first_input;
+                if (stop.first_stop_length.has_value()) {
+                    first_input = parse_nested_percentage(*stop.first_stop_length);
+                    if (!first_input)
+                        return nullptr;
+                }
+
+                auto output_value = output.release_nonnull();
+                stops.append({ output_value, first_input });
+                if (stop.second_stop_length.has_value()) {
+                    auto second_input = parse_nested_percentage(*stop.second_stop_length);
+                    if (!second_input)
+                        return nullptr;
+                    stops.append({ output_value, second_input.release_nonnull() });
                 }
             }
-
-            if (auto maybe_output = parse_number_value(argument_tokens, infinite_range)) {
-                if (output)
-                    return nullptr;
-                output = maybe_output;
-            }
-
-            if (argument_tokens.has_next_token() || !output)
+            if (stops.is_empty())
                 return nullptr;
-
-            stops.append({ *output, first_input });
-            if (second_input)
-                stops.append({ *output, second_input });
+            return EasingStyleValue::create(EasingStyleValue::Linear { move(stops) });
         }
-
-        if (stops.is_empty())
-            return nullptr;
-
-        transaction.commit();
-        return EasingStyleValue::create(EasingStyleValue::Linear { move(stops) });
-    }
-
-    if (name.equals_ignoring_ascii_case("cubic-bezier"sv)) {
-        if (comma_separated_arguments.size() != 4)
-            return nullptr;
-
-        for (auto const& argument : comma_separated_arguments) {
-            if (argument.size() != 1)
+        case CubicBezier: {
+            auto context_guard = push_temporary_value_parsing_context(FunctionContext { "cubic-bezier"sv });
+            if (easing->easing_function_values.size() != 4)
                 return nullptr;
+            auto x1 = parse_nested_number(easing->easing_function_values[0], { .min = 0, .max = 1 });
+            auto y1 = parse_nested_number(easing->easing_function_values[1], infinite_range);
+            auto x2 = parse_nested_number(easing->easing_function_values[2], { .min = 0, .max = 1 });
+            auto y2 = parse_nested_number(easing->easing_function_values[3], infinite_range);
+            if (!x1 || !y1 || !x2 || !y2)
+                return nullptr;
+            return EasingStyleValue::create(EasingStyleValue::CubicBezier {
+                x1.release_nonnull(),
+                y1.release_nonnull(),
+                x2.release_nonnull(),
+                y2.release_nonnull(),
+            });
         }
-
-        auto parse_argument = [this, &comma_separated_arguments](auto index, NumericRange accepted_range) {
-            TokenStream<ComponentValue> argument_tokens { comma_separated_arguments[index] };
-            return parse_number_value(argument_tokens, accepted_range);
-        };
-
-        auto x1 = parse_argument(0, { .min = 0, .max = 1 });
-        auto x2 = parse_argument(2, { .min = 0, .max = 1 });
-        auto y1 = parse_argument(1, infinite_range);
-        auto y2 = parse_argument(3, infinite_range);
-        if (!x1 || !y1 || !x2 || !y2)
-            return nullptr;
-
-        EasingStyleValue::CubicBezier bezier {
-            x1.release_nonnull(),
-            y1.release_nonnull(),
-            x2.release_nonnull(),
-            y2.release_nonnull(),
-        };
-
-        transaction.commit();
-        return EasingStyleValue::create(bezier);
-    }
-
-    if (name.equals_ignoring_ascii_case("steps"sv)) {
-        if (comma_separated_arguments.is_empty() || comma_separated_arguments.size() > 2)
-            return nullptr;
-
-        for (auto const& argument : comma_separated_arguments) {
-            if (argument.size() != 1)
+        case Steps: {
+            auto context_guard = push_temporary_value_parsing_context(FunctionContext { "steps"sv });
+            if (easing->easing_function_values.size() != 1)
                 return nullptr;
+            auto position = easing->easing_function_step_position;
+
+            // https://drafts.csswg.org/css-easing/#step-easing-functions
+            // If the <step-position> is jump-none, the <integer> must be at least 2, or the function is invalid.
+            // Otherwise, the <integer> must be at least 1, or the function is invalid.
+            double min_intervals = position == StepPosition::JumpNone ? 2 : 1;
+            auto intervals = parse_nested_integer(easing->easing_function_values[0], NumericRange { .min = min_intervals, .max = AK::NumericLimits<i32>::max() });
+            if (!intervals)
+                return nullptr;
+            return EasingStyleValue::create(EasingStyleValue::Steps { intervals.release_nonnull(), position });
         }
-
-        StepPosition position = StepPosition::End;
-
-        if (comma_separated_arguments.size() == 2) {
-            if (comma_separated_arguments[1].size() != 1)
-                return nullptr;
-
-            auto token = comma_separated_arguments[1][0];
-
-            if (!token.is(Token::Type::Ident))
-                return nullptr;
-
-            auto keyword = keyword_from_string(token.token().ident());
-
-            if (!keyword.has_value())
-                return nullptr;
-
-            auto step_position = keyword_to_step_position(keyword.value());
-
-            if (!step_position.has_value())
-                return nullptr;
-
-            position = step_position.value();
-        }
-
-        auto const& intervals_argument = comma_separated_arguments[0][0];
-        auto intervals_token = TokenStream<ComponentValue>::of_single_token(intervals_argument);
-
-        // https://drafts.csswg.org/css-easing/#step-easing-functions
-        // If the <step-position> is jump-none, the <integer> must be at least 2, or the function is invalid.
-        // Otherwise, the <integer> must be at least 1, or the function is invalid.
-
-        double min_internals = position == StepPosition::JumpNone ? 2 : 1;
-        auto intervals = parse_integer_value(intervals_token, NumericRange { .min = min_internals, .max = AK::NumericLimits<i32>::max() });
-
-        if (!intervals)
+        default:
             return nullptr;
+        }
+    };
 
-        transaction.commit();
-        return EasingStyleValue::create(EasingStyleValue::Steps { intervals.release_nonnull(), position });
-    }
+    auto value = materialize_easing();
+    if (!value)
+        return nullptr;
 
-    return nullptr;
+    transaction.commit();
+    return value;
 }
 
 // https://drafts.csswg.org/css-values-4/#url-value
