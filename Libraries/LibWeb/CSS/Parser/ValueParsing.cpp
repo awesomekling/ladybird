@@ -55,8 +55,6 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
-#include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
-#include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
@@ -1206,18 +1204,6 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
     return FunctionStyleValue::create("view"_fly_string, TupleStyleValue::create(move(tuple)));
 }
 
-// https://www.w3.org/TR/CSS2/visufx.html#value-def-shape
-RefPtr<StyleValue const> Parser::parse_rect_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    auto transaction = tokens.begin_transaction();
-    auto value = parse_css_value_for_property(PropertyID::Clip, tokens, original_source_text);
-    if (!value || !value->is_rect())
-        return nullptr;
-
-    transaction.commit();
-    return value;
-}
-
 // https://www.w3.org/TR/css-color-4/#typedef-hue
 RefPtr<StyleValue const> Parser::parse_hue_none_value(TokenStream<ComponentValue>& tokens)
 {
@@ -2219,19 +2205,6 @@ RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentV
     }
 
     return nullptr;
-}
-
-// https://drafts.csswg.org/css-values-4/#ratios
-RefPtr<StyleValue const> Parser::parse_ratio_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    // <ratio> = <number [0,∞]> [ / <number [0,∞]> ]?
-    auto transaction = tokens.begin_transaction();
-    auto value = parse_css_value_for_property(PropertyID::AspectRatio, tokens, original_source_text);
-    if (!value || !value->is_ratio())
-        return nullptr;
-
-    transaction.commit();
-    return value;
 }
 
 RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
@@ -3398,9 +3371,9 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Position:
         return parse_rust_owned_property_value(PropertyID::ObjectPosition, [](StyleValue const& value) { return value.is_position(); });
     case ValueType::Ratio:
-        return parse_ratio_value(tokens, original_source_text);
+        return parse_rust_owned_property_value(PropertyID::AspectRatio, [](StyleValue const& value) { return value.is_ratio(); });
     case ValueType::Rect:
-        return parse_rect_value(tokens, original_source_text);
+        return parse_rust_owned_property_value(PropertyID::Clip, [](StyleValue const& value) { return value.is_rect(); });
     case ValueType::Resolution:
         return parse_resolution_value(tokens, infinite_range, original_source_text);
     case ValueType::ScrollFunction:

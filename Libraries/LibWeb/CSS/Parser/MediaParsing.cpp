@@ -148,7 +148,8 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
             }
             case FFI::CssMediaFeatureValueSyntaxKind::Ratio: {
                 value_tokens.discard_whitespace();
-                if (auto ratio = parse_ratio_value(value_tokens))
+                auto ratio = parse_css_value_for_property(PropertyID::AspectRatio, value_tokens);
+                if (ratio && ratio->is_ratio())
                     return MediaFeatureValue(MediaFeatureValue::Type::Ratio, ratio.release_nonnull());
                 return {};
             }
