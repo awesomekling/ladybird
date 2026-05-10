@@ -214,31 +214,6 @@ private:
 
     RefPtr<StyleValue const> parse_value(ValueType, TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
-    Optional<GridSize> parse_grid_track_breadth(TokenStream<ComponentValue>&);
-    Optional<GridSize> parse_grid_inflexible_breadth(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_grid_fixed_breadth(TokenStream<ComponentValue>&);
-
-    Optional<GridLineNames> parse_grid_line_names(TokenStream<ComponentValue>&);
-
-    Optional<GridRepeat> parse_grid_track_repeat(TokenStream<ComponentValue>&);
-    Optional<GridRepeat> parse_grid_auto_repeat(TokenStream<ComponentValue>&);
-    Optional<GridRepeat> parse_grid_fixed_repeat(TokenStream<ComponentValue>&);
-
-    using GridRepeatTypeParser = AK::Function<Optional<GridRepeatParams>(TokenStream<ComponentValue>&)>;
-    using GridTrackParser = AK::Function<Optional<ExplicitGridTrack>(TokenStream<ComponentValue>&)>;
-    Optional<GridRepeat> parse_grid_track_repeat_impl(TokenStream<ComponentValue>&, GridRepeatTypeParser const&, GridTrackParser const&);
-
-    using GridMinMaxParamParser = AK::Function<Optional<GridSize>(TokenStream<ComponentValue>&)>;
-    Optional<ExplicitGridTrack> parse_grid_minmax(TokenStream<ComponentValue>&, GridMinMaxParamParser const&, GridMinMaxParamParser const&);
-
-    Optional<ExplicitGridTrack> parse_grid_track_size(TokenStream<ComponentValue>&);
-    Optional<ExplicitGridTrack> parse_grid_fixed_size(TokenStream<ComponentValue>&);
-
-    enum class AllowTrailingLineNamesForEachTrack {
-        Yes,
-        No
-    };
-    [[nodiscard]] size_t parse_track_list_impl(TokenStream<ComponentValue>& tokens, GridTrackSizeList& output, GridTrackParser const& track_parsing_callback, AllowTrailingLineNamesForEachTrack = AllowTrailingLineNamesForEachTrack::No);
     Optional<URL> parse_url_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
