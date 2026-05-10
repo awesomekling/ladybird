@@ -55,12 +55,15 @@ Vector<NonnullRefPtr<MediaQuery>> Parser::parse_a_media_query_list_from_string(S
 
 RefPtr<MediaQuery> Parser::parse_as_media_query()
 {
-    auto rust_media_query = RustComponentValueParser::parse_a_media_query(m_input, m_encoding, [this](RustComponentValueParser::MediaFeatureTest&& media_feature_test) -> OwnPtr<BooleanExpression> {
-        return materialize_rust_media_feature_test(move(media_feature_test));
-    });
-    if (!rust_media_query.has_value())
+    auto media_queries = parse_a_media_query_list_from_string(m_input, m_encoding);
+    if (media_queries.is_empty() && m_input.bytes_as_string_view().is_whitespace()) {
+        auto media_query = MediaQuery::create();
+        media_query->set_negated_for_parser(true);
+        return media_query;
+    }
+    if (media_queries.size() != 1)
         return nullptr;
-    return materialize_rust_media_query(rust_media_query.release_value());
+    return media_queries.take_first();
 }
 
 OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentValueParser::MediaFeatureTest&& media_feature_test)

@@ -5119,30 +5119,6 @@ static void parse_media_query_syntax(
     builder.finish_media_condition();
 }
 
-Optional<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
-{
-    MediaQuerySyntaxBuilder builder {
-        .parse_test = move(parse_test),
-    };
-
-    auto parsed_media_query = false;
-    parse_media_query_syntax(
-        input,
-        encoding,
-        builder,
-        [&parsed_media_query](u8 const* input, size_t input_size, void* context, auto media_query_callback, auto event_callback, auto media_feature_callback, auto media_feature_value_callback, auto component_value_callback) {
-            parsed_media_query = FFI::rust_css_parse_media_query(input, input_size, context, media_query_callback, event_callback, media_feature_callback, media_feature_value_callback, component_value_callback);
-        });
-
-    if (!parsed_media_query) {
-        VERIFY(builder.media_queries.is_empty());
-        return {};
-    }
-
-    VERIFY(builder.media_queries.size() == 1);
-    return builder.media_queries.take_first();
-}
-
 Vector<RustComponentValueParser::MediaQuerySyntax> RustComponentValueParser::parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test)
 {
     MediaQuerySyntaxBuilder builder {
