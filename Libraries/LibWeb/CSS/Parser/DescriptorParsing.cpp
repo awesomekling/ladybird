@@ -450,8 +450,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
             return ParseError::SyntaxError;
     }
 
-    auto metadata = RustComponentValueParser::descriptor_metadata(at_rule_id, descriptor_name_and_id.id());
-
     if (substitution_functions_presence.has_any()) {
         // https://drafts.csswg.org/css-values-5/#resolve-property
         // Unless otherwise specified, arbitrary substitution functions can be used in place of any part of any
@@ -459,7 +457,7 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
 
         // NB: Since we are not in a property value context we only allow ASFs if they are explicitly allowed in
         //     Descriptors.json
-        if (!metadata.allow_arbitrary_substitution_functions) {
+        if (!RustComponentValueParser::descriptor_allows_arbitrary_substitution_functions(at_rule_id, descriptor_name_and_id.id())) {
             ErrorReporter::the().report(InvalidValueError {
                 .value_type = MUST(String::formatted("{}/{}", to_string(at_rule_id), descriptor_name_and_id.name())),
                 .value_string = tokens.dump_string(),

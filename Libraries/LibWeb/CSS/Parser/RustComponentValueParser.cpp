@@ -850,36 +850,11 @@ bool RustComponentValueParser::at_rule_supports_descriptor(AtRuleID at_rule_id, 
         static_cast<u8>(to_underlying(descriptor_id)));
 }
 
-DescriptorMetadata RustComponentValueParser::descriptor_metadata(AtRuleID at_rule_id, DescriptorID descriptor_id)
+bool RustComponentValueParser::descriptor_allows_arbitrary_substitution_functions(AtRuleID at_rule_id, DescriptorID descriptor_id)
 {
-    DescriptorMetadata metadata;
-    metadata.allow_arbitrary_substitution_functions = FFI::rust_css_descriptor_allows_arbitrary_substitution_functions(
+    return FFI::rust_css_descriptor_allows_arbitrary_substitution_functions(
         static_cast<u8>(to_underlying(at_rule_id)),
         static_cast<u8>(to_underlying(descriptor_id)));
-
-    auto parsed = FFI::rust_css_for_each_descriptor_syntax(
-        static_cast<u8>(to_underlying(at_rule_id)),
-        static_cast<u8>(to_underlying(descriptor_id)),
-        &metadata,
-        [](void* raw_metadata, FFI::CssDescriptorSyntaxKind kind, u16 property_id, FFI::CssDescriptorValueType value_type, u8 const* value_ptr, size_t value_len) {
-            auto& metadata = *static_cast<DescriptorMetadata*>(raw_metadata);
-            switch (kind) {
-            case FFI::CssDescriptorSyntaxKind::Keyword: {
-                auto keyword = keyword_from_string({ value_ptr, value_len });
-                VERIFY(keyword.has_value());
-                metadata.syntax.empend(keyword.release_value());
-                break;
-            }
-            case FFI::CssDescriptorSyntaxKind::Property:
-                metadata.syntax.empend(static_cast<PropertyID>(property_id));
-                break;
-            case FFI::CssDescriptorSyntaxKind::ValueType:
-                metadata.syntax.empend(descriptor_value_type_from_ffi(value_type));
-                break;
-            }
-        });
-    VERIFY(parsed);
-    return metadata;
 }
 
 static URL::Type url_function_type_from_rust(FFI::CssUrlFunctionType);
