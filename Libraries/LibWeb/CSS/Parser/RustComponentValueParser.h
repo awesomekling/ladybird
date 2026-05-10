@@ -1047,19 +1047,6 @@ public:
         bool is_string { false };
     };
 
-    struct ScrollFunction {
-        FFI::CssScrollFunctionValueKind kind;
-        FFI::CssScrollFunctionScrollerKind scroller;
-        FFI::CssScrollFunctionAxisKind axis;
-    };
-
-    struct ViewFunction {
-        FFI::CssViewFunctionValueKind kind;
-        FFI::CssScrollFunctionAxisKind axis;
-        FFI::CssViewFunctionInsetKind inset;
-        FFI::CssViewFunctionInsetPosition inset_position;
-    };
-
     enum class SelectorType : u8 {
         Standalone,
         Relative,
@@ -1119,6 +1106,8 @@ public:
     static Optional<DescriptorValue> parse_descriptor(AtRuleID, DescriptorID, StringView input, StringView encoding);
     static Optional<RustStyleValue> parse_style_value_for_property(ReadonlySpan<PropertyID>, StringView input,
         bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
+    static Optional<RustStyleValue> parse_style_value_for_value_type(PropertyID, ValueType, StringView input,
+        bool allow_quirky_length = false, bool allow_quirky_color = false, bool allow_svg_unitless_length = false, bool allow_svg_unitless_angle = false);
     static Optional<SimpleColor> parse_simple_color(StringView input, StringView encoding, bool allow_quirky_color);
     static Optional<PropertyNumericMetadata> property_numeric_metadata(ReadonlySpan<PropertyID>, ValueType);
     static OwnPtr<SyntaxNode> parse_as_syntax(StringView input, StringView encoding, LimitSingleComponentIdentToCustomIdent);
@@ -1134,8 +1123,6 @@ public:
     static Optional<URL> parse_a_url_function(StringView input, StringView encoding);
     static Optional<FlyString> parse_an_opentype_tag(StringView input, StringView encoding);
     static Optional<CounterFunction> parse_a_counter(StringView input, StringView encoding);
-    static ScrollFunction parse_scroll_function(StringView input, StringView encoding);
-    static ViewFunction parse_view_function(StringView input, StringView encoding);
     static FFI::CssPrimitiveValueKind parse_primitive_value_prefix(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssPrimitiveValueKind parse_primitive_value(StringView input, StringView encoding, FFI::CssPrimitiveValueType, FFI::CssPrimitiveValueOptions);
     static FFI::CssColorValueKind parse_color(StringView input, StringView encoding, bool allow_quirky_color);
@@ -1155,6 +1142,8 @@ private:
     using BooleanExpressionTestParser = AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Optional<SupportsFeature>&&, Vector<ComponentValue>&&)>;
     using RustBooleanExpressionParser = AK::Function<void(u8 const*, size_t, void*, BooleanExpressionEventCallback, SupportsFeatureCallback, MediaFeatureCallback, MediaFeatureValueCallback, ComponentValueCallback)>;
 
+    static Optional<RustStyleValue> parse_style_value(ReadonlySpan<PropertyID>, Optional<ValueType>, StringView input,
+        bool allow_quirky_length, bool allow_quirky_color, bool allow_svg_unitless_length, bool allow_svg_unitless_angle);
     static OwnPtr<BooleanExpression> parse_a_boolean_expression(StringView input, StringView encoding, MatchResult result_for_general_enclosed, BooleanExpressionTestParser parse_test, RustBooleanExpressionParser rust_parse_boolean_expression);
 };
 

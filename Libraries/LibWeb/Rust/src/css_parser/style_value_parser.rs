@@ -30,6 +30,44 @@ pub(crate) fn parse_rust_owned_style_value_for_property_with_options(
     parse_rust_owned_style_value_for_property_with_mode(property_ids, filtered_input, false, primitive_value_options)
 }
 
+pub(crate) fn parse_rust_owned_style_value_for_value_type_with_options(
+    property_id: u16,
+    value_type: &[u8],
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+) -> RustOwnedStyleValueParseResult {
+    let Ok(value_type) = std::str::from_utf8(value_type) else {
+        return RustOwnedStyleValueParseResult::Invalid;
+    };
+    let Some(value_type) = property_value_type_from_css_value_type_name(value_type) else {
+        return RustOwnedStyleValueParseResult::Invalid;
+    };
+    let Some(property_id) = property_id_from_u16(property_id) else {
+        return RustOwnedStyleValueParseResult::Invalid;
+    };
+
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let component_values = strip_whitespace(&component_values);
+    if !component_values_parse_as_property_value_type_with_options(value_type, filtered_input, primitive_value_options)
+    {
+        return RustOwnedStyleValueParseResult::Invalid;
+    }
+
+    let style_value = parse_rust_owned_generated_longhand_value_with_options(
+        property_id,
+        value_type,
+        filtered_input,
+        component_values,
+        primitive_value_options,
+    );
+    if matches!(style_value.value, RustOwnedStyleValueKind::GuaranteedInvalid) {
+        RustOwnedStyleValueParseResult::Invalid
+    } else {
+        RustOwnedStyleValueParseResult::Parsed(style_value)
+    }
+}
+
 pub(super) fn parse_rust_owned_style_value_for_property_with_mode(
     property_ids: &[u16],
     filtered_input: &[u8],

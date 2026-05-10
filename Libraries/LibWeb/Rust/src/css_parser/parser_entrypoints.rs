@@ -160,6 +160,51 @@ where
     true
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_style_value_for_value_type_with_options_and_calculation_callback<C, D, U, S, E>(
+    property_id: u16,
+    value_type: &[u8],
+    filtered_input: &[u8],
+    primitive_value_options: CssPrimitiveValueOptions,
+    mut callback: C,
+    mut calculation_callback: D,
+    mut url_modifier_callback: U,
+    source_component_value_callbacks: (&mut S, &mut E),
+) -> bool
+where
+    C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    D: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+    U: FnMut(&UrlModifier),
+    S: FnMut(u8),
+    E: FnMut(CssComponentValue),
+{
+    let RustOwnedStyleValueParseResult::Parsed(style_value) = parse_rust_owned_style_value_for_value_type_with_options(
+        property_id,
+        value_type,
+        filtered_input,
+        primitive_value_options,
+    ) else {
+        return false;
+    };
+    let Some(filtered_input_string) = str::from_utf8(filtered_input).ok() else {
+        return false;
+    };
+
+    emit_rust_owned_style_value_with_calculation_callback(
+        &style_value,
+        filtered_input_string,
+        &mut callback,
+        &mut calculation_callback,
+        &mut url_modifier_callback,
+        source_component_value_callbacks.0,
+        source_component_value_callbacks.1,
+    );
+    if let RustOwnedStyleValueKind::MathFunction(value) = &style_value.value {
+        emit_rust_owned_calculation_tree(&value.calculation, &mut calculation_callback);
+    }
+    true
+}
+
 pub(super) fn numeric_range_limit_to_f64(limit: Option<f64>, value_type: PropertyValueType, is_minimum: bool) -> f64 {
     match (limit, value_type, is_minimum) {
         (Some(limit), _, _) => limit,

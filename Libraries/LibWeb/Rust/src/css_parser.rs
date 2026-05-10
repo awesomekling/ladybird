@@ -109,6 +109,7 @@ use style_value_parser::{
     component_values_parse_as_generated_property_value_type, component_values_parse_as_property_value_type,
     generated_property_value_type_order, parse_rust_owned_style_value_for_property,
     parse_rust_owned_style_value_for_property_with_mode, parse_rust_owned_style_value_for_property_with_options,
+    parse_rust_owned_style_value_for_value_type_with_options,
 };
 #[cfg(test)]
 use style_value_parser::{

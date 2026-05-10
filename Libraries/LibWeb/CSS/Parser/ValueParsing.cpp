@@ -1045,14 +1045,14 @@ RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream
             serialized_scroll_function = function_token.to_string();
         return serialized_scroll_function->bytes_as_string_view();
     });
-    auto scroll_function = RustComponentValueParser::parse_scroll_function(scroll_function_source, "utf-8"sv);
-    if (scroll_function.kind == FFI::CssScrollFunctionValueKind::Invalid)
+    auto scroll_function = RustComponentValueParser::parse_style_value_for_value_type(PropertyID::AnimationTimeline, ValueType::ScrollFunction, scroll_function_source);
+    if (!scroll_function.has_value() || scroll_function->kind != FFI::CssStyleValueKind::ScrollFunction)
         return nullptr;
 
     StyleValueTuple tuple;
     tuple.resize_with_default_value(2, nullptr);
 
-    switch (scroll_function.scroller) {
+    switch (scroll_function->scroll_function_scroller) {
     case FFI::CssScrollFunctionScrollerKind::None:
     case FFI::CssScrollFunctionScrollerKind::Nearest:
         break;
@@ -1064,7 +1064,7 @@ RefPtr<FunctionStyleValue const> Parser::parse_scroll_function_value(TokenStream
         break;
     }
 
-    switch (scroll_function.axis) {
+    switch (scroll_function->scroll_function_axis) {
     case FFI::CssScrollFunctionAxisKind::None:
     case FFI::CssScrollFunctionAxisKind::Block:
         break;
@@ -1104,8 +1104,8 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
             serialized_view_function = function_token.to_string();
         return serialized_view_function->bytes_as_string_view();
     });
-    auto view_function = RustComponentValueParser::parse_view_function(view_function_source, "utf-8"sv);
-    if (view_function.kind == FFI::CssViewFunctionValueKind::Invalid)
+    auto view_function = RustComponentValueParser::parse_style_value_for_value_type(PropertyID::AnimationTimeline, ValueType::ViewFunction, view_function_source);
+    if (!view_function.has_value() || view_function->kind != FFI::CssStyleValueKind::ViewFunction)
         return nullptr;
 
     auto context_guard = push_temporary_value_parsing_context(FunctionContext { "view"sv });
@@ -1113,7 +1113,7 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
     StyleValueTuple tuple;
     tuple.resize_with_default_value(2, nullptr);
 
-    switch (view_function.axis) {
+    switch (view_function->scroll_function_axis) {
     case FFI::CssScrollFunctionAxisKind::None:
     case FFI::CssScrollFunctionAxisKind::Block:
         break;
@@ -1128,13 +1128,13 @@ RefPtr<FunctionStyleValue const> Parser::parse_view_function_value(TokenStream<C
         break;
     }
 
-    switch (view_function.inset) {
+    switch (view_function->view_function_inset) {
     case FFI::CssViewFunctionInsetKind::None:
     case FFI::CssViewFunctionInsetKind::Default:
         break;
     case FFI::CssViewFunctionInsetKind::NonDefault: {
         auto argument_tokens = TokenStream { function_token.function().value };
-        if (view_function.inset_position == FFI::CssViewFunctionInsetPosition::AfterAxis) {
+        if (view_function->view_function_inset_position == FFI::CssViewFunctionInsetPosition::AfterAxis) {
             argument_tokens.discard_whitespace();
             argument_tokens.discard_a_token();
         }
@@ -2079,21 +2079,10 @@ RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>&
               serialized_easing = serialize_component_values_for_reparsing({ &component_value, 1 });
               return serialized_easing->bytes_as_string_view();
           }();
-    PropertyID property_id = PropertyID::Animation;
-    auto rust_style_value = RustComponentValueParser::parse_style_value_for_property({ &property_id, 1 }, easing_source);
-    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::CoordinatingValueListShorthand)
+    auto rust_style_value = RustComponentValueParser::parse_style_value_for_value_type(PropertyID::AnimationTimingFunction, ValueType::EasingFunction, easing_source);
+    if (!rust_style_value.has_value() || rust_style_value->kind != FFI::CssStyleValueKind::EasingFunction)
         return nullptr;
-
-    RustComponentValueParser::CoordinatingValueListShorthandItem const* easing = nullptr;
-    for (auto const& item : rust_style_value->coordinating_value_list_shorthand_items) {
-        if (item.layer_index == 0 && item.property_id == PropertyID::AnimationTimingFunction) {
-            if (easing)
-                return nullptr;
-            easing = &item;
-        }
-    }
-    if (!easing)
-        return nullptr;
+    auto easing = &*rust_style_value;
 
     auto parse_nested_number = [&](RustComponentValueParser::RustNestedPrimitiveValue const& value, NumericRange const& range) -> RefPtr<StyleValue const> {
         if (!value.source_component_values.is_empty()) {

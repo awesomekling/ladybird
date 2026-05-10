@@ -58,8 +58,7 @@ pub use css_parser::{
     CssPositionAnchorValueKind, CssPositionTryOrderValue, CssPositionValueKind, CssPositionVisibilityValue,
     CssPositionVisibilityValueKind, CssPrimitiveValueKind, CssPrimitiveValueOptions, CssPrimitiveValueType,
     CssPseudoElementValueKind, CssQuotesValueKind, CssRatioValue, CssRatioValueKind, CssRectValueKind,
-    CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollFunctionAxisKind,
-    CssScrollFunctionScrollerKind, CssScrollFunctionValue, CssScrollFunctionValueKind, CssScrollbarGutterValueKind,
+    CssRepeatStyleValueKind, CssRuleContext, CssRuleEvent, CssRuleEventKind, CssScrollbarGutterValueKind,
     CssSelectorCombinator, CssSelectorEvent, CssSelectorEventKind, CssSelectorNamespace, CssSelectorNamespaceType,
     CssSimpleSelectorKind, CssSizesAttributeEventKind, CssStyleValueKind, CssSupportsFeatureKind, CssSyntaxNode,
     CssSyntaxNodeKind, CssTextUnderlinePositionHorizontal, CssTextUnderlinePositionValue,
@@ -69,7 +68,6 @@ pub use css_parser::{
     CssTransformLonghandValueKind, CssTransitionBehaviorItemKind, CssTransitionBehaviorValueKind,
     CssTransitionPropertyValueKind, CssUnicodeRange, CssUrlCrossOriginModifierValue, CssUrlFunction,
     CssUrlFunctionType, CssUrlModifier, CssUrlModifierKind, CssUrlReferrerPolicyModifierValue, CssValueTypeSyntaxKind,
-    CssViewFunctionInsetKind, CssViewFunctionInsetPosition, CssViewFunctionValue, CssViewFunctionValueKind,
     CssViewTimelineInsetValue, CssViewTimelineInsetValueKind, CssViewTransitionNameValueKind, CssWhiteSpaceTrimValue,
     CssWhiteSpaceTrimValueKind, CssWillChangeFeatureKind, CssWillChangeValueKind,
 };
@@ -797,6 +795,134 @@ pub unsafe extern "C" fn rust_css_parse_style_value_for_property(
 }
 
 /// # Safety
+/// - `input` and `input_len` must point to a valid string
+/// - `value_type` and `value_type_len` must point to a valid string
+/// - Parameters provided to `callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_style_value_for_value_type(
+    property_id: u16,
+    value_type: *const u8,
+    value_type_len: usize,
+    input: *const u8,
+    input_len: usize,
+    allow_quirky_length: bool,
+    allow_quirky_color: bool,
+    allow_svg_unitless_length: bool,
+    allow_svg_unitless_angle: bool,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssStyleValueKind,
+        property_id: u16,
+        primitive_kind: CssPrimitiveValueKind,
+        has_numeric_value: bool,
+        numeric_value: f64,
+        has_secondary_numeric_value: bool,
+        secondary_numeric_value: f64,
+        color_red: u8,
+        color_green: u8,
+        color_blue: u8,
+        color_alpha: u8,
+        value: *const u8,
+        value_len: usize,
+        value_type: *const u8,
+        value_type_len: usize,
+    ),
+    calculation_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCalculationNodeKind,
+        primitive_kind: CssPrimitiveValueKind,
+        has_numeric_value: bool,
+        numeric_value: f64,
+        child_count: u32,
+        metadata: *const u8,
+        metadata_len: usize,
+    ),
+    url_modifier_callback: unsafe extern "C" fn(ctx: *mut c_void, modifier: *const CssUrlModifier),
+    source_component_value_list_callback: unsafe extern "C" fn(ctx: *mut c_void, kind: u8),
+    source_component_value_callback: unsafe extern "C" fn(ctx: *mut c_void, component_value: *const CssComponentValue),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(value_type) = bytes_from_raw(value_type, value_type_len) else {
+                return false;
+            };
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_style_value_for_value_type_with_options_and_calculation_callback(
+                property_id,
+                value_type,
+                input,
+                css_parser::CssPrimitiveValueOptions {
+                    allow_quirky_length,
+                    allow_quirky_color,
+                    allow_svg_unitless_length,
+                    allow_svg_unitless_angle,
+                },
+                |kind,
+                 property_id,
+                 primitive_kind,
+                 has_numeric_value,
+                 numeric_value,
+                 has_secondary_numeric_value,
+                 secondary_numeric_value,
+                 color_red,
+                 color_green,
+                 color_blue,
+                 color_alpha,
+                 value,
+                 value_type| {
+                    callback(
+                        ctx,
+                        kind,
+                        property_id,
+                        primitive_kind,
+                        has_numeric_value,
+                        numeric_value,
+                        has_secondary_numeric_value,
+                        secondary_numeric_value,
+                        color_red,
+                        color_green,
+                        color_blue,
+                        color_alpha,
+                        value.as_ptr(),
+                        value.len(),
+                        value_type.as_ptr(),
+                        value_type.len(),
+                    );
+                },
+                |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+                    calculation_callback(
+                        ctx,
+                        kind,
+                        primitive_kind,
+                        has_numeric_value,
+                        numeric_value,
+                        child_count,
+                        metadata.as_ptr(),
+                        metadata.len(),
+                    );
+                },
+                |modifier| {
+                    let modifier = modifier.as_ffi();
+                    url_modifier_callback(ctx, &raw const modifier);
+                },
+                (
+                    &mut |kind| {
+                        source_component_value_list_callback(ctx, kind);
+                    },
+                    &mut |component_value| {
+                        source_component_value_callback(ctx, &raw const component_value);
+                    },
+                ),
+            )
+        })
+    }
+}
+
+/// # Safety
 /// - `property_ids` and `property_ids_len` must point to valid PropertyID values
 /// - `value_type` and `value_type_len` must point to a valid string
 /// - Parameters provided to `callback` must be valid pointers
@@ -1191,45 +1317,6 @@ pub unsafe extern "C" fn rust_css_parse_opentype_tag(
             css_parser::parse_an_opentype_tag(input, |value| {
                 opentype_tag_callback(ctx, value.as_ptr(), value.len());
             })
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_scroll_function(input: *const u8, input_len: usize) -> CssScrollFunctionValue {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssScrollFunctionValue {
-                    kind: CssScrollFunctionValueKind::Invalid,
-                    scroller: CssScrollFunctionScrollerKind::None,
-                    axis: CssScrollFunctionAxisKind::None,
-                };
-            };
-
-            css_parser::parse_scroll_function_value(input)
-        })
-    }
-}
-
-/// # Safety
-/// - `input` and `input_len` must point to a valid string
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_css_parse_view_function(input: *const u8, input_len: usize) -> CssViewFunctionValue {
-    unsafe {
-        abort_on_panic(|| {
-            let Some(input) = bytes_from_raw(input, input_len) else {
-                return CssViewFunctionValue {
-                    kind: CssViewFunctionValueKind::Invalid,
-                    axis: CssScrollFunctionAxisKind::None,
-                    inset: CssViewFunctionInsetKind::None,
-                    inset_position: CssViewFunctionInsetPosition::None,
-                };
-            };
-
-            css_parser::parse_view_function_value(input)
         })
     }
 }
