@@ -6915,30 +6915,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         break;
     }
 
-    {
-        auto transaction = tokens.begin_transaction();
-        StyleValueVector parsed_values;
-        while (auto parsed_value = parse_css_value_for_property(property_id, tokens)) {
-            parsed_values.append(parsed_value.release_nonnull());
-            tokens.discard_whitespace();
-            if (!tokens.has_next_token())
-                break;
-        }
-
-        tokens.discard_whitespace();
-        if (!tokens.has_next_token()) {
-            if (parsed_values.size() == 1) {
-                transaction.commit();
-                return *parsed_values.take_first();
-            }
-
-            if (!parsed_values.is_empty() && parsed_values.size() <= property_maximum_value_count(property_id)) {
-                transaction.commit();
-                return StyleValueList::create(move(parsed_values), StyleValueList::Separator::Space);
-            }
-        }
-    }
-
     // We have more values than the property claims to allow. Check if it's a shorthand.
     auto unassigned_properties = longhands_for_shorthand(property_id);
     if (unassigned_properties.is_empty())
