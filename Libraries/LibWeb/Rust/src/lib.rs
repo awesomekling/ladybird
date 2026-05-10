@@ -169,6 +169,51 @@ pub unsafe extern "C" fn rust_css_parse_component_values(
 
 /// # Safety
 /// - `input` and `input_len` must point to a valid string
+/// - `ctx` must be a valid pointer to a CallbackContext
+/// - Parameters provided to `calculation_callback` must be valid pointers
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_css_parse_calculation(
+    input: *const u8,
+    input_len: usize,
+    ctx: *mut c_void,
+    calculation_callback: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        kind: CssCalculationNodeKind,
+        primitive_kind: CssPrimitiveValueKind,
+        has_numeric_value: bool,
+        numeric_value: f64,
+        child_count: u32,
+        metadata_ptr: *const u8,
+        metadata_len: usize,
+    ),
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            let Some(input) = bytes_from_raw(input, input_len) else {
+                return false;
+            };
+
+            css_parser::parse_calculation(
+                input,
+                |kind, primitive_kind, has_numeric_value, numeric_value, child_count, metadata| {
+                    calculation_callback(
+                        ctx,
+                        kind,
+                        primitive_kind,
+                        has_numeric_value,
+                        numeric_value,
+                        child_count,
+                        metadata.as_ptr(),
+                        metadata.len(),
+                    );
+                },
+            )
+        })
+    }
+}
+
+/// # Safety
+/// - `input` and `input_len` must point to a valid string
 /// - `declared_namespaces` and `declared_namespaces_len` must point to a valid slice
 /// - `ctx` must be a valid pointer to a CallbackContext
 /// - Parameters provided to callbacks must be valid pointers

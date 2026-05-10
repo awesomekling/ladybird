@@ -233,6 +233,31 @@ Vector<ComponentValue> RustComponentValueParser::parse_a_list_of_component_value
     return move(builder.root_values);
 }
 
+Optional<Vector<RustComponentValueParser::RustCalculationNodeEvent>> RustComponentValueParser::parse_calculation(StringView input, StringView encoding)
+{
+    Vector<RustCalculationNodeEvent> events;
+    auto filtered_input = decode_and_filter_code_points(input, encoding);
+    auto filtered_input_bytes = filtered_input.bytes();
+
+    auto parsed = FFI::rust_css_parse_calculation(
+        filtered_input_bytes.data(),
+        filtered_input_bytes.size(),
+        &events,
+        [](void* raw_events, FFI::CssCalculationNodeKind kind, FFI::CssPrimitiveValueKind primitive_kind, bool has_numeric_value, double numeric_value, u32 child_count, u8 const* metadata_ptr, size_t metadata_len) {
+            auto& events = *static_cast<Vector<RustCalculationNodeEvent>*>(raw_events);
+            events.append(RustCalculationNodeEvent {
+                .kind = kind,
+                .primitive_kind = primitive_kind,
+                .numeric_value = has_numeric_value ? Optional<double> { numeric_value } : Optional<double> {},
+                .child_count = child_count,
+                .metadata = string_from_ffi_bytes(metadata_ptr, metadata_len),
+            });
+        });
+    if (!parsed)
+        return {};
+    return events;
+}
+
 Vector<Vector<ComponentValue>> RustComponentValueParser::parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding)
 {
     struct CommaSeparatedListBuilder {

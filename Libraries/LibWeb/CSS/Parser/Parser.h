@@ -37,31 +37,6 @@
 
 namespace Web::CSS::Parser {
 
-namespace CalcParsing {
-
-struct Operator {
-    char delim;
-};
-struct ProductNode;
-struct SumNode;
-struct InvertNode;
-struct NegateNode;
-using Node = Variant<Operator, NonnullOwnPtr<ProductNode>, NonnullOwnPtr<SumNode>, NonnullOwnPtr<InvertNode>, NonnullOwnPtr<NegateNode>, NonnullRawPtr<ComponentValue const>>;
-struct ProductNode {
-    Vector<Node> children;
-};
-struct SumNode {
-    Vector<Node> children;
-};
-struct InvertNode {
-    Node child;
-};
-struct NegateNode {
-    Node child;
-};
-
-}
-
 struct FunctionContext {
     StringView name;
 };
@@ -290,9 +265,6 @@ private:
     Optional<FlyString> parse_dashed_ident(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<CustomIdentStyleValue const> parse_dashed_ident_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<RandomValueSharingStyleValue const> parse_random_value_sharing(TokenStream<ComponentValue>&);
-    // NOTE: Implemented in generated code. (GenerateCSSMathFunctions.cpp)
-    RefPtr<CalculationNode const> parse_math_function(Function const&, CalculationContext const&);
-    RefPtr<CalculationNode const> parse_a_calc_function_node(Function const&, CalculationContext const&);
     RefPtr<StyleValue const> parse_keyword_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_specific_keyword_value(TokenStream<ComponentValue>&, Keyword);
     RefPtr<StyleValue const> parse_hue_none_value(TokenStream<ComponentValue>&);
@@ -369,8 +341,7 @@ private:
     RefPtr<StyleValue const> parse_transform_function_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_transform_list_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
 
-    RefPtr<CalculationNode const> convert_to_calculation_node(CalcParsing::Node const&, CalculationContext const&);
-    RefPtr<CalculationNode const> parse_a_calculation(TokenStream<ComponentValue>&, CalculationContext const&);
+    RefPtr<CalculationNode const> materialize_rust_calculation_node_events(ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const>, CalculationContext const&);
 
     AK::Function<OwnPtr<BooleanExpression>(RustComponentValueParser::MediaFeatureTest&&)> rust_media_feature_test_parser();
     AK::Function<OwnPtr<BooleanExpression>(Optional<RustComponentValueParser::SupportsFeature>&&, Vector<ComponentValue>&&)> rust_supports_feature_parser();

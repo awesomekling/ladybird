@@ -3713,310 +3713,395 @@ GridTrackSizeList Parser::parse_explicit_track_list(TokenStream<ComponentValue>&
     return track_list;
 }
 
+RefPtr<CalculationNode const> Parser::materialize_rust_calculation_node_events(ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, CalculationContext const& context)
+{
+    if (calculation_node_events.is_empty())
+        return nullptr;
+
+    Vector<NonnullRefPtr<CalculationNode const>> stack;
+    auto pop_children = [&](u32 child_count) -> Optional<Vector<NonnullRefPtr<CalculationNode const>>> {
+        if (child_count > stack.size())
+            return {};
+
+        Vector<NonnullRefPtr<CalculationNode const>> reversed_children;
+        reversed_children.ensure_capacity(child_count);
+        for (u32 i = 0; i < child_count; ++i)
+            reversed_children.append(stack.take_last());
+
+        Vector<NonnullRefPtr<CalculationNode const>> children;
+        children.ensure_capacity(child_count);
+        for (auto i = reversed_children.size(); i > 0; --i)
+            children.append(reversed_children[i - 1]);
+        return children;
+    };
+    auto numeric_node_from_event = [&](RustComponentValueParser::RustCalculationNodeEvent const& event) -> RefPtr<CalculationNode const> {
+        if (!event.numeric_value.has_value())
+            return nullptr;
+
+        switch (event.primitive_kind) {
+        case FFI::CssPrimitiveValueKind::Number:
+            return NumericCalculationNode::create(Number { Number::Type::Number, *event.numeric_value }, context);
+        case FFI::CssPrimitiveValueKind::Keyword: {
+            auto maybe_keyword = keyword_from_string(event.metadata);
+            if (!maybe_keyword.has_value())
+                return nullptr;
+            return NumericCalculationNode::from_keyword(*maybe_keyword, context);
+        }
+        case FFI::CssPrimitiveValueKind::Percentage:
+            return NumericCalculationNode::create(Percentage { *event.numeric_value }, context);
+        case FFI::CssPrimitiveValueKind::Angle: {
+            auto unit = string_to_angle_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Angle { *event.numeric_value, unit.release_value() }, context);
+        }
+        case FFI::CssPrimitiveValueKind::Flex: {
+            auto unit = string_to_flex_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Flex { *event.numeric_value, unit.release_value() }, context);
+        }
+        case FFI::CssPrimitiveValueKind::Frequency: {
+            auto unit = string_to_frequency_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Frequency { *event.numeric_value, unit.release_value() }, context);
+        }
+        case FFI::CssPrimitiveValueKind::Length: {
+            auto unit = string_to_length_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Length { *event.numeric_value, unit.release_value() }, context);
+        }
+        case FFI::CssPrimitiveValueKind::Resolution: {
+            auto unit = string_to_resolution_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Resolution { *event.numeric_value, unit.release_value() }, context);
+        }
+        case FFI::CssPrimitiveValueKind::Time: {
+            auto unit = string_to_time_unit(event.metadata);
+            if (!unit.has_value())
+                return nullptr;
+            return NumericCalculationNode::create(Time { *event.numeric_value, unit.release_value() }, context);
+        }
+        default:
+            return nullptr;
+        }
+    };
+    auto matches_number = [&](CalculationNode const& node) {
+        auto const& numeric_type = node.numeric_type();
+        return numeric_type.has_value() && numeric_type->matches_number(context.percentages_resolve_as);
+    };
+    auto matches_sign_argument = [&](CalculationNode const& node) {
+        auto const& numeric_type = node.numeric_type();
+        return numeric_type.has_value()
+            && (numeric_type->matches_number(context.percentages_resolve_as)
+                || numeric_type->matches_dimension()
+                || numeric_type->matches_percentage());
+    };
+    auto have_consistent_types = [](CalculationNode const& left, CalculationNode const& right) {
+        auto const& left_numeric_type = left.numeric_type();
+        auto const& right_numeric_type = right.numeric_type();
+        return left_numeric_type.has_value()
+            && right_numeric_type.has_value()
+            && left_numeric_type->consistent_type(*right_numeric_type).has_value();
+    };
+    auto append_round_node = [&](Vector<NonnullRefPtr<CalculationNode const>> const& children, RoundingStrategy strategy) -> bool {
+        if (children.size() != 2)
+            return false;
+        if (!matches_sign_argument(*children.at(0)) || !matches_sign_argument(*children.at(1)))
+            return false;
+        if (!have_consistent_types(*children.at(0), *children.at(1)))
+            return false;
+
+        stack.append(RoundCalculationNode::create(strategy, children.at(0), children.at(1)));
+        return true;
+    };
+    auto append_random_node = [&](Vector<NonnullRefPtr<CalculationNode const>> const& children, StringView metadata) -> bool {
+        if (!context_allows_random_functions())
+            return false;
+
+        auto metadata_parts = metadata.split_view('\0', SplitBehavior::KeepEmpty);
+        if (metadata_parts.size() != 4 || metadata_parts[0] != "random"sv)
+            return false;
+
+        auto has_fixed_value_sharing = metadata_parts[1] == "fixed"sv;
+        auto minimum_index = has_fixed_value_sharing ? 1uz : 0uz;
+        if (children.size() != minimum_index + 2 && children.size() != minimum_index + 3)
+            return false;
+
+        auto const& minimum = children.at(minimum_index);
+        auto const& maximum = children.at(minimum_index + 1);
+        auto step_index = minimum_index + 2;
+        if (!matches_sign_argument(*minimum) || !matches_sign_argument(*maximum))
+            return false;
+        if (!have_consistent_types(*minimum, *maximum))
+            return false;
+        if (children.size() == step_index + 1) {
+            if (!matches_sign_argument(*children.at(step_index)))
+                return false;
+            if (!have_consistent_types(*minimum, *children.at(step_index)))
+                return false;
+        }
+
+        m_random_function_index++;
+
+        auto element_shared = metadata_parts[2] == "1"sv;
+        RefPtr<RandomValueSharingStyleValue const> value_sharing;
+        if (metadata_parts[1] == "auto"sv) {
+            if (has_fixed_value_sharing || !metadata_parts[3].is_empty())
+                return false;
+            value_sharing = RandomValueSharingStyleValue::create_auto(random_value_sharing_auto_name(), element_shared);
+        } else if (metadata_parts[1] == "dashed-ident"sv) {
+            if (has_fixed_value_sharing || metadata_parts[3].is_empty())
+                return false;
+            value_sharing = RandomValueSharingStyleValue::create_dashed_ident(MUST(FlyString::from_utf8(metadata_parts[3])), element_shared);
+        } else if (metadata_parts[1] == "fixed"sv) {
+            if (element_shared)
+                return false;
+            auto preserve_fixed_calculation = metadata_parts[3] == "calc"sv;
+            if (!metadata_parts[3].is_empty() && !preserve_fixed_calculation)
+                return false;
+            CalculationContext fixed_value_sharing_context {
+                .accepted_ranges_by_type = { { ValueType::Number, NumericRange { .min = 0, .max = 0.999999 } } },
+            };
+            CalculationContext fixed_value_sharing_validation_context;
+            auto fixed_calculation_tree = simplify_a_calculation_tree(*children.at(0), fixed_value_sharing_validation_context, CalculationResolutionContext {});
+            auto fixed_calculation_type = fixed_calculation_tree->numeric_type();
+            if (!fixed_calculation_type.has_value() || !fixed_calculation_type->matches_number(fixed_value_sharing_validation_context.percentages_resolve_as))
+                return false;
+            auto fixed_value = CalculatedStyleValue::create(fixed_calculation_tree, fixed_calculation_type.release_value(), fixed_value_sharing_context);
+            if (!fixed_value->resolves_to_number())
+                return false;
+            if (is<NumericCalculationNode>(*fixed_calculation_tree)) {
+                auto const* fixed_number = as<NumericCalculationNode>(*fixed_calculation_tree).value().get_pointer<Number>();
+                if (!fixed_number || fixed_number->value() < 0 || fixed_number->value() > 0.999999)
+                    return false;
+            }
+            if (is<NumericCalculationNode>(*children.at(0)) && !preserve_fixed_calculation) {
+                auto const* fixed_number = as<NumericCalculationNode>(*children.at(0)).value().get_pointer<Number>();
+                if (!fixed_number)
+                    return false;
+                value_sharing = RandomValueSharingStyleValue::create_fixed(NumberStyleValue::create(fixed_number->value()));
+            } else {
+                value_sharing = RandomValueSharingStyleValue::create_fixed(fixed_value);
+            }
+        } else {
+            return false;
+        }
+
+        RefPtr<CalculationNode const> step;
+        if (children.size() == step_index + 1)
+            step = children.at(step_index);
+        stack.append(RandomCalculationNode::create(value_sharing.release_nonnull(), minimum, maximum, move(step)));
+        return true;
+    };
+
+    for (auto const& event : calculation_node_events) {
+        switch (event.kind) {
+        case FFI::CssCalculationNodeKind::Numeric: {
+            auto numeric_node = numeric_node_from_event(event);
+            if (!numeric_node)
+                return nullptr;
+            stack.append(numeric_node.release_nonnull());
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Sum: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(SumCalculationNode::create(children.release_value()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Product: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(ProductCalculationNode::create(children.release_value()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Negate: {
+            auto children = pop_children(1);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(NegateCalculationNode::create(children->first()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Invert: {
+            auto children = pop_children(1);
+            if (!children.has_value())
+                return nullptr;
+            stack.append(InvertCalculationNode::create(children->first()));
+            break;
+        }
+        case FFI::CssCalculationNodeKind::Function: {
+            auto children = pop_children(event.child_count);
+            if (!children.has_value())
+                return nullptr;
+
+            if (event.metadata.equals_ignoring_ascii_case("min"sv)) {
+                stack.append(MinCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("max"sv)) {
+                stack.append(MaxCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("hypot"sv)) {
+                stack.append(HypotCalculationNode::create(children.release_value()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("clamp"sv) && children->size() == 3) {
+                stack.append(ClampCalculationNode::create(children->at(0), children->at(1), children->at(2)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("abs"sv) && children->size() == 1) {
+                stack.append(AbsCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sign"sv) && children->size() == 1) {
+                if (!matches_sign_argument(*children->first()))
+                    return nullptr;
+                stack.append(SignCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sin"sv) && children->size() == 1) {
+                stack.append(SinCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("cos"sv) && children->size() == 1) {
+                stack.append(CosCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("tan"sv) && children->size() == 1) {
+                stack.append(TanCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("asin"sv) && children->size() == 1) {
+                stack.append(AsinCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("acos"sv) && children->size() == 1) {
+                stack.append(AcosCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("atan"sv) && children->size() == 1) {
+                stack.append(AtanCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("atan2"sv) && children->size() == 2) {
+                stack.append(Atan2CalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("sqrt"sv) && children->size() == 1) {
+                stack.append(SqrtCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("pow"sv) && children->size() == 2) {
+                if (!matches_number(*children->at(0)) || !matches_number(*children->at(1)) || !have_consistent_types(*children->at(0), *children->at(1)))
+                    return nullptr;
+                stack.append(PowCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("log"sv) && (children->size() == 1 || children->size() == 2)) {
+                auto value = children->at(0);
+                auto base = children->size() == 2
+                    ? children->at(1)
+                    : NumericCalculationNode::from_keyword(Keyword::E, context).release_nonnull();
+                if (!matches_number(*value) || !matches_number(*base) || !have_consistent_types(*value, *base))
+                    return nullptr;
+                stack.append(LogCalculationNode::create(value, base));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("exp"sv) && children->size() == 1) {
+                if (!matches_number(*children->first()))
+                    return nullptr;
+                stack.append(ExpCalculationNode::create(children->first()));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round nearest"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Nearest))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round up"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Up))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round down"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::Down))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("round to-zero"sv)) {
+                if (!append_round_node(*children, RoundingStrategy::ToZero))
+                    return nullptr;
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("mod"sv) && children->size() == 2) {
+                stack.append(ModCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.equals_ignoring_ascii_case("rem"sv) && children->size() == 2) {
+                stack.append(RemCalculationNode::create(children->at(0), children->at(1)));
+                break;
+            }
+            if (event.metadata.bytes_as_string_view().starts_with("random"sv)) {
+                if (!append_random_node(*children, event.metadata))
+                    return nullptr;
+                break;
+            }
+            return nullptr;
+        }
+        case FFI::CssCalculationNodeKind::TreeCountingFunction: {
+            if (!context_allows_tree_counting_functions())
+                return nullptr;
+
+            TreeCountingFunctionStyleValue::TreeCountingFunction function;
+            if (event.metadata.equals_ignoring_ascii_case("sibling-count"sv)) {
+                function = TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingCount;
+            } else if (event.metadata.equals_ignoring_ascii_case("sibling-index"sv)) {
+                function = TreeCountingFunctionStyleValue::TreeCountingFunction::SiblingIndex;
+            } else {
+                return nullptr;
+            }
+
+            auto tree_counting_function = TreeCountingFunctionStyleValue::create(function, TreeCountingFunctionStyleValue::ComputedType::Number);
+            stack.append(NonMathFunctionCalculationNode::create(*tree_counting_function, NumericType {}));
+            break;
+        }
+        }
+    }
+
+    if (stack.size() != 1)
+        return nullptr;
+    return stack.first();
+}
+
 RefPtr<CalculatedStyleValue const> Parser::parse_calculated_value(ComponentValue const& component_value, CalculationContext&& context)
 {
     if (!component_value.is_function())
         return nullptr;
 
-    auto function_node = parse_a_calc_function_node(component_value.function(), context);
+    auto source = component_value.to_string();
+
+    auto calculation_node_events = RustComponentValueParser::parse_calculation(source, "utf-8"sv);
+    if (!calculation_node_events.has_value())
+        return nullptr;
+
+    auto function_node = materialize_rust_calculation_node_events(*calculation_node_events, context);
     if (!function_node)
         return nullptr;
+
+    function_node = simplify_a_calculation_tree(*function_node, context, CalculationResolutionContext {});
 
     auto function_type = function_node->numeric_type();
     if (!function_type.has_value())
         return nullptr;
 
     return CalculatedStyleValue::create(function_node.release_nonnull(), function_type.release_value(), context);
-}
-
-RefPtr<CalculationNode const> Parser::parse_a_calc_function_node(Function const& function, CalculationContext const& context)
-{
-    auto context_guard = push_temporary_value_parsing_context(FunctionContext { function.name });
-
-    if (function.name.equals_ignoring_ascii_case("calc"sv)) {
-        TokenStream tokens { function.value };
-        return parse_a_calculation(tokens, context);
-    }
-
-    if (auto maybe_function = parse_math_function(function, context)) {
-        // NOTE: We have to simplify manually here, since parse_math_function() is a helper for calc() parsing
-        //       that doesn't do it directly by itself.
-        return simplify_a_calculation_tree(*maybe_function, context, CalculationResolutionContext {});
-    }
-
-    return nullptr;
-}
-
-RefPtr<CalculationNode const> Parser::convert_to_calculation_node(CalcParsing::Node const& node, CalculationContext const& context)
-{
-    return node.visit(
-        [this, &context](NonnullOwnPtr<CalcParsing::ProductNode> const& product_node) -> RefPtr<CalculationNode const> {
-            Vector<NonnullRefPtr<CalculationNode const>> children;
-            children.ensure_capacity(product_node->children.size());
-
-            for (auto const& child : product_node->children) {
-                if (auto child_as_node = convert_to_calculation_node(child, context)) {
-                    children.append(child_as_node.release_nonnull());
-                } else {
-                    return nullptr;
-                }
-            }
-
-            return ProductCalculationNode::create(move(children));
-        },
-        [this, &context](NonnullOwnPtr<CalcParsing::SumNode> const& sum_node) -> RefPtr<CalculationNode const> {
-            Vector<NonnullRefPtr<CalculationNode const>> children;
-            children.ensure_capacity(sum_node->children.size());
-
-            for (auto const& child : sum_node->children) {
-                if (auto child_as_node = convert_to_calculation_node(child, context)) {
-                    children.append(child_as_node.release_nonnull());
-                } else {
-                    return nullptr;
-                }
-            }
-
-            return SumCalculationNode::create(move(children));
-        },
-        [this, &context](NonnullOwnPtr<CalcParsing::InvertNode> const& invert_node) -> RefPtr<CalculationNode const> {
-            if (auto child_as_node = convert_to_calculation_node(invert_node->child, context))
-                return InvertCalculationNode::create(child_as_node.release_nonnull());
-            return nullptr;
-        },
-        [this, &context](NonnullOwnPtr<CalcParsing::NegateNode> const& negate_node) -> RefPtr<CalculationNode const> {
-            if (auto child_as_node = convert_to_calculation_node(negate_node->child, context))
-                return NegateCalculationNode::create(child_as_node.release_nonnull());
-            return nullptr;
-        },
-        [this, &context](NonnullRawPtr<ComponentValue const> const& component_value) -> RefPtr<CalculationNode const> {
-            // NOTE: This is the "process the leaf nodes" part of step 5 of https://drafts.csswg.org/css-values-4/#parse-a-calculation
-            //       We divert a little from the spec: Rather than modify an existing tree of values, we construct a new one from that source tree.
-            //       This lets us make CalculationNodes immutable.
-
-            // 1. If leaf is a parenthesized simple block, replace leaf with the result of parsing a calculation from leaf’s contents.
-            if (component_value->is_block() && component_value->block().is_paren()) {
-                TokenStream tokens { component_value->block().value };
-                auto leaf_calculation = parse_a_calculation(tokens, context);
-                if (!leaf_calculation)
-                    return nullptr;
-
-                return leaf_calculation.release_nonnull();
-            }
-
-            // 2. If leaf is a math function, replace leaf with the internal representation of that math function.
-            if (component_value->is_function() && math_function_from_string(component_value->function().name).has_value()) {
-                auto const& function = component_value->function();
-                auto leaf_calculation = parse_a_calc_function_node(function, context);
-                if (!leaf_calculation)
-                    return nullptr;
-
-                return leaf_calculation.release_nonnull();
-            }
-
-            // AD-HOC: We also need to convert tokens into their numeric types.
-
-            if (component_value->is(Token::Type::Ident)) {
-                auto maybe_keyword = keyword_from_string(component_value->token().ident());
-                if (!maybe_keyword.has_value())
-                    return nullptr;
-                return NumericCalculationNode::from_keyword(*maybe_keyword, context);
-            }
-
-            if (component_value->is(Token::Type::Number))
-                return NumericCalculationNode::create(Number { Number::Type::Number, component_value->token().number_value() }, context);
-
-            if (component_value->is(Token::Type::Dimension)) {
-                auto numeric_value = component_value->token().dimension_value();
-                auto unit_string = component_value->token().dimension_unit();
-
-                if (auto length_type = string_to_length_unit(unit_string); length_type.has_value())
-                    return NumericCalculationNode::create(Length { numeric_value, length_type.release_value() }, context);
-
-                if (auto angle_type = string_to_angle_unit(unit_string); angle_type.has_value())
-                    return NumericCalculationNode::create(Angle { numeric_value, angle_type.release_value() }, context);
-
-                if (auto flex_type = string_to_flex_unit(unit_string); flex_type.has_value())
-                    return NumericCalculationNode::create(Flex { numeric_value, flex_type.release_value() }, context);
-
-                if (auto frequency_type = string_to_frequency_unit(unit_string); frequency_type.has_value())
-                    return NumericCalculationNode::create(Frequency { numeric_value, frequency_type.release_value() }, context);
-
-                if (auto resolution_type = string_to_resolution_unit(unit_string); resolution_type.has_value())
-                    return NumericCalculationNode::create(Resolution { numeric_value, resolution_type.release_value() }, context);
-
-                if (auto time_type = string_to_time_unit(unit_string); time_type.has_value())
-                    return NumericCalculationNode::create(Time { numeric_value, time_type.release_value() }, context);
-
-                ErrorReporter::the().report(InvalidValueError {
-                    .value_type = "math-function"_fly_string,
-                    .value_string = component_value->to_string(),
-                    .description = "Unrecognized dimension type."_string,
-                });
-                return nullptr;
-            }
-
-            if (component_value->is(Token::Type::Percentage))
-                return NumericCalculationNode::create(Percentage { component_value->token().percentage() }, context);
-
-            auto tree_counting_function_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
-            if (auto tree_counting_function = parse_tree_counting_function(tree_counting_function_tokens, TreeCountingFunctionStyleValue::ComputedType::Number))
-                return NonMathFunctionCalculationNode::create(tree_counting_function.release_nonnull(), NumericType {});
-
-            // NOTE: If we get here, then we have a ComponentValue that didn't get replaced with something else,
-            //       so the calc() is invalid.
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "math-function"_fly_string,
-                .value_string = component_value->to_string(),
-                .description = "Left-over ComponentValue in calculation tree."_string,
-            });
-            return nullptr;
-        },
-        [](CalcParsing::Operator const& op) -> RefPtr<CalculationNode const> {
-            ErrorReporter::the().report(InvalidValueError {
-                .value_type = "math-function"_fly_string,
-                .value_string = String::from_code_point(op.delim),
-                .description = "Left-over Operator in calculation tree."_string,
-            });
-            return nullptr;
-        });
-}
-
-// https://drafts.csswg.org/css-values-4/#parse-a-calculation
-RefPtr<CalculationNode const> Parser::parse_a_calculation(TokenStream<ComponentValue>& tokens, CalculationContext const& context)
-{
-    auto transaction = tokens.begin_transaction();
-
-    // 1. Discard any <whitespace-token>s from values.
-    // 2. An item in values is an “operator” if it’s a <delim-token> with the value "+", "-", "*", or "/". Otherwise, it’s a “value”.
-
-    Vector<CalcParsing::Node> values;
-    while (tokens.has_next_token()) {
-        auto const& value = tokens.consume_a_token();
-        if (value.is(Token::Type::Whitespace))
-            continue;
-        if (value.is(Token::Type::Delim)) {
-            if (first_is_one_of(value.token().delim(), static_cast<u32>('+'), static_cast<u32>('-'), static_cast<u32>('*'), static_cast<u32>('/'))) {
-                // NOTE: Sequential operators are invalid syntax.
-                if (!values.is_empty() && values.last().has<CalcParsing::Operator>())
-                    return nullptr;
-
-                values.append(CalcParsing::Operator { static_cast<char>(value.token().delim()) });
-                continue;
-            }
-        }
-
-        values.append(NonnullRawPtr { value });
-    }
-
-    // If we have no values, the syntax is invalid.
-    if (values.is_empty())
-        return nullptr;
-
-    // NOTE: If the first or last value is an operator, the syntax is invalid.
-    if (values.first().has<CalcParsing::Operator>() || values.last().has<CalcParsing::Operator>())
-        return nullptr;
-
-    // 3. Collect children into Product and Invert nodes.
-    //    For every consecutive run of value items in values separated by "*" or "/" operators:
-    while (true) {
-        Optional<size_t> first_product_operator = values.find_first_index_if([](auto const& item) {
-            return item.template has<CalcParsing::Operator>()
-                && first_is_one_of(item.template get<CalcParsing::Operator>().delim, '*', '/');
-        });
-
-        if (!first_product_operator.has_value())
-            break;
-
-        auto start_of_run = first_product_operator.value() - 1;
-        auto end_of_run = first_product_operator.value() + 1;
-        for (auto i = start_of_run + 1; i < values.size(); i += 2) {
-            auto& item = values[i];
-            if (!item.has<CalcParsing::Operator>()) {
-                end_of_run = i - 1;
-                break;
-            }
-
-            auto delim = item.get<CalcParsing::Operator>().delim;
-            if (!first_is_one_of(delim, '*', '/')) {
-                end_of_run = i - 1;
-                break;
-            }
-        }
-
-        // 1. For each "/" operator in the run, replace its right-hand value item rhs with an Invert node containing rhs as its child.
-        Vector<CalcParsing::Node> run_values;
-        run_values.append(move(values[start_of_run]));
-        for (auto i = start_of_run + 1; i <= end_of_run; i += 2) {
-            auto& operator_ = values[i].get<CalcParsing::Operator>().delim;
-            auto& rhs = values[i + 1];
-            if (operator_ == '/') {
-                run_values.append(make<CalcParsing::InvertNode>(move(rhs)));
-                continue;
-            }
-            VERIFY(operator_ == '*');
-            run_values.append(move(rhs));
-        }
-        // 2. Replace the entire run with a Product node containing the value items of the run as its children.
-        values.remove(start_of_run, end_of_run - start_of_run + 1);
-        values.insert(start_of_run, make<CalcParsing::ProductNode>(move(run_values)));
-    }
-
-    // 4. Collect children into Sum and Negate nodes.
-    Optional<CalcParsing::Node> single_value;
-    {
-        // 1. For each "-" operator item in values, replace its right-hand value item rhs with a Negate node containing rhs as its child.
-        for (auto i = 0u; i < values.size(); ++i) {
-            auto& maybe_minus_operator = values[i];
-            if (!maybe_minus_operator.has<CalcParsing::Operator>() || maybe_minus_operator.get<CalcParsing::Operator>().delim != '-')
-                continue;
-
-            auto rhs_index = ++i;
-            auto negate_node = make<CalcParsing::NegateNode>(move(values[rhs_index]));
-            values.remove(rhs_index);
-            values.insert(rhs_index, move(negate_node));
-        }
-
-        // 2. If values has only one item, and it is a Product node or a parenthesized simple block, replace values with that item.
-        if (values.size() == 1) {
-            values.first().visit(
-                [&](ComponentValue const& component_value) {
-                    if (component_value.is_block() && component_value.block().is_paren())
-                        single_value = NonnullRawPtr { component_value };
-                },
-                [&](NonnullOwnPtr<CalcParsing::ProductNode>& node) {
-                    single_value = move(node);
-                },
-                [](auto&) {});
-        }
-        //    Otherwise, replace values with a Sum node containing the value items of values as its children.
-        if (!single_value.has_value()) {
-            auto operator_count = 0u;
-            for (size_t i = 0; i < values.size();) {
-                auto& value = values[i];
-                if (value.has<CalcParsing::Operator>()) {
-                    operator_count++;
-                    values.remove(i);
-                } else {
-                    i++;
-                }
-            }
-            if (values.size() == 0 || operator_count != values.size() - 1)
-                return nullptr;
-
-            single_value = make<CalcParsing::SumNode>(move(values));
-        }
-    }
-    VERIFY(single_value.has_value());
-
-    // 5. At this point values is a tree of Sum, Product, Negate, and Invert nodes, with other types of values at the leaf nodes. Process the leaf nodes.
-    // NOTE: We process leaf nodes as part of this conversion.
-    auto calculation_tree = convert_to_calculation_node(*single_value, context);
-    if (!calculation_tree)
-        return nullptr;
-
-    // 6. Return the result of simplifying a calculation tree from values.
-    transaction.commit();
-    return simplify_a_calculation_tree(*calculation_tree, context, CalculationResolutionContext {});
 }
 
 // https://drafts.csswg.org/css-values-5/#tree-counting

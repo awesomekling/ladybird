@@ -888,6 +888,9 @@ bool Parser::context_allows_tree_counting_functions() const
 
 bool Parser::context_allows_random_functions() const
 {
+    if (m_value_context.is_empty())
+        return false;
+
     if (auto const* special_context = m_value_context.first().get_pointer<SpecialContext>(); special_context && first_is_one_of(*special_context, SpecialContext::CanvasContextGenericValue, SpecialContext::OnScreenCanvasContextFontValue))
         return false;
 

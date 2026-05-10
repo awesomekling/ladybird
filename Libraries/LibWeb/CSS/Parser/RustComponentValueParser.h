@@ -1120,6 +1120,7 @@ public:
     };
 
     static Vector<ComponentValue> parse_a_list_of_component_values(StringView input, StringView encoding);
+    static Optional<Vector<RustCalculationNodeEvent>> parse_calculation(StringView input, StringView encoding);
     static Vector<Vector<ComponentValue>> parse_a_comma_separated_list_of_component_values(StringView input, StringView encoding);
     static Optional<SelectorList> parse_a_selector_list(StringView input, StringView encoding, SelectorType, SelectorParsingMode, HashTable<FlyString> const& declared_namespaces);
     static FFI::CssValueTypeSyntaxKind parse_a_value_type(u8 value_type_id, TokenStream<ComponentValue>&);

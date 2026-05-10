@@ -226,6 +226,22 @@ where
     }
 }
 
+pub(crate) fn parse_calculation<C>(filtered_input: &[u8], mut callback: C) -> bool
+where
+    C: FnMut(CssCalculationNodeKind, CssPrimitiveValueKind, bool, f64, u32, &[u8]),
+{
+    let (mut parser, _) = parser_from_filtered_input(filtered_input);
+    let component_values = parser.parse_a_list_of_component_values();
+    let [ComponentValue::Function(function)] = component_values.as_slice() else {
+        return false;
+    };
+    let Some(calculation) = parse_rust_owned_calculation_function(function) else {
+        return false;
+    };
+    emit_rust_owned_calculation_tree(&calculation, &mut callback);
+    true
+}
+
 pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
     filtered_input: &[u8],
     mut group_callback: G,
