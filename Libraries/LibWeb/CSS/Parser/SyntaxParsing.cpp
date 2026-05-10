@@ -11,7 +11,6 @@
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/Parser/TokenStream.h>
-#include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GuaranteedInvalidStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
@@ -20,76 +19,6 @@
 #include <LibWeb/CSS/ValueType.h>
 
 namespace Web::CSS::Parser {
-
-static bool serialize_component_value_for_reparsing(StringBuilder& builder, ComponentValue const& component_value)
-{
-    if (component_value.is_token()) {
-        if (component_value.token().is(Token::Type::EndOfFile) || component_value.token().is(Token::Type::Invalid))
-            return false;
-
-        auto original_source_text = component_value.original_source_text();
-        builder.append(original_source_text.is_empty() ? component_value.to_string() : original_source_text);
-        return true;
-    }
-
-    if (component_value.is_block()) {
-        auto const& block = component_value.block();
-        builder.append(block.token.bracket_string());
-        for (auto const& child : block.value) {
-            if (!serialize_component_value_for_reparsing(builder, child))
-                return false;
-        }
-        builder.append(block.token.bracket_mirror_string());
-        return true;
-    }
-
-    if (component_value.is_function()) {
-        auto const& function = component_value.function();
-        serialize_an_identifier(builder, function.name);
-        builder.append('(');
-        for (auto const& child : function.value) {
-            if (!serialize_component_value_for_reparsing(builder, child))
-                return false;
-        }
-        builder.append(')');
-        return true;
-    }
-
-    builder.append(component_value.to_string());
-    return true;
-}
-
-static Optional<String> serialize_component_values_for_reparsing(ReadonlySpan<ComponentValue const> component_values)
-{
-    StringBuilder builder;
-    for (auto const& component_value : component_values) {
-        if (!serialize_component_value_for_reparsing(builder, component_value))
-            return {};
-    }
-    return builder.to_string_without_validation();
-}
-
-// https://drafts.csswg.org/css-values-5/#typedef-syntax
-OwnPtr<SyntaxNode> parse_as_syntax(Vector<ComponentValue> const& component_values, LimitSingleComponentIdentToCustomIdent limit_single_component_ident_to_custom_ident)
-{
-    // <syntax> = '*' | <syntax-component> [ <syntax-combinator> <syntax-component> ]* | <syntax-string>
-    // <syntax-component> = <syntax-single-component> <syntax-multiplier>?
-    //                    | '<' transform-list '>'
-    // <syntax-single-component> = '<' <syntax-type-name> '>' | <ident>
-    // <syntax-type-name> = angle | color | custom-ident | image | integer
-    //                    | length | length-percentage | number
-    //                    | percentage | resolution | string | time
-    //                    | url | transform-function
-    // <syntax-combinator> = '|'
-    // <syntax-multiplier> = [ '#' | '+' ]
-    //
-    // <syntax-string> = <string>
-    // FIXME: Eventually, extend this to also parse *any* CSS grammar, not just for the <syntax> type.
-    auto serialized_syntax = serialize_component_values_for_reparsing(component_values);
-    if (!serialized_syntax.has_value())
-        return {};
-    return RustComponentValueParser::parse_as_syntax(serialized_syntax->bytes_as_string_view(), "utf-8"sv, limit_single_component_ident_to_custom_ident);
-}
 
 NonnullRefPtr<StyleValue const> parse_with_a_syntax(ParsingParams const& parsing_params, Vector<ComponentValue> const& input, SyntaxNode const& syntax)
 {

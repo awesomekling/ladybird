@@ -6,6 +6,7 @@
 
 #include <LibWeb/CSS/Parser/ArbitrarySubstitutionFunctions.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/RustTokenizer.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
@@ -334,7 +335,8 @@ static Vector<ComponentValue> replace_an_attr_function(DOM::AbstractElement& ele
         syntax = AttrUnit { "%"_fly_string };
     } else if (first_argument_tokens.next_token().is_function("type"sv)) {
         auto const& type_function = first_argument_tokens.consume_a_token().function();
-        if (auto parsed_syntax = parse_as_syntax(type_function.value)) {
+        auto serialized_syntax = Parser::serialize_component_values_for_reparsing(type_function.value);
+        if (auto parsed_syntax = RustComponentValueParser::parse_as_syntax(serialized_syntax.bytes_as_string_view(), "utf-8"sv, LimitSingleComponentIdentToCustomIdent::No)) {
             syntax = parsed_syntax.release_nonnull();
         } else {
             return failure();

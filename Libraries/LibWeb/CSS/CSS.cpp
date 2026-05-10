@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/CSSUnitValue.h>
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Parser/RustComponentValueParser.h>
 #include <LibWeb/CSS/Parser/Syntax.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -82,8 +83,7 @@ WebIDL::ExceptionOr<void> register_property(JS::VM& vm, PropertyDefinition defin
 
     // 3. Attempt to consume a syntax definition from syntax. If it returns failure, throw a SyntaxError.
     //    Otherwise, let syntax definition be the returned syntax definition.
-    auto syntax_component_values = parse_component_values_list(parsing_params, definition.syntax);
-    auto maybe_syntax = parse_as_syntax(syntax_component_values, Parser::LimitSingleComponentIdentToCustomIdent::Yes);
+    auto maybe_syntax = Parser::RustComponentValueParser::parse_as_syntax(definition.syntax, "utf-8"sv, Parser::LimitSingleComponentIdentToCustomIdent::Yes);
     if (!maybe_syntax) {
         return WebIDL::SyntaxError::create(realm, "Invalid syntax definition"_utf16);
     }
