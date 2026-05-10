@@ -28,8 +28,6 @@
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
-#include <LibWeb/CSS/StyleValues/BorderRadiusRectStyleValue.h>
-#include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorMixStyleValue.h>
@@ -56,7 +54,6 @@
 #include <LibWeb/CSS/StyleValues/OpacityValueStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
-#include <LibWeb/CSS/StyleValues/RadialSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
@@ -2585,155 +2582,6 @@ RefPtr<URLStyleValue const> Parser::parse_url_value(TokenStream<ComponentValue>&
     return URLStyleValue::create(url.release_value());
 }
 
-RefPtr<BorderRadiusRectStyleValue const> Parser::parse_border_radius_rect_value(TokenStream<ComponentValue>& tokens)
-{
-    auto top_left = [&](StyleValueVector& radii) { return radii[0]; };
-    auto top_right = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-        case 3:
-        case 2:
-            return radii[1];
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-    auto bottom_right = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-        case 3:
-            return radii[2];
-        case 2:
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-    auto bottom_left = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-            return radii[3];
-        case 3:
-        case 2:
-            return radii[1];
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-
-    StyleValueVector horizontal_radii;
-    StyleValueVector vertical_radii;
-    bool reading_vertical = false;
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is_delim('/')) {
-            if (reading_vertical || horizontal_radii.is_empty())
-                return nullptr;
-
-            reading_vertical = true;
-            tokens.discard_a_token(); // `/`
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        auto maybe_dimension = parse_length_percentage_value(tokens, non_negative_range, non_negative_range);
-        if (!maybe_dimension)
-            return nullptr;
-        if (reading_vertical) {
-            vertical_radii.append(maybe_dimension.release_nonnull());
-        } else {
-            horizontal_radii.append(maybe_dimension.release_nonnull());
-        }
-        tokens.discard_whitespace();
-    }
-
-    if (horizontal_radii.size() > 4 || vertical_radii.size() > 4
-        || horizontal_radii.is_empty()
-        || (reading_vertical && vertical_radii.is_empty()))
-        return nullptr;
-
-    auto top_left_radius = BorderRadiusStyleValue::create(top_left(horizontal_radii),
-        vertical_radii.is_empty() ? top_left(horizontal_radii) : top_left(vertical_radii));
-    auto top_right_radius = BorderRadiusStyleValue::create(top_right(horizontal_radii),
-        vertical_radii.is_empty() ? top_right(horizontal_radii) : top_right(vertical_radii));
-    auto bottom_right_radius = BorderRadiusStyleValue::create(bottom_right(horizontal_radii),
-        vertical_radii.is_empty() ? bottom_right(horizontal_radii) : bottom_right(vertical_radii));
-    auto bottom_left_radius = BorderRadiusStyleValue::create(bottom_left(horizontal_radii),
-        vertical_radii.is_empty() ? bottom_left(horizontal_radii) : bottom_left(vertical_radii));
-
-    transaction.commit();
-    return BorderRadiusRectStyleValue::create(top_left_radius, top_right_radius, bottom_right_radius, bottom_left_radius);
-}
-
-// https://drafts.csswg.org/css-images-4/#radial-size
-RefPtr<RadialSizeStyleValue const> Parser::parse_radial_size(TokenStream<ComponentValue>& tokens)
-{
-    // <radial-size> = <radial-extent>{1,2} | <length-percentage [0,∞]>{1,2}
-    // <radial-extent> = closest-corner | closest-side | farthest-corner | farthest-side
-    // AD-HOC: The grammar by the spec above is incorrect as it disallows mixing of <length-percentage> and
-    //         <radial-extent> which breaks backwards compatibility with `<shape-radius>` which it is intended to
-    //         replace (see https://github.com/w3c/csswg-drafts/issues/9729). To avoid this issue we instead use the
-    //         following grammar:
-    //         `<radial-size> = [ <radial-extent> | <length-percentage [0,∞]> ]{1,2}`
-    auto parse_radial_extent = [&](TokenStream<ComponentValue>& tokens) -> Optional<RadialExtent> {
-        auto radial_extent_transaction = tokens.begin_transaction();
-
-        auto keyword_value = parse_keyword_value(tokens);
-        if (!keyword_value)
-            return {};
-
-        auto radial_extent = keyword_to_radial_extent(keyword_value->to_keyword());
-        if (!radial_extent.has_value())
-            return {};
-
-        radial_extent_transaction.commit();
-        return radial_extent;
-    };
-
-    auto parse_nonnegative_length_percentage_value = [&](TokenStream<ComponentValue>& tokens) -> RefPtr<StyleValue const> {
-        auto length_percentage_transaction = tokens.begin_transaction();
-
-        auto length_percentage_value = parse_length_percentage_value(tokens, non_negative_range, non_negative_range);
-        if (!length_percentage_value)
-            return nullptr;
-
-        length_percentage_transaction.commit();
-        return length_percentage_value;
-    };
-
-    auto transaction = tokens.begin_transaction();
-    Vector<RadialSizeStyleValue::Component> values;
-
-    while (tokens.has_next_token() && values.size() < 2) {
-        tokens.discard_whitespace();
-
-        if (auto radial_extent = parse_radial_extent(tokens); radial_extent.has_value()) {
-            values.append(*radial_extent);
-            continue;
-        }
-
-        if (auto length_percentage = parse_nonnegative_length_percentage_value(tokens); length_percentage) {
-            values.append(length_percentage.release_nonnull());
-            continue;
-        }
-
-        break;
-    }
-
-    if (values.is_empty())
-        return nullptr;
-
-    transaction.commit();
-    return RadialSizeStyleValue::create(values);
-}
-
 static FontStyleKeyword font_style_keyword_from_rust(FFI::CssFontStyleKind font_style)
 {
     switch (font_style) {
@@ -3155,83 +3003,6 @@ RefPtr<CustomIdentStyleValue const> Parser::parse_custom_ident_value(TokenStream
     return nullptr;
 }
 
-// https://drafts.csswg.org/css-values-5/#typedef-random-value-sharing
-RefPtr<RandomValueSharingStyleValue const> Parser::parse_random_value_sharing(TokenStream<ComponentValue>& tokens)
-{
-    // <random-value-sharing> = [ [ auto | <dashed-ident> ] || element-shared ] | fixed <number [0,1]>
-    auto transaction = tokens.begin_transaction();
-
-    tokens.discard_whitespace();
-
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    // fixed <number [0,1]>
-    if (tokens.next_token().is_ident("fixed"sv)) {
-        tokens.discard_a_token();
-        tokens.discard_whitespace();
-
-        // NB: Fixed values have to be less than one and numbers serialize with six digits of precision
-        if (auto fixed_value = parse_number_value(tokens, { .min = 0, .max = 0.999999 })) {
-            tokens.discard_whitespace();
-
-            if (tokens.has_next_token())
-                return nullptr;
-
-            transaction.commit();
-            return RandomValueSharingStyleValue::create_fixed(fixed_value.release_nonnull());
-        }
-
-        return nullptr;
-    }
-
-    // [ [ auto | <dashed-ident> ] || element-shared ]
-    bool has_explicit_auto = false;
-    Optional<FlyString> dashed_ident;
-    bool element_shared = false;
-
-    while (tokens.has_next_token()) {
-        if (auto maybe_dashed_ident_value = parse_dashed_ident_value(tokens)) {
-            if (has_explicit_auto || dashed_ident.has_value())
-                return nullptr;
-
-            dashed_ident = maybe_dashed_ident_value->custom_ident();
-
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        auto maybe_keyword_value = parse_keyword_value(tokens);
-
-        if (maybe_keyword_value && maybe_keyword_value->to_keyword() == Keyword::Auto) {
-            if (has_explicit_auto || dashed_ident.has_value())
-                return nullptr;
-
-            has_explicit_auto = true;
-
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        if (maybe_keyword_value && maybe_keyword_value->to_keyword() == Keyword::ElementShared) {
-            if (element_shared)
-                return nullptr;
-
-            element_shared = true;
-
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        return nullptr;
-    }
-
-    if (!dashed_ident.has_value())
-        return RandomValueSharingStyleValue::create_auto(random_value_sharing_auto_name(), element_shared);
-
-    return RandomValueSharingStyleValue::create_dashed_ident(dashed_ident.value(), element_shared);
-}
-
 // https://drafts.csswg.org/css-values-4/#typedef-dashed-ident
 Optional<FlyString> Parser::parse_dashed_ident(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
@@ -3635,81 +3406,6 @@ Optional<ExplicitGridTrack> Parser::parse_grid_fixed_size(TokenStream<ComponentV
     }
 
     return {};
-}
-
-// https://www.w3.org/TR/css-grid-2/#typedef-track-list
-GridTrackSizeList Parser::parse_grid_track_list(TokenStream<ComponentValue>& tokens)
-{
-    // <track-list> = [ <line-names>? [ <track-size> | <track-repeat> ] ]+ <line-names>?
-
-    auto transaction = tokens.begin_transaction();
-    GridTrackSizeList track_list;
-    auto parsed_track_count = parse_track_list_impl(tokens, track_list, [&](auto& tokens) -> Optional<ExplicitGridTrack> {
-        if (auto track_repeat = parse_grid_track_repeat(tokens); track_repeat.has_value())
-            return ExplicitGridTrack(track_repeat.value());
-        if (auto track_size = parse_grid_track_size(tokens); track_size.has_value())
-            return ExplicitGridTrack(track_size.value());
-        return Optional<ExplicitGridTrack> {};
-    });
-    if (parsed_track_count == 0)
-        return {};
-    transaction.commit();
-    return track_list;
-}
-
-// https://www.w3.org/TR/css-grid-2/#typedef-auto-track-list
-GridTrackSizeList Parser::parse_grid_auto_track_list(TokenStream<ComponentValue>& tokens)
-{
-    // <auto-track-list> = [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>? <auto-repeat>
-    //                     [ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>?
-
-    auto transaction = tokens.begin_transaction();
-    GridTrackSizeList track_list;
-    size_t parsed_track_count = 0;
-    auto parse_zero_or_more_fixed_tracks = [&] {
-        parsed_track_count += parse_track_list_impl(tokens, track_list, [&](auto& tokens) -> Optional<ExplicitGridTrack> {
-            if (auto fixed_repeat = parse_grid_fixed_repeat(tokens); fixed_repeat.has_value())
-                return ExplicitGridTrack(fixed_repeat.value());
-            if (auto fixed_size = parse_grid_fixed_size(tokens); fixed_size.has_value())
-                return ExplicitGridTrack(fixed_size.value());
-            return Optional<ExplicitGridTrack> {};
-        });
-    };
-
-    parse_zero_or_more_fixed_tracks();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token()) {
-        if (parsed_track_count == 0)
-            return {};
-        transaction.commit();
-        return track_list;
-    }
-
-    if (auto auto_repeat = parse_grid_auto_repeat(tokens); auto_repeat.has_value()) {
-        track_list.append(ExplicitGridTrack(auto_repeat.release_value()));
-    } else {
-        return {};
-    }
-
-    parse_zero_or_more_fixed_tracks();
-    transaction.commit();
-    return track_list;
-}
-
-// https://www.w3.org/TR/css-grid-2/#typedef-explicit-track-list
-GridTrackSizeList Parser::parse_explicit_track_list(TokenStream<ComponentValue>& tokens)
-{
-    // <explicit-track-list> = [ <line-names>? <track-size> ]+ <line-names>?
-
-    auto transaction = tokens.begin_transaction();
-    GridTrackSizeList track_list;
-    auto parsed_track_count = parse_track_list_impl(tokens, track_list, [&](auto& tokens) -> Optional<ExplicitGridTrack> {
-        return parse_grid_track_size(tokens);
-    });
-    if (parsed_track_count == 0)
-        return {};
-    transaction.commit();
-    return track_list;
 }
 
 RefPtr<CalculationNode const> Parser::materialize_rust_calculation_node_events(ReadonlySpan<RustComponentValueParser::RustCalculationNodeEvent const> calculation_node_events, CalculationContext const& context)

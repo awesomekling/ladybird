@@ -239,15 +239,8 @@ private:
         No
     };
     [[nodiscard]] size_t parse_track_list_impl(TokenStream<ComponentValue>& tokens, GridTrackSizeList& output, GridTrackParser const& track_parsing_callback, AllowTrailingLineNamesForEachTrack = AllowTrailingLineNamesForEachTrack::No);
-    GridTrackSizeList parse_grid_track_list(TokenStream<ComponentValue>&);
-    GridTrackSizeList parse_grid_auto_track_list(TokenStream<ComponentValue>&);
-    GridTrackSizeList parse_explicit_track_list(TokenStream<ComponentValue>&);
-
     Optional<URL> parse_url_function(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<URLStyleValue const> parse_url_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-
-    RefPtr<BorderRadiusRectStyleValue const> parse_border_radius_rect_value(TokenStream<ComponentValue>&);
-    RefPtr<RadialSizeStyleValue const> parse_radial_size(TokenStream<ComponentValue>&);
 
     RefPtr<ColorInterpolationMethodStyleValue const> parse_color_interpolation_method_value(TokenStream<ComponentValue>&);
 
@@ -264,7 +257,6 @@ private:
     RefPtr<CustomIdentStyleValue const> parse_custom_ident_value(TokenStream<ComponentValue>&, ReadonlySpan<StringView> blacklist = {}, Optional<StringView> original_source_text = {});
     Optional<FlyString> parse_dashed_ident(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<CustomIdentStyleValue const> parse_dashed_ident_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
-    RefPtr<RandomValueSharingStyleValue const> parse_random_value_sharing(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_keyword_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_specific_keyword_value(TokenStream<ComponentValue>&, Keyword);
     RefPtr<StyleValue const> parse_hue_none_value(TokenStream<ComponentValue>&);
