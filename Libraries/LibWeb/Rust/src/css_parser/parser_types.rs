@@ -899,6 +899,7 @@ pub enum CssDescriptorResultKind {
     CounterStyleSystemFixed,
     CounterStyleSystemFixedWithInteger,
     CounterStyleSystemExtends,
+    CounterStyleName,
     CounterStylePad,
     CounterStyleRangeAuto,
     CounterStyleRangeList,

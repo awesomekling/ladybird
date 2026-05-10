@@ -2132,6 +2132,17 @@ fn parses_descriptor_results_with_rust_owned_dispatch() {
         ))
     );
     assert_eq!(
+        parse_descriptor_result_value("example", CssDescriptorValueType::CounterStyleName),
+        Some((
+            CssDescriptorResultKind::CounterStyleName,
+            vec![("example".to_string(), false)]
+        ))
+    );
+    assert_eq!(
+        parse_descriptor_result_value("default", CssDescriptorValueType::OptionalDeclarationValue),
+        Some((CssDescriptorResultKind::OptionalDeclarationValue, vec![]))
+    );
+    assert_eq!(
         parse_descriptor_result_value("calc(50% + 25%)", CssDescriptorValueType::PositivePercentage),
         Some((
             CssDescriptorResultKind::PositivePercentage,

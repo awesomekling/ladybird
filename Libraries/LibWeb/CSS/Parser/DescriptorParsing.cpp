@@ -595,10 +595,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // <counter-style-name> is a <custom-ident> that is not an ASCII case-insensitive match for none.
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    auto counter_style_name = RustComponentValueParser::parse_a_counter_style_name(descriptor_source.bytes_as_string_view(), "utf-8"sv);
-
-                    if (!counter_style_name.has_value())
+                    auto const& counter_style_name_descriptor = descriptor_value->result;
+                    if (!counter_style_name_descriptor.has_value() || counter_style_name_descriptor->kind != FFI::CssDescriptorResultKind::CounterStyleName || counter_style_name_descriptor->items.size() != 1)
                         return nullptr;
+
+                    auto counter_style_name = FlyString::from_utf8_without_validation(counter_style_name_descriptor->items.first().source.bytes());
 
                     // https://drafts.csswg.org/css-counter-styles-3/#the-counter-style-rule
                     // Counter style names are case-sensitive. However, the names defined in this specification are
@@ -606,11 +607,11 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     // of properties, in the @counter-style rule, and in the counter() functions.
                     //
                     // NB: The "names defined in this specification" are defined in the `CounterStyleNameKeyword` enum
-                    auto const& keyword = keyword_from_string(counter_style_name.value());
+                    auto const& keyword = keyword_from_string(counter_style_name);
                     if (keyword.has_value() && keyword_to_counter_style_name_keyword(keyword.value()).has_value())
-                        counter_style_name = counter_style_name->to_ascii_lowercase();
+                        counter_style_name = counter_style_name.to_ascii_lowercase();
 
-                    return CustomIdentStyleValue::create(counter_style_name.release_value());
+                    return CustomIdentStyleValue::create(counter_style_name);
                 }
                 case DescriptorMetadata::ValueType::CounterStyleNegative: {
                     // https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
@@ -862,7 +863,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_descriptor_v
                     auto start = tokens.current_index();
                     while (tokens.has_next_token())
                         tokens.discard_a_token();
-                    if (!RustComponentValueParser::parse_optional_declaration_value_descriptor(descriptor_source.bytes_as_string_view(), "utf-8"sv))
+                    auto const& optional_declaration_value = descriptor_value->result;
+                    if (!optional_declaration_value.has_value() || optional_declaration_value->kind != FFI::CssDescriptorResultKind::OptionalDeclarationValue)
                         return nullptr;
 
                     auto component_values = Vector<ComponentValue> { tokens.tokens_since(start) };

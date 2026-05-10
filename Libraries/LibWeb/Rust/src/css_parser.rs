@@ -367,11 +367,7 @@ where
     emit_descriptor_syntax(&matched_syntax, syntax_callback);
 
     match matched_syntax {
-        DescriptorSyntax::ValueType(
-            CssDescriptorValueType::CounterStyleName
-            | CssDescriptorValueType::OptionalDeclarationValue
-            | CssDescriptorValueType::UnicodeRangeTokens,
-        ) => true,
+        DescriptorSyntax::ValueType(CssDescriptorValueType::UnicodeRangeTokens) => true,
         DescriptorSyntax::ValueType(value_type) => {
             parse_descriptor_result(value_type, filtered_input, result_callbacks)
         }
@@ -629,6 +625,29 @@ where
                     );
                 }
             }
+        }
+        CssDescriptorValueType::CounterStyleName => {
+            let mut counter_style_name = None;
+            if !parse_a_counter_style_name(filtered_input, |name| {
+                counter_style_name = Some(name.to_string());
+            }) {
+                return false;
+            }
+            let Some(counter_style_name) = counter_style_name else {
+                return false;
+            };
+
+            (callbacks.kind_callback)(CssDescriptorResultKind::CounterStyleName);
+            (callbacks.source_callback)(
+                default_order,
+                &counter_style_name,
+                false,
+                CssPrimitiveValueKind::CustomIdent,
+                false,
+                0.0,
+                0,
+                0,
+            );
         }
         CssDescriptorValueType::CounterStylePad => {
             let Some(pad) = parse_rust_owned_counter_style_pad_descriptor(filtered_input) else {
@@ -936,6 +955,13 @@ where
                 0,
                 0,
             );
+        }
+        CssDescriptorValueType::OptionalDeclarationValue => {
+            if !parse_optional_declaration_value_descriptor(filtered_input) {
+                return false;
+            }
+
+            (callbacks.kind_callback)(CssDescriptorResultKind::OptionalDeclarationValue);
         }
         _ => return false,
     }
