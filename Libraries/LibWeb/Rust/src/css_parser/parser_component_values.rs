@@ -1214,10 +1214,11 @@ impl ComponentValueParser {
         // `<supports-decl> = ( <declaration> )`
         if let ComponentValue::SimpleBlock(block) = &component_value
             && is_paren_block(block)
-            && component_values_start_like_a_declaration(&block.value)
+            && let Some(declaration) =
+                crate::css_parser::parser_emitters::parse_declaration_from_component_values(&block.value)
         {
             self.index += 1;
-            return Some((SupportsFeature::Declaration, component_value));
+            return Some((SupportsFeature::Declaration(declaration), component_value));
         }
 
         let ComponentValue::Function(function) = &component_value else {

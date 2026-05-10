@@ -40,26 +40,6 @@ pub(super) fn is_paren_block(block: &SimpleBlock) -> bool {
     matches!(block.token.token_type, TokenType::OpenParen)
 }
 
-pub(super) fn component_values_start_like_a_declaration(component_values: &[ComponentValue]) -> bool {
-    let mut non_whitespace = component_values
-        .iter()
-        .filter(|component_value| !is_whitespace_component_value(component_value));
-
-    matches!(
-        (non_whitespace.next(), non_whitespace.next()),
-        (
-            Some(ComponentValue::PreservedToken(Token {
-                token_type: TokenType::Ident { .. },
-                ..
-            })),
-            Some(ComponentValue::PreservedToken(Token {
-                token_type: TokenType::Colon,
-                ..
-            }))
-        )
-    )
-}
-
 pub(super) fn contains_only_any_value(component_values: &[ComponentValue]) -> bool {
     for component_value in component_values {
         match component_value {

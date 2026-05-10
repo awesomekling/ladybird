@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn ignore_supports_feature(_: CssSupportsFeatureKind, _: Option<&str>) {}
+fn ignore_supports_feature(_: CssSupportsFeatureKind, _: Option<&str>, _: Option<&str>, _: bool) {}
 
 pub(super) fn parse_rust_owned_math_function(
     value_type: PropertyValueType,
@@ -341,7 +341,7 @@ pub(crate) fn parse_a_supports_condition<E, C, S>(
 ) where
     E: FnMut(CssBooleanExpressionEventKind),
     C: FnMut(CssComponentValue),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
 {
     let (mut parser, filtered_input_string) = parser_from_filtered_input(filtered_input);
     parser.rule_context.push(RuleContext::SupportsCondition);
@@ -394,7 +394,7 @@ where
     }
 
     match feature {
-        SupportsFeature::Declaration => feature_callback(CssSupportsFeatureKind::Declaration, None),
+        SupportsFeature::Declaration(_) => feature_callback(CssSupportsFeatureKind::Declaration, None),
         SupportsFeature::Selector => feature_callback(CssSupportsFeatureKind::Selector, None),
         SupportsFeature::FontTech(name) => feature_callback(CssSupportsFeatureKind::FontTech, Some(&name)),
         SupportsFeature::FontFormat(name) => feature_callback(CssSupportsFeatureKind::FontFormat, Some(&name)),
@@ -11521,7 +11521,7 @@ pub(crate) fn parse_a_rule<Q, E, B, S, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11559,7 +11559,7 @@ pub(crate) fn parse_a_blocks_contents<Q, E, B, S, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11596,7 +11596,7 @@ pub(crate) fn parse_a_blocks_contents_with_context<Q, E, B, S, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),
@@ -11631,7 +11631,7 @@ pub(crate) fn parse_a_stylesheets_contents<Q, E, B, S, M, V, C>(
     Q: FnMut(CssMediaQuery),
     E: FnMut(CssRuleEvent),
     B: FnMut(CssBooleanExpressionEventKind),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
     C: FnMut(CssComponentValue),

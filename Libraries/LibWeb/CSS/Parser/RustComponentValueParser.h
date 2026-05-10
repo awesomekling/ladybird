@@ -60,6 +60,8 @@ public:
     struct SupportsFeature {
         FFI::CssSupportsFeatureKind kind;
         Optional<FlyString> name;
+        Optional<String> value;
+        Important important { Important::No };
     };
 
     struct PropertyKeyword {
@@ -1175,7 +1177,7 @@ private:
     using MediaFeatureCallback = void (*)(void*, FFI::CssMediaFeature const*);
     using MediaFeatureValueCallback = void (*)(void*, FFI::CssMediaFeatureValue const*);
     using ComponentValueCallback = void (*)(void*, FFI::CssComponentValue const*);
-    using SupportsFeatureCallback = void (*)(void*, FFI::CssSupportsFeatureKind, u8 const*, size_t);
+    using SupportsFeatureCallback = void (*)(void*, FFI::CssSupportsFeatureKind, u8 const*, size_t, u8 const*, size_t, bool);
     using BooleanExpressionTestParser = AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Optional<SupportsFeature>&&, Vector<ComponentValue>&&)>;
     using RustBooleanExpressionParser = AK::Function<void(u8 const*, size_t, void*, BooleanExpressionEventCallback, SupportsFeatureCallback, MediaFeatureCallback, MediaFeatureValueCallback, ComponentValueCallback)>;
 

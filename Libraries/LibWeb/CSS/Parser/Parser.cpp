@@ -274,21 +274,32 @@ OwnPtr<BooleanExpression> Parser::parse_supports_feature(TokenStream<ComponentVa
     if (!feature.has_value())
         return {};
 
+    if (feature->kind == FFI::CssSupportsFeatureKind::Declaration) {
+        VERIFY(feature->name.has_value());
+        VERIFY(feature->value.has_value());
+
+        auto value_start = tokens.current_index();
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+
+        Declaration declaration {
+            .name = feature->name.release_value(),
+            .value = Vector<ComponentValue> { tokens.tokens_since(value_start) },
+            .important = feature->important,
+        };
+
+        transaction.commit();
+        return BooleanExpressionInParens::create(Supports::Declaration::create(feature->value.release_value(), convert_to_style_property(declaration).has_value()));
+    }
+
     auto const& first_token = tokens.consume_a_token();
     tokens.discard_whitespace();
     if (tokens.has_next_token())
         return {};
 
     switch (feature->kind) {
-    case FFI::CssSupportsFeatureKind::Declaration: {
-        VERIFY(first_token.is_block() && first_token.block().is_paren());
-        TokenStream block_tokens { first_token.block().value };
-        if (auto declaration = parse_supports_declaration(block_tokens)) {
-            transaction.commit();
-            return BooleanExpressionInParens::create(declaration.release_nonnull<BooleanExpression>());
-        }
-        return {};
-    }
+    case FFI::CssSupportsFeatureKind::Declaration:
+        VERIFY_NOT_REACHED();
     case FFI::CssSupportsFeatureKind::Selector: {
         VERIFY(first_token.is_function("selector"sv));
         // FIXME: Parsing and then converting back to a string is weird.

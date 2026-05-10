@@ -347,7 +347,7 @@ pub(super) fn emit_rule<E, C>(
     event_callback: &mut E,
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
-    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>),
+    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     media_feature_callback: &mut impl FnMut(CssMediaFeature),
     media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
@@ -837,7 +837,7 @@ pub(super) fn emit_rule_or_list_of_declarations_list<E, C>(
     event_callback: &mut E,
     media_query_callback: &mut impl FnMut(CssMediaQuery),
     boolean_expression_event_callback: &mut impl FnMut(CssBooleanExpressionEventKind),
-    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>),
+    supports_feature_callback: &mut impl FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
     media_feature_callback: &mut impl FnMut(CssMediaFeature),
     media_feature_value_callback: &mut impl FnMut(CssMediaFeatureValue),
     component_value_callback: &mut C,
@@ -900,7 +900,7 @@ pub(super) fn emit_declaration<E, C>(
     event_callback(CssRuleEvent::new(CssRuleEventKind::DeclarationEnd));
 }
 
-fn parse_declaration_from_component_values(component_values: &[ComponentValue]) -> Option<Declaration> {
+pub(super) fn parse_declaration_from_component_values(component_values: &[ComponentValue]) -> Option<Declaration> {
     // https://drafts.csswg.org/css-syntax/#consume-declaration
     // To consume a declaration from a token stream input, given an optional bool nested (default false):
 
@@ -1039,7 +1039,7 @@ pub(super) fn emit_boolean_expression<E, C, M, V, S>(
     C: FnMut(CssComponentValue),
     M: FnMut(CssMediaFeature),
     V: FnMut(CssMediaFeatureValue),
-    S: FnMut(CssSupportsFeatureKind, Option<&str>),
+    S: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
 {
     match expression {
         BooleanExpression::Not(child) => {
@@ -1100,9 +1100,15 @@ pub(super) fn emit_boolean_expression<E, C, M, V, S>(
         }
         BooleanExpression::Test(BooleanExpressionTest::SupportsFeature(feature, component_values)) => {
             event_callback(CssBooleanExpressionEventKind::TestStart);
-            emit_supports_feature(feature, supports_feature_callback);
-            for component_value in component_values {
-                emit_component_value(component_value, filtered_input, component_value_callback);
+            emit_supports_feature(feature, component_values, filtered_input, supports_feature_callback);
+            if let SupportsFeature::Declaration(declaration) = feature {
+                for component_value in &declaration.value {
+                    emit_component_value(component_value, filtered_input, component_value_callback);
+                }
+            } else {
+                for component_value in component_values {
+                    emit_component_value(component_value, filtered_input, component_value_callback);
+                }
             }
             event_callback(CssBooleanExpressionEventKind::TestEnd);
         }
@@ -1128,16 +1134,43 @@ pub(super) fn emit_boolean_expression<E, C, M, V, S>(
     }
 }
 
-fn emit_supports_feature<C>(feature: &SupportsFeature, callback: &mut C)
-where
-    C: FnMut(CssSupportsFeatureKind, Option<&str>),
+fn emit_supports_feature<C>(
+    feature: &SupportsFeature,
+    component_values: &[ComponentValue],
+    filtered_input: &str,
+    callback: &mut C,
+) where
+    C: FnMut(CssSupportsFeatureKind, Option<&str>, Option<&str>, bool),
 {
     match feature {
-        SupportsFeature::Declaration => callback(CssSupportsFeatureKind::Declaration, None),
-        SupportsFeature::Selector => callback(CssSupportsFeatureKind::Selector, None),
-        SupportsFeature::FontTech(name) => callback(CssSupportsFeatureKind::FontTech, Some(name)),
-        SupportsFeature::FontFormat(name) => callback(CssSupportsFeatureKind::FontFormat, Some(name)),
-        SupportsFeature::Env(name) => callback(CssSupportsFeatureKind::Env, Some(name)),
+        SupportsFeature::Declaration(declaration) => {
+            let source = component_values
+                .first()
+                .and_then(|component_value| match component_value {
+                    ComponentValue::SimpleBlock(block) => {
+                        serialize_component_values_for_reparsing(&block.value, filtered_input)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    let mut source = declaration.name.clone();
+                    source.push(':');
+                    if let Some(value) = serialize_component_values_for_reparsing(&declaration.value, filtered_input) {
+                        source.push_str(&value);
+                    }
+                    source
+                });
+            callback(
+                CssSupportsFeatureKind::Declaration,
+                Some(&declaration.name),
+                Some(&source),
+                declaration.important,
+            );
+        }
+        SupportsFeature::Selector => callback(CssSupportsFeatureKind::Selector, None, None, false),
+        SupportsFeature::FontTech(name) => callback(CssSupportsFeatureKind::FontTech, Some(name), None, false),
+        SupportsFeature::FontFormat(name) => callback(CssSupportsFeatureKind::FontFormat, Some(name), None, false),
+        SupportsFeature::Env(name) => callback(CssSupportsFeatureKind::Env, Some(name), None, false),
     }
 }
 

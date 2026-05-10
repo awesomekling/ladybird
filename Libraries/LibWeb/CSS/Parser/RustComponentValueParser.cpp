@@ -4909,12 +4909,20 @@ static void process_boolean_expression_event(RustBooleanExpressionBuilder& build
     }
 }
 
-static void set_boolean_expression_supports_feature(RustBooleanExpressionBuilder& builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len)
+static void set_boolean_expression_supports_feature(RustBooleanExpressionBuilder& builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important)
 {
     Optional<FlyString> name;
     if (name_len > 0)
         name = fly_string_from_ffi_bytes(name_ptr, name_len);
-    builder.supports_feature = RustComponentValueParser::SupportsFeature { kind, move(name) };
+    Optional<String> value;
+    if (value_len > 0)
+        value = string_from_ffi_bytes(value_ptr, value_len);
+    builder.supports_feature = RustComponentValueParser::SupportsFeature {
+        kind,
+        move(name),
+        move(value),
+        important ? Important::Yes : Important::No,
+    };
 }
 
 static void set_boolean_expression_media_feature(RustBooleanExpressionBuilder& builder, FFI::CssMediaFeature const* media_feature)
@@ -4980,9 +4988,9 @@ OwnPtr<BooleanExpression> RustComponentValueParser::parse_a_boolean_expression(S
             auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
             process_boolean_expression_event(builder, event);
         },
-        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len) {
+        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important) {
             auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
-            set_boolean_expression_supports_feature(builder, kind, name_ptr, name_len);
+            set_boolean_expression_supports_feature(builder, kind, name_ptr, name_len, value_ptr, value_len, important);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
             auto& builder = *static_cast<RustBooleanExpressionBuilder*>(raw_builder);
@@ -6460,11 +6468,11 @@ static void apply_rule_boolean_expression_event(RuleEventBuilder& builder, FFI::
     process_boolean_expression_event(*boolean_expression_builder, event);
 }
 
-static void apply_rule_supports_feature(RuleEventBuilder& builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len)
+static void apply_rule_supports_feature(RuleEventBuilder& builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important)
 {
     auto boolean_expression_builder = builder.current_boolean_expression_builder();
     VERIFY(boolean_expression_builder);
-    set_boolean_expression_supports_feature(*boolean_expression_builder, kind, name_ptr, name_len);
+    set_boolean_expression_supports_feature(*boolean_expression_builder, kind, name_ptr, name_len, value_ptr, value_len, important);
 }
 
 static void apply_rule_media_feature(RuleEventBuilder& builder, FFI::CssMediaFeature const* media_feature)
@@ -6568,8 +6576,8 @@ Optional<Rule> RustComponentValueParser::parse_a_rule(StringView input, StringVi
         [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
             apply_rule_boolean_expression_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         },
-        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len) {
-            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len);
+        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important) {
+            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len, value_ptr, value_len, important);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
             apply_rule_media_feature(*static_cast<RuleEventBuilder*>(raw_builder), media_feature);
@@ -6622,8 +6630,8 @@ Vector<RuleOrListOfDeclarations> RustComponentValueParser::parse_a_blocks_conten
         [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
             apply_rule_boolean_expression_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         },
-        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len) {
-            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len);
+        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important) {
+            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len, value_ptr, value_len, important);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
             apply_rule_media_feature(*static_cast<RuleEventBuilder*>(raw_builder), media_feature);
@@ -6662,8 +6670,8 @@ Vector<Rule> RustComponentValueParser::parse_a_stylesheets_contents(StringView i
         [](void* raw_builder, FFI::CssBooleanExpressionEventKind event) {
             apply_rule_boolean_expression_event(*static_cast<RuleEventBuilder*>(raw_builder), event);
         },
-        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len) {
-            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len);
+        [](void* raw_builder, FFI::CssSupportsFeatureKind kind, u8 const* name_ptr, size_t name_len, u8 const* value_ptr, size_t value_len, bool important) {
+            apply_rule_supports_feature(*static_cast<RuleEventBuilder*>(raw_builder), kind, name_ptr, name_len, value_ptr, value_len, important);
         },
         [](void* raw_builder, FFI::CssMediaFeature const* media_feature) {
             apply_rule_media_feature(*static_cast<RuleEventBuilder*>(raw_builder), media_feature);
