@@ -2174,7 +2174,7 @@ Optional<FlyString> Parser::parse_counter_style_name(TokenStream<ComponentValue>
 }
 
 // https://drafts.csswg.org/css-counter-styles-3/#typedef-counter-style
-RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     // <counter-style> = <counter-style-name> | <symbols()>
     auto transaction = tokens.begin_transaction();
@@ -2184,10 +2184,19 @@ RefPtr<StyleValue const> Parser::parse_counter_style_value(TokenStream<Component
 
     auto start = tokens.current_index();
     tokens.discard_a_token();
-    auto serialized_counter_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
-    auto maybe_counter_style = RustComponentValueParser::parse_a_counter_style(serialized_counter_style.bytes_as_string_view(), "utf-8"sv);
+    Optional<String> serialized_counter_style;
+    auto counter_style_source = original_source_text.value_or_lazy_evaluated([&] {
+        serialized_counter_style = serialize_component_values_for_reparsing(tokens.tokens_since(start));
+        return serialized_counter_style->bytes_as_string_view();
+    });
+    auto maybe_counter_style = RustComponentValueParser::parse_a_counter_style(counter_style_source, "utf-8"sv);
     if (!maybe_counter_style.has_value())
         return nullptr;
+
+    if (original_source_text.has_value()) {
+        while (tokens.has_next_token())
+            tokens.discard_a_token();
+    }
 
     auto counter_style = materialize_rust_counter_style(maybe_counter_style);
     transaction.commit();
@@ -4215,7 +4224,7 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::Counter:
         return parse_counter_value(tokens, original_source_text);
     case ValueType::CounterStyle:
-        return parse_counter_style_value(tokens);
+        return parse_counter_style_value(tokens, original_source_text);
     case ValueType::CustomIdent:
         // FIXME: Figure out how to pass the blacklist here
         return parse_custom_ident_value(tokens, {});

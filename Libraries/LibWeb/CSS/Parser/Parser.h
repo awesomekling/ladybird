@@ -315,7 +315,7 @@ private:
     RefPtr<StyleValue const> parse_color_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_counter_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     Optional<FlyString> parse_counter_style_name(TokenStream<ComponentValue>&);
-    RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_counter_style_value(TokenStream<ComponentValue>&, Optional<StringView> original_source_text = {});
     RefPtr<StyleValue const> parse_rect_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_ratio_value(TokenStream<ComponentValue>&);
     RefPtr<StringStyleValue const> parse_string_value(TokenStream<ComponentValue>&);
