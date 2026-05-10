@@ -242,12 +242,6 @@ pub(crate) fn parse_a_comma_separated_list_of_component_values<G, C>(
     }
 }
 
-pub(crate) fn parse_empty_prelude(filtered_input: &[u8]) -> bool {
-    let (mut parser, _) = parser_from_filtered_input(filtered_input);
-    let component_values = parser.parse_a_list_of_component_values();
-    strip_whitespace(&component_values).is_empty()
-}
-
 pub(crate) fn parse_a_value_type(filtered_input: &[u8], value_type_id: u8) -> CssValueTypeSyntaxKind {
     let Some(value_type_id) = value_type_id_from_u8(value_type_id) else {
         return CssValueTypeSyntaxKind::Invalid;

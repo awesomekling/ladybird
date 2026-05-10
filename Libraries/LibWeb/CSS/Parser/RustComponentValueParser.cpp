@@ -4551,14 +4551,6 @@ Optional<RustComponentValueParser::SyntaxComponent> RustComponentValueParser::pa
     return SyntaxComponent { move(builder.root), consumed_byte_length };
 }
 
-bool RustComponentValueParser::parse_empty_prelude(StringView input, StringView encoding)
-{
-    auto filtered_input = decode_and_filter_code_points(input, encoding);
-    auto filtered_input_bytes = filtered_input.bytes();
-
-    return FFI::rust_css_parse_empty_prelude(filtered_input_bytes.data(), filtered_input_bytes.size());
-}
-
 Optional<Declaration> RustComponentValueParser::parse_a_declaration(StringView input, StringView encoding)
 {
     struct DeclarationBuilder {

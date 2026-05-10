@@ -100,8 +100,8 @@ use super::{
     parse_content_value, parse_coordinating_value_list_shorthand, parse_counter_style_additive_symbols,
     parse_counter_style_negative, parse_counter_style_range, parse_counter_style_symbol, parse_counter_style_symbols,
     parse_counter_style_system, parse_crop_or_cross, parse_cursor_value, parse_descriptor_result,
-    parse_descriptor_syntax, parse_display_value, parse_easing_value, parse_empty_prelude,
-    parse_filter_value_list_value, parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
+    parse_descriptor_syntax, parse_display_value, parse_easing_value, parse_filter_value_list_value,
+    parse_fit_content_value, parse_flex_flow_value, parse_flex_shorthand_value,
     parse_font_feature_values_family_name_list, parse_font_feature_values_feature_value, parse_font_shorthand,
     parse_font_weight_absolute_pair, parse_generated_property_value, parse_grid_auto_flow_value,
     parse_grid_auto_track_sizes_value, parse_grid_placement_shorthand, parse_grid_template_shorthand,
@@ -9772,13 +9772,6 @@ fn rejects_invalid_font_feature_values_feature_values() {
     assert_eq!(parse_font_feature_values_feature_values("calc(1)"), None);
     assert_eq!(parse_font_feature_values_feature_values("1 foo"), None);
     assert_eq!(parse_font_feature_values_feature_values("4294967296"), None);
-}
-
-#[test]
-fn parses_empty_preludes() {
-    assert!(parse_empty_prelude("".as_bytes()));
-    assert!(parse_empty_prelude(" \t\n".as_bytes()));
-    assert!(!parse_empty_prelude("foo".as_bytes()));
 }
 
 #[test]
