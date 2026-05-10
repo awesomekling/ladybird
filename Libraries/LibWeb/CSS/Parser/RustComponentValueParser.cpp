@@ -4268,6 +4268,45 @@ Optional<RustComponentValueParser::RustStyleValue> RustComponentValueParser::par
                 VERIFY_NOT_REACHED();
             }();
 
+            auto append_modifier_to_url = [&](Optional<URL>& target) {
+                VERIFY(target.has_value());
+                auto modifiers = target->request_url_modifiers();
+                modifiers.append(move(modifier));
+                target = URL { target->url(), target->type(), move(modifiers) };
+            };
+            auto image_url_target = [&]<typename ImageSetOptions>(Optional<RustImageKind> image_kind, Optional<URL>& image_url, ImageSetOptions& image_set_options) -> Optional<URL>* {
+                if (image_kind == RustImageKind::ImageSet) {
+                    VERIFY(!image_set_options.is_empty());
+                    return &image_set_options.last().image_url;
+                }
+                return image_url.has_value() ? &image_url : nullptr;
+            };
+            Optional<URL>* image_url = nullptr;
+            if (style_value->kind == FFI::CssStyleValueKind::Image)
+                image_url = image_url_target(style_value->image_kind, style_value->image_url, style_value->image_set_options);
+            else if (style_value->kind == FFI::CssStyleValueKind::LayerShorthand) {
+                VERIFY(!style_value->layer_shorthand_items.is_empty());
+                auto& item = style_value->layer_shorthand_items.last();
+                image_url = image_url_target(item.image_kind, item.image_url, item.image_set_options);
+            } else if (style_value->kind == FFI::CssStyleValueKind::Content) {
+                VERIFY(!style_value->content_events.is_empty());
+                auto& item = style_value->content_events.last();
+                image_url = image_url_target(item.image_kind, item.image_url, item.image_set_options);
+            } else if (style_value->kind == FFI::CssStyleValueKind::Cursor) {
+                VERIFY(!style_value->cursor_images.is_empty());
+                auto& item = style_value->cursor_images.last();
+                image_url = image_url_target(item.image_kind, item.image_url, item.image_set_options);
+            } else if (style_value->kind == FFI::CssStyleValueKind::ListStyle)
+                image_url = image_url_target(style_value->list_style_image_source_kind, style_value->list_style_image_source_url, style_value->list_style_image_source_image_set_options);
+            else if (style_value->kind == FFI::CssStyleValueKind::BorderImage)
+                image_url = image_url_target(style_value->border_image_source_source_kind, style_value->border_image_source_source_url, style_value->border_image_source_source_image_set_options);
+            else if (style_value->kind == FFI::CssStyleValueKind::ShapeOutside)
+                image_url = image_url_target(style_value->shape_outside_image_source_kind, style_value->shape_outside_image_source_url, style_value->shape_outside_image_source_image_set_options);
+            if (image_url) {
+                append_modifier_to_url(*image_url);
+                return;
+            }
+
             VERIFY(style_value->kind == FFI::CssStyleValueKind::FilterValueList);
             VERIFY(!style_value->filter_value_list_events.is_empty());
             VERIFY(style_value->filter_value_list_events.last().kind == RustFilterValueListEventKind::Url);

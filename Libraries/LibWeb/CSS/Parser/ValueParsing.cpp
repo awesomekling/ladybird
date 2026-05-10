@@ -44,8 +44,6 @@
 #include <LibWeb/CSS/StyleValues/FunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GuaranteedInvalidStyleValue.h>
-#include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
-#include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -2207,82 +2205,6 @@ RefPtr<StringStyleValue const> Parser::parse_string_value(TokenStream<ComponentV
     return nullptr;
 }
 
-RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    return parse_image_value(tokens, AllowImageSet::Yes, original_source_text);
-}
-
-RefPtr<ImageSetStyleValue const> Parser::parse_image_set_function(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
-{
-    auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
-    if (!tokens.has_next_token())
-        return nullptr;
-
-    auto const& component_value = tokens.consume_a_token();
-    if (component_value.contains_attr_tainted_value())
-        return nullptr;
-
-    auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
-    auto value = parse_css_value_for_property(PropertyID::BorderImageSource, component_value_tokens, original_source_text);
-    component_value_tokens.discard_whitespace();
-    if (!value || (!original_source_text.has_value() && component_value_tokens.has_next_token()) || !value->is_image_set())
-        return nullptr;
-
-    discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
-    transaction.commit();
-    return static_ptr_cast<ImageSetStyleValue const>(value);
-}
-
-RefPtr<AbstractImageStyleValue const> Parser::parse_image_value(TokenStream<ComponentValue>& tokens, AllowImageSet allow_image_set, Optional<StringView> original_source_text)
-{
-    tokens.mark();
-    auto url = parse_url_function(tokens, original_source_text);
-    if (url.has_value()) {
-        // If the value is a 'url(..)' parse as image, but if it is just a reference 'url(#xx)', leave it alone,
-        // so we can parse as URL further on. These URLs are used as references inside SVG documents for masks.
-        // FIXME: Remove this special case once mask-image accepts `<image>`.
-        if (!url->url().starts_with('#')) {
-            tokens.discard_a_mark();
-            return ImageStyleValue::create(url.release_value());
-        }
-        tokens.restore_a_mark();
-        return nullptr;
-    }
-    tokens.discard_a_mark();
-
-    if (allow_image_set == AllowImageSet::Yes) {
-        if (auto image_set = parse_image_set_function(tokens, original_source_text))
-            return image_set;
-    }
-
-    auto parse_single_rust_image_component = [&]() -> RefPtr<AbstractImageStyleValue const> {
-        tokens.discard_whitespace();
-        if (tokens.is_empty())
-            return nullptr;
-
-        if (tokens.next_token().is_function("image-set"sv) || tokens.next_token().is_function("-webkit-image-set"sv))
-            return nullptr;
-
-        auto transaction = tokens.begin_transaction();
-        auto const& component_value = tokens.consume_a_token();
-        auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
-        auto value = parse_css_value_for_property(PropertyID::BorderImageSource, component_value_tokens, original_source_text);
-        component_value_tokens.discard_whitespace();
-        if (!value || (!original_source_text.has_value() && component_value_tokens.has_next_token()) || !value->is_abstract_image())
-            return nullptr;
-
-        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
-        transaction.commit();
-        return static_ptr_cast<AbstractImageStyleValue const>(value);
-    };
-
-    if (auto image = parse_single_rust_image_component())
-        return image;
-
-    return nullptr;
-}
-
 RefPtr<StyleValue const> Parser::parse_easing_value(TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     auto transaction = tokens.begin_transaction();
@@ -3309,8 +3231,26 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
         return parse_frequency_value(tokens, infinite_range, original_source_text);
     case ValueType::FrequencyPercentage:
         return parse_frequency_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
-    case ValueType::Image:
-        return parse_image_value(tokens, original_source_text);
+    case ValueType::Image: {
+        auto transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
+            return nullptr;
+
+        auto const& component_value = tokens.consume_a_token();
+        if (component_value.contains_attr_tainted_value())
+            return nullptr;
+
+        auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(component_value);
+        auto value = parse_css_value_for_property(PropertyID::BorderImageSource, component_value_tokens, original_source_text);
+        component_value_tokens.discard_whitespace();
+        if (!value || (!original_source_text.has_value() && component_value_tokens.has_next_token()) || !value->is_abstract_image())
+            return nullptr;
+
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
+        transaction.commit();
+        return value;
+    }
     case ValueType::Integer:
         return parse_integer_value(tokens, infinite_integer_range, original_source_text);
     case ValueType::Length:

@@ -124,6 +124,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
     match &style_value.value {
         RustOwnedStyleValueKind::Image(image) => callback_image_style_value(
             callback,
+            url_modifier_callback,
             &mut SourceComponentValueEmitter {
                 filtered_input,
                 list_callback: source_component_value_list_callback,
@@ -168,6 +169,7 @@ pub(super) fn emit_rust_owned_style_value_with_calculation_callback<C, D, U, S, 
         }
         RustOwnedStyleValueKind::ImageSet(image_set) => callback_image_set_style_value(
             callback,
+            url_modifier_callback,
             &mut SourceComponentValueEmitter {
                 filtered_input,
                 list_callback: source_component_value_list_callback,
@@ -4678,13 +4680,15 @@ fn callback_gradient_metadata<C, S, E>(
     }
 }
 
-fn callback_image_style_value<C, S, E>(
+fn callback_image_style_value<C, U, S, E>(
     callback: &mut C,
+    url_modifier_callback: &mut U,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     image: &RustOwnedImage,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    U: FnMut(&UrlModifier),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -4710,15 +4714,22 @@ fn callback_image_style_value<C, S, E>(
     if let Some(gradient) = &image.gradient {
         callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
     }
+    if let Some(url) = &image.url {
+        for modifier in &url.request_url_modifiers {
+            url_modifier_callback(modifier);
+        }
+    }
 }
 
-fn callback_image_set_style_value<C, S, E>(
+fn callback_image_set_style_value<C, U, S, E>(
     callback: &mut C,
+    url_modifier_callback: &mut U,
     source_component_value_emitter: &mut SourceComponentValueEmitter<S, E>,
     property_id: u16,
     image_set: &RustOwnedImageSet,
 ) where
     C: FnMut(CssStyleValueKind, u16, CssPrimitiveValueKind, bool, f64, bool, f64, u8, u8, u8, u8, &[u8], &str),
+    U: FnMut(&UrlModifier),
     S: FnMut(u8),
     E: FnMut(CssComponentValue),
 {
@@ -4745,6 +4756,11 @@ fn callback_image_set_style_value<C, S, E>(
         }
         if let Some(gradient) = &option.image.gradient {
             callback_gradient_metadata(callback, source_component_value_emitter, property_id, gradient);
+        }
+        if let Some(url) = &option.image.url {
+            for modifier in &url.request_url_modifiers {
+                url_modifier_callback(modifier);
+            }
         }
         if !option.resolution_component_values.is_empty() {
             source_component_value_emitter.emit(

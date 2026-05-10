@@ -3592,13 +3592,13 @@ pub(super) fn rust_owned_url_payload_from_component_value(
     let mut parser = ComponentValueParser::new(vec![component_value.clone()]);
     let url_function = parser.parse_a_url_function()?;
     parser.discard_whitespace();
-    if parser.has_next_component_value() || !url_function.request_url_modifiers.is_empty() {
+    if parser.has_next_component_value() {
         return None;
     }
     Some(RustOwnedUrlPayload {
         function_type: url_function.function_type,
         url: url_function.url,
-        request_url_modifiers: vec![],
+        request_url_modifiers: url_function.request_url_modifiers,
     })
 }
 
