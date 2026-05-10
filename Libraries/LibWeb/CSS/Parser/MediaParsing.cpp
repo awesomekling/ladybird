@@ -98,18 +98,17 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
         if (rust_value.parsed_value.has_value())
             return rust_value.parsed_value.release_value();
 
+        // Rust emits typed payloads for plain media feature values. If no payload
+        // was emitted and the value is not a function, there is no C++ parser work
+        // left to do here.
+        if (!any_of(component_values, [](auto const& component_value) { return component_value.is_function(); }))
+            return materialize_unknown_media_feature_value(component_values);
+
         TokenStream value_tokens { component_values };
         auto maybe_value = [&]() -> Optional<MediaFeatureValue> {
             auto context_guard = push_temporary_value_parsing_context(SpecialContext::MediaCondition);
 
             switch (syntax_kind) {
-            case FFI::CssMediaFeatureValueSyntaxKind::Ident: {
-                value_tokens.discard_whitespace();
-                auto keyword = parse_keyword_value(value_tokens);
-                if (keyword)
-                    return MediaFeatureValue(MediaFeatureValue::Type::Ident, keyword.release_nonnull());
-                return {};
-            }
             case FFI::CssMediaFeatureValueSyntaxKind::Boolean: {
                 value_tokens.discard_whitespace();
                 if (auto integer = parse_integer_value(value_tokens, infinite_integer_range)) {
@@ -150,6 +149,7 @@ OwnPtr<MediaFeature> Parser::materialize_rust_media_feature_test(RustComponentVa
                     return MediaFeatureValue(MediaFeatureValue::Type::Resolution, resolution.release_nonnull());
                 return {};
             }
+            case FFI::CssMediaFeatureValueSyntaxKind::Ident:
             case FFI::CssMediaFeatureValueSyntaxKind::Unknown:
             case FFI::CssMediaFeatureValueSyntaxKind::Invalid:
                 VERIFY_NOT_REACHED();
