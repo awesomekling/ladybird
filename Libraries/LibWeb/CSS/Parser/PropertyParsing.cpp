@@ -145,7 +145,6 @@ RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID propert
 Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(ReadonlySpan<PropertyID> property_ids, TokenStream<ComponentValue>& tokens, Optional<StringView> original_source_text)
 {
     tokens.discard_whitespace();
-    auto& peek_token = tokens.next_token();
 
     {
         auto generated_transaction = tokens.begin_transaction();
@@ -6891,38 +6890,6 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
 
     if (property_ids.size() == 1 && property_uses_rust_owned_whole_grammar(property_ids[0]))
         return OptionalNone {};
-
-    if (peek_token.is(Token::Type::Ident)) {
-        // NOTE: We do not try to parse "CSS-wide keywords" here. https://www.w3.org/TR/css-values-4/#common-keywords
-        //       These are only valid on their own, and so should be parsed directly in `parse_css_value()`.
-        if (auto property_keyword = RustComponentValueParser::parse_property_keyword_value(property_ids, peek_token.token().ident()); property_keyword.has_value()) {
-            tokens.discard_a_token();
-            return PropertyAndValue { property_keyword->property_id, KeywordStyleValue::create(property_keyword->keyword) };
-        }
-
-        // Custom idents
-        Optional<String> generated_source;
-        StringView source;
-        if (original_source_text.has_value()) {
-            source = *original_source_text;
-        } else {
-            auto token_original_source_text = peek_token.original_source_text();
-            if (token_original_source_text.is_empty()) {
-                generated_source = peek_token.to_string();
-                source = generated_source->bytes_as_string_view();
-            } else {
-                source = token_original_source_text;
-            }
-        }
-        if (auto property_custom_ident = RustComponentValueParser::parse_property_custom_ident_value(property_ids, source); property_custom_ident.has_value()) {
-            tokens.discard_a_token();
-            if (original_source_text.has_value()) {
-                while (tokens.has_next_token())
-                    tokens.discard_a_token();
-            }
-            return PropertyAndValue { property_custom_ident->property_id, CustomIdentStyleValue::create(property_custom_ident->custom_ident) };
-        }
-    }
 
     return OptionalNone {};
 }
