@@ -3414,12 +3414,23 @@ RefPtr<StyleValue const> Parser::parse_value(ValueType value_type, TokenStream<C
     case ValueType::TimePercentage:
         return parse_time_percentage_value(tokens, infinite_range, infinite_range, original_source_text);
     case ValueType::TransformFunction: {
-        auto value = parse_rust_owned_property_value_prefix(PropertyID::Transform, tokens, original_source_text);
-        if (!value || !value->is_value_list())
+        auto transaction = tokens.begin_transaction();
+        tokens.discard_whitespace();
+        if (!tokens.has_next_token())
             return nullptr;
+
+        auto const& part = tokens.consume_a_token();
+        auto component_value_tokens = TokenStream<ComponentValue>::of_single_token(part);
+        auto value = parse_css_value_for_property(PropertyID::Transform, component_value_tokens, original_source_text);
+        component_value_tokens.discard_whitespace();
+        if (!value || (!original_source_text.has_value() && component_value_tokens.has_next_token()) || !value->is_value_list())
+            return nullptr;
+
         auto const& transformations = value->as_value_list();
         if (transformations.size() != 1)
             return nullptr;
+        discard_remaining_tokens_if_using_original_source(tokens, original_source_text);
+        transaction.commit();
         return transformations.value_at(0, false);
     }
     case ValueType::TransformList: {
