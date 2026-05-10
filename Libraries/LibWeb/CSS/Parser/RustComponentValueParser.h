@@ -1138,7 +1138,6 @@ public:
     static Optional<Declaration> parse_a_declaration(StringView input, StringView encoding, Vector<RuleContext> const& rule_context);
     static OwnPtr<BooleanExpression> parse_a_supports_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_test);
     static OwnPtr<BooleanExpression> parse_an_if_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(Optional<MediaFeatureTest>&&, Optional<SupportsFeature>&&, Vector<ComponentValue>&&)> parse_test);
-    static OwnPtr<BooleanExpression> parse_a_container_condition(StringView input, StringView encoding);
     static OwnPtr<BooleanExpression> parse_a_media_condition(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Vector<MediaQuerySyntax> parse_a_media_query_list(StringView input, StringView encoding, AK::Function<OwnPtr<BooleanExpression>(MediaFeatureTest&&)> parse_test);
     static Optional<PageSelectorList> parse_a_page_selector_list(StringView input, StringView encoding);
