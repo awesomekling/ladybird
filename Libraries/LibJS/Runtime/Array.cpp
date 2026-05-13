@@ -64,17 +64,10 @@ GC::Ref<Array> Array::create_from(Realm& realm, ReadonlySpan<Value> elements)
     return array;
 }
 
-Array::Array(Realm& realm, Object& prototype)
+Array::Array(Realm&, Object& prototype)
     : Object(ConstructWithPrototypeTag::Tag, prototype)
-    , m_realm(realm)
 {
     set_has_magical_length_property();
-}
-
-void Array::visit_edges(Cell::Visitor& visitor)
-{
-    Base::visit_edges(visitor);
-    visitor.visit(m_realm);
 }
 
 // 10.4.2.4 ArraySetLength ( A, Desc ), https://tc39.es/ecma262/#sec-arraysetlength
@@ -305,7 +298,7 @@ ThrowCompletionOr<Optional<PropertyDescriptor>> Array::internal_get_own_property
 
 bool Array::default_prototype_chain_intact() const
 {
-    auto const& intrinsics = m_realm->intrinsics();
+    auto const& intrinsics = shape().realm().intrinsics();
     auto const* array_prototype = shape().prototype();
     if (!array_prototype)
         return false;

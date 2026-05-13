@@ -71,8 +71,6 @@ public:
             && indexed_storage_kind() == IndexedStorageKind::Packed;
     }
 
-    virtual void visit_edges(Cell::Visitor& visitor) override;
-
 protected:
     explicit Array(Realm& realm, Object& prototype);
 
@@ -81,7 +79,6 @@ private:
 
     ThrowCompletionOr<bool> set_length(PropertyDescriptor const&);
 
-    GC::Ref<Realm> m_realm;
     bool m_length_writable { true };
     bool m_is_proxy_target { false };
 };
