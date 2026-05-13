@@ -16,6 +16,7 @@
 #include <AK/LexicalPath.h>
 #include <AK/NumberFormat.h>
 #include <AK/Platform.h>
+#include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StackInfo.h>
 #include <AK/StackUnwinder.h>
@@ -660,43 +661,39 @@ void Heap::run_post_gc_tasks()
 
 void Heap::dump_allocators()
 {
+    struct AllocatorReport {
+        size_t total_bytes { 0 };
+        String line;
+    };
+    Vector<AllocatorReport> reports;
+
     size_t total_in_committed_blocks = 0;
     size_t total_waste = 0;
+    size_t total_external = 0;
     for (auto& allocator : m_all_cell_allocators) {
-        struct BlockStats {
-            HeapBlock& block;
-            size_t live_cells { 0 };
-            size_t dead_cells { 0 };
-            size_t total_cells { 0 };
-        };
-        Vector<BlockStats> blocks;
-
-        size_t total_live_cells = 0;
-        size_t total_dead_cells = 0;
+        size_t live_cells_in_allocator = 0;
+        size_t block_count_in_allocator = 0;
+        size_t external_bytes_in_allocator = 0;
         size_t cell_count = (HeapBlock::BLOCK_SIZE - sizeof(HeapBlock)) / allocator.cell_size();
 
         allocator.for_each_block([&](HeapBlock& heap_block) {
-            BlockStats block { heap_block };
-
+            ++block_count_in_allocator;
             heap_block.for_each_cell([&](Cell* cell) {
-                if (cell->state() == Cell::State::Live)
-                    ++block.live_cells;
-                else if (cell->state() == Cell::State::Dead)
-                    ++block.dead_cells;
-                else
+                if (cell->state() == Cell::State::Live) {
+                    ++live_cells_in_allocator;
+                    external_bytes_in_allocator += cell->external_memory_size();
+                } else if (cell->state() != Cell::State::Dead) {
                     VERIFY_NOT_REACHED();
+                }
             });
-            total_live_cells += block.live_cells;
-            total_dead_cells += block.dead_cells;
-
-            blocks.append({ block });
             return IterationDecision::Continue;
         });
 
-        if (blocks.is_empty())
+        if (block_count_in_allocator == 0)
             continue;
 
-        total_in_committed_blocks += blocks.size() * HeapBlock::BLOCK_SIZE;
+        total_in_committed_blocks += block_count_in_allocator * HeapBlock::BLOCK_SIZE;
+        total_external += external_bytes_in_allocator;
 
         StringBuilder builder;
         if (allocator.class_name().has_value())
@@ -704,25 +701,33 @@ void Heap::dump_allocators()
         else
             builder.appendff("generic ({}b)", allocator.cell_size());
 
-        builder.appendff(" x {}", total_live_cells);
+        builder.appendff(" x {}", live_cells_in_allocator);
 
-        size_t cost = blocks.size() * HeapBlock::BLOCK_SIZE / KiB;
-        size_t reserved = allocator.block_allocator().block_count() * HeapBlock::BLOCK_SIZE / KiB;
-        builder.appendff(", cost: {} KiB, reserved: {} KiB", cost, reserved);
+        size_t cost_bytes = block_count_in_allocator * HeapBlock::BLOCK_SIZE;
+        size_t reserved_bytes = allocator.block_allocator().block_count() * HeapBlock::BLOCK_SIZE;
+        builder.appendff(", cost: {} KiB, reserved: {} KiB", cost_bytes / KiB, reserved_bytes / KiB);
 
-        size_t total_dead_bytes = ((blocks.size() * cell_count) - total_live_cells) * allocator.cell_size();
+        if (external_bytes_in_allocator)
+            builder.appendff(", external: {} KiB", external_bytes_in_allocator / KiB);
+
+        size_t total_bytes = cost_bytes + external_bytes_in_allocator;
+        builder.appendff(", total: {} KiB", total_bytes / KiB);
+
+        size_t total_dead_bytes = ((block_count_in_allocator * cell_count) - live_cells_in_allocator) * allocator.cell_size();
         if (total_dead_bytes) {
             builder.appendff(", waste: {} KiB", total_dead_bytes / KiB);
             total_waste += total_dead_bytes;
         }
 
-        dbgln("{}", builder.string_view());
-
-        for (auto& block : blocks) {
-            dbgln("  block at {:p}: live {} / dead {} / total {} cells", &block.block, block.live_cells, block.dead_cells, block.block.cell_count());
-        }
+        reports.append({ total_bytes, MUST(builder.to_string()) });
     }
+
+    quick_sort(reports, [](auto const& a, auto const& b) { return a.total_bytes > b.total_bytes; });
+    for (auto const& report : reports)
+        dbgln("{}", report.line);
+
     dbgln("Total allocated: {} KiB", total_in_committed_blocks / KiB);
+    dbgln("Total external: {} KiB", total_external / KiB);
     dbgln("Total wasted on fragmentation: {} KiB", total_waste / KiB);
 }
 
