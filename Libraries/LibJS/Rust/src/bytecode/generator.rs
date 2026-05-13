@@ -785,7 +785,8 @@ impl Generator {
         }
         let source_map = SourceMapEntry {
             bytecode_offset: 0, // filled during flattening
-            source_start: self.current_source_start,
+            line: self.current_source_start.line,
+            column: self.current_source_start.column,
         };
         let block = &mut self.basic_blocks[self.current_block_index.basic_block_index()];
         block.append(instruction, source_map);
@@ -1647,7 +1648,7 @@ impl Generator {
         fn push_source_map_entry(source_map: &mut Vec<SourceMapEntry>, entry: SourceMapEntry) {
             let should_push = source_map
                 .last()
-                .is_none_or(|previous| previous.source_start != entry.source_start);
+                .is_none_or(|previous| previous.line != entry.line || previous.column != entry.column);
             if should_push {
                 source_map.push(entry);
             }
@@ -1678,7 +1679,8 @@ impl Generator {
                             &mut source_map,
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
-                                source_start: sm.source_start,
+                                line: sm.line,
+                                column: sm.column,
                             },
                         );
                         instruction.encode(self.strict, &mut bytecode);
@@ -1689,7 +1691,8 @@ impl Generator {
                             &mut source_map,
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
-                                source_start: sm.source_start,
+                                line: sm.line,
+                                column: sm.column,
                             },
                         );
                         let replacement = Instruction::Return { value };
@@ -1701,7 +1704,8 @@ impl Generator {
                             &mut source_map,
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
-                                source_start: sm.source_start,
+                                line: sm.line,
+                                column: sm.column,
                             },
                         );
                         let replacement = Instruction::End { value };
@@ -1716,7 +1720,8 @@ impl Generator {
                             &mut source_map,
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
-                                source_start: sm.source_start,
+                                line: sm.line,
+                                column: sm.column,
                             },
                         );
                         let replacement = Instruction::JumpFalse { condition, target };
@@ -1730,7 +1735,8 @@ impl Generator {
                             &mut source_map,
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
-                                source_start: sm.source_start,
+                                line: sm.line,
+                                column: sm.column,
                             },
                         );
                         let replacement = Instruction::JumpTrue { condition, target };
@@ -1749,11 +1755,8 @@ impl Generator {
                     &mut source_map,
                     SourceMapEntry {
                         bytecode_offset: u32_from_usize(instruction_offset),
-                        source_start: Position {
-                            line: 0,
-                            column: 0,
-                            offset: 0,
-                        },
+                        line: 0,
+                        column: 0,
                     },
                 );
                 end_instruction.encode(self.strict, &mut bytecode);

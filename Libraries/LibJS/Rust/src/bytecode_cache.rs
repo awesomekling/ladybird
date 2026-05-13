@@ -26,7 +26,7 @@ use crate::bytecode::operand::PropertyKeyTableIndex;
 use crate::{CompiledProgram, CompiledProgramBytecode, ModuleCallbacks, ast, u32_from_usize};
 
 const MAGIC: &[u8; 8] = b"LBJSBC\0\0";
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 const SOURCE_HASH_SIZE: usize = 32;
 
 fn source_span_is_valid(start: u32, end: u32, source_len: usize) -> bool {
@@ -2132,9 +2132,8 @@ impl Encode for SourceMapTable<'_> {
     fn encode(&self, encoder: &mut Encoder) {
         encoder.sequence(&self.0.source_map, |entry, encoder| {
             entry.bytecode_offset.encode(encoder);
-            entry.source_start.line.encode(encoder);
-            entry.source_start.column.encode(encoder);
-            entry.source_start.offset.encode(encoder);
+            entry.line.encode(encoder);
+            entry.column.encode(encoder);
         });
     }
 }
@@ -2144,7 +2143,8 @@ impl SourceMapTable<'_> {
         decoder.sequence_values(|decoder| {
             Some(SourceMapEntry {
                 bytecode_offset: u32::decode(decoder)?,
-                source_start: ast::Position::decode(decoder)?,
+                line: u32::decode(decoder)?,
+                column: u32::decode(decoder)?,
             })
         })
     }

@@ -125,10 +125,9 @@ static SourceMapEntry const* first_real_source_map_entry(Executable const& execu
 {
     SourceMapEntry const* first_entry = nullptr;
     for (auto const& entry : executable.source_map) {
-        auto const& position = entry.source_record.start;
-        if (position.line == 0 && position.column == 0)
+        if (entry.line == 0 && entry.column == 0)
             continue;
-        if (!first_entry || position.offset < first_entry->source_record.start.offset)
+        if (!first_entry || entry.line < first_entry->line || (entry.line == first_entry->line && entry.column < first_entry->column))
             first_entry = &entry;
     }
     return first_entry;
@@ -158,8 +157,8 @@ static void dump_header(StringBuilder& output, Executable const& executable, boo
     for (size_t i = 0; i < name_view.length_in_code_units(); ++i)
         update_hash_with_code_unit(name_view.code_unit_at(i));
     if (first_source_map_entry) {
-        update_hash(first_source_map_entry->source_record.start.line);
-        update_hash(first_source_map_entry->source_record.start.column);
+        update_hash(first_source_map_entry->line);
+        update_hash(first_source_map_entry->column);
     }
     update_hash(static_cast<u32>(min(executable.bytecode.size(), static_cast<size_t>(NumericLimits<u32>::max()))));
 
@@ -170,16 +169,15 @@ static void dump_header(StringBuilder& output, Executable const& executable, boo
 
     // Show source location if available.
     if (first_source_map_entry) {
-        auto first_position = first_source_map_entry->source_record.start;
         auto filename = executable.source_code->filename();
         if (!filename.is_empty()) {
             // Show just the basename to keep output portable across machines.
             auto last_slash = filename.bytes_as_string_view().find_last('/');
             if (last_slash.has_value())
                 filename = MUST(filename.substring_from_byte_offset(last_slash.value() + 1));
-            output.appendff(" {}:{}:{}", filename, first_position.line, first_position.column);
+            output.appendff(" {}:{}:{}", filename, first_source_map_entry->line, first_source_map_entry->column);
         } else {
-            output.appendff(" line {}, column {}", first_position.line, first_position.column);
+            output.appendff(" line {}, column {}", first_source_map_entry->line, first_source_map_entry->column);
         }
     }
     output.append('\n');
@@ -446,7 +444,7 @@ Optional<SourceRange> Executable::source_range_at(size_t offset) const
     auto& entry = source_map[low - 1];
     return SourceRange {
         .code = source_code,
-        .start = entry.source_record.start,
+        .start = { .line = entry.line, .column = entry.column },
     };
 }
 
