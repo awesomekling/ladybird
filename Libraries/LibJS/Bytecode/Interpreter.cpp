@@ -2612,7 +2612,7 @@ ThrowCompletionOr<void> SetVariableBinding::execute_impl(VM& vm) const
 ThrowCompletionOr<void> GetById::execute_impl(VM& vm) const
 {
     auto base_value = vm.get(base());
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
+    auto& cache = property_lookup_cache_for(vm.current_executable(), *this);
 
     vm.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(vm, [&] { return vm.get_identifier(m_base_identifier); }, [&] -> PropertyKey const& { return vm.get_property_key(m_property); }, base_value, base_value, cache)));
     return {};
@@ -2622,7 +2622,7 @@ ThrowCompletionOr<void> GetByIdWithThis::execute_impl(VM& vm) const
 {
     auto base_value = vm.get(m_base);
     auto this_value = vm.get(m_this_value);
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
+    auto& cache = property_lookup_cache_for(vm.current_executable(), *this);
     vm.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(vm, [] { return Optional<Utf16FlyString const&> {}; }, [&] -> PropertyKey const& { return vm.get_property_key(m_property); }, base_value, this_value, cache)));
     return {};
 }
@@ -2630,8 +2630,17 @@ ThrowCompletionOr<void> GetByIdWithThis::execute_impl(VM& vm) const
 ThrowCompletionOr<void> GetLength::execute_impl(VM& vm) const
 {
     auto base_value = vm.get(base());
+    if (base_value.is_string()) {
+        vm.set(dst(), Value(base_value.as_string().length_in_utf16_code_units()));
+        return {};
+    }
+    if (base_value.is_object() && base_value.as_object().has_magical_length_property()) {
+        vm.set(dst(), Value { base_value.as_object().indexed_array_like_size() });
+        return {};
+    }
+
     auto& executable = vm.current_executable();
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
+    auto& cache = property_lookup_cache_for(executable, *this);
     vm.set(dst(), TRY(get_by_id<GetByIdMode::Length>(vm, [&] { return vm.get_identifier(m_base_identifier); }, [&] { return executable.get_property_key(*executable.length_identifier); }, base_value, base_value, cache)));
     return {};
 }
@@ -2640,8 +2649,17 @@ ThrowCompletionOr<void> GetLengthWithThis::execute_impl(VM& vm) const
 {
     auto base_value = vm.get(m_base);
     auto this_value = vm.get(m_this_value);
+    if (base_value.is_string()) {
+        vm.set(dst(), Value(base_value.as_string().length_in_utf16_code_units()));
+        return {};
+    }
+    if (base_value.is_object() && base_value.as_object().has_magical_length_property()) {
+        vm.set(dst(), Value { base_value.as_object().indexed_array_like_size() });
+        return {};
+    }
+
     auto& executable = vm.current_executable();
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
+    auto& cache = property_lookup_cache_for(executable, *this);
     vm.set(dst(), TRY(get_by_id<GetByIdMode::Length>(vm, [] { return Optional<Utf16FlyString const&> {}; }, [&] -> PropertyKey const& { return executable.get_property_key(*executable.length_identifier); }, base_value, this_value, cache)));
     return {};
 }
@@ -2688,8 +2706,8 @@ ThrowCompletionOr<void> PutById::execute_impl(VM& vm) const
     auto base = vm.get(m_base);
     auto const& base_identifier = vm.get_identifier(m_base_identifier);
     auto const& property_key = vm.get_property_key(m_property);
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
-    TRY(put_by_property_key(vm, base, base, value, base_identifier, property_key, m_kind, strict(), &cache));
+    auto* cache = (m_kind == PutKind::Normal || m_kind == PutKind::Own) ? &property_lookup_cache_for(vm.current_executable(), *this) : nullptr;
+    TRY(put_by_property_key(vm, base, base, value, base_identifier, property_key, m_kind, strict(), cache));
     return {};
 }
 
@@ -2698,8 +2716,8 @@ ThrowCompletionOr<void> PutByIdWithThis::execute_impl(VM& vm) const
     auto value = vm.get(m_src);
     auto base = vm.get(m_base);
     auto const& name = vm.get_property_key(m_property);
-    auto& cache = *bit_cast<PropertyLookupCache*>(m_cache);
-    TRY(put_by_property_key(vm, base, vm.get(m_this_value), value, {}, name, m_kind, strict(), &cache));
+    auto* cache = (m_kind == PutKind::Normal || m_kind == PutKind::Own) ? &property_lookup_cache_for(vm.current_executable(), *this) : nullptr;
+    TRY(put_by_property_key(vm, base, vm.get(m_this_value), value, {}, name, m_kind, strict(), cache));
     return {};
 }
 

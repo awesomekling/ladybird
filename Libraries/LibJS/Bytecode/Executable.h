@@ -172,9 +172,12 @@ public:
 
     virtual ~Executable() override;
 
+    PropertyLookupCache& allocate_property_lookup_cache();
+
     Utf16FlyString name;
     Vector<u8> bytecode;
-    Vector<PropertyLookupCache> property_lookup_caches;
+    Vector<NonnullOwnPtr<PropertyLookupCache>> property_lookup_caches;
+    u32 property_lookup_cache_count { 0 };
     Vector<GlobalVariableCache> global_variable_caches;
     Vector<TemplateObjectCache> template_object_caches;
     Vector<ObjectShapeCache> object_shape_caches;

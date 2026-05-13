@@ -355,7 +355,9 @@ NUMERIC_TYPES = {
 }
 
 # Cache pointer types stored as u64 in the instruction stream.
-# The Executable::fixup_cache_pointers() pass replaces indices with actual pointers.
+# The Executable::fixup_cache_pointers() pass replaces indices with actual
+# pointers, except for PropertyLookupCache sites, which start as null and are
+# patched lazily on first use.
 CACHE_POINTER_TYPES = {
     "PropertyLookupCache*": "property_lookup_caches",
     "GlobalVariableCache*": "global_variable_caches",
@@ -606,7 +608,6 @@ def generate_fixup_cache_function(ops: List[OpDef]) -> str:
     lines: List[str] = []
     lines.append("void fixup_instruction_cache(")
     lines.append("    Instruction& insn,")
-    lines.append("    Span<PropertyLookupCache> property_lookup_caches,")
     lines.append("    Span<GlobalVariableCache> global_variable_caches,")
     lines.append("    Span<TemplateObjectCache> template_object_caches,")
     lines.append("    Span<ObjectShapeCache> object_shape_caches,")
@@ -625,9 +626,15 @@ def generate_fixup_cache_function(ops: List[OpDef]) -> str:
         if cache_field is None:
             continue
 
-        vector_name = CACHE_POINTER_TYPES[cache_field.type.strip()]
+        cache_type = cache_field.type.strip()
+        vector_name = CACHE_POINTER_TYPES[cache_type]
         lines.append(f"    case Instruction::Type::{op.name}: {{")
         lines.append(f"        auto& op = static_cast<Op::{op.name}&>(insn);")
+        if cache_type == "PropertyLookupCache*":
+            lines.append("        op.set_cache(0);")
+            lines.append("        break;")
+            lines.append("    }")
+            continue
         lines.append("        auto index = op.cache();")
         lines.append("        if (index != NO_CACHE)")
         lines.append(f"            op.set_cache(bit_cast<u64>(&{vector_name}[index]));")
@@ -703,7 +710,6 @@ namespace JS::Bytecode {
 
 void fixup_instruction_cache(
     Instruction& insn,
-    Span<PropertyLookupCache> property_lookup_caches,
     Span<GlobalVariableCache> global_variable_caches,
     Span<TemplateObjectCache> template_object_caches,
     Span<ObjectShapeCache> object_shape_caches,

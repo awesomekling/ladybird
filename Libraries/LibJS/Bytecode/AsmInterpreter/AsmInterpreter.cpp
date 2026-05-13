@@ -890,14 +890,24 @@ i64 asm_try_inline_call(VM* vm, u32 pc)
 // AddOwnProperty. Returns 0 on cache hit, 1 on miss (caller should use full slow path).
 i64 asm_try_put_by_id_cache(VM* vm, u32 pc)
 {
-    auto* bytecode = vm->current_executable().bytecode.data();
+    auto& executable = vm->current_executable();
+    auto* bytecode = executable.bytecode.data();
     auto& insn = *reinterpret_cast<Op::PutById const*>(&bytecode[pc]);
+    if (insn.kind() != PutKind::Normal && insn.kind() != PutKind::Own)
+        return 1;
+
+    auto* cache_ptr = bit_cast<PropertyLookupCache*>(insn.cache());
+    if (!cache_ptr) [[unlikely]] {
+        property_lookup_cache_for(executable, insn);
+        return 1;
+    }
+
     auto base = vm->get(insn.base());
     if (!base.is_object()) [[unlikely]]
         return 1;
     auto& object = base.as_object();
     auto value = vm->get(insn.src());
-    auto& cache = *bit_cast<PropertyLookupCache*>(insn.cache());
+    auto& cache = *cache_ptr;
 
     for (size_t i = 0; i < cache.entries.size(); ++i) {
         auto& entry = cache.entries[i];
@@ -945,14 +955,21 @@ i64 asm_try_put_by_id_cache(VM* vm, u32 pc)
 // On miss, returns 1 (caller should use full slow path).
 i64 asm_try_get_by_id_cache(VM* vm, u32 pc)
 {
-    auto* bytecode = vm->current_executable().bytecode.data();
+    auto& executable = vm->current_executable();
+    auto* bytecode = executable.bytecode.data();
     auto& insn = *reinterpret_cast<Op::GetById const*>(&bytecode[pc]);
+    auto* cache_ptr = bit_cast<PropertyLookupCache*>(insn.cache());
+    if (!cache_ptr) [[unlikely]] {
+        property_lookup_cache_for(executable, insn);
+        return 1;
+    }
+
     auto base = vm->get(insn.base());
     if (!base.is_object()) [[unlikely]]
         return 1;
     auto& object = base.as_object();
     auto& shape = object.shape();
-    auto& cache = *bit_cast<PropertyLookupCache*>(insn.cache());
+    auto& cache = *cache_ptr;
 
     for (auto& entry : cache.entries) {
         auto cached_prototype = entry.prototype.ptr();

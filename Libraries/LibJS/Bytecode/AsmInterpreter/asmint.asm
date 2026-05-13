@@ -1649,7 +1649,7 @@ handler GetById
     assert_nonzero shape
     # Get PropertyLookupCache* (direct pointer from instruction stream)
     load64 plc, [pb, pc, m_cache]
-    assert_nonzero plc
+    branch_zero plc, .try_cache
     load_pair64 cache_shape, cache_proto, [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_SHAPE], [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_PROTOTYPE]
     branch_ne cache_shape, shape, .try_cache
     branch_nonzero cache_proto, .proto
@@ -1702,7 +1702,7 @@ handler PutById
     load64 shape, [obj, OBJECT_SHAPE]
     assert_nonzero shape
     load64 plc, [pb, pc, m_cache]
-    assert_nonzero plc
+    branch_zero plc, .try_cache
     load_pair64 cache_shape, cache_proto, [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_SHAPE], [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_PROTOTYPE]
     branch_ne cache_shape, shape, .try_cache
     branch_nonzero cache_proto, .try_cache
@@ -1880,7 +1880,7 @@ handler GetLength
     load64 shape, [obj, OBJECT_SHAPE]
     assert_nonzero shape
     load64 plc, [pb, pc, m_cache]
-    assert_nonzero plc
+    branch_zero plc, .slow
     load_pair64 cache_shape, cache_proto, [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_SHAPE], [plc, PROPERTY_LOOKUP_CACHE_ENTRY0_PROTOTYPE]
     branch_ne cache_shape, shape, .slow
     branch_nonzero cache_proto, .slow

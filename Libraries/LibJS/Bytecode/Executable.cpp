@@ -5,6 +5,7 @@
  */
 
 #include <AK/BinarySearch.h>
+#include <AK/NumericLimits.h>
 #include <LibGC/Heap.h>
 #include <LibGC/HeapBlock.h>
 #include <LibJS/Bytecode/BasicBlock.h>
@@ -88,7 +89,8 @@ Executable::Executable(
     , number_of_registers(number_of_registers)
     , is_strict_mode(strict == Strict::Yes)
 {
-    property_lookup_caches.resize(number_of_property_lookup_caches);
+    VERIFY(number_of_property_lookup_caches <= NumericLimits<u32>::max());
+    property_lookup_cache_count = static_cast<u32>(number_of_property_lookup_caches);
     global_variable_caches.resize(number_of_global_variable_caches);
     template_object_caches.resize(number_of_template_object_caches);
     object_shape_caches.resize(number_of_object_shape_caches);
@@ -99,12 +101,19 @@ Executable::Executable(
 
 Executable::~Executable() = default;
 
+PropertyLookupCache& Executable::allocate_property_lookup_cache()
+{
+    auto cache = make<PropertyLookupCache>();
+    auto& cache_ref = *cache;
+    property_lookup_caches.append(move(cache));
+    return cache_ref;
+}
+
 void Executable::fixup_cache_pointers()
 {
     for (auto it = InstructionStreamIterator(bytecode); !it.at_end(); ++it) {
         fixup_instruction_cache(
             const_cast<Instruction&>(*it),
-            property_lookup_caches.span(),
             global_variable_caches.span(),
             template_object_caches.span(),
             object_shape_caches.span(),
@@ -307,6 +316,10 @@ size_t Executable::external_memory_size() const
 {
     size_t size = vector_external_memory_size(bytecode);
     size = saturating_add_external_memory_size(size, vector_external_memory_size(property_lookup_caches));
+    if (property_lookup_caches.size() > NumericLimits<size_t>::max() / sizeof(PropertyLookupCache))
+        size = NumericLimits<size_t>::max();
+    else
+        size = saturating_add_external_memory_size(size, property_lookup_caches.size() * sizeof(PropertyLookupCache));
     size = saturating_add_external_memory_size(size, vector_external_memory_size(global_variable_caches));
     size = saturating_add_external_memory_size(size, vector_external_memory_size(template_object_caches));
     size = saturating_add_external_memory_size(size, vector_external_memory_size(object_shape_caches));
@@ -372,7 +385,7 @@ void StaticPropertyLookupCache::sweep_all()
 void Executable::remove_dead_cells(Badge<GC::Heap>)
 {
     for (auto& cache : property_lookup_caches) {
-        for (auto& entry : cache.entries)
+        for (auto& entry : cache->entries)
             clear_cache_entry_if_dead(entry);
     }
     for (auto& cache : global_variable_caches) {

@@ -107,7 +107,7 @@ ErrorOr<void> validate_bytecode(Executable const& executable, CacheState cache_s
         // The regex table is not consulted at runtime; m_regex_index fields
         // are skipped during validation.
         .regex_table_size = 0,
-        .property_lookup_cache_count = static_cast<u32>(executable.property_lookup_caches.size()),
+        .property_lookup_cache_count = executable.property_lookup_cache_count,
         .global_variable_cache_count = static_cast<u32>(executable.global_variable_caches.size()),
         .template_object_cache_count = static_cast<u32>(executable.template_object_caches.size()),
         .object_shape_cache_count = static_cast<u32>(executable.object_shape_caches.size()),

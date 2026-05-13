@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/StdLibExtras.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/PutKind.h>
@@ -21,6 +22,18 @@
 #include <LibWasm/Opcode.h>
 
 namespace JS::Bytecode {
+
+template<typename InstructionWithCache>
+ALWAYS_INLINE PropertyLookupCache& property_lookup_cache_for(Executable& executable, InstructionWithCache const& instruction)
+{
+    auto* cache = bit_cast<PropertyLookupCache*>(instruction.cache());
+    if (cache)
+        return *cache;
+
+    auto& allocated_cache = executable.allocate_property_lookup_cache();
+    const_cast<InstructionWithCache&>(instruction).set_cache(bit_cast<u64>(&allocated_cache));
+    return allocated_cache;
+}
 
 enum class GetByIdMode {
     Normal,
