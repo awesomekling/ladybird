@@ -26,7 +26,7 @@ use crate::bytecode::operand::PropertyKeyTableIndex;
 use crate::{CompiledProgram, CompiledProgramBytecode, ModuleCallbacks, ast, u32_from_usize};
 
 const MAGIC: &[u8; 8] = b"LBJSBC\0\0";
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 const SOURCE_HASH_SIZE: usize = 32;
 
 fn source_span_is_valid(start: u32, end: u32, source_len: usize) -> bool {
@@ -802,7 +802,7 @@ unsafe fn materialize_executable(
             bytecode: executable.bytecode,
             source_map: executable.source_map,
             exception_handlers: executable.exception_handlers,
-            basic_block_start_offsets: executable.basic_block_start_offsets,
+            basic_block_start_offsets: Vec::new(),
             number_of_registers: executable.number_of_registers,
             number_of_arguments: executable.number_of_arguments,
         };
@@ -1872,7 +1872,6 @@ impl Encode for ExecutableRecord<'_> {
         ConstantTable(&self.generator.constants).encode(encoder);
         ExceptionHandlerTable(self.assembled).encode(encoder);
         SourceMapTable(self.assembled).encode(encoder);
-        BasicBlockOffsetTable(self.assembled).encode(encoder);
         LocalVariableTable(self.generator).encode(encoder);
         SharedFunctionTable(self.generator).encode(encoder);
         ClassBlueprintTable(self.generator).encode(encoder);
@@ -1895,7 +1894,6 @@ impl ExecutableRecord<'_> {
             constants: ConstantTable::decode(decoder)?,
             exception_handlers: ExceptionHandlerTable::decode(decoder)?,
             source_map: SourceMapTable::decode(decoder)?,
-            basic_block_start_offsets: BasicBlockOffsetTable::decode(decoder)?,
             local_variables: LocalVariableTable::decode(decoder)?,
             shared_functions: SharedFunctionTable::decode(decoder)?,
             class_blueprints: ClassBlueprintTable::decode(decoder)?,
@@ -1917,7 +1915,6 @@ struct DecodedExecutableRecord {
     constants: Vec<ConstantValue>,
     exception_handlers: Vec<ExceptionHandler>,
     source_map: Vec<SourceMapEntry>,
-    basic_block_start_offsets: Vec<usize>,
     local_variables: Vec<LocalVariable>,
     shared_functions: Vec<DecodedFunctionRecord>,
     class_blueprints: Vec<DecodedClassBlueprintRecord>,
@@ -1937,7 +1934,6 @@ impl DecodedExecutableRecord {
             + self.constants.len()
             + self.exception_handlers.len()
             + self.source_map.len()
-            + self.basic_block_start_offsets.len()
             + self.local_variables.len()
             + self.shared_functions.len()
             + self.class_blueprints.len();
@@ -2147,22 +2143,6 @@ impl SourceMapTable<'_> {
                 column: u32::decode(decoder)?,
             })
         })
-    }
-}
-
-struct BasicBlockOffsetTable<'a>(&'a AssembledBytecode);
-
-impl Encode for BasicBlockOffsetTable<'_> {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.sequence(&self.0.basic_block_start_offsets, |offset, encoder| {
-            offset.encode(encoder);
-        });
-    }
-}
-
-impl BasicBlockOffsetTable<'_> {
-    fn decode(decoder: &mut Decoder<'_>) -> Option<Vec<usize>> {
-        decoder.sequence_values(usize::decode)
     }
 }
 
