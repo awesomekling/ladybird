@@ -139,7 +139,6 @@ struct ObjectPropertyIteratorCache {
 
 struct SourceRecord {
     Position start {};
-    Position end {};
 };
 
 struct SourceMapEntry {

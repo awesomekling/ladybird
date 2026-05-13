@@ -84,11 +84,11 @@ void SourceCode::fill_position_cache() const
     }
 }
 
-SourceRange SourceCode::range_from_offsets(u32 start_offset, u32 end_offset) const
+SourceRange SourceCode::range_from_offsets(u32 start_offset, [[maybe_unused]] u32 end_offset) const
 {
-    // If the underlying code is an empty string, the range is 1,1 - 1,1 no matter what.
+    // If the underlying code is an empty string, the range is 1,1 no matter what.
     if (m_code.is_empty())
-        return { *this, { .line = 1, .column = 1, .offset = 0 }, { .line = 1, .column = 1, .offset = 0 } };
+        return { *this, { .line = 1, .column = 1, .offset = 0 } };
 
     if (m_cached_positions.is_empty())
         fill_position_cache();
@@ -107,7 +107,6 @@ SourceRange SourceCode::range_from_offsets(u32 start_offset, u32 end_offset) con
     }
 
     Optional<Position> start;
-    Optional<Position> end;
 
     u32 previous_code_point = 0;
 
@@ -121,16 +120,6 @@ SourceRange SourceCode::range_from_offsets(u32 start_offset, u32 end_offset) con
                 .column = current.column,
                 .offset = start_offset,
             };
-        }
-
-        // If we're on or after the end offset, this is the end position.
-        if (!end.has_value() && view.iterator_offset(it) >= end_offset) {
-            end = Position {
-                .line = current.line,
-                .column = current.column,
-                .offset = end_offset,
-            };
-            break;
         }
 
         u32 code_point = *it;
@@ -147,12 +136,12 @@ SourceRange SourceCode::range_from_offsets(u32 start_offset, u32 end_offset) con
         current.column += 1;
     }
 
-    // If we didn't find both a start and end position, just return 1,1-1,1.
+    // If we didn't find a start position, just return 1,1.
     // FIXME: This is a hack. Find a way to return the nicest possible values here.
-    if (!start.has_value() || !end.has_value())
-        return SourceRange { *this, { .line = 1, .column = 1 }, { .line = 1, .column = 1 } };
+    if (!start.has_value())
+        return SourceRange { *this, { .line = 1, .column = 1 } };
 
-    return SourceRange { *this, *start, *end };
+    return SourceRange { *this, *start };
 }
 
 }

@@ -1014,11 +1014,6 @@ extern "C" void* rust_create_executable(
                     .column = data->source_map[i].source_start_column,
                     .offset = data->source_map[i].source_start_offset,
                 },
-                .end = {
-                    .line = data->source_map[i].source_end_line,
-                    .column = data->source_map[i].source_end_column,
-                    .offset = data->source_map[i].source_end_offset,
-                },
             },
         });
     }

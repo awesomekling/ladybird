@@ -786,7 +786,6 @@ impl Generator {
         let source_map = SourceMapEntry {
             bytecode_offset: 0, // filled during flattening
             source_start: self.current_source_start,
-            source_end: self.current_source_end,
         };
         let block = &mut self.basic_blocks[self.current_block_index.basic_block_index()];
         block.append(instruction, source_map);
@@ -1646,9 +1645,9 @@ impl Generator {
         let mut source_map: Vec<SourceMapEntry> = Vec::new();
         let mut exception_handlers: Vec<ExceptionHandler> = Vec::new();
         fn push_source_map_entry(source_map: &mut Vec<SourceMapEntry>, entry: SourceMapEntry) {
-            let should_push = source_map.last().is_none_or(|previous| {
-                previous.source_start != entry.source_start || previous.source_end != entry.source_end
-            });
+            let should_push = source_map
+                .last()
+                .is_none_or(|previous| previous.source_start != entry.source_start);
             if should_push {
                 source_map.push(entry);
             }
@@ -1680,7 +1679,6 @@ impl Generator {
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
                                 source_start: sm.source_start,
-                                source_end: sm.source_end,
                             },
                         );
                         instruction.encode(self.strict, &mut bytecode);
@@ -1692,7 +1690,6 @@ impl Generator {
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
                                 source_start: sm.source_start,
-                                source_end: sm.source_end,
                             },
                         );
                         let replacement = Instruction::Return { value };
@@ -1705,7 +1702,6 @@ impl Generator {
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
                                 source_start: sm.source_start,
-                                source_end: sm.source_end,
                             },
                         );
                         let replacement = Instruction::End { value };
@@ -1721,7 +1717,6 @@ impl Generator {
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
                                 source_start: sm.source_start,
-                                source_end: sm.source_end,
                             },
                         );
                         let replacement = Instruction::JumpFalse { condition, target };
@@ -1736,7 +1731,6 @@ impl Generator {
                             SourceMapEntry {
                                 bytecode_offset: u32_from_usize(instruction_offset),
                                 source_start: sm.source_start,
-                                source_end: sm.source_end,
                             },
                         );
                         let replacement = Instruction::JumpTrue { condition, target };
@@ -1756,11 +1750,6 @@ impl Generator {
                     SourceMapEntry {
                         bytecode_offset: u32_from_usize(instruction_offset),
                         source_start: Position {
-                            line: 0,
-                            column: 0,
-                            offset: 0,
-                        },
-                        source_end: Position {
                             line: 0,
                             column: 0,
                             offset: 0,

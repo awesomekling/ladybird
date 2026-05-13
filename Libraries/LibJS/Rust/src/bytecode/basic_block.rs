@@ -13,7 +13,6 @@ use crate::ast::Position;
 pub struct SourceMapEntry {
     pub bytecode_offset: u32,
     pub source_start: Position,
-    pub source_end: Position,
 }
 
 /// A basic block in the bytecode generator.
