@@ -7,9 +7,9 @@
 #pragma once
 
 #include <AK/Error.h>
-#include <AK/FixedArray.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
+#include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Size.h>
 #include <LibMedia/Color/CodingIndependentCodePoints.h>
@@ -40,6 +40,7 @@ public:
     static ErrorOr<PlaneSizes> plane_sizes(IntSize size, u8 bit_depth, Media::Subsampling);
     static ErrorOr<NonnullOwnPtr<YUVData>> create(IntSize size, u8 bit_depth, Media::Subsampling, Media::CodingIndependentCodePoints);
     static ErrorOr<NonnullOwnPtr<YUVData>> create_from_data(IntSize size, u8 bit_depth, Media::Subsampling, Media::CodingIndependentCodePoints, ReadonlyBytes y_data, ReadonlyBytes u_data, ReadonlyBytes v_data);
+    static ErrorOr<NonnullOwnPtr<YUVData>> create_from_anonymous_buffer(IntSize size, u8 bit_depth, Media::Subsampling, Media::CodingIndependentCodePoints, Core::AnonymousBuffer);
 
     ~YUVData();
 
@@ -55,6 +56,7 @@ public:
     ReadonlyBytes y_data() const;
     ReadonlyBytes u_data() const;
     ReadonlyBytes v_data() const;
+    Core::AnonymousBuffer const& anonymous_buffer() const;
 
     ErrorOr<NonnullRefPtr<Bitmap>> to_bitmap() const;
 

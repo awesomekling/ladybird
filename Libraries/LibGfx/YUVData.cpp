@@ -29,9 +29,8 @@ struct YUVDataImpl {
     Media::Subsampling subsampling;
     Media::CodingIndependentCodePoints cicp;
 
-    FixedArray<u8> y_buffer;
-    FixedArray<u8> u_buffer;
-    FixedArray<u8> v_buffer;
+    Core::AnonymousBuffer buffer;
+    YUVData::PlaneSizes plane_sizes;
 };
 
 }
@@ -76,18 +75,15 @@ ErrorOr<NonnullOwnPtr<YUVData>> YUVData::create(IntSize size, u8 bit_depth, Medi
 {
     auto sizes = TRY(plane_sizes(size, bit_depth, subsampling));
 
-    auto y_buffer = TRY(FixedArray<u8>::create(sizes.y));
-    auto u_buffer = TRY(FixedArray<u8>::create(sizes.u));
-    auto v_buffer = TRY(FixedArray<u8>::create(sizes.v));
+    auto buffer = TRY(Core::AnonymousBuffer::create_with_size(sizes.total));
 
     auto impl = TRY(try_make<Details::YUVDataImpl>(Details::YUVDataImpl {
         .size = size,
         .bit_depth = bit_depth,
         .subsampling = subsampling,
         .cicp = cicp,
-        .y_buffer = move(y_buffer),
-        .u_buffer = move(u_buffer),
-        .v_buffer = move(v_buffer),
+        .buffer = move(buffer),
+        .plane_sizes = sizes,
     }));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) YUVData(move(impl)));
@@ -104,6 +100,24 @@ ErrorOr<NonnullOwnPtr<YUVData>> YUVData::create_from_data(IntSize size, u8 bit_d
     u_data.copy_to(yuv_data->u_data());
     v_data.copy_to(yuv_data->v_data());
     return yuv_data;
+}
+
+ErrorOr<NonnullOwnPtr<YUVData>> YUVData::create_from_anonymous_buffer(IntSize size, u8 bit_depth, Media::Subsampling subsampling, Media::CodingIndependentCodePoints cicp, Core::AnonymousBuffer buffer)
+{
+    auto sizes = TRY(plane_sizes(size, bit_depth, subsampling));
+    if (!buffer.is_valid() || buffer.size() != sizes.total)
+        return Error::from_string_literal("YUVData anonymous buffer size mismatch");
+
+    auto impl = TRY(try_make<Details::YUVDataImpl>(Details::YUVDataImpl {
+        .size = size,
+        .bit_depth = bit_depth,
+        .subsampling = subsampling,
+        .cicp = cicp,
+        .buffer = move(buffer),
+        .plane_sizes = sizes,
+    }));
+
+    return adopt_nonnull_own_or_enomem(new (nothrow) YUVData(move(impl)));
 }
 
 YUVData::YUVData(NonnullOwnPtr<Details::YUVDataImpl> impl)
@@ -135,32 +149,37 @@ Media::CodingIndependentCodePoints const& YUVData::cicp() const
 
 Bytes YUVData::y_data()
 {
-    return m_impl->y_buffer.span();
+    return Bytes { m_impl->buffer.data<u8>(), m_impl->plane_sizes.y };
 }
 
 Bytes YUVData::u_data()
 {
-    return m_impl->u_buffer.span();
+    return Bytes { m_impl->buffer.data<u8>() + m_impl->plane_sizes.y, m_impl->plane_sizes.u };
 }
 
 Bytes YUVData::v_data()
 {
-    return m_impl->v_buffer.span();
+    return Bytes { m_impl->buffer.data<u8>() + m_impl->plane_sizes.y + m_impl->plane_sizes.u, m_impl->plane_sizes.v };
 }
 
 ReadonlyBytes YUVData::y_data() const
 {
-    return m_impl->y_buffer.span();
+    return ReadonlyBytes { m_impl->buffer.data<u8>(), m_impl->plane_sizes.y };
 }
 
 ReadonlyBytes YUVData::u_data() const
 {
-    return m_impl->u_buffer.span();
+    return ReadonlyBytes { m_impl->buffer.data<u8>() + m_impl->plane_sizes.y, m_impl->plane_sizes.u };
 }
 
 ReadonlyBytes YUVData::v_data() const
 {
-    return m_impl->v_buffer.span();
+    return ReadonlyBytes { m_impl->buffer.data<u8>() + m_impl->plane_sizes.y + m_impl->plane_sizes.u, m_impl->plane_sizes.v };
+}
+
+Core::AnonymousBuffer const& YUVData::anonymous_buffer() const
+{
+    return m_impl->buffer;
 }
 
 static FFI::YUVMatrix yuv_matrix_for_cicp(Media::CodingIndependentCodePoints const& cicp)
@@ -203,16 +222,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> YUVData::to_bitmap() const
             return Error::from_string_literal("Subsampled RGB is unsupported");
 
         if (impl.bit_depth <= 8) {
-            auto const* y_data = impl.y_buffer.data();
-            auto const* u_data = impl.u_buffer.data();
-            auto const* v_data = impl.v_buffer.data();
+            auto const* y_plane_data = y_data().data();
+            auto const* u_plane_data = u_data().data();
+            auto const* v_plane_data = v_data().data();
             auto y_stride = static_cast<int>(width);
 
             for (u32 row = 0; row < height; row++) {
                 auto* dst_row = dst + (static_cast<size_t>(row) * dst_stride);
-                auto const* y_row = y_data + (static_cast<size_t>(row) * y_stride);
-                auto const* u_row = u_data + (static_cast<size_t>(row) * y_stride);
-                auto const* v_row = v_data + (static_cast<size_t>(row) * y_stride);
+                auto const* y_row = y_plane_data + (static_cast<size_t>(row) * y_stride);
+                auto const* u_row = u_plane_data + (static_cast<size_t>(row) * y_stride);
+                auto const* v_row = v_plane_data + (static_cast<size_t>(row) * y_stride);
                 for (u32 col = 0; col < width; col++) {
                     dst_row[(col * 4) + 0] = v_row[col];
                     dst_row[(col * 4) + 1] = y_row[col];
@@ -224,16 +243,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> YUVData::to_bitmap() const
             // Our buffers hold native N-bit values in the low bits of each u16; shift right to reduce
             // to 8-bit for the output.
             auto shift = impl.bit_depth - 8;
-            auto const* y_data = reinterpret_cast<u16 const*>(impl.y_buffer.data());
-            auto const* u_data = reinterpret_cast<u16 const*>(impl.u_buffer.data());
-            auto const* v_data = reinterpret_cast<u16 const*>(impl.v_buffer.data());
+            auto const* y_plane_data = reinterpret_cast<u16 const*>(y_data().data());
+            auto const* u_plane_data = reinterpret_cast<u16 const*>(u_data().data());
+            auto const* v_plane_data = reinterpret_cast<u16 const*>(v_data().data());
             auto y_stride = static_cast<int>(width);
 
             for (u32 row = 0; row < height; row++) {
                 auto* dst_row = dst + (static_cast<size_t>(row) * dst_stride);
-                auto const* y_row = y_data + (static_cast<size_t>(row) * y_stride);
-                auto const* u_row = u_data + (static_cast<size_t>(row) * y_stride);
-                auto const* v_row = v_data + (static_cast<size_t>(row) * y_stride);
+                auto const* y_row = y_plane_data + (static_cast<size_t>(row) * y_stride);
+                auto const* u_row = u_plane_data + (static_cast<size_t>(row) * y_stride);
+                auto const* v_row = v_plane_data + (static_cast<size_t>(row) * y_stride);
                 for (u32 col = 0; col < width; col++) {
                     dst_row[(col * 4) + 0] = static_cast<u8>(v_row[col] >> shift);
                     dst_row[(col * 4) + 1] = static_cast<u8>(y_row[col] >> shift);
@@ -258,18 +277,18 @@ ErrorOr<NonnullRefPtr<Bitmap>> YUVData::to_bitmap() const
     bool success;
     if (impl.bit_depth <= 8) {
         success = FFI::yuv_u8_to_rgba(
-            impl.y_buffer.data(), y_stride,
-            impl.u_buffer.data(), uv_stride,
-            impl.v_buffer.data(), uv_stride,
+            y_data().data(), y_stride,
+            u_data().data(), uv_stride,
+            v_data().data(), uv_stride,
             width, height,
             impl.subsampling.x(), impl.subsampling.y(),
             dst, dst_stride,
             range, matrix);
     } else {
         success = FFI::yuv_u16_to_rgba(
-            reinterpret_cast<u16 const*>(impl.y_buffer.data()), y_stride,
-            reinterpret_cast<u16 const*>(impl.u_buffer.data()), uv_stride,
-            reinterpret_cast<u16 const*>(impl.v_buffer.data()), uv_stride,
+            reinterpret_cast<u16 const*>(y_data().data()), y_stride,
+            reinterpret_cast<u16 const*>(u_data().data()), uv_stride,
+            reinterpret_cast<u16 const*>(v_data().data()), uv_stride,
             width, height,
             impl.bit_depth,
             impl.subsampling.x(), impl.subsampling.y(),
@@ -333,7 +352,7 @@ static u16 expand_sample_to_full_16_bit_range(u16 sample, u8 bit_depth)
     return static_cast<u16>((sample << shift) | (sample >> inverse_shift));
 }
 
-static void copy_plane_expanded_to_full_16_bit_range(FixedArray<u8> const& source_buffer, SkPixmap const& destination, IntSize plane_size, u8 bit_depth)
+static void copy_plane_expanded_to_full_16_bit_range(ReadonlyBytes source_buffer, SkPixmap const& destination, IntSize plane_size, u8 bit_depth)
 {
     VERIFY(bit_depth > 8);
 
@@ -371,11 +390,11 @@ SkYUVAPixmaps YUVData::make_pixmaps() const
         if (!pixmaps.isValid())
             return pixmaps;
 
-        copy_plane_expanded_to_full_16_bit_range(m_impl->y_buffer, pixmaps.plane(0), m_impl->size, m_impl->bit_depth);
+        copy_plane_expanded_to_full_16_bit_range(y_data(), pixmaps.plane(0), m_impl->size, m_impl->bit_depth);
 
         auto uv_size = m_impl->subsampling.subsampled_size(m_impl->size);
-        copy_plane_expanded_to_full_16_bit_range(m_impl->u_buffer, pixmaps.plane(1), uv_size, m_impl->bit_depth);
-        copy_plane_expanded_to_full_16_bit_range(m_impl->v_buffer, pixmaps.plane(2), uv_size, m_impl->bit_depth);
+        copy_plane_expanded_to_full_16_bit_range(u_data(), pixmaps.plane(1), uv_size, m_impl->bit_depth);
+        copy_plane_expanded_to_full_16_bit_range(v_data(), pixmaps.plane(2), uv_size, m_impl->bit_depth);
 
         return pixmaps;
     }
@@ -390,15 +409,15 @@ SkYUVAPixmaps YUVData::make_pixmaps() const
     // Create pixmaps from our buffers
     SkPixmap y_pixmap(
         SkImageInfo::Make(skia_size, color_type, kOpaque_SkAlphaType),
-        m_impl->y_buffer.data(),
+        y_data().data(),
         y_row_bytes);
     SkPixmap u_pixmap(
         SkImageInfo::Make(uv_size.width(), uv_size.height(), color_type, kOpaque_SkAlphaType),
-        m_impl->u_buffer.data(),
+        u_data().data(),
         uv_row_bytes);
     SkPixmap v_pixmap(
         SkImageInfo::Make(uv_size.width(), uv_size.height(), color_type, kOpaque_SkAlphaType),
-        m_impl->v_buffer.data(),
+        v_data().data(),
         uv_row_bytes);
 
     SkPixmap plane_pixmaps[SkYUVAInfo::kMaxPlanes] = { y_pixmap, u_pixmap, v_pixmap, {} };

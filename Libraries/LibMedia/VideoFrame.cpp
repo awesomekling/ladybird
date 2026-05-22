@@ -61,24 +61,11 @@ static bool video_full_range_flag_ipc_value_valid(Media::VideoFullRangeFlag vide
         || Media::video_full_range_flag_valid(video_full_range_flag);
 }
 
-static ErrorOr<Core::AnonymousBuffer> encode_yuv_data(Gfx::YUVData const& yuv_data)
-{
-    auto sizes = TRY(Gfx::YUVData::plane_sizes(yuv_data.size(), yuv_data.bit_depth(), yuv_data.subsampling()));
-    auto buffer = TRY(Core::AnonymousBuffer::create_with_size(sizes.total));
-
-    auto bytes = Bytes { buffer.data<u8>(), buffer.size() };
-    yuv_data.y_data().copy_to(bytes.slice(0, sizes.y));
-    yuv_data.u_data().copy_to(bytes.slice(sizes.y, sizes.u));
-    yuv_data.v_data().copy_to(bytes.slice(sizes.y + sizes.u, sizes.v));
-    return buffer;
-}
-
 template<>
 ErrorOr<void> encode(Encoder& encoder, Media::VideoFrame const& frame)
 {
     auto const& yuv_data = frame.yuv_data();
-    auto yuv_data_buffer = TRY(encode_yuv_data(yuv_data));
-    TRY(encoder.encode(yuv_data_buffer));
+    TRY(encoder.encode(yuv_data.anonymous_buffer()));
     TRY(encoder.encode(frame.color_space()));
     TRY(encoder.encode(frame.timestamp()));
     TRY(encoder.encode(frame.duration()));
@@ -128,16 +115,7 @@ ErrorOr<NonnullRefPtr<Media::VideoFrame const>> decode(Decoder& decoder)
         || !video_full_range_flag_ipc_value_valid(cicp.video_full_range_flag()))
         return Error::from_string_literal("IPC: VideoFrame contained invalid CICP metadata");
 
-    auto sizes = TRY(Gfx::YUVData::plane_sizes(size, bit_depth, subsampling));
-    if (yuv_data_buffer.size() != sizes.total)
-        return Error::from_string_literal("IPC: VideoFrame contained invalid YUV data size");
-
-    auto bytes = yuv_data_buffer.bytes();
-    auto y_data = bytes.slice(0, sizes.y);
-    auto u_data = bytes.slice(sizes.y, sizes.u);
-    auto v_data = bytes.slice(sizes.y + sizes.u, sizes.v);
-
-    auto yuv_data = TRY(Gfx::YUVData::create_from_data(size, bit_depth, subsampling, cicp, y_data, u_data, v_data));
+    auto yuv_data = TRY(Gfx::YUVData::create_from_anonymous_buffer(size, bit_depth, subsampling, cicp, move(yuv_data_buffer)));
     auto frame = TRY(try_make_ref_counted<Media::VideoFrame>(timestamp, duration, size.to_type<u32>(), bit_depth, move(color_space), move(yuv_data)));
     return NonnullRefPtr<Media::VideoFrame const> { *frame };
 }
