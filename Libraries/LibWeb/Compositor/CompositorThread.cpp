@@ -105,6 +105,14 @@ struct CompositorCommandEnvelope {
     CompositorCommand command;
 };
 
+static bool can_coalesce_async_scroll_command(CompositorContextId existing_context_id, AsyncScrollByCommand const& existing_command, CompositorContextId new_context_id, AsyncScrollByCommand const& new_command)
+{
+    return existing_context_id == new_context_id
+        && !existing_command.operation_id.has_value()
+        && !new_command.operation_id.has_value()
+        && existing_command.scroll_target == new_command.scroll_target;
+}
+
 static void flush_surface(Gfx::PaintingSurface& surface)
 {
     if (auto context = surface.skia_backend_context()) {
@@ -239,6 +247,17 @@ public:
     void enqueue_command(CompositorContextId context_id, CompositorCommand&& command)
     {
         Sync::MutexLocker const locker { m_mutex };
+        if (auto* new_async_scroll = command.get_pointer<AsyncScrollByCommand>(); new_async_scroll && !m_command_queue.is_empty()) {
+            auto& queued_command = m_command_queue.tail();
+            if (auto* queued_async_scroll = queued_command.command.get_pointer<AsyncScrollByCommand>();
+                queued_async_scroll && can_coalesce_async_scroll_command(queued_command.context_id, *queued_async_scroll, context_id, *new_async_scroll)) {
+                queued_async_scroll->position = new_async_scroll->position;
+                queued_async_scroll->delta_in_device_pixels.translate_by(new_async_scroll->delta_in_device_pixels);
+                queued_async_scroll->viewport_rect = new_async_scroll->viewport_rect;
+                m_command_ready.signal();
+                return;
+            }
+        }
         m_command_queue.enqueue({ context_id, move(command) });
         if constexpr (COMPOSITOR_DEBUG) {
             auto context = m_contexts.get(context_id).value_or(nullptr);
