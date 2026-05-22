@@ -33,7 +33,7 @@ static ErrorOr<Core::Process> launch_process(StringView application, ReadonlySpa
     return result;
 }
 
-static Vector<ByteString> create_arguments(ByteString const& webdriver_endpoint, bool headless, bool expose_experimental_interfaces, bool expose_internals_object, bool force_cpu_painting, Optional<StringView> debug_process, Optional<StringView> default_time_zone)
+static Vector<ByteString> create_arguments(ByteString const& webdriver_endpoint, bool headless, Optional<ByteString> const& headless_mode, bool expose_experimental_interfaces, bool expose_internals_object, bool force_cpu_painting, Optional<StringView> debug_process, Optional<StringView> default_time_zone)
 {
     Vector<ByteString> arguments;
 #if defined(AK_OS_MACOS)
@@ -49,8 +49,12 @@ static Vector<ByteString> create_arguments(ByteString const& webdriver_endpoint,
         arguments.append(certificate_args.last().view().characters_without_null_termination());
     }
 
-    if (headless)
-        arguments.append("--headless"sv);
+    if (headless) {
+        if (headless_mode.has_value() && !headless_mode->is_empty())
+            arguments.append(ByteString::formatted("--headless={}", *headless_mode));
+        else
+            arguments.append("--headless"sv);
+    }
 
     arguments.append("--allow-popups"sv);
     arguments.append("--force-new-process"sv);
@@ -85,7 +89,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool expose_experimental_interfaces = false;
     bool expose_internals_object = false;
     bool force_cpu_painting = false;
-    bool headless = false;
+    Optional<ByteString> headless_mode;
     Optional<StringView> debug_process;
     Optional<StringView> default_time_zone;
 
@@ -97,7 +101,22 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(expose_internals_object, "Expose internals object", "expose-internals-object");
     args_parser.add_option(force_cpu_painting, "Launch browser with GPU painting disabled", "force-cpu-painting");
     args_parser.add_option(debug_process, "Wait for a debugger to attach to the given process name (WebContent, RequestServer, etc.)", "debug-process", 0, "process-name");
-    args_parser.add_option(headless, "Launch browser without a graphical interface", "headless");
+    args_parser.add_option(Core::ArgsParser::Option {
+        .argument_mode = Core::ArgsParser::OptionArgumentMode::Optional,
+        .help_string = "Launch browser without a graphical interface. Mode may be 'screenshot' (default), 'layout-tree', 'text', or 'manual'.",
+        .long_name = "headless",
+        .value_name = "mode",
+        .accept_value = [&](StringView value) {
+            if (headless_mode.has_value())
+                return false;
+
+            if (!value.is_empty() && !value.equals_ignoring_ascii_case("screenshot"sv) && !value.equals_ignoring_ascii_case("layout-tree"sv) && !value.equals_ignoring_ascii_case("text"sv) && !value.equals_ignoring_ascii_case("manual"sv))
+                return false;
+
+            headless_mode = ByteString { value };
+            return true;
+        },
+    });
     args_parser.add_option(default_time_zone, "Default time zone", "default-time-zone", 0, "time-zone-id");
     args_parser.parse(arguments);
 
@@ -114,7 +133,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     WebView::platform_init();
 
-    Web::WebDriver::set_default_interface_mode(headless ? Web::WebDriver::InterfaceMode::Headless : Web::WebDriver::InterfaceMode::Graphical);
+    Web::WebDriver::set_default_interface_mode(headless_mode.has_value() ? Web::WebDriver::InterfaceMode::Headless : Web::WebDriver::InterfaceMode::Graphical);
 
     auto webdriver_socket_path = ByteString::formatted("{}/webdriver", TRY(Core::StandardPaths::runtime_directory()));
     TRY(Core::Directory::create(webdriver_socket_path, Core::Directory::CreateDirectories::Yes));
@@ -139,7 +158,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         }
 
         auto launch_browser_callback = [&](ByteString const& webdriver_endpoint, bool headless) {
-            auto arguments = create_arguments(webdriver_endpoint, headless, expose_experimental_interfaces, expose_internals_object, force_cpu_painting, debug_process, default_time_zone);
+            auto arguments = create_arguments(webdriver_endpoint, headless, headless_mode, expose_experimental_interfaces, expose_internals_object, force_cpu_painting, debug_process, default_time_zone);
             return launch_process("Ladybird"sv, arguments.span());
         };
 
