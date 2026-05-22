@@ -130,8 +130,6 @@ DisplayingVideoSinkUpdateResult DisplayingVideoSink::update()
     if (m_seek_status == SeekStatus::FrameInvalidated) {
         result = DisplayingVideoSinkUpdateResult::NewFrameAvailable;
         m_seek_status = SeekStatus::None;
-    } else if (m_seek_status == SeekStatus::Complete) {
-        result = DisplayingVideoSinkUpdateResult::NewFrameAvailable;
     }
 
     auto last_status = PipelineStatus::Pending;

@@ -1615,10 +1615,10 @@ void HTMLMediaElement::set_selected_video_track(Badge<VideoTrack>, GC::Ptr<HTML:
         m_playback_manager->remove_the_displaying_video_sink_for_track(previous_track->track_in_playback_manager());
 }
 
-void HTMLMediaElement::update_video_frame_and_timeline()
+bool HTMLMediaElement::update_video_frame_and_timeline()
 {
     if (!m_playback_manager)
-        return;
+        return false;
 
     if (m_selected_video_track_sink) {
         auto sink_update_result = m_selected_video_track_sink->update();
@@ -1626,14 +1626,18 @@ void HTMLMediaElement::update_video_frame_and_timeline()
             update_current_video_frame();
     }
 
+    auto should_request_another_frame = potentially_playing();
+
     // Wait for the seek to complete before updating the timestamp, otherwise we'll display the timestamp from
     // before the seek when the user lets go of the left mouse button.
     if (seeking())
-        return;
+        return should_request_another_frame;
 
     auto new_position = m_playback_manager->current_time().to_seconds_f64();
     if (new_position != m_current_playback_position)
         set_current_playback_position(new_position);
+
+    return should_request_another_frame;
 }
 
 void HTMLMediaElement::on_audio_track_added(Media::Track const& track)

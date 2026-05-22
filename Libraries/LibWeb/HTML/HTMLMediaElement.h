@@ -153,7 +153,7 @@ public:
 
     void set_selected_video_track(Badge<VideoTrack>, GC::Ptr<HTML::VideoTrack> video_track);
 
-    void update_video_frame_and_timeline();
+    bool update_video_frame_and_timeline();
 
     GC::Ref<TextTrack> add_text_track(Bindings::TextTrackKind kind, String const& label, String const& language);
 
