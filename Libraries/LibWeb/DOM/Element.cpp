@@ -4534,6 +4534,8 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
         // https://drafts.csswg.org/cssom/#ref-for-cssstyledeclaration-updating-flag
         if (m_inline_style && m_inline_style->is_updating())
             return;
+        if (old_value == value)
+            return;
         if (!m_inline_style)
             m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, {}, {});
         m_inline_style->set_declarations_from_text(value.value_or(""_string));
