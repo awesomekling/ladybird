@@ -14,6 +14,41 @@
 
 namespace Sandbox {
 
+enum class Capability {
+    DenyFileSystemProbes,
+    FileSystemRead,
+    FileSystemWrite,
+    FileDescriptorIO,
+    ProcessCreation,
+    LocalIPC,
+    Network,
+    GpuDevice,
+    CommonRuntime,
+    ExecutableMemory,
+};
+
+enum class FileSystemScope {
+    BrowserResources,
+    Configuration,
+    CrashSymbolication,
+    SharedLibraries,
+    GraphicsDriverResources,
+    GraphicsDeviceAccess,
+    HardwareMetadata,
+    Fonts,
+    WasmCompiler,
+    GraphicsShaderCache,
+    AudioRuntime,
+    ResolverConfiguration,
+    TlsCertificates,
+    HttpCache,
+};
+
+struct Policy {
+    ReadonlySpan<Capability> capabilities;
+    ReadonlySpan<FileSystemScope> filesystem_scopes;
+};
+
 struct LandlockPath {
     enum class Access {
         ReadOnly,

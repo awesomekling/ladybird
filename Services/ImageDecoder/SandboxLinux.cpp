@@ -17,10 +17,7 @@ ErrorOr<void> apply_sandbox()
     TRY(Sandbox::restrict_filesystem_with_landlock());
 
     Sandbox::SeccompPolicy policy;
-    policy.deny_readonly_filesystem_probes();
-    policy.allow_file_descriptor_operations();
-    policy.allow_ipc();
-    policy.allow_common_runtime();
+    Sandbox::allow_capabilities(policy, sandbox_policy().capabilities);
     TRY(policy.install());
 
     return {};

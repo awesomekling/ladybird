@@ -7,8 +7,23 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <LibSandbox/Sandbox.h>
 
 namespace ImageDecoder {
+
+inline Sandbox::Policy sandbox_policy()
+{
+    static constexpr Sandbox::Capability capabilities[] {
+        Sandbox::Capability::DenyFileSystemProbes,
+        Sandbox::Capability::FileDescriptorIO,
+        Sandbox::Capability::LocalIPC,
+        Sandbox::Capability::CommonRuntime,
+    };
+    return {
+        .capabilities = capabilities,
+        .filesystem_scopes = {},
+    };
+}
 
 [[nodiscard]] ErrorOr<void> apply_sandbox();
 

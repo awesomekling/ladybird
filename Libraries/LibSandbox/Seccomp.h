@@ -7,7 +7,9 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/Span.h>
 #include <AK/Vector.h>
+#include <LibSandbox/Sandbox.h>
 #include <linux/filter.h>
 
 namespace Sandbox {
@@ -45,5 +47,8 @@ private:
 
     Vector<sock_filter> m_filter;
 };
+
+void allow_capability(SeccompPolicy&, Capability);
+void allow_capabilities(SeccompPolicy&, ReadonlySpan<Capability>);
 
 }

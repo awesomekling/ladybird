@@ -1144,6 +1144,49 @@ void SeccompPolicy::allow_exit()
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, exit_group);
 }
 
+void allow_capability(SeccompPolicy& policy, Capability capability)
+{
+    switch (capability) {
+    case Capability::DenyFileSystemProbes:
+        policy.deny_readonly_filesystem_probes();
+        break;
+    case Capability::FileSystemRead:
+        policy.allow_readonly_file_opens();
+        policy.allow_filesystem_metadata_queries();
+        break;
+    case Capability::FileSystemWrite:
+        policy.allow_filesystem_writes();
+        break;
+    case Capability::FileDescriptorIO:
+        policy.allow_file_descriptor_operations();
+        break;
+    case Capability::ProcessCreation:
+        policy.allow_process_creation();
+        break;
+    case Capability::LocalIPC:
+        policy.allow_ipc();
+        break;
+    case Capability::Network:
+        policy.allow_network();
+        break;
+    case Capability::GpuDevice:
+        policy.allow_gpu_device_operations();
+        break;
+    case Capability::CommonRuntime:
+        policy.allow_common_runtime();
+        break;
+    case Capability::ExecutableMemory:
+        policy.allow_executable_memory_mappings();
+        break;
+    }
+}
+
+void allow_capabilities(SeccompPolicy& policy, ReadonlySpan<Capability> capabilities)
+{
+    for (auto capability : capabilities)
+        allow_capability(policy, capability);
+}
+
 ErrorOr<void> SeccompPolicy::install()
 {
     TRY(install_sigsys_handler());
