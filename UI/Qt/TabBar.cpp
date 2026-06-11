@@ -81,7 +81,8 @@ static constexpr int VERTICAL_TABS_HOVER_COLLAPSE_POLL_INTERVAL_MS = 250;
 static constexpr int TAB_PREVIEW_HOVER_DELAY_MS = 350;
 static constexpr int TAB_PREVIEW_THUMBNAIL_WIDTH = 320;
 static constexpr int TAB_PREVIEW_THUMBNAIL_HEIGHT = 180;
-static constexpr int TAB_PREVIEW_POPUP_GAP = 8;
+static constexpr int TAB_PREVIEW_SHADOW_MARGIN = 12;
+static constexpr int TAB_PREVIEW_CARD_GAP = 6;
 static constexpr int TAB_BUTTON_SIZE = 22;
 static constexpr int TAB_ICON_SIZE = 16;
 static constexpr int COLLAPSED_VERTICAL_TAB_BUTTON_SIZE = 16;
@@ -325,7 +326,7 @@ public:
         setAttribute(Qt::WA_ShowWithoutActivating);
 
         auto* outer_layout = new QVBoxLayout(this);
-        outer_layout->setContentsMargins(12, 12, 12, 12);
+        outer_layout->setContentsMargins(TAB_PREVIEW_SHADOW_MARGIN, TAB_PREVIEW_SHADOW_MARGIN, TAB_PREVIEW_SHADOW_MARGIN, TAB_PREVIEW_SHADOW_MARGIN);
         outer_layout->setSpacing(0);
 
         m_card = new QFrame(this);
@@ -1106,28 +1107,28 @@ QPoint TabBar::tab_preview_position_for(int index, QSize const& popup_size) cons
     if (tab_layout() == TabLayout::Horizontal) {
         position = mapToGlobal(QPoint {
             tab_rect.center().x() - popup_size.width() / 2,
-            tab_rect.bottom() + TAB_PREVIEW_POPUP_GAP,
+            tab_rect.bottom() + TAB_PREVIEW_CARD_GAP - TAB_PREVIEW_SHADOW_MARGIN,
         });
 
         if (position.y() + popup_size.height() > available_geometry.bottom())
-            position.setY(mapToGlobal(QPoint { 0, tab_rect.top() }).y() - popup_size.height() - TAB_PREVIEW_POPUP_GAP);
+            position.setY(mapToGlobal(QPoint { 0, tab_rect.top() }).y() - popup_size.height() - TAB_PREVIEW_CARD_GAP + TAB_PREVIEW_SHADOW_MARGIN);
     } else {
         position = mapToGlobal(QPoint {
-            tab_rect.right() + TAB_PREVIEW_POPUP_GAP,
+            tab_rect.right() + TAB_PREVIEW_CARD_GAP - TAB_PREVIEW_SHADOW_MARGIN,
             tab_rect.center().y() - popup_size.height() / 2,
         });
 
         if (position.x() + popup_size.width() > available_geometry.right())
-            position.setX(mapToGlobal(QPoint { tab_rect.left(), 0 }).x() - popup_size.width() - TAB_PREVIEW_POPUP_GAP);
+            position.setX(mapToGlobal(QPoint { tab_rect.left(), 0 }).x() - popup_size.width() - TAB_PREVIEW_CARD_GAP + TAB_PREVIEW_SHADOW_MARGIN);
     }
 
-    auto minimum_x = available_geometry.left() + TAB_PREVIEW_POPUP_GAP;
-    auto maximum_x = available_geometry.right() - popup_size.width() - TAB_PREVIEW_POPUP_GAP;
+    auto minimum_x = available_geometry.left() + TAB_PREVIEW_CARD_GAP - TAB_PREVIEW_SHADOW_MARGIN;
+    auto maximum_x = available_geometry.right() - popup_size.width() - TAB_PREVIEW_CARD_GAP + TAB_PREVIEW_SHADOW_MARGIN;
     if (minimum_x <= maximum_x)
         position.setX(clamp(position.x(), minimum_x, maximum_x));
 
-    auto minimum_y = available_geometry.top() + TAB_PREVIEW_POPUP_GAP;
-    auto maximum_y = available_geometry.bottom() - popup_size.height() - TAB_PREVIEW_POPUP_GAP;
+    auto minimum_y = available_geometry.top() + TAB_PREVIEW_CARD_GAP - TAB_PREVIEW_SHADOW_MARGIN;
+    auto maximum_y = available_geometry.bottom() - popup_size.height() - TAB_PREVIEW_CARD_GAP + TAB_PREVIEW_SHADOW_MARGIN;
     if (minimum_y <= maximum_y)
         position.setY(clamp(position.y(), minimum_y, maximum_y));
 
