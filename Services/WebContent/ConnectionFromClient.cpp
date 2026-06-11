@@ -304,6 +304,15 @@ void ConnectionFromClient::mouse_event(u64 page_id, Web::MouseEvent event)
     enqueue_input_event({ page_id, move(event), 0 });
 }
 
+void ConnectionFromClient::request_page_preview_rendering_update(u64 page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->page().client().request_frame();
+}
+
 void ConnectionFromClient::drag_event(u64 page_id, Web::DragEvent event)
 {
     enqueue_input_event({ page_id, move(event), 0 });

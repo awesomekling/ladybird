@@ -49,6 +49,7 @@ endpoint WebContentServer
     traverse_the_history_by_delta(u64 page_id, i32 delta) =|
 
     set_viewport(u64 page_id, Web::DevicePixelSize size, double device_pixel_ratio, Web::ViewportIsFullscreen is_fullscreen) =|
+    request_page_preview_rendering_update(u64 page_id) =|
 
     key_event(u64 page_id, Web::KeyEvent event) =|
     mouse_event(u64 page_id, Web::MouseEvent event) =|

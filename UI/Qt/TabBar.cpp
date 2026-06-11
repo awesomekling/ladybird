@@ -1050,6 +1050,10 @@ void TabBar::schedule_tab_preview(int index)
     m_tab_preview_index = index;
     m_tab_preview_popup->hide();
     QToolTip::hideText();
+
+    if (auto* tab = m_tab_widget->tab(index))
+        tab->view().request_tab_preview_rendering_update();
+
     m_tab_preview_timer->start();
 }
 
@@ -1069,6 +1073,8 @@ void TabBar::show_tab_preview()
         hide_tab_preview();
         return;
     }
+
+    tab->view().request_tab_preview_rendering_update();
 
     auto thumbnail = tab->view().tab_preview_pixmap({ TAB_PREVIEW_THUMBNAIL_WIDTH, TAB_PREVIEW_THUMBNAIL_HEIGHT });
     if (!thumbnail.has_value()) {

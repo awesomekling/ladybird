@@ -739,6 +739,11 @@ Optional<QPixmap> WebContentView::tab_preview_pixmap(QSize const& maximum_size) 
     return preview;
 }
 
+void WebContentView::request_tab_preview_rendering_update()
+{
+    client().async_request_page_preview_rendering_update(page_id());
+}
+
 void WebContentView::resizeEvent(QResizeEvent* event)
 {
     WebContentViewBase::resizeEvent(event);

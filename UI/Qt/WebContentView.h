@@ -88,6 +88,7 @@ public:
         Dark,
     };
     void update_palette(PaletteMode = PaletteMode::Default);
+    void request_tab_preview_rendering_update();
     Optional<QPixmap> tab_preview_pixmap(QSize const& maximum_size) const;
 
     using ViewImplementation::client;
