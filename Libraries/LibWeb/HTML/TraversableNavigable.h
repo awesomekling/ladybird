@@ -49,6 +49,9 @@ public:
 
     VisibilityState system_visibility_state() const { return m_system_visibility_state; }
     void set_system_visibility_state(VisibilityState);
+    bool has_pending_page_preview_rendering_update() const { return m_has_pending_page_preview_rendering_update; }
+    void request_page_preview_rendering_update();
+    void clear_pending_page_preview_rendering_update() { m_has_pending_page_preview_rendering_update = false; }
 
     bool is_created_by_web_content() const { return m_is_created_by_web_content; }
     void set_is_created_by_web_content(bool value) { m_is_created_by_web_content = value; }
@@ -171,6 +174,8 @@ private:
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#system-visibility-state
     VisibilityState m_system_visibility_state { VisibilityState::Hidden };
+
+    bool m_has_pending_page_preview_rendering_update { false };
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#is-created-by-web-content
     bool m_is_created_by_web_content { false };

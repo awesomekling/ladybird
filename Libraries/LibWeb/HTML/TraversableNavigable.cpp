@@ -1808,6 +1808,12 @@ void TraversableNavigable::set_system_visibility_state(VisibilityState visibilit
     }
 }
 
+void TraversableNavigable::request_page_preview_rendering_update()
+{
+    m_has_pending_page_preview_rendering_update = true;
+    page().client().request_frame();
+}
+
 // https://html.spec.whatwg.org/multipage/interaction.html#currently-focused-area-of-a-top-level-traversable
 GC::Ptr<DOM::Node> TraversableNavigable::currently_focused_area()
 {

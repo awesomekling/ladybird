@@ -310,7 +310,7 @@ void ConnectionFromClient::request_page_preview_rendering_update(u64 page_id)
     if (!page.has_value())
         return;
 
-    page->page().client().request_frame();
+    page->page().top_level_traversable()->request_page_preview_rendering_update();
 }
 
 void ConnectionFromClient::drag_event(u64 page_id, Web::DragEvent event)

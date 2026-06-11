@@ -326,6 +326,7 @@ void EventLoop::update_the_rendering()
     //      C, then the order of A and B in the list must match the shadow-including tree order
     //      of their respective navigable containers in C's node tree.
     // 3. Filter non-renderable documents: Remove from docs any Document object doc for which any of the following are true:
+    GC::RootVector<GC::Ref<TraversableNavigable>> traversables_with_page_preview_rendering_updates;
     auto docs = documents_in_this_event_loop_matching([&](auto const& document) {
         if (!document.is_fully_active())
             return false;
@@ -335,10 +336,6 @@ void EventLoop::update_the_rendering()
             return false;
         }
 
-        // doc's visibility state is "hidden";
-        if (document.hidden())
-            return false;
-
         // doc's rendering is suppressed for view transitions; or
         if (document.rendering_suppression_for_view_transitions())
             return false;
@@ -346,6 +343,16 @@ void EventLoop::update_the_rendering()
         auto navigable = document.navigable();
         if (!navigable)
             return false;
+
+        auto top_level_traversable = navigable->top_level_traversable();
+        auto has_page_preview_rendering_update = top_level_traversable && top_level_traversable->has_pending_page_preview_rendering_update();
+
+        // doc's visibility state is "hidden";
+        if (document.hidden() && !has_page_preview_rendering_update)
+            return false;
+
+        if (has_page_preview_rendering_update && !traversables_with_page_preview_rendering_updates.contains([&](auto const& traversable) { return traversable.ptr() == top_level_traversable.ptr(); }))
+            traversables_with_page_preview_rendering_updates.append(*top_level_traversable);
 
         // doc's node navigable doesn't currently have a rendering opportunity.
         if (!navigable->has_a_rendering_opportunity())
@@ -563,6 +570,9 @@ void EventLoop::update_the_rendering()
         TemporaryExecutionContext context(document->realm(), TemporaryExecutionContext::CallbacksEnabled::Yes);
         document->fonts()->set_is_pending_on_the_environment(document->readiness() == DocumentReadyState::Loading);
     }
+
+    for (auto& traversable : traversables_with_page_preview_rendering_updates)
+        traversable->clear_pending_page_preview_rendering_update();
 }
 
 void run_when_event_loop_reaches_step_1(GC::Ref<GC::Function<void()>> steps)
