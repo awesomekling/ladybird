@@ -3076,6 +3076,7 @@ static bool subject_pseudo_class_is_bucketable(PseudoClass pseudo_class)
     case PseudoClass::FocusWithin:
     case PseudoClass::Fullscreen:
     case PseudoClass::Heading:
+    case PseudoClass::Host:
     case PseudoClass::Hover:
     case PseudoClass::Link:
     case PseudoClass::LocalLink:
@@ -3092,6 +3093,8 @@ static bool subject_pseudo_class_is_bucketable(PseudoClass pseudo_class)
 static u8 subject_pseudo_class_bucket_priority(PseudoClass pseudo_class)
 {
     switch (pseudo_class) {
+    case PseudoClass::Host:
+        return 110;
     case PseudoClass::FocusVisible:
         return 100;
     case PseudoClass::Focus:
@@ -3309,6 +3312,8 @@ static bool matches_subject_pseudo_class_bucket(PseudoClass pseudo_class, DOM::E
         return element.is_fullscreen_element();
     case PseudoClass::Heading:
         return element.is_html_heading_element();
+    case PseudoClass::Host:
+        return element.is_shadow_host();
     case PseudoClass::Hover:
         return matches_hover_pseudo_class_for_rule_bucket(element);
     case PseudoClass::LocalLink:
@@ -4238,7 +4243,8 @@ static IterationDecision for_each_matching_rule_bucket(DOM::AbstractElement abst
     if (decision == IterationDecision::Break)
         return IterationDecision::Break;
 
-    static constexpr Array<PseudoClass, 17> subject_pseudo_classes {
+    static constexpr Array<PseudoClass, 18> subject_pseudo_classes {
+        PseudoClass::Host,
         PseudoClass::FocusVisible,
         PseudoClass::Focus,
         PseudoClass::Active,
