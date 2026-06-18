@@ -103,6 +103,13 @@ namespace Web::CSS {
 
 GC_DEFINE_ALLOCATOR(StyleComputer);
 
+// NB: Keep these salts in sync with Selector.cpp. They separate otherwise identical
+// string hashes by selector component kind, e.g. `.article` versus `<article>`.
+static constexpr u32 ancestor_filter_tag_name_salt = 13;
+static constexpr u32 ancestor_filter_id_salt = 17;
+static constexpr u32 ancestor_filter_class_salt = 19;
+static constexpr u32 ancestor_filter_attribute_salt = 23;
+
 static bool property_affects_font_metrics(PropertyID property_id)
 {
     return property_id == PropertyID::FontSize || property_id == PropertyID::LineHeight;
@@ -4023,13 +4030,13 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_math_depth(NonnullRefPtr<
 
 static void for_each_element_hash(DOM::Element const& element, auto callback)
 {
-    callback(element.local_name().ascii_case_insensitive_hash());
+    callback(element.local_name().ascii_case_insensitive_hash() * ancestor_filter_tag_name_salt);
     if (element.id().has_value())
-        callback(element.id().value().hash());
+        callback(element.id().value().hash() * ancestor_filter_id_salt);
     for (auto const& class_ : element.class_names())
-        callback(class_.hash());
+        callback(class_.hash() * ancestor_filter_class_salt);
     element.for_each_attribute([&](auto& attribute) {
-        callback(attribute.name().ascii_case_insensitive_hash());
+        callback(attribute.name().ascii_case_insensitive_hash() * ancestor_filter_attribute_salt);
     });
 }
 

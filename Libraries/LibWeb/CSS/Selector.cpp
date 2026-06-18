@@ -14,6 +14,13 @@
 
 namespace Web::CSS {
 
+// NB: Keep these salts in sync with StyleComputer.cpp. They separate otherwise identical
+// string hashes by selector component kind, e.g. `.article` versus `<article>`.
+static constexpr u32 ancestor_filter_tag_name_salt = 13;
+static constexpr u32 ancestor_filter_id_salt = 17;
+static constexpr u32 ancestor_filter_class_salt = 19;
+static constexpr u32 ancestor_filter_attribute_salt = 23;
+
 static bool component_value_contains_nesting_selector(Parser::ComponentValue const& component_value)
 {
     if (component_value.is_delim('&'))
@@ -201,14 +208,16 @@ void Selector::collect_ancestor_hashes()
             Vector<u32> hashes;
             switch (simple_selector.type) {
             case SimpleSelector::Type::Id:
+                hashes.append(simple_selector.name().hash() * ancestor_filter_id_salt);
+                break;
             case SimpleSelector::Type::Class:
-                hashes.append(simple_selector.name().hash());
+                hashes.append(simple_selector.name().hash() * ancestor_filter_class_salt);
                 break;
             case SimpleSelector::Type::TagName:
-                hashes.append(simple_selector.qualified_name().name.lowercase_name.hash());
+                hashes.append(simple_selector.qualified_name().name.lowercase_name.hash() * ancestor_filter_tag_name_salt);
                 break;
             case SimpleSelector::Type::Attribute:
-                hashes.append(simple_selector.attribute().qualified_name.name.lowercase_name.hash());
+                hashes.append(simple_selector.attribute().qualified_name.name.lowercase_name.hash() * ancestor_filter_attribute_salt);
                 break;
             case SimpleSelector::Type::PseudoClass: {
                 auto const& pseudo_class = simple_selector.pseudo_class();
