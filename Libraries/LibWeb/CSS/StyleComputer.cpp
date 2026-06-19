@@ -20,6 +20,7 @@
 #include <AK/NeverDestroyed.h>
 #include <AK/NonnullRawPtr.h>
 #include <AK/QuickSort.h>
+#include <AK/ScopeGuard.h>
 #include <AK/Utf8View.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibWeb/Animations/AnimationEffect.h>
@@ -2840,6 +2841,17 @@ RefPtr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElemen
         }
     }
 
+    // Memoize resolved custom property values for the duration of this element's style computation. The cascade
+    // and compute_properties() below both resolve the same custom properties repeatedly; the resolved value is
+    // invariant for this element during the pass. Save and restore the previous cache so nested computations
+    // (e.g. pseudo-elements) get their own.
+    HashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> custom_property_resolution_cache;
+    auto* previous_custom_property_resolution_cache = m_custom_property_resolution_cache;
+    m_custom_property_resolution_cache = &custom_property_resolution_cache;
+    ScopeGuard restore_custom_property_resolution_cache = [&] {
+        m_custom_property_resolution_cache = previous_custom_property_resolution_cache;
+    };
+
     auto cascaded_properties = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set);
 
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
@@ -3488,7 +3500,7 @@ static bool matches_subject_pseudo_class_bucket(PseudoClass pseudo_class, DOM::E
     }
 }
 
-NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_custom_property(DOM::AbstractElement abstract_element, Utf16FlyString const& name, Optional<Parser::GuardedSubstitutionContexts&> guarded_contexts)
+NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_custom_property(DOM::AbstractElement abstract_element, Utf16FlyString const& name, Optional<Parser::GuardedSubstitutionContexts&> guarded_contexts) const
 {
     // https://drafts.csswg.org/css-variables/#propdef-
     // The computed value of a custom property is its specified value with any arbitrary-substitution functions replaced.
@@ -3521,8 +3533,35 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_custom_property(
     if (!value->is_unresolved() || !value->as_unresolved().contains_arbitrary_substitution_function())
         return value.release_nonnull();
 
+    // Substituting the arbitrary-substitution functions in a custom property is expensive, and the same property is
+    // commonly referenced many times while computing one element's style (once per referencing property, plus
+    // recursively down var() chains). For a non-cyclic property the resolved value is invariant for this element
+    // during a single style pass, so memoize it. The cache is scoped to the element currently being computed (see
+    // compute_style_impl()).
+    // NB: A property that participates in a cycle is excluded from the cache: its resolved value is path-dependent
+    //     (a cyclic property resolves differently depending on which property the cycle is entered from), so caching
+    //     it would corrupt the results of unrelated resolutions.
+    if (m_custom_property_resolution_cache) {
+        if (auto it = m_custom_property_resolution_cache->find(name); it != m_custom_property_resolution_cache->end())
+            return it->value;
+    }
+
     auto& unresolved = value->as_unresolved();
-    return Parser::Parser::resolve_unresolved_style_value(Parser::ParsingParams {}, abstract_element, PropertyNameAndID::from_name(name).release_value(), unresolved, guarded_contexts);
+    auto property = PropertyNameAndID::from_name(name).release_value();
+
+    auto resolve_and_maybe_cache = [&](Parser::GuardedSubstitutionContexts& contexts) -> NonnullRefPtr<StyleValue const> {
+        auto cycles_before = contexts.cycle_detection_count();
+        auto resolved = Parser::Parser::resolve_unresolved_style_value(Parser::ParsingParams {}, abstract_element, property, unresolved, contexts);
+        auto involved_cycle = contexts.cycle_detection_count() != cycles_before;
+        if (m_custom_property_resolution_cache && !involved_cycle)
+            m_custom_property_resolution_cache->set(name, resolved);
+        return resolved;
+    };
+
+    if (guarded_contexts.has_value())
+        return resolve_and_maybe_cache(*guarded_contexts);
+    Parser::GuardedSubstitutionContexts guarded_contexts_storage;
+    return resolve_and_maybe_cache(guarded_contexts_storage);
 }
 
 void StyleComputer::compute_custom_properties(ComputedProperties&, DOM::AbstractElement abstract_element) const

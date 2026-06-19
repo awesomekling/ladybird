@@ -34,8 +34,13 @@ public:
     void guard(SubstitutionContext&);
     void unguard(SubstitutionContext const&);
 
+    // Incremented every time a cycle is detected. Lets callers tell whether resolving a value involved a cycle,
+    // which matters because a cyclic value's resolution is path-dependent and must not be memoized.
+    u64 cycle_detection_count() const { return m_cycle_detection_count; }
+
 private:
     Vector<SubstitutionContext&> m_contexts;
+    u64 m_cycle_detection_count { 0 };
 };
 
 enum class ArbitrarySubstitutionFunction : u8 {

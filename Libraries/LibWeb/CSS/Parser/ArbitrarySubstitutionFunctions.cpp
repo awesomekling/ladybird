@@ -46,6 +46,7 @@ void GuardedSubstitutionContexts::guard(SubstitutionContext& context)
         if (existing_context == context) {
             existing_context.is_cyclic = true;
             context.is_cyclic = true;
+            ++m_cycle_detection_count;
             return;
         }
     }
@@ -430,7 +431,7 @@ static Vector<ComponentValue> replace_a_var_function(DOM::AbstractElement& eleme
     } else {
         // Look up the value of the custom property
         auto& custom_property_name = name_token.token().ident();
-        auto custom_property_value = StyleComputer::compute_value_of_custom_property(element, Utf16FlyString::from_utf8(custom_property_name), guarded_contexts);
+        auto custom_property_value = element.document().style_computer().compute_value_of_custom_property(element, Utf16FlyString::from_utf8(custom_property_name), guarded_contexts);
         result = custom_property_value->tokenize();
     }
 

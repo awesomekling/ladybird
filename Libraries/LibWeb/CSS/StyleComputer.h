@@ -136,7 +136,7 @@ public:
 
     [[nodiscard]] inline bool should_reject_with_ancestor_filter(Selector const&) const;
 
-    static NonnullRefPtr<StyleValue const> compute_value_of_custom_property(DOM::AbstractElement, Utf16FlyString const& custom_property, Optional<Parser::GuardedSubstitutionContexts&> = {});
+    NonnullRefPtr<StyleValue const> compute_value_of_custom_property(DOM::AbstractElement, Utf16FlyString const& custom_property, Optional<Parser::GuardedSubstitutionContexts&> = {}) const;
 
     static NonnullRefPtr<StyleValue const> compute_value_of_property(PropertyID, NonnullRefPtr<StyleValue const> const& specified_value, Function<NonnullRefPtr<StyleValue const>(PropertyID)> const& get_property_specified_value, ComputationContext const&, double device_pixels_per_css_pixel);
     static NonnullRefPtr<StyleValue const> compute_animation_name(NonnullRefPtr<StyleValue const> const& absolutized_value);
@@ -245,6 +245,10 @@ private:
     mutable Vector<ScopedMatchingRule> m_rules_to_run_scratch;
     mutable Vector<u64> m_seen_multi_bucket_rule_generations;
     mutable u64 m_multi_bucket_rule_generation { 0 };
+
+    // Points at a per-element memoization cache for resolved custom property values while that element's style is
+    // being computed. Null outside of a style computation. See compute_value_of_custom_property().
+    mutable HashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>>* m_custom_property_resolution_cache { nullptr };
 
     OwnPtr<CountingBloomFilter<u8, 14>> m_ancestor_filter;
     OwnPtr<SelectorEngine::HasResultCache> m_has_result_cache;
