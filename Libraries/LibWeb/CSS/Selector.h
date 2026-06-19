@@ -162,6 +162,9 @@ public:
             QualifiedName qualified_name;
             String value {};
             CaseType case_type;
+            // Precomputed at parse time: the attribute name is one of the legacy HTML attributes that, in an HTML
+            // document, are matched case-insensitively by default. Avoids a linear name comparison on every match.
+            bool name_matches_case_insensitively_in_html { false };
         };
 
         struct Invalid {
@@ -260,6 +263,10 @@ private:
 };
 
 bool is_legacy_single_colon_pseudo_element(PseudoElement);
+
+// https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+// Whether an attribute with this name is matched case-insensitively by default in HTML documents.
+bool attribute_name_matches_case_insensitively_in_html(FlyString const& name);
 
 String serialize_a_group_of_selectors(SelectorList const& selectors);
 

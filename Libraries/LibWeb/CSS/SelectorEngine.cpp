@@ -512,8 +512,6 @@ static bool matches_single_attribute(CSS::Selector::SimpleSelector::Attribute co
 
 static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute const& attribute, [[maybe_unused]] GC::Ptr<CSS::CSSStyleSheet const> style_sheet_for_rule, DOM::Element const& element)
 {
-    auto const& attribute_name = attribute.qualified_name.name.name;
-
     auto case_sensitivity = [&](CSS::Selector::SimpleSelector::Attribute::CaseType case_type) {
         switch (case_type) {
         case CSS::Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch:
@@ -522,22 +520,11 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
             return CaseSensitivity::CaseSensitive;
         case CSS::Selector::SimpleSelector::Attribute::CaseType::DefaultMatch:
             // See: https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
-            if (element.document().is_html_document()
+            // NB: Whether the attribute name is in the case-insensitive set is precomputed at selector parse time.
+            if (attribute.name_matches_case_insensitively_in_html
+                && element.document().is_html_document()
                 && element.namespace_uri() == Namespace::HTML
-                && attribute.qualified_name.namespace_type == CSS::Selector::SimpleSelector::QualifiedName::NamespaceType::Default
-                && attribute_name.is_one_of(
-                    HTML::AttributeNames::accept, HTML::AttributeNames::accept_charset, HTML::AttributeNames::align,
-                    HTML::AttributeNames::alink, HTML::AttributeNames::axis, HTML::AttributeNames::bgcolor, HTML::AttributeNames::charset,
-                    HTML::AttributeNames::checked, HTML::AttributeNames::clear, HTML::AttributeNames::codetype, HTML::AttributeNames::color,
-                    HTML::AttributeNames::compact, HTML::AttributeNames::declare, HTML::AttributeNames::defer, HTML::AttributeNames::dir,
-                    HTML::AttributeNames::direction, HTML::AttributeNames::disabled, HTML::AttributeNames::enctype, HTML::AttributeNames::face,
-                    HTML::AttributeNames::frame, HTML::AttributeNames::hreflang, HTML::AttributeNames::http_equiv, HTML::AttributeNames::lang,
-                    HTML::AttributeNames::language, HTML::AttributeNames::link, HTML::AttributeNames::media, HTML::AttributeNames::method,
-                    HTML::AttributeNames::multiple, HTML::AttributeNames::nohref, HTML::AttributeNames::noresize, HTML::AttributeNames::noshade,
-                    HTML::AttributeNames::nowrap, HTML::AttributeNames::readonly, HTML::AttributeNames::rel, HTML::AttributeNames::rev,
-                    HTML::AttributeNames::rules, HTML::AttributeNames::scope, HTML::AttributeNames::scrolling, HTML::AttributeNames::selected,
-                    HTML::AttributeNames::shape, HTML::AttributeNames::target, HTML::AttributeNames::text, HTML::AttributeNames::type,
-                    HTML::AttributeNames::valign, HTML::AttributeNames::valuetype, HTML::AttributeNames::vlink)) {
+                && attribute.qualified_name.namespace_type == CSS::Selector::SimpleSelector::QualifiedName::NamespaceType::Default) {
                 return CaseSensitivity::CaseInsensitive;
             }
 

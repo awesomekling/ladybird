@@ -486,6 +486,7 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_attribute_simple_se
             .match_type = Selector::SimpleSelector::Attribute::MatchType::HasAttribute,
             .qualified_name = qualified_name,
             .case_type = Selector::SimpleSelector::Attribute::CaseType::DefaultMatch,
+            .name_matches_case_insensitively_in_html = attribute_name_matches_case_insensitively_in_html(qualified_name.name.name),
         }
     };
 
