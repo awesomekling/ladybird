@@ -86,11 +86,16 @@ void UnresolvedStyleValue::serialize(StringBuilder& builder, SerializationMode) 
 
 Vector<Parser::ComponentValue> UnresolvedStyleValue::values() const
 {
-    auto parser = Parser::Parser::create(Parser::ParsingParams {}, m_value_comparison_text.is_empty() ? m_source_text : m_value_comparison_text);
-    auto values = parser.parse_as_list_of_component_values();
-    if (m_contains_attr_tainted_values)
-        mark_as_attr_tainted(values);
-    return values;
+    if (!m_cached_values.has_value()) {
+        auto parser = Parser::Parser::create(Parser::ParsingParams {}, m_value_comparison_text.is_empty() ? m_source_text : m_value_comparison_text);
+        auto values = parser.parse_as_list_of_component_values();
+        if (m_contains_attr_tainted_values)
+            mark_as_attr_tainted(values);
+        m_cached_values = move(values);
+    }
+    // NB: Callers consume (and may move out of) the returned vector, so hand back a copy of the cache.
+    //     Copying component values is still far cheaper than re-tokenizing the source text.
+    return *m_cached_values;
 }
 
 Vector<Parser::ComponentValue> UnresolvedStyleValue::tokenize() const

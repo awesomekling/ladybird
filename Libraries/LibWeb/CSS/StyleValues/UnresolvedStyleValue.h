@@ -51,6 +51,10 @@ private:
     String m_value_comparison_text;
     Parser::SubstitutionFunctionsPresence m_substitution_functions_presence {};
     bool m_contains_attr_tainted_values { false };
+
+    // NB: values() re-tokenizes m_source_text on every call, which is hot during var() substitution.
+    //     The component values are immutable, so cache them after the first parse.
+    mutable Optional<Vector<Parser::ComponentValue>> m_cached_values;
 };
 
 }
