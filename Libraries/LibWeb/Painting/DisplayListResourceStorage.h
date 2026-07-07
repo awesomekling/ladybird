@@ -107,6 +107,7 @@ public:
     void update_video_frame(VideoFrameResourceId, NonnullRefPtr<Media::VideoFrame const>);
     void clear_video_frame(VideoFrameResourceId);
 
+    u64 cache_id() const { return m_cache_id; }
     Gfx::Font const& font(FontResourceId id) const { return *m_fonts.get(id.value()).value(); }
     Gfx::DecodedImageFrame const& image_frame(ImageFrameResourceId) const;
     sk_sp<SkImage> skia_image_for_image_frame(ImageFrameResourceId, RefPtr<Gfx::SkiaBackendContext> const&) const;
@@ -130,6 +131,8 @@ private:
     HashMap<u64, size_t> m_image_frame_cache_reference_counts;
     HashMap<u64, size_t> m_video_frame_cache_reference_counts;
     HashMap<u64, size_t> m_display_list_cache_reference_counts;
+
+    u64 m_cache_id { 0 };
 };
 
 }

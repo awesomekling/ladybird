@@ -57,9 +57,31 @@ private:
     Gfx::Path path_from_data(DisplayListDataSpan) const;
     ReadonlySpan<Color> gradient_colors(DisplayListGradientColorStops) const;
     ReadonlySpan<float> gradient_positions(DisplayListGradientColorStops) const;
+    void clear_nested_display_list_raster_cache();
 
     RefPtr<Gfx::SkiaBackendContext> m_skia_backend_context;
     CompositedContextResolver const* m_composited_context_resolver { nullptr };
+
+    // Rasterizations of the visible portions of nested display lists. Display lists are immutable while their
+    // resource storage is current, so the cache is bounded by total byte size and cleared when storage changes.
+    struct NestedDisplayListRasterCacheKey {
+        u64 resource_storage_cache_id { 0 };
+        u64 display_list_id { 0 };
+        Gfx::IntRect visible_rect_in_list_space;
+
+        bool operator==(NestedDisplayListRasterCacheKey const&) const = default;
+    };
+    struct NestedDisplayListRasterCacheKeyTraits : public DefaultTraits<NestedDisplayListRasterCacheKey> {
+        static unsigned hash(NestedDisplayListRasterCacheKey const& key)
+        {
+            auto const& rect = key.visible_rect_in_list_space;
+            u32 rect_hash = pair_int_hash(pair_int_hash(rect.x(), rect.y()), pair_int_hash(rect.width(), rect.height()));
+            return pair_int_hash(pair_int_hash(u64_hash(key.resource_storage_cache_id), u64_hash(key.display_list_id)), rect_hash);
+        }
+    };
+    HashMap<NestedDisplayListRasterCacheKey, NonnullRefPtr<Gfx::PaintingSurface>, NestedDisplayListRasterCacheKeyTraits> m_nested_display_list_raster_cache;
+    size_t m_nested_display_list_raster_cache_bytes { 0 };
+    u64 m_nested_display_list_raster_cache_resource_storage_cache_id { 0 };
 };
 
 }

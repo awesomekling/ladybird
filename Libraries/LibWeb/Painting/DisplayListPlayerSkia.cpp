@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashTable.h>
+#include <AK/NumericLimits.h>
 #include <AK/TemporaryChange.h>
 #include <core/SkBitmap.h>
 #include <core/SkBlurTypes.h>
@@ -58,6 +60,12 @@ DisplayListPlayerSkia::~DisplayListPlayerSkia()
 {
 }
 
+void DisplayListPlayerSkia::clear_nested_display_list_raster_cache()
+{
+    m_nested_display_list_raster_cache.clear();
+    m_nested_display_list_raster_cache_bytes = 0;
+}
+
 void DisplayListPlayerSkia::execute(
     DisplayList const& display_list,
     AccumulatedVisualContextTree const& visual_context_tree,
@@ -67,6 +75,12 @@ void DisplayListPlayerSkia::execute(
     CanvasSurfaceRegistry const* canvas_surface_registry,
     CompositedContextResolver const* composited_context_resolver)
 {
+    auto resource_storage_cache_id = resource_storage.cache_id();
+    if (m_nested_display_list_raster_cache_resource_storage_cache_id != resource_storage_cache_id) {
+        clear_nested_display_list_raster_cache();
+        m_nested_display_list_raster_cache_resource_storage_cache_id = resource_storage_cache_id;
+    }
+
     TemporaryChange composited_context_resolver_change { m_composited_context_resolver, composited_context_resolver };
     DisplayListPlayer::execute(
         display_list,
@@ -166,6 +180,112 @@ static void paint_scrollbar_into_surface(Gfx::PaintingSurface& surface, PaintScr
     stroke_paint.setAntiAlias(true);
     stroke_paint.setColor(to_skia_color(stroke_color));
     canvas.drawRRect(thumb_rrect, stroke_paint);
+}
+
+static bool display_list_resource_can_be_raster_cached(DisplayListResourceStorage const&, DisplayListResourceId, HashTable<DisplayListResourceId>&);
+
+static bool visual_context_path_can_be_raster_cached(AccumulatedVisualContextTree const& visual_context_tree, VisualContextIndex context_index)
+{
+    for (auto index = context_index;; index = visual_context_tree.node_at(index).parent_index) {
+        auto const& node = visual_context_tree.node_at(index);
+        if (auto const* effects = node.data.get_pointer<EffectsData>()) {
+            if (effects->blend_mode != Gfx::CompositingAndBlendingOperator::Normal)
+                return false;
+        }
+
+        if (index == VISUAL_VIEWPORT_NODE_INDEX)
+            return true;
+    }
+}
+
+static bool display_list_can_be_raster_cached(DisplayList const& display_list, AccumulatedVisualContextTree const& visual_context_tree, DisplayListResourceStorage const& resource_storage, HashTable<DisplayListResourceId>& visited_display_lists)
+{
+    bool can_be_raster_cached = true;
+
+    display_list.for_each_command_header([&](DisplayListCommandHeader const& header, ReadonlyBytes payload) {
+        if (!can_be_raster_cached)
+            return;
+
+        if (!visual_context_path_can_be_raster_cached(visual_context_tree, header.context_index)) {
+            can_be_raster_cached = false;
+            return;
+        }
+
+        switch (header.type) {
+        case DisplayListCommandType::DrawCompositedContext:
+        case DisplayListCommandType::DrawCanvas:
+        case DisplayListCommandType::DrawVideoFrame:
+        case DisplayListCommandType::ApplyBackdropFilter:
+            can_be_raster_cached = false;
+            return;
+        case DisplayListCommandType::ApplyEffects: {
+            auto command = read_display_list_command_payload<ApplyEffects>(payload);
+            if (command.compositing_and_blending_operator != Gfx::CompositingAndBlendingOperator::Normal) {
+                can_be_raster_cached = false;
+                return;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        visit_display_list_command(header.type, payload, [&]<typename Command>(Command const& command) {
+            if constexpr (requires { command.display_list_id; }) {
+                if (!display_list_resource_can_be_raster_cached(resource_storage, command.display_list_id, visited_display_lists))
+                    can_be_raster_cached = false;
+            }
+
+            if constexpr (requires { command.paint_kind; command.paint_style; }) {
+                if (command.paint_kind == PathPaintKind::PaintStyle
+                    && command.paint_style.type == DisplayListPaintStyleType::Pattern
+                    && !display_list_resource_can_be_raster_cached(resource_storage, command.paint_style.pattern_tile_display_list_id, visited_display_lists))
+                    can_be_raster_cached = false;
+            }
+        });
+    });
+
+    return can_be_raster_cached;
+}
+
+static bool display_list_resource_can_be_raster_cached(DisplayListResourceStorage const& resource_storage, DisplayListResourceId display_list_id, HashTable<DisplayListResourceId>& visited_display_lists)
+{
+    if (visited_display_lists.set(display_list_id, AK::HashSetExistingEntryBehavior::Keep) != HashSetResult::InsertedNewEntry)
+        return true;
+
+    auto const& display_list_resource = resource_storage.display_list_resource(display_list_id);
+    return display_list_can_be_raster_cached(*display_list_resource.display_list, display_list_resource.visual_context_tree, resource_storage, visited_display_lists);
+}
+
+static bool display_list_resource_can_be_raster_cached(DisplayListResourceStorage const& resource_storage, DisplayListResourceId display_list_id)
+{
+    HashTable<DisplayListResourceId> visited_display_lists;
+    return display_list_resource_can_be_raster_cached(resource_storage, display_list_id, visited_display_lists);
+}
+
+static bool skia_scalar_can_be_safely_converted_to_int(SkScalar value)
+{
+    if (!__builtin_isfinite(value))
+        return false;
+
+    auto value_as_double = static_cast<double>(value);
+    if (value_as_double < NumericLimits<int>::min() || value_as_double > NumericLimits<int>::max())
+        return false;
+
+    return value == SkScalarFloorToScalar(value);
+}
+
+static Optional<Gfx::IntPoint> integer_translation_from_matrix(SkMatrix const& matrix)
+{
+    if (!matrix.isTranslate())
+        return {};
+
+    auto translate_x = matrix.getTranslateX();
+    auto translate_y = matrix.getTranslateY();
+    if (!skia_scalar_can_be_safely_converted_to_int(translate_x) || !skia_scalar_can_be_safely_converted_to_int(translate_y))
+        return {};
+
+    return Gfx::IntPoint { static_cast<int>(translate_x), static_cast<int>(translate_y) };
 }
 
 void DisplayListPlayerSkia::paint_scrollbar(Gfx::PaintingSurface& surface, PaintScrollBar const& command)
@@ -1027,11 +1147,57 @@ void DisplayListPlayerSkia::play_command(AddRoundedRectClip const& command)
 void DisplayListPlayerSkia::play_command(PaintNestedDisplayList const& command)
 {
     auto& canvas = surface().canvas();
+    auto const& nested_display_list = resource_storage().display_list_resource(command.display_list_id);
+
+    // Nested display lists (used for SVG images) are immutable and are frequently replayed with identical commands
+    // every frame; some carry huge command streams (thousands of paths, dozens of layers). Rasterize the clip-visible
+    // portion once into an offscreen surface and reuse it, instead of re-encoding the entire vector command stream on
+    // every frame. Only do this when the canvas transform is an integer translation, so drawing the cached raster is
+    // pixel-identical to replaying the commands.
+    auto total_matrix = canvas.getTotalMatrix();
+    auto translation = integer_translation_from_matrix(total_matrix);
+    if (m_skia_backend_context && translation.has_value() && !command.rect.is_empty() && display_list_resource_can_be_raster_cached(resource_storage(), command.display_list_id)) {
+        auto device_clip_bounds = canvas.getDeviceClipBounds();
+        auto clip_in_local_space = Gfx::IntRect { device_clip_bounds.x(), device_clip_bounds.y(), device_clip_bounds.width(), device_clip_bounds.height() }.translated(-translation.value());
+        auto visible_rect = command.rect.intersected(clip_in_local_space);
+        if (visible_rect.is_empty())
+            return;
+
+        auto visible_rect_in_list_space = visible_rect.translated(-command.rect.location());
+        NestedDisplayListRasterCacheKey cache_key { resource_storage().cache_id(), command.display_list_id.value(), visible_rect_in_list_space };
+        auto cached_surface = m_nested_display_list_raster_cache.get(cache_key);
+        if (!cached_surface.has_value()) {
+            constexpr size_t max_cache_bytes = 128 * MiB;
+            auto entry_bytes = static_cast<size_t>(visible_rect.width()) * visible_rect.height() * 4;
+            if (entry_bytes <= max_cache_bytes) {
+                if (m_nested_display_list_raster_cache_bytes + entry_bytes > max_cache_bytes)
+                    clear_nested_display_list_raster_cache();
+                auto offscreen_surface = Gfx::PaintingSurface::create_with_size(
+                    visible_rect.size(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied, m_skia_backend_context);
+                offscreen_surface->canvas().clear(SK_ColorTRANSPARENT);
+                offscreen_surface->canvas().translate(-visible_rect_in_list_space.x(), -visible_rect_in_list_space.y());
+                execute_display_list_into_surface(
+                    *nested_display_list.display_list, nested_display_list.visual_context_tree, *offscreen_surface);
+                offscreen_surface->canvas().resetMatrix();
+                m_nested_display_list_raster_cache.set(cache_key, offscreen_surface);
+                m_nested_display_list_raster_cache_bytes += entry_bytes;
+                cached_surface = move(offscreen_surface);
+            }
+        }
+        if (cached_surface.has_value()) {
+            auto image = (*cached_surface)->sk_image_snapshot<sk_sp<SkImage>>();
+            if (image) {
+                SkPaint paint;
+                canvas.drawImage(image.get(), visible_rect.x(), visible_rect.y(), SkSamplingOptions(), &paint);
+                return;
+            }
+        }
+    }
+
     canvas.save();
     canvas.clipRect(to_skia_rect(command.rect));
     canvas.translate(command.rect.x(), command.rect.y());
     ScrollStateSnapshot scroll_state_snapshot;
-    auto const& nested_display_list = resource_storage().display_list_resource(command.display_list_id);
     execute_nested_display_list(
         *nested_display_list.display_list,
         nested_display_list.visual_context_tree,

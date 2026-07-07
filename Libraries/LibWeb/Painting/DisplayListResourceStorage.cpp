@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Atomic.h>
+#include <AK/StdLibExtras.h>
 #include <LibGfx/Filter.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/SkiaBackendContext.h>
@@ -65,6 +67,12 @@ static sk_sp<SkImage> skia_image_for_stored_image_frame(DisplayListStoredImageFr
     return resource.skia_image;
 }
 
+static u64 allocate_display_list_resource_storage_cache_id()
+{
+    static Atomic<u64> s_next_cache_id { 1 };
+    return s_next_cache_id.fetch_add(1, AK::MemoryOrder::memory_order_relaxed);
+}
+
 bool DisplayListResourceSet::is_empty() const
 {
     return fonts.is_empty()
@@ -103,9 +111,43 @@ DisplayListResource::DisplayListResource(DisplayList const& display_list, Accumu
 {
 }
 
-DisplayListResourceStorage::DisplayListResourceStorage() = default;
-DisplayListResourceStorage::DisplayListResourceStorage(DisplayListResourceStorage&&) = default;
-DisplayListResourceStorage& DisplayListResourceStorage::operator=(DisplayListResourceStorage&&) = default;
+DisplayListResourceStorage::DisplayListResourceStorage()
+    : m_cache_id(allocate_display_list_resource_storage_cache_id())
+{
+}
+
+DisplayListResourceStorage::DisplayListResourceStorage(DisplayListResourceStorage&& other)
+    : m_fonts(move(other.m_fonts))
+    , m_image_frames(move(other.m_image_frames))
+    , m_video_frames(move(other.m_video_frames))
+    , m_display_lists(move(other.m_display_lists))
+    , m_display_list_cached_skia_images(move(other.m_display_list_cached_skia_images))
+    , m_font_cache_reference_counts(move(other.m_font_cache_reference_counts))
+    , m_image_frame_cache_reference_counts(move(other.m_image_frame_cache_reference_counts))
+    , m_video_frame_cache_reference_counts(move(other.m_video_frame_cache_reference_counts))
+    , m_display_list_cache_reference_counts(move(other.m_display_list_cache_reference_counts))
+    , m_cache_id(exchange(other.m_cache_id, allocate_display_list_resource_storage_cache_id()))
+{
+}
+
+DisplayListResourceStorage& DisplayListResourceStorage::operator=(DisplayListResourceStorage&& other)
+{
+    if (this == &other)
+        return *this;
+
+    m_fonts = move(other.m_fonts);
+    m_image_frames = move(other.m_image_frames);
+    m_video_frames = move(other.m_video_frames);
+    m_display_lists = move(other.m_display_lists);
+    m_display_list_cached_skia_images = move(other.m_display_list_cached_skia_images);
+    m_font_cache_reference_counts = move(other.m_font_cache_reference_counts);
+    m_image_frame_cache_reference_counts = move(other.m_image_frame_cache_reference_counts);
+    m_video_frame_cache_reference_counts = move(other.m_video_frame_cache_reference_counts);
+    m_display_list_cache_reference_counts = move(other.m_display_list_cache_reference_counts);
+    m_cache_id = exchange(other.m_cache_id, allocate_display_list_resource_storage_cache_id());
+
+    return *this;
+}
 DisplayListResourceStorage::~DisplayListResourceStorage() = default;
 
 FontResourceId DisplayListResourceStorage::add_font(Gfx::Font const& font)

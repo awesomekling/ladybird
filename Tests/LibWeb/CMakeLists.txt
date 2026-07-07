@@ -9,6 +9,7 @@ set(TEST_SOURCES
     TestCSSSyntaxParser.cpp
     TestCSSTokenizer.cpp
     TestCSSTokenStream.cpp
+    TestDisplayListResourceStorage.cpp
     TestFetchResponse.cpp
     TestFetchURL.cpp
     TestHTMLTokenizer.cpp
