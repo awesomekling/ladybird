@@ -2011,7 +2011,9 @@ handler UnaryMinus(
             };
 
             let overflow = || @cold {
-                store(dst, box_f64(to_f64(integer)));
+                neg(integer);
+                let unsigned_integer: u32 = alias(integer);
+                store(dst, box_f64(u32_to_f64(unsigned_integer)));
                 dispatch_next;
             };
 
@@ -2884,7 +2886,8 @@ handler CallBuiltinMathAbs(
             let overflow = || @cold {
                 let overflowed_integer = unbox_i32(argument_value);
                 neg(overflowed_integer);
-                store(dst, box_f64(to_f64(overflowed_integer)));
+                let unsigned_integer: u32 = alias(overflowed_integer);
+                store(dst, box_f64(u32_to_f64(unsigned_integer)));
                 dispatch_next;
             };
             if integer_value < 0 {
