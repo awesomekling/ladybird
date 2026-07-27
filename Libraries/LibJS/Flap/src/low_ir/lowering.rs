@@ -223,6 +223,9 @@ fn lower_handler_internal(
             ) && let Some((instruction, _)) = folded_checked_i32_bytecode_field(function, inputs[1])
             {
                 folded_instructions.insert(instruction);
+                if let Some((instruction, _)) = checked_i32_unbox_source(function, inputs[0]) {
+                    folded_instructions.insert(instruction);
+                }
             }
         } else if let Operation::Intrinsic(Intrinsic::Branch(operation)) = operation
             && typed_narrow_signed_branch_operation(function, *operation, inputs).is_some()
@@ -967,6 +970,7 @@ fn lower_checked_operation(
     let failure_label = Label::new(format!(".ssa_checked_{}_failure", block.0));
     let mut failure = failure.clone();
     let mut failure_inout_update = None;
+    let mut failure_recovery = None;
     if let Operation::Intrinsic(Intrinsic::Branch(operation)) = operation {
         if let Some(machine_operation) = typed_narrow_signed_branch_operation(function, *operation, inputs) {
             let [lhs, rhs] = require_inputs(inputs, operation.name())?;
@@ -1008,14 +1012,22 @@ fn lower_checked_operation(
         if *operation != CheckedIntegerOperation::Negate {
             let [result] = require_results(results, operation.name())?;
             let [lhs, rhs] = require_inputs(inputs, operation.name())?;
+            let lhs_id = *lhs;
+            let result_id = *result;
             let result = value_operand(function, *result)?;
-            let lhs = folded_checked_i32_source(function, *lhs)
-                .map(|(_, source)| source)
-                .unwrap_or(*lhs);
+            let lhs_operand = value_operand(function, lhs_id)?;
+            let rhs_bytecode_field = folded_checked_i32_bytecode_field(function, *rhs);
+            let lhs = if rhs_bytecode_field.is_some() {
+                checked_i32_unbox_source(function, *lhs)
+            } else {
+                folded_checked_i32_source(function, *lhs)
+            }
+            .map(|(_, source)| source)
+            .unwrap_or(*lhs);
             let rhs_value = folded_checked_i32_source(function, *rhs)
                 .map(|(_, source)| source)
                 .unwrap_or(*rhs);
-            let rhs_operand = folded_checked_i32_bytecode_field(function, *rhs)
+            let rhs_operand = rhs_bytecode_field
                 .map(|(_, field)| bytecode_field_memory(&field))
                 .map_or_else(|| value_operand(function, rhs_value), Ok)?;
             let checked_operation = match operation {
@@ -1037,7 +1049,24 @@ fn lower_checked_operation(
                 {
                     emit!(output; MachineOperation::Overflow(OverflowOperation::Decrement) => [result, Operand::Label(failure_label.clone())];);
                 } else {
-                    emit!(output; MachineOperation::Overflow(checked_operation) => [result, rhs_operand, Operand::Label(failure_label.clone())];);
+                    emit!(output; MachineOperation::Overflow(checked_operation) => [result.clone(), rhs_operand.clone(), Operand::Label(failure_label.clone())];);
+                    if rhs_bytecode_field.is_some() {
+                        failure_recovery = Some((
+                            match checked_operation {
+                                OverflowOperation::AddWithOverflow => OverflowOperation::RecoverAddLhs,
+                                OverflowOperation::SubtractWithOverflow => OverflowOperation::RecoverSubtractLhs,
+                                _ => unreachable!(),
+                            },
+                            result.clone(),
+                            rhs_operand,
+                        ));
+                        failure_inout_update = Some((lhs_operand.clone(), result));
+                        for argument in &mut failure.arguments {
+                            if *argument == lhs_id || value_operand(function, *argument)? == lhs_operand {
+                                *argument = result_id;
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -1095,6 +1124,9 @@ fn lower_checked_operation(
         emit!(output; MachineOperation::Cold => [Operand::Label(failure_label.clone())];);
     }
     emit!(output; MachineOperation::Label => [Operand::Label(failure_label)];);
+    if let Some((operation, result, rhs)) = failure_recovery {
+        emit!(output; MachineOperation::Overflow(operation) => [result, rhs];);
+    }
     if let Some((input, result)) = failure_inout_update {
         emit!(output; MachineOperation::Move(IntegerWidth::U64) => [input, result];);
     }
@@ -2484,6 +2516,10 @@ fn folded_checked_i32_source(function: &FunctionUses<'_>, value: ValueId) -> Opt
     if value_use_count(function, value) != 1 && !integer_result_can_stay_narrow(function, value) {
         return None;
     }
+    checked_i32_unbox_source(function, value)
+}
+
+fn checked_i32_unbox_source(function: &FunctionUses<'_>, value: ValueId) -> Option<(InstructionId, ValueId)> {
     let (instruction, unbox) = defining_instruction(function, value)?;
     if unbox.operation != Operation::Intrinsic(Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: false })) {
         return None;
