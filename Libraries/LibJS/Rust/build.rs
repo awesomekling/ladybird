@@ -79,7 +79,21 @@ fn generate_specialization_selector(
             .iter()
             .map(|component| component.parameters.len())
             .sum::<usize>();
-        std::cmp::Reverse((specialization.components.len(), constraint_count))
+        let constraint_specificity = specialization
+            .components
+            .iter()
+            .flat_map(|component| &component.parameters)
+            .map(|parameter| match parameter.constraint {
+                SpecializationConstraint::Constant => 1,
+                SpecializationConstraint::ConstantType(_) => 2,
+                SpecializationConstraint::ExactInteger(_) | SpecializationConstraint::SameOperand(_) => 3,
+            })
+            .sum::<usize>();
+        std::cmp::Reverse((
+            specialization.components.len(),
+            constraint_count,
+            constraint_specificity,
+        ))
     });
 
     writeln!(w, "#[allow(unused_variables)]")?;

@@ -178,16 +178,30 @@ fn substitute_expression(expression: &mut Expression, substitutions: &HashMap<St
         ExpressionKind::Call { callee, arguments } => {
             if callee == "load"
                 && let [
-                    Expression {
+                    argument @ Expression {
                         kind: ExpressionKind::Name(name),
                         ..
                     },
                 ] = arguments.as_slice()
-                && let Some(ExpressionKind::Name(replacement)) = substitutions.get(name)
-                && replacement.starts_with("Value<")
+                && let Some(replacement) = substitutions.get(name)
             {
-                expression.kind = ExpressionKind::Name(replacement.clone());
-                return;
+                match replacement {
+                    ExpressionKind::Name(replacement) if replacement.starts_with("Value<") => {
+                        expression.kind = ExpressionKind::Name(replacement.clone());
+                        return;
+                    }
+                    ExpressionKind::Integer(value) => {
+                        expression.kind = ExpressionKind::Call {
+                            callee: "box_i32".to_string(),
+                            arguments: vec![Expression {
+                                kind: ExpressionKind::Integer(*value),
+                                span: argument.span,
+                            }],
+                        };
+                        return;
+                    }
+                    _ => {}
+                }
             }
             for argument in arguments {
                 substitute_expression(argument, substitutions);

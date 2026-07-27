@@ -2465,6 +2465,20 @@ fn lower_instruction(
         Operation::Intrinsic(Intrinsic::Value(operation)) => {
             let machine_operation = value_machine_operation(*operation)
                 .ok_or_else(|| format!("value operation '{}' requires specialized lowering", operation.name()))?;
+            if matches!(operation, ValueOperation::BoxInt32 { .. })
+                && let [destination] = results.as_slice()
+                && let [source @ Operand::Immediate(_)] = inputs.as_slice()
+            {
+                output.push(machine_instruction(
+                    MachineOperation::Move(IntegerWidth::U32),
+                    vec![destination.clone(), source.clone()],
+                ));
+                output.push(machine_instruction(
+                    machine_operation,
+                    vec![destination.clone(), destination.clone()],
+                ));
+                return Ok(());
+            }
             output.push(machine_instruction(
                 machine_operation,
                 results.into_iter().chain(inputs).collect(),

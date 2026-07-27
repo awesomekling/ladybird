@@ -1,4 +1,4 @@
-$5700f957 int32-binary-specializations.js:19:1
+$f3647adf int32-binary-specializations.js:27:1
   Registers: 7
   Blocks:    1
   Constants:
@@ -11,11 +11,15 @@ block0:
   [  38] End value:reg5
 
 
-int32_binary_specializations$e3587d98 int32-binary-specializations.js:2:5
-  Registers: 19
+int32_binary_specializations$d2c0d738 int32-binary-specializations.js:2:5
+  Registers: 27
   Blocks:    1
   Constants:
     [0] = Int32(2)
+    [1] = Int32(1)
+    [2] = Int32(3)
+    [3] = Int32(4)
+    [4] = Int32(5)
 
 block0:
   [   0] AddLhsInt32 dst:reg5, lhs:2, rhs:arg0
@@ -27,9 +31,17 @@ block0:
   [  60] BitwiseXorRhsInt32 dst:reg11, lhs:arg0, rhs:2
   [  70] BitwiseAndRhsInt32 dst:reg12, lhs:arg0, rhs:2
   [  80] BitwiseOrRhsInt32 dst:reg13, lhs:arg0, rhs:2
-  [  90] LeftShiftRhsInt32 dst:reg14, lhs:arg0, rhs:2
-  [  a0] RightShiftRhsInt32 dst:reg15, lhs:arg0, rhs:2
-  [  b0] UnsignedRightShiftRhsInt32 dst:reg16, lhs:arg0, rhs:2
-  [  c0] ModRhsInt32 dst:reg17, lhs:arg0, rhs:2
-  [  d0] NewArray dst:reg18, elements:[reg5, reg6, reg7, reg8, reg9, reg10, reg11, reg12, reg13, reg14, reg15, reg16, reg17]
-  [ 118] Return value:reg18
+  [  90] LeftShiftRhsValue1 dst:reg14, lhs:arg0
+  [  a0] LeftShiftRhsValue2 dst:reg15, lhs:arg0
+  [  b0] LeftShiftRhsValue3 dst:reg16, lhs:arg0
+  [  c0] LeftShiftRhsValue4 dst:reg17, lhs:arg0
+  [  d0] LeftShiftRhsInt32 dst:reg18, lhs:arg0, rhs:5
+  [  e0] RightShiftRhsValue1 dst:reg19, lhs:arg0
+  [  f0] RightShiftRhsValue2 dst:reg20, lhs:arg0
+  [ 100] RightShiftRhsValue3 dst:reg21, lhs:arg0
+  [ 110] RightShiftRhsValue4 dst:reg22, lhs:arg0
+  [ 120] RightShiftRhsInt32 dst:reg23, lhs:arg0, rhs:5
+  [ 130] UnsignedRightShiftRhsInt32 dst:reg24, lhs:arg0, rhs:2
+  [ 140] ModRhsInt32 dst:reg25, lhs:arg0, rhs:2
+  [ 150] NewArray dst:reg26, elements:[reg5, reg6, reg7, reg8, reg9, reg10, reg11, reg12, reg13, reg14, reg15, reg16, reg17, reg18, reg19, reg20, reg21, reg22, reg23, reg24, reg25]
+  [ 1b8] Return value:reg26

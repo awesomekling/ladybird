@@ -34,6 +34,27 @@ mod tests {
     }
 
     #[test]
+    fn prefers_exact_integer_specializations() {
+        let instruction = Instruction::LeftShift {
+            dst: Operand::register(Register(0)),
+            lhs: Operand::register(Register(1)),
+            rhs: Operand::constant(0),
+        };
+
+        let (specialized, component_count) =
+            specialize_instruction_sequence([&instruction].into_iter(), &[ConstantValue::Number(1.0)])
+                .expect("LeftShift should specialize");
+        assert_eq!(component_count, 1);
+        assert!(matches!(specialized, Instruction::LeftShiftRhsValue1 { .. }));
+
+        let (specialized, component_count) =
+            specialize_instruction_sequence([&instruction].into_iter(), &[ConstantValue::Number(5.0)])
+                .expect("LeftShift should specialize");
+        assert_eq!(component_count, 1);
+        assert!(matches!(specialized, Instruction::LeftShiftRhsInt32 { rhs: 5, .. }));
+    }
+
+    #[test]
     fn selects_declarative_undefined_move_specializations() {
         let instructions = [
             Instruction::Mov {
