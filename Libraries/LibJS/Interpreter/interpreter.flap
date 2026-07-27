@@ -710,13 +710,13 @@ inline fn compare_numeric_values(
                     integer_condition(lhs_integer, rhs_integer, true_result);
                     goto false_result;
                 },
-                Value<f64>(rhs_double) => {
+                Value<f64>(rhs_double) => @cold {
                     goto compare_double(to_f64(lhs_integer), rhs_double);
                 },
                 _ => slow,
             }
         },
-        Value<f64>(lhs_double) => {
+        Value<f64>(lhs_double) => @cold {
             match rhs {
                 Value<i32>(rhs_integer) => {
                     goto compare_double(lhs_double, to_f64(rhs_integer));
