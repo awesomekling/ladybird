@@ -1097,7 +1097,9 @@ fn rematerialize_cold_int32_unboxes(function: &mut Function, _: &mut AnalysisMan
                     Some(Terminator::CheckedOperation {
                         operation:
                             Operation::Intrinsic(Intrinsic::CheckedInteger(
-                                CheckedIntegerOperation::Add | CheckedIntegerOperation::Subtract,
+                                CheckedIntegerOperation::Add
+                                | CheckedIntegerOperation::Subtract
+                                | CheckedIntegerOperation::Multiply,
                             )),
                         inputs,
                         ..
