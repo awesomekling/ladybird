@@ -441,7 +441,7 @@ inline fn signed_shift(
     slow_path: SlowPath
 ) {
     let slow = || @cold {
-        call_slow_path(slow_path);
+        call_binary_slow_path(slow_path, dst, lhs, rhs);
     };
 
     guard let Value<i32>(integer) = lhs else slow;
@@ -936,15 +936,15 @@ handler Mul(
     lhs: in Operand,
     rhs: in Operand
 ) {
+    let lhs_value = load(lhs);
+    let rhs_value = load(rhs);
     let slow = || @cold {
-        call_slow_path(mul);
+        call_binary_slow_path(mul_values, dst, lhs_value, rhs_value);
     };
     let multiply_double = |lhs: f64, rhs: f64| @cold {
         store(dst, box_number(lhs * rhs));
         dispatch_next;
     };
-    let lhs_value = load(lhs);
-    let rhs_value = load(rhs);
     match lhs_value {
         Value<i32>(lhs_integer) => {
             match rhs_value {
@@ -988,9 +988,11 @@ handler Mul(
 
 handler Exp(
     dst: out Operand,
-    lhs: Operand,
-    rhs: Operand
-) @cold = call_slow_path(exp);
+    lhs: in Operand,
+    rhs: in Operand
+) {
+    call_binary_slow_path(exp_values, dst, load(lhs), load(rhs));
+}
 
 handler ConcatString(
     dst: out Operand,
@@ -1600,7 +1602,7 @@ handler Div(
     let rhs = load(rhs);
 
     guard let [lhs_number, rhs_number] = numeric_pair_to_f64(lhs, rhs) else @cold {
-        call_slow_path(div);
+        call_binary_slow_path(div_values, dst, lhs, rhs);
     };
 
     let quotient = lhs_number / rhs_number;
@@ -1806,13 +1808,13 @@ handler LeftShift(
     dst: out Operand,
     lhs: in Operand,
     rhs: in Operand
-) = signed_shift(dst, load(lhs), load(rhs), shl, left_shift);
+) = signed_shift(dst, load(lhs), load(rhs), shl, left_shift_values);
 
 handler RightShift(
     dst: out Operand,
     lhs: in Operand,
     rhs: in Operand
-) = signed_shift(dst, load(lhs), load(rhs), sar, right_shift);
+) = signed_shift(dst, load(lhs), load(rhs), sar, right_shift_values);
 
 handler UnsignedRightShift(
     dst: out Operand,
@@ -1823,7 +1825,7 @@ handler UnsignedRightShift(
     let rhs = load(rhs);
 
     let slow = || @cold {
-        call_slow_path(unsigned_right_shift);
+        call_binary_slow_path(unsigned_right_shift_values, dst, lhs, rhs);
     };
 
     guard let Value<i32>(integer) = lhs else slow;
@@ -1850,7 +1852,7 @@ handler Mod(
     let rhs = load(rhs);
 
     let slow = || @cold {
-        call_slow_path(mod);
+        call_binary_slow_path(mod_values, dst, lhs, rhs);
     };
 
     guard let Value<i32>(lhs_int) = lhs else slow;

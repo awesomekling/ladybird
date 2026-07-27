@@ -573,8 +573,8 @@ i64 asm_slow_path_add(VM*, u32 pc, Op::Add const*);
 i64 asm_slow_path_sub(VM*, u32 pc, Op::Sub const*);
 i64 asm_slow_path_add_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_sub_values(VM*, u32 pc, Operand, Value, Value);
-i64 asm_slow_path_mul(VM*, u32 pc, Op::Mul const*);
-i64 asm_slow_path_div(VM*, u32 pc, Op::Div const*);
+i64 asm_slow_path_mul_values(VM*, u32 pc, Operand, Value, Value);
+i64 asm_slow_path_div_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_less_than(VM*, u32 pc, Op::LessThan const*);
 i64 asm_slow_path_less_than_equals(VM*, u32 pc, Op::LessThanEquals const*);
 i64 asm_slow_path_greater_than(VM*, u32 pc, Op::GreaterThan const*);
@@ -610,7 +610,7 @@ i64 asm_slow_path_get_global(VM*, u32 pc, Op::GetGlobal const*);
 i64 asm_slow_path_set_global(VM*, u32 pc, Op::SetGlobal const*);
 i64 asm_slow_path_concat_string(VM*, u32 pc, Op::ConcatString const*);
 i64 asm_slow_path_copy_object_excluding_properties(VM*, u32 pc, Op::CopyObjectExcludingProperties const*);
-i64 asm_slow_path_exp(VM*, u32 pc, Op::Exp const*);
+i64 asm_slow_path_exp_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_import_call(VM*, u32 pc, Op::ImportCall const*);
 i64 asm_slow_path_new_class(VM*, u32 pc, Op::NewClass const*);
 i64 asm_slow_path_call(VM*, u32 pc, Op::Call const*);
@@ -641,10 +641,10 @@ i64 asm_slow_path_bitwise_or(VM*, u32 pc, Op::BitwiseOr const*);
 i64 asm_slow_path_bitwise_xor_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_bitwise_and_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_bitwise_or_values(VM*, u32 pc, Operand, Value, Value);
-i64 asm_slow_path_left_shift(VM*, u32 pc, Op::LeftShift const*);
-i64 asm_slow_path_right_shift(VM*, u32 pc, Op::RightShift const*);
-i64 asm_slow_path_unsigned_right_shift(VM*, u32 pc, Op::UnsignedRightShift const*);
-i64 asm_slow_path_mod(VM*, u32 pc, Op::Mod const*);
+i64 asm_slow_path_left_shift_values(VM*, u32 pc, Operand, Value, Value);
+i64 asm_slow_path_right_shift_values(VM*, u32 pc, Operand, Value, Value);
+i64 asm_slow_path_unsigned_right_shift_values(VM*, u32 pc, Operand, Value, Value);
+i64 asm_slow_path_mod_values(VM*, u32 pc, Operand, Value, Value);
 i64 asm_slow_path_strictly_equals(VM*, u32 pc, Op::StrictlyEquals const*);
 i64 asm_slow_path_strictly_inequals(VM*, u32 pc, Op::StrictlyInequals const*);
 i64 asm_slow_path_loosely_equals(VM*, u32 pc, Op::LooselyEquals const*);
@@ -761,16 +761,14 @@ i64 asm_slow_path_sub(VM* vm, u32 pc, Op::Sub const* instruction)
     return asm_slow_path_sub_values(vm, pc, instruction->dst(), vm->get(instruction->lhs()), vm->get(instruction->rhs()));
 }
 
-i64 asm_slow_path_mul(VM* vm, u32 pc, Op::Mul const* instruction)
+i64 asm_slow_path_mul_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, mul(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::Mul));
+    return finish_binary_slow_path(*vm, pc, destination, mul(*vm, lhs, rhs));
 }
 
-i64 asm_slow_path_div(VM* vm, u32 pc, Op::Div const* instruction)
+i64 asm_slow_path_div_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, div(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::Div));
+    return finish_binary_slow_path(*vm, pc, destination, div(*vm, lhs, rhs));
 }
 
 i64 asm_slow_path_less_than(VM* vm, u32 pc, Op::LessThan const* instruction)
@@ -1297,11 +1295,9 @@ i64 asm_slow_path_copy_object_excluding_properties(VM* vm, u32 pc, Op::CopyObjec
     return static_cast<i64>(pc + instruction->length());
 }
 
-i64 asm_slow_path_exp(VM* vm, u32 pc, Op::Exp const* instruction)
+i64 asm_slow_path_exp_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    auto result = ASM_TRY(*vm, pc, exp(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs())));
-    vm->set(instruction->dst(), result);
-    return static_cast<i64>(pc + sizeof(Op::Exp));
+    return finish_binary_slow_path(*vm, pc, destination, exp(*vm, lhs, rhs));
 }
 
 i64 asm_slow_path_import_call(VM* vm, u32 pc, Op::ImportCall const* instruction)
@@ -1954,28 +1950,24 @@ i64 asm_slow_path_bitwise_or_values(VM* vm, u32 pc, Operand destination, Value l
     return finish_binary_slow_path(*vm, pc, destination, bitwise_or(*vm, lhs, rhs));
 }
 
-i64 asm_slow_path_left_shift(VM* vm, u32 pc, Op::LeftShift const* instruction)
+i64 asm_slow_path_left_shift_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, left_shift(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::LeftShift));
+    return finish_binary_slow_path(*vm, pc, destination, left_shift(*vm, lhs, rhs));
 }
 
-i64 asm_slow_path_right_shift(VM* vm, u32 pc, Op::RightShift const* instruction)
+i64 asm_slow_path_right_shift_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, right_shift(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::RightShift));
+    return finish_binary_slow_path(*vm, pc, destination, right_shift(*vm, lhs, rhs));
 }
 
-i64 asm_slow_path_unsigned_right_shift(VM* vm, u32 pc, Op::UnsignedRightShift const* instruction)
+i64 asm_slow_path_unsigned_right_shift_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, unsigned_right_shift(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::UnsignedRightShift));
+    return finish_binary_slow_path(*vm, pc, destination, unsigned_right_shift(*vm, lhs, rhs));
 }
 
-i64 asm_slow_path_mod(VM* vm, u32 pc, Op::Mod const* instruction)
+i64 asm_slow_path_mod_values(VM* vm, u32 pc, Operand destination, Value lhs, Value rhs)
 {
-    vm->set(instruction->dst(), ASM_TRY(*vm, pc, mod(*vm, vm->get(instruction->lhs()), vm->get(instruction->rhs()))));
-    return static_cast<i64>(pc + sizeof(Op::Mod));
+    return finish_binary_slow_path(*vm, pc, destination, mod(*vm, lhs, rhs));
 }
 
 static ThrowCompletionOr<bool> loosely_equals(VM& vm, Value lhs, Value rhs)
