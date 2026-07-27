@@ -1041,7 +1041,36 @@ impl Backend for X86_64Backend {
         operands: &[AllocatedOperand],
     ) -> Result<(), CompileError> {
         let (width, condition) = operation.scalar_branch().expect("allocated scalar branch was verified");
-        scalar_compare(emit, operands.physical_register(0), operands.operand(1), width)?;
+        if let [
+            AllocatedOperand::Immediate(lhs),
+            AllocatedOperand::Immediate(rhs),
+            AllocatedOperand::Label(target),
+        ] = operands
+        {
+            let mask = match width {
+                IntegerWidth::U16 => u16::MAX as u64,
+                IntegerWidth::U32 => u32::MAX as u64,
+                IntegerWidth::U64 => u64::MAX,
+                _ => unreachable!("allocated scalar branch was verified"),
+            };
+            let equal = (*lhs as u64 & mask) == (*rhs as u64 & mask);
+            if condition == ScalarBranchCondition::Equal && equal
+                || condition == ScalarBranchCondition::NotEqual && !equal
+            {
+                emit!(emit.output, X86_64; Opcode::Jump => [label target.clone()];);
+            }
+            return Ok(());
+        }
+        let (lhs, rhs) = if let Some(lhs) = operands.operand(0).physical_register() {
+            (lhs, operands.operand(1))
+        } else if matches!(operation, Operation::Branch(BranchOperation::Equality { .. }))
+            && let Some(rhs) = operands.operand(1).physical_register()
+        {
+            (rhs, operands.operand(0))
+        } else {
+            return emit.error("scalar comparison requires at least one register operand");
+        };
+        scalar_compare(emit, lhs, rhs, width)?;
         branch_scalar(emit, condition, &operands.label(2));
         Ok(())
     }
