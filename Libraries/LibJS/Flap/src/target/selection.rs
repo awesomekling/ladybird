@@ -9,8 +9,8 @@
 use super::ir::{Function, Instruction, Operand, Program};
 use crate::Architecture;
 use crate::low_ir::preallocate::{
-    materialize_program_counter_reads, orient_commutative_updates, schedule_x86_relational_operand_loads,
-    split_rematerializable_live_ranges_across_calls,
+    materialize_program_counter_reads, materialize_repeated_store_constants, orient_commutative_updates,
+    schedule_x86_relational_operand_loads, split_rematerializable_live_ranges_across_calls,
 };
 use crate::low_ir::{self, AddressDisplacement, Operand as LowOperand};
 use crate::target::description::{IntegerWidth, Operation};
@@ -28,6 +28,7 @@ pub(crate) fn select_program(
             if architecture == Architecture::X86_64 {
                 schedule_x86_relational_operand_loads(&mut handler.instructions);
             }
+            materialize_repeated_store_constants(&mut handler.instructions, architecture);
             orient_commutative_updates(&mut handler.instructions);
             split_rematerializable_live_ranges_across_calls(&mut handler.instructions);
             // Splitting creates new virtual registers, so interning must follow it.

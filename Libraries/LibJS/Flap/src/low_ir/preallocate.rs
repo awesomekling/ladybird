@@ -7,6 +7,7 @@
 //! Target-aware instruction combining before register allocation.
 
 use super::{Instruction, Operand, VirtualRegister, visit_virtual_registers, visit_virtual_registers_mut};
+use crate::Architecture;
 use crate::hash::{HashMap, HashSet};
 use crate::intrinsic::{BranchOperation, IntegerBinaryOperation, IntegerSignedness};
 use crate::low_ir::analysis::virtual_register_access;
@@ -15,6 +16,120 @@ use crate::target::description::{
     BinaryOperation, EqualityCondition, IntegerWidth, MemoryWidth, OperandKind, Operation, PairWidth,
 };
 use crate::types::InterpreterRegister;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum StoreConstant {
+    Immediate(i64),
+    Value(i64),
+}
+
+fn repeated_store_constant(operand: &Operand, architecture: Architecture) -> Option<StoreConstant> {
+    match operand {
+        Operand::Immediate(value)
+            if architecture == Architecture::Aarch64 || !(i32::MIN as i64..=i32::MAX as i64).contains(value) =>
+        {
+            Some(StoreConstant::Immediate(*value))
+        }
+        Operand::ValueConstant(value)
+            if architecture == Architecture::Aarch64 || !(i32::MIN as i64..=i32::MAX as i64).contains(value) =>
+        {
+            Some(StoreConstant::Value(*value))
+        }
+        _ => None,
+    }
+}
+
+fn store_constant_operand(constant: StoreConstant) -> Operand {
+    match constant {
+        StoreConstant::Immediate(value) => Operand::Immediate(value),
+        StoreConstant::Value(value) => Operand::ValueConstant(value),
+    }
+}
+
+/// Materialize a constant once when adjacent stores would otherwise make the
+/// backend reconstruct it independently for every store.
+pub(crate) fn materialize_repeated_store_constants(instructions: &mut Vec<Instruction>, architecture: Architecture) {
+    let mut current_run = 0usize;
+    let mut in_store_run = false;
+    let runs = instructions
+        .iter()
+        .map(|instruction| {
+            if instruction.opcode.operation() != Operation::StoreOperand {
+                in_store_run = false;
+                return None;
+            }
+            if !in_store_run {
+                current_run += 1;
+                in_store_run = true;
+            }
+            Some(current_run)
+        })
+        .collect::<Vec<_>>();
+    let mut counts = HashMap::<(usize, StoreConstant), usize>::default();
+    for (run, instruction) in runs.iter().copied().zip(instructions.iter()) {
+        let Some(run) = run else {
+            continue;
+        };
+        let Some(constant) = instruction
+            .operands
+            .get(1)
+            .and_then(|operand| repeated_store_constant(operand, architecture))
+        else {
+            continue;
+        };
+        *counts.entry((run, constant)).or_default() += 1;
+    }
+    if counts.values().all(|count| *count < 2) {
+        return;
+    }
+
+    let mut existing_registers = HashSet::default();
+    for instruction in instructions.iter() {
+        for operand in &instruction.operands {
+            visit_virtual_registers(operand, &mut |register| {
+                existing_registers.insert(register.clone());
+            });
+        }
+    }
+
+    let mut materialized = HashMap::<(usize, StoreConstant), VirtualRegister>::default();
+    let mut materialization_index = 0u64;
+    let original = std::mem::take(instructions);
+    instructions.reserve(original.len() + counts.len());
+    for (run, mut instruction) in runs.into_iter().zip(original) {
+        if let Some(run) = run
+            && let Some(constant) = instruction
+                .operands
+                .get(1)
+                .and_then(|operand| repeated_store_constant(operand, architecture))
+            && counts[&(run, constant)] >= 2
+        {
+            let key = (run, constant);
+            let register = if let Some(register) = materialized.get(&key) {
+                register.clone()
+            } else {
+                let register = loop {
+                    let candidate = VirtualRegister::from(format!("repeated_store_constant_{materialization_index}"));
+                    materialization_index += 1;
+                    if existing_registers.insert(candidate.clone()) {
+                        break candidate;
+                    }
+                };
+                instructions.push(Instruction {
+                    opcode: Operation::Move(IntegerWidth::U64),
+                    operands: vec![
+                        Operand::VirtualRegister(register.clone()),
+                        store_constant_operand(constant),
+                    ],
+                });
+                materialized.insert(key, register.clone());
+                register
+            };
+            instruction.operands[1] = Operand::VirtualRegister(register);
+        }
+        instructions.push(instruction);
+    }
+}
 
 /// Turn every read of the interpreter's own program counter into a dedicated
 /// instruction so each backend can materialize it from whatever state it
@@ -435,4 +550,70 @@ fn rematerialization_recipe(instruction: &Instruction) -> Option<(VirtualRegiste
             operands: vec![Operand::VirtualRegister(register.clone()), source.clone()],
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(offset: i64, value: i64) -> Instruction {
+        Instruction {
+            opcode: Operation::StoreOperand,
+            operands: vec![Operand::Immediate(offset), Operand::ValueConstant(value)],
+        }
+    }
+
+    #[test]
+    fn materializes_repeated_store_constants_once() {
+        let value = 0x7ffe_0000_0000_0000u64 as i64;
+        for architecture in [Architecture::X86_64, Architecture::Aarch64] {
+            let mut instructions = vec![store(4, value), store(8, value), store(12, value)];
+            materialize_repeated_store_constants(&mut instructions, architecture);
+
+            assert_eq!(instructions.len(), 4);
+            assert_eq!(instructions[0].opcode, Operation::Move(IntegerWidth::U64));
+            assert_eq!(instructions[0].operands[1], Operand::ValueConstant(value));
+            let Operand::VirtualRegister(materialized) = &instructions[0].operands[0] else {
+                panic!("constant materialization should define a virtual register");
+            };
+            assert!(instructions[1..].iter().all(|instruction| {
+                instruction.opcode == Operation::StoreOperand
+                    && instruction.operands[1] == Operand::VirtualRegister(materialized.clone())
+            }));
+        }
+    }
+
+    #[test]
+    fn leaves_encodable_x86_store_constants_inline() {
+        let mut instructions = vec![store(4, 42), store(8, 42)];
+        materialize_repeated_store_constants(&mut instructions, Architecture::X86_64);
+
+        assert_eq!(instructions.len(), 2);
+        assert!(
+            instructions
+                .iter()
+                .all(|instruction| instruction.operands[1] == Operand::ValueConstant(42))
+        );
+    }
+
+    #[test]
+    fn does_not_extend_a_store_constant_across_other_work() {
+        let value = 0x7ffe_0000_0000_0000u64 as i64;
+        let mut instructions = vec![
+            store(4, value),
+            Instruction {
+                opcode: Operation::Move(IntegerWidth::U64),
+                operands: vec![
+                    Operand::VirtualRegister(VirtualRegister::from("other")),
+                    Operand::Immediate(1),
+                ],
+            },
+            store(8, value),
+        ];
+        materialize_repeated_store_constants(&mut instructions, Architecture::X86_64);
+
+        assert_eq!(instructions.len(), 3);
+        assert_eq!(instructions[0].operands[1], Operand::ValueConstant(value));
+        assert_eq!(instructions[2].operands[1], Operand::ValueConstant(value));
+    }
 }
