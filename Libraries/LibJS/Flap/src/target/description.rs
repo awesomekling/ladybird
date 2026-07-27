@@ -765,6 +765,15 @@ fn lookup_operation(operation: Operation) -> &'static InstructionDescription {
                     .aarch64(spec().scratches(&[X9, X10]))
             }
         }
+        Operation::Call(CallKind::BinarySlowPath) => {
+            &const {
+                plain(&[FuncSymbol, GprIn, GprIn, GprIn])
+                    .terminal()
+                    .call()
+                    .x86_64(spec().scratches(&[RAX, R11]))
+                    .aarch64(spec().scratches(&[X0, X9]))
+            }
+        }
         Operation::Call(CallKind::Helper) => {
             &const {
                 plain(&[FuncSymbol, GprIn, GprOut])

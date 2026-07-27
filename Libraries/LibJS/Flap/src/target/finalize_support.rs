@@ -378,3 +378,51 @@ pub(crate) fn push_plain_move(
         operands: operands.to_vec(),
     });
 }
+
+pub(crate) fn schedule_parallel_moves(
+    requested_moves: &[(PhysicalRegister, PhysicalRegister)],
+    scratch: PhysicalRegister,
+) -> Vec<(PhysicalRegister, PhysicalRegister)> {
+    let mut pending = requested_moves
+        .iter()
+        .copied()
+        .filter(|(destination, source)| destination != source)
+        .collect::<Vec<_>>();
+    let mut scheduled = Vec::with_capacity(pending.len() + 1);
+    while !pending.is_empty() {
+        if let Some(index) = pending
+            .iter()
+            .position(|(destination, _)| !pending.iter().any(|(_, source)| source == destination))
+        {
+            scheduled.push(pending.remove(index));
+            continue;
+        }
+
+        let saved = pending[0].0;
+        scheduled.push((scratch, saved));
+        for (_, source) in &mut pending {
+            if *source == saved {
+                *source = scratch;
+            }
+        }
+    }
+    scheduled
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::target::registers::x86_64::{R8, R11, RCX, RDX};
+
+    #[test]
+    fn schedules_parallel_move_cycles_through_scratch() {
+        assert_eq!(
+            schedule_parallel_moves(&[(RDX, RCX), (RCX, RDX)], R11),
+            [(R11, RDX), (RDX, RCX), (RCX, R11)]
+        );
+        assert_eq!(
+            schedule_parallel_moves(&[(RDX, RCX), (RCX, R8), (R8, RDX)], R11),
+            [(R11, RDX), (RDX, RCX), (RCX, R8), (R8, R11)]
+        );
+    }
+}

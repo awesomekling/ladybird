@@ -415,7 +415,7 @@ inline fn bitwise_binary(
     slow_path: SlowPath
 ) {
     let slow = || @cold {
-        call_slow_path(slow_path);
+        call_binary_slow_path(slow_path, dst, lhs, rhs);
     };
 
     let non_int32 = || @cold {
@@ -469,7 +469,7 @@ inline fn store_relational_result(
         dispatch_next;
     };
     let slow = || @cold {
-        call_slow_path(slow_path);
+        call_binary_slow_path(slow_path, dst, lhs, rhs);
     };
 
     match lhs {
@@ -861,15 +861,15 @@ handler Add(
     lhs: in Operand,
     rhs: in Operand
 ) {
+    let lhs_value = load(lhs);
+    let rhs_value = load(rhs);
     let slow = || @cold {
-        call_slow_path(add);
+        call_binary_slow_path(add_values, dst, lhs_value, rhs_value);
     };
     let add_double = |lhs: f64, rhs: f64| @cold {
         store(dst, box_number(lhs + rhs));
         dispatch_next;
     };
-    let lhs_value = load(lhs);
-    let rhs_value = load(rhs);
     match lhs_value {
         Value<i32>(lhs_integer) => {
             match rhs_value {
@@ -907,15 +907,15 @@ handler Sub(
     lhs: in Operand,
     rhs: in Operand
 ) {
+    let lhs_value = load(lhs);
+    let rhs_value = load(rhs);
     let slow = || @cold {
-        call_slow_path(sub);
+        call_binary_slow_path(sub_values, dst, lhs_value, rhs_value);
     };
     let subtract_double = |lhs: f64, rhs: f64| @cold {
         store(dst, box_number(lhs - rhs));
         dispatch_next;
     };
-    let lhs_value = load(lhs);
-    let rhs_value = load(rhs);
     match lhs_value {
         Value<i32>(lhs_integer) => {
             match rhs_value {
@@ -1652,7 +1652,7 @@ handler LessThan(
     load(rhs),
     branch_lt_signed,
     branch_fp_less,
-    less_than
+    less_than_values
 );
 
 handler LessThanEquals(
@@ -1665,7 +1665,7 @@ handler LessThanEquals(
     load(rhs),
     branch_le_signed,
     branch_fp_less_or_equal,
-    less_than_equals
+    less_than_equals_values
 );
 
 handler GreaterThan(
@@ -1678,7 +1678,7 @@ handler GreaterThan(
     load(rhs),
     branch_gt_signed,
     branch_fp_greater,
-    greater_than
+    greater_than_values
 );
 
 handler GreaterThanEquals(
@@ -1691,14 +1691,14 @@ handler GreaterThanEquals(
     load(rhs),
     branch_ge_signed,
     branch_fp_greater_or_equal,
-    greater_than_equals
+    greater_than_equals_values
 );
 
 handler BitwiseXor(
     dst: out Operand,
     lhs: in Operand,
     rhs: in Operand
-) = bitwise_binary(dst, load(lhs), load(rhs), xor, bitwise_xor);
+) = bitwise_binary(dst, load(lhs), load(rhs), xor, bitwise_xor_values);
 
 handler UnaryPlus(
     dst: out Operand,
@@ -1808,13 +1808,13 @@ handler BitwiseAnd(
     dst: out Operand,
     lhs: in Operand,
     rhs: in Operand
-) = bitwise_binary(dst, load(lhs), load(rhs), and, bitwise_and);
+) = bitwise_binary(dst, load(lhs), load(rhs), and, bitwise_and_values);
 
 handler BitwiseOr(
     dst: out Operand,
     lhs: in Operand,
     rhs: in Operand
-) = bitwise_binary(dst, load(lhs), load(rhs), or, bitwise_or);
+) = bitwise_binary(dst, load(lhs), load(rhs), or, bitwise_or_values);
 
 handler LeftShift(
     dst: out Operand,
