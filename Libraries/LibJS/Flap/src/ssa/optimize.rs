@@ -13,8 +13,8 @@ use super::report::FunctionOptimizationReport;
 #[cfg(test)]
 use super::{BinaryOperation, IntegerBinaryOperation};
 use super::{
-    BlockId, BlockLayout, Edge, Effects, Function, Instruction, InstructionId, Intrinsic, OperandOperation, Operation,
-    Terminator, ValueDefinition, ValueId, ValueOperation,
+    BlockId, BlockLayout, CheckedIntegerOperation, Edge, Effects, Function, Instruction, InstructionId, Intrinsic,
+    OperandOperation, Operation, Terminator, ValueDefinition, ValueId, ValueOperation,
 };
 use crate::frontend::layout::{LayoutConstants, LayoutValue};
 use crate::hash::{HashMap, HashSet};
@@ -266,6 +266,7 @@ fn run_optimization_pipeline(
         "rematerialize-cold-bytecode-field-loads",
         rematerialize_cold_bytecode_field_loads
     );
+    run_pass!("rematerialize-cold-int32-unboxes", rematerialize_cold_int32_unboxes);
     report
 }
 
@@ -1072,6 +1073,94 @@ fn rematerialize_cold_bytecode_field_loads(function: &mut Function, _: &mut Anal
     changed
 }
 
+fn rematerialize_cold_int32_unboxes(function: &mut Function, _: &mut AnalysisManager) -> bool {
+    let candidates = function
+        .instructions
+        .iter()
+        .filter_map(|instruction| {
+            if instruction.operation
+                != Operation::Intrinsic(Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: false }))
+            {
+                return None;
+            }
+            let [source] = instruction.inputs.as_slice() else {
+                return None;
+            };
+            let [result] = instruction.results.as_slice() else {
+                return None;
+            };
+            let is_checked_input = function
+                .blocks
+                .iter()
+                .filter(|block| block.layout != BlockLayout::Cold)
+                .any(|block| match &block.terminator {
+                    Some(Terminator::CheckedOperation {
+                        operation:
+                            Operation::Intrinsic(Intrinsic::CheckedInteger(
+                                CheckedIntegerOperation::Add | CheckedIntegerOperation::Subtract,
+                            )),
+                        inputs,
+                        ..
+                    }) => inputs.contains(result),
+                    _ => false,
+                });
+            is_checked_input.then_some((*source, *result))
+        })
+        .collect::<Vec<_>>();
+
+    let mut changed = false;
+    for (source, result) in candidates {
+        for block_index in 0..function.blocks.len() {
+            if function.blocks[block_index].layout != BlockLayout::Cold {
+                continue;
+            }
+            let is_used = function.blocks[block_index]
+                .instructions
+                .iter()
+                .any(|instruction| function.instructions[instruction.0].inputs.contains(&result))
+                || function.blocks[block_index]
+                    .terminator
+                    .as_ref()
+                    .is_some_and(|terminator| terminator.inputs().contains(&result));
+            if !is_used {
+                continue;
+            }
+
+            let block = BlockId(block_index);
+            let replacement = function.append_instruction(
+                block,
+                Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: true }),
+                vec![source],
+                vec![Type::I32],
+            )[0];
+            let replacement_instruction = function.blocks[block_index]
+                .instructions
+                .pop()
+                .expect("the rematerialized unbox was just appended");
+            function.blocks[block_index]
+                .instructions
+                .insert(0, replacement_instruction);
+
+            let replacements = HashMap::from_iter([(result, replacement)]);
+            for instruction in function.blocks[block_index].instructions.iter().skip(1) {
+                rewrite_values(&mut function.instructions[instruction.0].inputs, &replacements);
+            }
+            rewrite_terminator(
+                function.blocks[block_index]
+                    .terminator
+                    .as_mut()
+                    .expect("every SSA block has a terminator"),
+                &replacements,
+            );
+            changed = true;
+        }
+    }
+    if changed {
+        recompute_effects(function);
+    }
+    changed
+}
+
 /// Whether another block reads this instruction's result along a guard's exit.
 fn escapes_through_a_guard(
     function: &Function,
@@ -1417,7 +1506,7 @@ mod tests {
     use crate::intrinsic::{
         AssertionOperation, CallOperation, ControlOperation, OperandLoad, OperandOperation, OperandStore,
     };
-    use crate::ssa::{CheckedIntegerOperation, Constant, LowLevelOperation, MemoryEffect, lowering as ir_lowering};
+    use crate::ssa::{Constant, LowLevelOperation, MemoryEffect, lowering as ir_lowering};
 
     fn append_test_operation(
         function: &mut Function,
@@ -1486,6 +1575,69 @@ mod tests {
             unreachable!()
         };
         assert_eq!(inputs, &[lhs, loaded]);
+        function.validate().unwrap();
+    }
+
+    #[test]
+    fn rematerializes_checked_int32_unboxes_for_cold_consumers() {
+        let mut function = Function::new("cold-int32-unbox", vec![Type::Value, Type::I32], Vec::new());
+        let unboxed = function.append_instruction(
+            function.entry,
+            Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: false }),
+            vec![function.parameter(0)],
+            vec![Type::I32],
+        )[0];
+        let success = function.create_named_block("success", BlockLayout::Hot, vec![Type::I32]);
+        let failure = function.create_empty_block("failure", BlockLayout::Cold);
+        let cold_consumer = function.create_empty_block("cold-consumer", BlockLayout::Cold);
+        function.set_checked_operation(
+            function.entry,
+            Intrinsic::CheckedInteger(CheckedIntegerOperation::Subtract),
+            vec![unboxed, function.parameter(1)],
+            vec![Type::I32],
+            Effects::PURE,
+            success,
+            Vec::new(),
+            Edge::new(failure),
+        );
+        function.set_terminator(success, Terminator::jump(cold_consumer));
+        function.append_instruction(
+            failure,
+            Intrinsic::LowLevel(LowLevelOperation::Negate),
+            vec![unboxed],
+            vec![Type::I32],
+        );
+        function.set_terminator(failure, Terminator::Return(Vec::new()));
+        function.append_instruction(
+            cold_consumer,
+            Intrinsic::LowLevel(LowLevelOperation::Negate),
+            vec![unboxed],
+            vec![Type::I32],
+        );
+        function.set_terminator(cold_consumer, Terminator::Return(Vec::new()));
+
+        assert!(rematerialize_cold_int32_unboxes(
+            &mut function,
+            &mut AnalysisManager::default()
+        ));
+
+        assert_eq!(function.blocks[failure.0].instructions.len(), 2);
+        assert_eq!(
+            function.instructions[function.blocks[failure.0].instructions[0].0].operation,
+            Operation::Intrinsic(Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: true }))
+        );
+        let rematerialized = function.blocks[cold_consumer.0].instructions[0];
+        let rematerialized_value = function.instructions[rematerialized.0].results[0];
+        assert_eq!(
+            function.instructions[rematerialized.0].operation,
+            Operation::Intrinsic(Intrinsic::Value(ValueOperation::UnboxInt32 { rematerialized: true }))
+        );
+        assert_eq!(
+            function.instructions[function.blocks[cold_consumer.0].instructions[1].0]
+                .inputs
+                .as_slice(),
+            [rematerialized_value]
+        );
         function.validate().unwrap();
     }
 
