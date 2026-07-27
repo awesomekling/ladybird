@@ -729,7 +729,7 @@ inline fn jump_relational(
     slow: SlowPath
 ) {
     let failure = || @cold {
-        call_slow_path(slow);
+        call_jump_slow_path(slow, lhs, rhs, true_target, false_target);
     };
     let take_true = || {
         jump(true_target);
@@ -1167,7 +1167,7 @@ handler JumpLessThan(
     false_target,
     branch_lt_signed,
     branch_fp_less,
-    jump_less_than
+    jump_less_than_values
 );
 
 handler JumpGreaterThan(
@@ -1182,7 +1182,7 @@ handler JumpGreaterThan(
     false_target,
     branch_gt_signed,
     branch_fp_greater,
-    jump_greater_than
+    jump_greater_than_values
 );
 
 handler JumpLessThanEquals(
@@ -1197,7 +1197,7 @@ handler JumpLessThanEquals(
     false_target,
     branch_le_signed,
     branch_fp_less_or_equal,
-    jump_less_than_equals
+    jump_less_than_equals_values
 );
 
 handler JumpGreaterThanEquals(
@@ -1212,7 +1212,7 @@ handler JumpGreaterThanEquals(
     false_target,
     branch_ge_signed,
     branch_fp_greater_or_equal,
-    jump_greater_than_equals
+    jump_greater_than_equals_values
 );
 
 handler JumpLooselyEquals(
