@@ -1342,10 +1342,13 @@ impl<'a> Checker<'a> {
                 symbol.ty,
                 Type::EnvironmentCoordinateCacheIndex | Type::GlobalVariableCacheIndex | Type::PropertyLookupCacheIndex
             ) {
-                return Some((symbol.ty.clone(), Type::U32, FieldWidth::U32));
+                return Some((symbol.ty.clone(), Type::U32, BytecodeOperation::Load(FieldWidth::U32)));
             }
             if !self.bytecode_fields.contains(&symbol.id) {
                 return None;
+            }
+            if symbol.ty == Type::InlineInt32 {
+                return Some((Type::InlineInt32, Type::Value, BytecodeOperation::LoadInlineInt32));
             }
             let width = match symbol.ty {
                 Type::U8 | Type::I8 | Type::Bool => FieldWidth::U8,
@@ -1354,16 +1357,16 @@ impl<'a> Checker<'a> {
                 Type::U64 | Type::I64 => FieldWidth::U64,
                 _ => return None,
             };
-            Some((symbol.ty.clone(), symbol.ty.clone(), width))
+            Some((symbol.ty.clone(), symbol.ty.clone(), BytecodeOperation::Load(width)))
         })();
         let (target, signature) = if returning_builtin {
             let resolved = resolved_intrinsic
                 .take()
                 .expect("returning builtins are resolved intrinsics");
             (CallTarget::Intrinsic(resolved.intrinsic), resolved.signature)
-        } else if let Some((parameter_type, return_type, width)) = &bytecode_load {
+        } else if let Some((parameter_type, return_type, operation)) = &bytecode_load {
             (
-                CallTarget::Intrinsic(Intrinsic::Bytecode(BytecodeOperation::Load(*width))),
+                CallTarget::Intrinsic(Intrinsic::Bytecode(*operation)),
                 signature(
                     &[(ParameterMode::In, parameter_type.clone())],
                     Some(return_type.clone()),
@@ -2652,6 +2655,38 @@ impl<'a> Checker<'a> {
                 {
                     return Ok(Value::new(ValueKind::Integer(value), Type::Bool, expression.span));
                 }
+                if let Some(symbol) = self.lookup(name)
+                    && &symbol.ty == expected
+                {
+                    return Ok(Value::new(
+                        ValueKind::Variable(symbol.id),
+                        symbol.ty.clone(),
+                        expression.span,
+                    ));
+                }
+                if *expected == Type::SlowPath
+                    && (name.starts_with("asm_slow_path_")
+                        || name.chars().all(|character| {
+                            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+                        }))
+                {
+                    return Ok(Value::new(
+                        ValueKind::SlowPath(ExternalSymbol::new(if name.starts_with("asm_slow_path_") {
+                            name.clone()
+                        } else {
+                            format!("asm_slow_path_{name}")
+                        })),
+                        Type::SlowPath,
+                        expression.span,
+                    ));
+                }
+                if *expected == Type::FunctionSymbol {
+                    return Ok(Value::new(
+                        ValueKind::FunctionSymbol(ExternalSymbol::new(name)),
+                        Type::FunctionSymbol,
+                        expression.span,
+                    ));
+                }
                 if let Some(symbol) = self.lookup(name) {
                     if &symbol.ty != expected {
                         return self.error(
@@ -2686,29 +2721,6 @@ impl<'a> Checker<'a> {
                     }
                     let name = self.check_label(name, expression.span)?;
                     return Ok(Value::new(ValueKind::Label(name), expected.clone(), expression.span));
-                }
-                if *expected == Type::SlowPath
-                    && (name.starts_with("asm_slow_path_")
-                        || name.chars().all(|character| {
-                            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-                        }))
-                {
-                    return Ok(Value::new(
-                        ValueKind::SlowPath(ExternalSymbol::new(if name.starts_with("asm_slow_path_") {
-                            name.clone()
-                        } else {
-                            format!("asm_slow_path_{name}")
-                        })),
-                        Type::SlowPath,
-                        expression.span,
-                    ));
-                }
-                if *expected == Type::FunctionSymbol {
-                    return Ok(Value::new(
-                        ValueKind::FunctionSymbol(ExternalSymbol::new(name)),
-                        Type::FunctionSymbol,
-                        expression.span,
-                    ));
                 }
                 let matches_inline_operation = operation_signature(expected).is_some_and(|signature| {
                     self.signatures

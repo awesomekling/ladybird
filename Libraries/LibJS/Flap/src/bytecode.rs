@@ -7,7 +7,8 @@
 //! Prepared bytecode metadata used by reusable handler lowering.
 
 use crate::types::Type;
-use bytecode_def::OpDef;
+use flap_metadata::{InstructionDefinition, Specialization, SpecializationConstraint};
+use std::collections::{HashMap, HashSet};
 
 /// The identity of a handler parameter that names a bytecode field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -41,7 +42,7 @@ impl HandlerLayout {
         handler_name: &str,
         parameter_names: &[String],
         parameter_types: &[Type],
-        op: Option<&OpDef>,
+        op: Option<&InstructionDefinition>,
     ) -> Result<Self, String> {
         if parameter_names.len() != parameter_types.len() {
             return Err(format!(
@@ -91,12 +92,83 @@ impl HandlerLayout {
     }
 }
 
+pub(crate) fn validate_specializations(
+    ops: &[InstructionDefinition],
+    specializations: &[Specialization],
+) -> Result<(), String> {
+    let ops = ops.iter().map(|op| (op.name.as_str(), op)).collect::<HashMap<_, _>>();
+    let mut names = HashSet::new();
+    for specialization in specializations {
+        let mut relationships = HashMap::<u32, usize>::new();
+        for (component_index, component) in specialization.components.iter().enumerate() {
+            let op = ops
+                .get(component.bytecode.as_str())
+                .ok_or_else(|| format!("specialization references unknown bytecode '{}'", component.bytecode))?;
+            if component_index + 1 != specialization.components.len() && op.is_terminator {
+                return Err(format!(
+                    "terminating bytecode '{}' may only be the final specialization component",
+                    component.bytecode
+                ));
+            }
+            let mut parameters = HashSet::new();
+            for parameter in &component.parameters {
+                if !parameters.insert(parameter.name.as_str()) {
+                    return Err(format!(
+                        "specialization repeats parameter '{}.{}'",
+                        component.bytecode, parameter.name
+                    ));
+                }
+                let field_name = format!("m_{}", parameter.name);
+                let field = op.fields.iter().find(|field| field.name == field_name).ok_or_else(|| {
+                    format!(
+                        "specialization parameter '{}.{}' does not name a bytecode field",
+                        component.bytecode, parameter.name
+                    )
+                })?;
+                match &parameter.constraint {
+                    SpecializationConstraint::SameOperand(relation) => {
+                        if field.ty != "Operand" || field.is_array {
+                            return Err(format!(
+                                "same-operand constraint requires an Operand field, but '{}.{}' is {}",
+                                component.bytecode, parameter.name, field.ty
+                            ));
+                        }
+                        *relationships.entry(*relation).or_default() += 1;
+                    }
+                    SpecializationConstraint::Constant
+                    | SpecializationConstraint::ConstantType(_)
+                    | SpecializationConstraint::ExactInteger(_) => {
+                        if field.ty != "Operand" || field.is_array {
+                            return Err(format!(
+                                "constant constraint requires an Operand field, but '{}.{}' is {}",
+                                component.bytecode, parameter.name, field.ty
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        for (relationship, count) in relationships {
+            if count < 2 {
+                return Err(format!(
+                    "same-operand relationship {relationship} must constrain at least two parameters"
+                ));
+            }
+        }
+        let name = flap_metadata::specialization_name(specialization);
+        if !names.insert(name.clone()) {
+            return Err(format!("duplicate specialization name '{name}'"));
+        }
+    }
+    Ok(())
+}
+
 fn bytecode_field_name(name: &str) -> String {
     name.strip_prefix("m_")
         .map_or_else(|| format!("m_{name}"), |_| name.to_string())
 }
 
-fn bytecode_field_type_name(field: &bytecode_def::Field) -> String {
+fn bytecode_field_type_name(field: &flap_metadata::Field) -> String {
     if field.is_array {
         format!("{}[]", field.ty)
     } else {
@@ -104,17 +176,34 @@ fn bytecode_field_type_name(field: &bytecode_def::Field) -> String {
     }
 }
 
-fn bytecode_field_type_matches(field: &bytecode_def::Field, parameter_type: &Type) -> bool {
+fn bytecode_field_type_matches(field: &flap_metadata::Field, parameter_type: &Type) -> bool {
     if field.is_array {
-        return field.ty == "Operand" && *parameter_type == Type::Sequence(Box::new(Type::U32));
+        return match field.ty.as_str() {
+            "Operand" | "Optional<Operand>" => *parameter_type == Type::Sequence(Box::new(Type::U32)),
+            "Value" => *parameter_type == Type::Sequence(Box::new(Type::Value)),
+            _ => false,
+        };
     }
     match field.ty.as_str() {
         "bool" => *parameter_type == Type::Bool || *parameter_type == Type::U8,
-        "u32" | "Completion::Type" | "IteratorHint" | "EnvironmentMode" | "ArgumentsKind" | "FunctionNamePrefix" => {
-            *parameter_type == Type::U32
-        }
+        "u32"
+        | "Completion::Type"
+        | "IteratorHint"
+        | "EnvironmentMode"
+        | "ArgumentsKind"
+        | "FunctionNamePrefix"
+        | "IdentifierTableIndex"
+        | "ObjectPropertyIteratorCacheIndex"
+        | "ObjectShapeCacheIndex"
+        | "PropertyKeyTableIndex"
+        | "RegexTableIndex"
+        | "StringTableIndex"
+        | "TemplateObjectCacheIndex"
+        | "Optional<IdentifierTableIndex>"
+        | "Optional<StringTableIndex>" => *parameter_type == Type::U32,
         "u64" => *parameter_type == Type::U64,
-        "Operand" => *parameter_type == Type::Operand,
+        "i32" => *parameter_type == Type::InlineInt32,
+        "Operand" | "Optional<Operand>" => *parameter_type == Type::Operand,
         "Label" | "Optional<Label>" => *parameter_type == Type::BytecodeOffset,
         "EnvironmentCoordinate" => *parameter_type == Type::EnvironmentCoordinate,
         "EnvironmentCoordinateCacheIndex" => *parameter_type == Type::EnvironmentCoordinateCacheIndex,
@@ -132,9 +221,9 @@ mod tests {
 
     #[test]
     fn aligns_layout_offsets_with_handler_parameters() {
-        let mut op = bytecode_def::parse_bytecode_def(
-            "TestBytecode.def",
-            "op Add < Instruction\n    m_lhs: Operand\n    m_rhs: Operand\nendop\n",
+        let mut op = flap_metadata::parse_flap_metadata(
+            "test.flap",
+            "handler Add(lhs: Operand, rhs: Operand) { dispatch_next; }\n",
         )
         .unwrap()
         .remove(0);
@@ -156,9 +245,9 @@ mod tests {
 
     #[test]
     fn rejects_unrelated_index_types_as_property_lookup_cache_indices() {
-        let op = bytecode_def::parse_bytecode_def(
-            "TestBytecode.def",
-            "op Get < Instruction\n    m_cache: PropertyKeyTableIndex\nendop\n",
+        let op = flap_metadata::parse_flap_metadata(
+            "test.flap",
+            "handler Get(cache: PropertyKeyTableIndex) { dispatch_next; }\n",
         )
         .unwrap()
         .remove(0);
@@ -179,11 +268,19 @@ mod tests {
     }
 
     #[test]
+    fn accepts_inline_int32_handler_parameters() {
+        let op = flap_metadata::parse_flap_metadata("test.flap", "handler AddInt32(rhs: Int32) { dispatch_next; }\n")
+            .unwrap()
+            .remove(0);
+
+        HandlerLayout::new("AddInt32", &["rhs".to_string()], &[Type::InlineInt32], Some(&op)).unwrap();
+    }
+
+    #[test]
     fn rejects_wide_put_kind_handler_parameters() {
-        let op =
-            bytecode_def::parse_bytecode_def("TestBytecode.def", "op Put < Instruction\n    m_kind: PutKind\nendop\n")
-                .unwrap()
-                .remove(0);
+        let op = flap_metadata::parse_flap_metadata("test.flap", "handler Put(kind: PutKind) { dispatch_next; }\n")
+            .unwrap()
+            .remove(0);
         let error = HandlerLayout::new("Put", &["kind".to_string()], &[Type::U32], Some(&op)).unwrap_err();
 
         assert!(
@@ -194,10 +291,9 @@ mod tests {
 
     #[test]
     fn rejects_mismatched_handler_parameter_metadata_before_field_types() {
-        let op =
-            bytecode_def::parse_bytecode_def("TestBytecode.def", "op Put < Instruction\n    m_kind: PutKind\nendop\n")
-                .unwrap()
-                .remove(0);
+        let op = flap_metadata::parse_flap_metadata("test.flap", "handler Put(kind: PutKind) { dispatch_next; }\n")
+            .unwrap()
+            .remove(0);
         let error = HandlerLayout::new(
             "Put",
             &["kind".to_string(), "extra".to_string()],
@@ -207,5 +303,46 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "handler 'Put' has 2 parameter names but 1 parameter types");
+    }
+
+    #[test]
+    fn validates_pair_specialization_constraints() {
+        let source = r#"
+handler Increment(dst: inout Operand) { dispatch_next; }
+handler JumpLessThan(lhs: Operand, rhs: Operand) @terminator { exit; }
+specialize Increment(dst: Operand'0)
+    + JumpLessThan(lhs: Operand'0, rhs: Int32);
+"#;
+        let ops = flap_metadata::parse_flap_metadata("test.flap", source).unwrap();
+        let specializations = flap_metadata::parse_specializations("test.flap", source).unwrap();
+
+        validate_specializations(&ops, &specializations).unwrap();
+    }
+
+    #[test]
+    fn rejects_dangling_same_operand_relationships() {
+        let source = r#"
+handler Increment(dst: inout Operand) { dispatch_next; }
+specialize Increment(dst: Operand'0);
+"#;
+        let ops = flap_metadata::parse_flap_metadata("test.flap", source).unwrap();
+        let specializations = flap_metadata::parse_specializations("test.flap", source).unwrap();
+        let error = validate_specializations(&ops, &specializations).unwrap_err();
+
+        assert!(error.contains("must constrain at least two parameters"));
+    }
+
+    #[test]
+    fn rejects_duplicate_derived_specialization_names() {
+        let source = r#"
+handler Add(rhs: Operand) { dispatch_next; }
+specialize Add(rhs: Int32);
+specialize Add(rhs: Int32);
+"#;
+        let ops = flap_metadata::parse_flap_metadata("test.flap", source).unwrap();
+        let specializations = flap_metadata::parse_specializations("test.flap", source).unwrap();
+        let error = validate_specializations(&ops, &specializations).unwrap_err();
+
+        assert_eq!(error, "duplicate specialization name 'AddRhsInt32'");
     }
 }

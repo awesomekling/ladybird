@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytecode_def = { path = "../BytecodeDef" }
+flap_metadata = { path = "../FlapMetadata" }
 smallvec = "=1.15.1"
 
 [[bench]]

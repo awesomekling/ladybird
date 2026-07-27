@@ -1,4 +1,4 @@
 [package]
-name = "bytecode_def"
+name = "flap_metadata"
 version = "0.1.0"
 edition = "2024"
