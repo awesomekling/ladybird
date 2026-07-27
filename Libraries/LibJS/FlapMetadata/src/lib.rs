@@ -10,7 +10,7 @@
 //! `Libraries/LibJS/Flap` (interpreter codegen) to ensure a single source
 //! of truth for instruction names, fields, offsets, and sizes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 
@@ -707,6 +707,7 @@ pub fn derive_specialized_instructions(
         let mut components = Vec::with_capacity(specialization.components.len());
         let mut relationship_fields = HashMap::<u32, String>::new();
         let mut field_counts = HashMap::<String, usize>::new();
+        let mut allocated_field_names = HashSet::<String>::new();
         for component in &specialization.components {
             let op = ops_by_name
                 .get(component.bytecode.as_str())
@@ -752,10 +753,19 @@ pub fn derive_specialized_instructions(
                         SpecializedParameterBinding::Undefined
                     }
                     Some(SpecializationConstraint::SameOperand(relationship)) => {
-                        let specialized_name = relationship_fields
-                            .entry(*relationship)
-                            .or_insert_with(|| source_name.to_string())
-                            .clone();
+                        let specialized_name = if let Some(specialized_name) = relationship_fields.get(relationship) {
+                            specialized_name.clone()
+                        } else {
+                            let mut suffix = 1;
+                            let mut candidate = source_name.to_string();
+                            while allocated_field_names.contains(&candidate) {
+                                suffix += 1;
+                                candidate = format!("{source_name}{suffix}");
+                            }
+                            allocated_field_names.insert(candidate.clone());
+                            relationship_fields.insert(*relationship, candidate.clone());
+                            candidate
+                        };
                         if !fields
                             .iter()
                             .any(|field: &Field| field.name == format!("m_{specialized_name}"))
@@ -771,11 +781,21 @@ pub fn derive_specialized_instructions(
                     constraint => {
                         let occurrence = field_occurrences.entry(source_name.to_string()).or_default();
                         *occurrence += 1;
-                        let specialized_name = if field_counts[source_name] == 1 {
+                        let mut specialized_name = if field_counts[source_name] == 1 {
                             source_name.to_string()
                         } else {
                             format!("{source_name}{occurrence}")
                         };
+                        if allocated_field_names.contains(&specialized_name) {
+                            let base = specialized_name;
+                            let mut suffix = 2;
+                            specialized_name = format!("{base}{suffix}");
+                            while allocated_field_names.contains(&specialized_name) {
+                                suffix += 1;
+                                specialized_name = format!("{base}{suffix}");
+                            }
+                        }
+                        allocated_field_names.insert(specialized_name.clone());
                         let ty = match constraint {
                             Some(SpecializationConstraint::ConstantType(ty)) if ty == "Int32" => "i32",
                             _ => field.ty.as_str(),
@@ -946,6 +966,35 @@ specialize Increment(dst: Operand'0)
         assert_eq!(
             derived[2].components[1].parameters["lhs"],
             SpecializedParameterBinding::Field("dst".to_string())
+        );
+    }
+
+    #[test]
+    fn disambiguates_repeated_field_names_across_fused_components() {
+        let source = r#"
+handler Add(dst: out Operand, lhs: in Operand, rhs: in Operand) { dispatch_next; }
+handler ToInt32(dst: out Operand, value: in Operand) { dispatch_next; }
+handler Mov(dst: out Operand, src: in Operand) { dispatch_next; }
+specialize Add(dst: Operand'0, rhs: Int32)
+    + ToInt32(dst: Operand'1, value: Operand'0)
+    + Mov(src: Operand'1);
+"#;
+        let ops = parse_flap_metadata("test.flap", source).unwrap();
+        let specializations = parse_specializations("test.flap", source).unwrap();
+        let derived = derive_specialized_instructions(&ops, &specializations).unwrap();
+
+        assert_eq!(
+            derived[0]
+                .definition
+                .fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["m_dst", "m_lhs", "m_rhs", "m_dst2", "m_dst3"]
+        );
+        assert_eq!(
+            derived[0].components[2].parameters["src"],
+            SpecializedParameterBinding::Field("dst2".to_string())
         );
     }
 
