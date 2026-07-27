@@ -54,7 +54,7 @@ block5:
 
 block6:
   [  80] Mov dst:reg8, src:result~1
-  [  90] Add dst:reg7, lhs:reg8, rhs:Int32(10)
+  [  90] AddRhsInt32 dst:reg7, lhs:reg8, rhs:10
   [  a0] Mov dst:result~1, src:reg7
   [  b0] JumpStrictlyEquals lhs:reg5, rhs:Int32(0), true_target:block10, false_target:block11
 
@@ -127,7 +127,7 @@ block5:
 
 block6:
   [  80] Mov dst:reg8, src:result~1
-  [  90] Add dst:reg7, lhs:reg8, rhs:Int32(100)
+  [  90] AddRhsInt32 dst:reg7, lhs:reg8, rhs:100
   [  a0] Mov dst:result~1, src:reg7
   [  b0] JumpStrictlyEquals lhs:reg5, rhs:Int32(0), true_target:block10, false_target:block11
 

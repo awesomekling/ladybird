@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use flap_metadata::{Field, InstructionDefinition, parse_flap_metadata};
+use flap_metadata::{
+    Field, InstructionDefinition, derive_specialized_instructions, parse_flap_metadata, parse_specializations,
+};
 use std::env;
 use std::fmt::Write;
 use std::fs;
@@ -229,7 +231,15 @@ fn run() -> Result<(), String> {
     let op_header = op_header.ok_or_else(|| "missing --op-header".to_string())?;
     let opcodes_header = opcodes_header.ok_or_else(|| "missing --opcodes-header".to_string())?;
     let source = fs::read_to_string(&input).map_err(|error| format!("failed to read {}: {error}", input.display()))?;
-    let ops = parse_flap_metadata(&input.to_string_lossy(), &source).map_err(|error| error.to_string())?;
+    let source_name = input.to_string_lossy();
+    let mut ops = parse_flap_metadata(&source_name, &source).map_err(|error| error.to_string())?;
+    let specializations = parse_specializations(&source_name, &source).map_err(|error| error.to_string())?;
+    let specialized_ops = derive_specialized_instructions(&ops, &specializations)?;
+    ops.extend(
+        specialized_ops
+            .into_iter()
+            .map(|specialization| specialization.definition),
+    );
     fs::write(&op_header, generate_op_header(&ops)?)
         .map_err(|error| format!("failed to write {}: {error}", op_header.display()))?;
     fs::write(&opcodes_header, generate_opcodes_header(&ops))

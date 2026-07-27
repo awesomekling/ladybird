@@ -407,12 +407,19 @@ impl Compiler {
             })
             .transpose()?;
 
-        let ops = flap_metadata::parse_flap_metadata(unit.source.name, unit.source.contents)
+        let mut ops = flap_metadata::parse_flap_metadata(unit.source.name, unit.source.contents)
             .map_err(|error| CompileError::from_flap_metadata_error(unit.source, error))?;
         let specializations = flap_metadata::parse_specializations(unit.source.name, unit.source.contents)
             .map_err(|error| CompileError::from_flap_metadata_error(unit.source, error))?;
         bytecode::validate_specializations(&ops, &specializations)
             .map_err(|message| CompileError::new(CompileStage::Semantic, None, message))?;
+        let specialized_ops = flap_metadata::derive_specialized_instructions(&ops, &specializations)
+            .map_err(|message| CompileError::new(CompileStage::Semantic, None, message))?;
+        ops.extend(
+            specialized_ops
+                .iter()
+                .map(|specialization| specialization.definition.clone()),
+        );
         // The interpreter dispatches on a single opcode byte, so a table beyond
         // 256 entries would have unreachable handlers.
         if ops.len() > DISPATCH_TABLE_SIZE {
@@ -429,6 +436,8 @@ impl Compiler {
 
         let mut ast = frontend::parser::parse(unit.source.name, unit.source.contents)
             .map_err(|diagnostic| CompileError::from_diagnostic(CompileStage::Parse, diagnostic))?;
+        frontend::specialize::expand_declarative_specializations(unit.source.name, &mut ast, &specialized_ops)
+            .map_err(|diagnostic| CompileError::from_diagnostic(CompileStage::Semantic, diagnostic))?;
         frontend::specialize::expand_handler_specializations(unit.source.name, &mut ast)
             .map_err(|diagnostic| CompileError::from_diagnostic(CompileStage::Semantic, diagnostic))?;
         let typed_program = if let Some(layouts) = &layouts {
@@ -717,6 +726,61 @@ handler CopyInlineInt32(dst: out Operand, value: Int32) = CopyInt32Value(dst, va
                 .expect("specialized handler emission should succeed");
 
             assert!(assembly.as_str().contains("handler_CopyInlineInt32"));
+        }
+    }
+
+    #[test]
+    fn compiles_declarative_single_and_fused_specializations() {
+        let source = r#"
+handler Copy(dst: out Operand, src: in Operand) {
+    store(dst, load(src));
+    dispatch_next;
+}
+handler Touch(src: in Operand) {
+    let value = load(src);
+    assert_nonzero(value);
+    dispatch_next;
+}
+specialize Copy(src: Int32);
+specialize Copy(dst: Operand'0) + Touch(src: Operand'0);
+specialize Copy(dst: Operand'0) + Touch(src: Operand'0) + Touch(src: Operand'0);
+"#;
+
+        for architecture in [Architecture::X86_64, Architecture::Aarch64] {
+            let compiler = compiler(architecture);
+            let prepared = compiler
+                .prepare(CompilationUnit {
+                    source: SourceInput {
+                        name: "test.flap",
+                        contents: source,
+                    },
+                    constants: Some(SourceInput {
+                        name: "layout.conf",
+                        contents: REQUIRED_LAYOUT,
+                    }),
+                })
+                .expect("declarative specializations should prepare");
+            assert!(prepared.handlers.iter().any(|handler| handler.name() == "CopySrcInt32"));
+            assert!(
+                prepared
+                    .handlers
+                    .iter()
+                    .any(|handler| handler.name() == "CopyDstSameOperand0TouchSrcSameOperand0")
+            );
+            assert!(
+                prepared
+                    .handlers
+                    .iter()
+                    .any(|handler| { handler.name() == "CopyDstSameOperand0TouchSrcSameOperand0TouchSrcSameOperand0" })
+            );
+
+            compiler
+                .lower(&prepared)
+                .and_then(|program| compiler.select(program))
+                .and_then(|program| compiler.allocate(program))
+                .and_then(|program| compiler.finalize(program))
+                .and_then(|program| compiler.emit_program(&program))
+                .expect("declarative specializations should compile");
         }
     }
 

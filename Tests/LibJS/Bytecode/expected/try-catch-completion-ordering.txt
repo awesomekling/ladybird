@@ -1,4 +1,4 @@
-$63c57e75 try-catch-completion-ordering.js:1:1
+$e7eb680d try-catch-completion-ordering.js:1:1
   Registers: 8
   Blocks:    3
   Locals:    e~0
@@ -19,8 +19,8 @@ block1:
   [  50] End value:reg7
 
 block2:
-  [  58] Mov dst:reg5, src:Undefined
-  [  68] Throw src:Null
+  [  58] MovSrcUndefined dst:reg5
+  [  60] Throw src:Null
 
 Exception handlers:
-  [  58 ..   70] => handler block1
+  [  58 ..   68] => handler block1

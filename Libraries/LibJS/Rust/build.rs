@@ -13,6 +13,8 @@ use flap_metadata::Field;
 use flap_metadata::InstructionDefinition;
 use flap_metadata::Specialization;
 use flap_metadata::SpecializationConstraint;
+use flap_metadata::SpecializedInstruction;
+use flap_metadata::SpecializedParameterBinding;
 use flap_metadata::compute_layouts;
 use flap_metadata::field_type_info;
 use flap_metadata::user_fields;
@@ -39,6 +41,7 @@ fn generate_rust_code(
     mut w: impl Write,
     ops: &[InstructionDefinition],
     specializations: &[Specialization],
+    specialized_ops: &[SpecializedInstruction],
 ) -> Result<(), Box<dyn std::error::Error>> {
     writeln!(w, "// @generated from Libraries/LibJS/Interpreter/interpreter.flap")?;
     writeln!(w, "// Do not edit manually.")?;
@@ -57,7 +60,174 @@ fn generate_rust_code(
     generate_instruction_is_terminator_from_opcode(&mut w, ops)?;
     generate_validate_instruction(&mut w, ops)?;
     generate_specialization_metadata(&mut w, specializations)?;
+    generate_specialization_selector(&mut w, ops, specializations, specialized_ops)?;
 
+    Ok(())
+}
+
+fn generate_specialization_selector(
+    mut w: impl Write,
+    ops: &[InstructionDefinition],
+    specializations: &[Specialization],
+    specialized_ops: &[SpecializedInstruction],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut order = (0..specializations.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| {
+        let specialization = &specializations[*index];
+        let constraint_count = specialization
+            .components
+            .iter()
+            .map(|component| component.parameters.len())
+            .sum::<usize>();
+        std::cmp::Reverse((specialization.components.len(), constraint_count))
+    });
+
+    writeln!(w, "#[allow(unused_variables)]")?;
+    writeln!(w, "#[allow(clippy::clone_on_copy)]")?;
+    writeln!(w, "#[allow(clippy::collapsible_if)]")?;
+    writeln!(w, "#[allow(clippy::redundant_clone)]")?;
+    writeln!(w, "#[allow(clippy::unnecessary_unwrap)]")?;
+    writeln!(
+        w,
+        "pub fn specialize_instruction_sequence<'a>(instructions: impl Iterator<Item = &'a Instruction> + Clone, constants: &[super::generator::ConstantValue]) -> Option<(Instruction, usize)> {{"
+    )?;
+    for index in order {
+        let specialization = &specializations[index];
+        let specialized_op = &specialized_ops[index];
+        let component_count = specialization.components.len();
+        writeln!(w, "    let mut candidate = instructions.clone();")?;
+        writeln!(w, "    if let (")?;
+        for (component_index, component) in specialization.components.iter().enumerate() {
+            let op = &component.bytecode;
+            let base_op = ops
+                .iter()
+                .find(|definition| definition.name == *op)
+                .expect("specialization bytecodes are validated");
+            let bindings = user_fields(base_op)
+                .iter()
+                .map(|field| rust_field_name(&field.name))
+                .map(|name| format!("{name}: c{component_index}_{name}"))
+                .collect::<Vec<_>>();
+            writeln!(w, "        Some(Instruction::{op} {{ {} }}),", bindings.join(", "))?;
+        }
+        writeln!(w, "    ) = (")?;
+        for _ in &specialization.components {
+            writeln!(w, "        candidate.next(),")?;
+        }
+        writeln!(w, "    ) {{")?;
+
+        let mut conditions = Vec::new();
+        let mut extracted_values = Vec::new();
+        for (component_index, component) in specialization.components.iter().enumerate() {
+            for parameter in &component.parameters {
+                let operand = format!("c{component_index}_{}", parameter.name);
+                match &parameter.constraint {
+                    SpecializationConstraint::Constant => {
+                        conditions.push(format!(
+                            "{operand}.is_constant() && constants.get({operand}.index() as usize).is_some()"
+                        ));
+                    }
+                    SpecializationConstraint::ConstantType(ty) if ty == "Int32" => {
+                        let value = format!("specialized_c{component_index}_{}", parameter.name);
+                        writeln!(
+                            w,
+                            "            let {value} = constants.get({operand}.index() as usize).and_then(|constant| match constant {{"
+                        )?;
+                        writeln!(
+                            w,
+                            "                super::generator::ConstantValue::Number(number) if number.fract() == 0.0 && *number >= i32::MIN as f64 && *number <= i32::MAX as f64 && number.to_bits() != (-0.0_f64).to_bits() => Some(*number as i32),"
+                        )?;
+                        writeln!(w, "                _ => None,")?;
+                        writeln!(w, "            }});")?;
+                        conditions.push(format!("{operand}.is_constant() && {value}.is_some()"));
+                        extracted_values.push(value);
+                    }
+                    SpecializationConstraint::ConstantType(ty) => {
+                        let pattern = match ty.as_str() {
+                            "Double" => {
+                                "super::generator::ConstantValue::Number(number) if number.fract() != 0.0 || *number < i32::MIN as f64 || *number > i32::MAX as f64 || number.to_bits() == (-0.0_f64).to_bits()"
+                            }
+                            "String" => "super::generator::ConstantValue::String(_)",
+                            "Boolean" => "super::generator::ConstantValue::Boolean(_)",
+                            "Null" => "super::generator::ConstantValue::Null",
+                            "Undefined" => "super::generator::ConstantValue::Undefined",
+                            _ => unreachable!("validated constant type"),
+                        };
+                        conditions.push(format!(
+                            "{operand}.is_constant() && matches!(constants.get({operand}.index() as usize), Some({pattern}))"
+                        ));
+                    }
+                    SpecializationConstraint::ExactInteger(value) => {
+                        conditions.push(format!(
+                            "{operand}.is_constant() && matches!(constants.get({operand}.index() as usize), Some(super::generator::ConstantValue::Number(number)) if number.to_bits() == ({}f64).to_bits())",
+                            *value as f64
+                        ));
+                    }
+                    SpecializationConstraint::SameOperand(_) => {}
+                }
+            }
+        }
+        let mut relationships = std::collections::HashMap::<u32, Vec<String>>::new();
+        for (component_index, component) in specialization.components.iter().enumerate() {
+            for parameter in &component.parameters {
+                if let SpecializationConstraint::SameOperand(relationship) = parameter.constraint {
+                    relationships
+                        .entry(relationship)
+                        .or_default()
+                        .push(format!("c{component_index}_{}", parameter.name));
+                }
+            }
+        }
+        for operands in relationships.values() {
+            for operand in &operands[1..] {
+                conditions.push(format!("{} == {operand}", operands[0]));
+            }
+        }
+
+        if !conditions.is_empty() {
+            writeln!(w, "            if {} {{", conditions.join(" && "))?;
+        }
+        for value in &extracted_values {
+            writeln!(w, "                let {value} = {value}.unwrap();")?;
+        }
+        writeln!(
+            w,
+            "                return Some((Instruction::{} {{",
+            specialized_op.definition.name
+        )?;
+        for field in &specialized_op.definition.fields {
+            let field_name = rust_field_name(&field.name);
+            let mut source = None;
+            for (component_index, component) in specialized_op.components.iter().enumerate() {
+                for (parameter, binding) in &component.parameters {
+                    if binding == &SpecializedParameterBinding::Field(field_name.clone()) {
+                        source = Some(if field.ty == "i32" {
+                            format!("specialized_c{component_index}_{parameter}")
+                        } else {
+                            format!("(*c{component_index}_{parameter}).clone()")
+                        });
+                        break;
+                    }
+                }
+                if source.is_some() {
+                    break;
+                }
+            }
+            writeln!(
+                w,
+                "                    {field_name}: {},",
+                source.expect("every specialized field has a source")
+            )?;
+        }
+        writeln!(w, "                }}, {component_count}));")?;
+        if !conditions.is_empty() {
+            writeln!(w, "            }}")?;
+        }
+        writeln!(w, "    }}")?;
+    }
+    writeln!(w, "    None")?;
+    writeln!(w, "}}")?;
+    writeln!(w)?;
     Ok(())
 }
 
@@ -1386,7 +1556,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .open(out_dir.join("instruction_generated.rs"))?;
     let content = fs::read_to_string(&def_path).expect("Failed to read interpreter.flap");
     let source_name = def_path.to_string_lossy();
-    let ops = flap_metadata::parse_flap_metadata(&source_name, &content)?;
+    let mut ops = flap_metadata::parse_flap_metadata(&source_name, &content)?;
     let specializations = flap_metadata::parse_specializations(&source_name, &content)?;
-    generate_rust_code(file, &ops, &specializations)
+    let specialized_ops = flap_metadata::derive_specialized_instructions(&ops, &specializations)?;
+    ops.extend(
+        specialized_ops
+            .iter()
+            .map(|specialization| specialization.definition.clone()),
+    );
+    generate_rust_code(file, &ops, &specializations, &specialized_ops)
 }
