@@ -196,6 +196,8 @@ define_machine_opcodes! {
         }
     } printing store_instruction(width);
     [Increment32Memory] => Self::Increment32Memory => [[A]] printing simple!("inc"; SimpleOperand::Resolved(0, "DWORD PTR "));
+    [LoadVector128] => Self::LoadVector128 => [[FR, A]] printing simple!("movdqu"; native(0), SimpleOperand::Resolved(1, "XMMWORD PTR "));
+    [StoreVector128] => Self::StoreVector128 => [[A, FR]] printing simple!("movdqu"; SimpleOperand::Resolved(0, "XMMWORD PTR "), native(1));
     [SignExtend32To64] => Self::SignExtend32To64 => [[R, R]] printing simple!("movsxd"; native(0), integer(1, IntegerWidth::U32));
     [Move64Register] => Self::Move64Register => [[R, R]] printing simple!("mov"; native(0), native(1));
     [MoveExecutionContext] => Self::MoveExecutionContext => [[R, R]];

@@ -7,7 +7,7 @@
 //! AArch64 machine instruction finalization.
 
 use super::Opcode;
-use super::{AddSubtractOperation, AddressIndexShift, ConditionFlags, FlagUpdate, MemoryAddressing};
+use super::{AddSubtractOperation, AddressIndexShift, ConditionFlags, FlagUpdate, ImmediateShift, MemoryAddressing};
 use crate::CompileError;
 use crate::frontend::layout::KnownLayoutConstant;
 use crate::low_ir::Label;
@@ -25,7 +25,8 @@ use crate::target::finalize_support::{
 };
 use crate::target::finalize_support::{memory_branch, push_plain_move};
 use crate::target::ir::{
-    AllocatedOperand, MachineInstruction, MachineMemoryAddress, MachineOpcode, MachineOperand, RuntimeConstants,
+    AllocatedOperand, MachineCondition, MachineInstruction, MachineMemoryAddress, MachineOpcode, MachineOperand,
+    RuntimeConstants,
 };
 use crate::target::machine_verify::emit_machine_instructions as emit;
 use crate::target::registers::{
@@ -1621,6 +1622,65 @@ impl Backend for Aarch64Backend {
             [value_scratch, address_scratch],
         )
         .map_err(|error| memory_address_compile_error(emit.handler, error))
+    }
+
+    fn finalize_copy_values(
+        &self,
+        emit: &mut Emit<'_>,
+        operands: &[AllocatedOperand],
+    ) -> Result<(), CompileError> {
+        use crate::target::registers::aarch64::{X9, X10, X11, X12, X13};
+        use crate::target::finalize_support::{COPY_VALUES_GRANULARITY, VALUE_SIZE, VALUES_PER_PAIR};
+
+        let [destination, source, count] = operands.physical_registers();
+        let loop_label = emit.unique_label("copy_values");
+
+        // A do-while loop copying COPY_VALUES_GRANULARITY Values per iteration.
+        // Both regions are padded to that granularity, so overshooting the count
+        // is harmless and the loop needs no tail. LDP and STP only address a
+        // base plus a scaled immediate, so the cursors advance by hand.
+        emit!(emit.output, Aarch64;
+            Opcode::MoveRegister(IntegerWidth::U64) => [register X9, register source];
+            Opcode::MoveRegister(IntegerWidth::U64) => [register X10, register destination];
+            Opcode::MoveImmediateDecimal(IntegerWidth::U64) => [register X11, immediate 0];
+            Opcode::Label => [label loop_label.clone()];
+        );
+        for chunk in 0..COPY_VALUES_GRANULARITY / VALUES_PER_PAIR {
+            let displacement = (chunk * VALUES_PER_PAIR * VALUE_SIZE) as i64;
+            let address = |base| MachineMemoryAddress {
+                base,
+                index: None,
+                scale: None,
+                displacement: (displacement != 0).then_some(displacement),
+            };
+            emit!(emit.output, Aarch64;
+                Opcode::LoadPair(PairWidth::DoubleWord)
+                    => [register X12, register X13, address address(X9)];
+                Opcode::StorePair(PairWidth::DoubleWord)
+                    => [address address(X10), register X12, register X13];
+            );
+        }
+        let stride = (COPY_VALUES_GRANULARITY * VALUE_SIZE) as i64;
+        emit!(emit.output, Aarch64;
+            Opcode::AddSubtractImmediate {
+                operation: AddSubtractOperation::Add,
+                shift: ImmediateShift::None,
+                flags: FlagUpdate::Preserve,
+            } => [register X9, register X9, immediate stride];
+            Opcode::AddSubtractImmediate {
+                operation: AddSubtractOperation::Add,
+                shift: ImmediateShift::None,
+                flags: FlagUpdate::Preserve,
+            } => [register X10, register X10, immediate stride];
+            Opcode::AddSubtractImmediate {
+                operation: AddSubtractOperation::Add,
+                shift: ImmediateShift::None,
+                flags: FlagUpdate::Preserve,
+            } => [register X11, register X11, immediate COPY_VALUES_GRANULARITY as i64];
+            Opcode::CompareRegister(IntegerWidth::U64) => [register X11, register count];
+            Opcode::BranchCondition(MachineCondition::UnsignedLess) => [label loop_label];
+        );
+        Ok(())
     }
 
     fn finalize_indexed_offset_store(&self, emit: &mut Emit<'_>, operands: &[AllocatedOperand]) {

@@ -359,6 +359,7 @@ fn finalize_instruction(
         }
         Operation::Store64IndexedOffset => backend.finalize_indexed_offset_store(emit, operands),
         Operation::Increment32Memory => backend.finalize_memory_increment(emit, operands)?,
+        Operation::CopyValues => backend.finalize_copy_values(emit, operands)?,
         Operation::Memory(MemoryOperation::Load { width, signed, .. }) => {
             backend.finalize_scalar_load(emit, opcode, width, signed, operands)?;
         }

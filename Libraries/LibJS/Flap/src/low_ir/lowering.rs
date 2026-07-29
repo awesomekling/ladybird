@@ -3142,6 +3142,7 @@ fn low_level_machine_operation(operation: LowLevelOperation) -> MachineOperation
         LowLevelOperation::LoadEffectiveAddress => MachineOperation::LoadEffectiveAddress,
         LowLevelOperation::LoadVm => MachineOperation::LoadVm,
         LowLevelOperation::Increment32Memory => MachineOperation::Increment32Memory,
+        LowLevelOperation::CopyValues => MachineOperation::CopyValues,
         LowLevelOperation::ClearBit => MachineOperation::ClearBit,
         LowLevelOperation::ToggleBit => MachineOperation::ToggleBit,
         LowLevelOperation::Negate => MachineOperation::Negate,

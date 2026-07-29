@@ -605,6 +605,10 @@ define_named_intrinsic_enum! {
         BitwiseNotInt32 => "bitwise_not_i32" from [];
         Add => "add" signatures [signature!([InOut AnyGpr, In AnyGpr])];
         Subtract => "sub" signatures [signature!([InOut AnyGpr, In AnyGpr])];
+        // Copies `count` Values from a source to a destination, rounding the
+        // count up to `COPY_VALUES_GRANULARITY`. Both regions must be padded
+        // out to that granularity.
+        CopyValues => "copy_values" signatures [signature!([In AnyGpr, In AnyGpr, In AnyGpr])];
     }
 }
 
@@ -1054,7 +1058,7 @@ impl Intrinsic {
                 ..IntrinsicEffects::PURE
             },
             Self::Control(_) => IntrinsicEffects::UNKNOWN,
-            Self::LowLevel(LowLevelOperation::Increment32Memory) => IntrinsicEffects {
+            Self::LowLevel(LowLevelOperation::Increment32Memory | LowLevelOperation::CopyValues) => IntrinsicEffects {
                 memory: ModRef::ReadWrite,
                 ..IntrinsicEffects::PURE
             },

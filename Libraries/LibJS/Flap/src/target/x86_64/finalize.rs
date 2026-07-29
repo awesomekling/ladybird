@@ -23,10 +23,11 @@ use crate::target::finalize_support::{
     required_runtime_constant, verified_label, verified_register,
 };
 use crate::target::finalize_support::{memory_branch, push_plain_move};
-use crate::target::ir::{AllocatedOperand, MachineInstruction, MachineMemoryAddress, MachineOpcode, MachineOperand};
+use crate::target::ir::{AllocatedOperand, MachineCondition, MachineInstruction, MachineMemoryAddress, MachineOpcode, MachineOperand};
 use crate::target::machine_verify::emit_machine_instructions as emit;
 use crate::target::registers::{PhysicalRegister, x86_64::R15};
 use crate::{CompileError, ObjectFormat};
+
 
 fn machine_instruction(opcode: Opcode, operands: Vec<MachineOperand>) -> MachineInstruction {
     MachineInstruction {
@@ -1193,6 +1194,47 @@ impl Backend for X86_64Backend {
             StoreSource::Register(source),
             None,
         );
+    }
+
+    fn finalize_copy_values(
+        &self,
+        emit: &mut Emit<'_>,
+        operands: &[AllocatedOperand],
+    ) -> Result<(), CompileError> {
+        use crate::target::registers::x86_64::{R11, XMM3};
+        use crate::target::finalize_support::{COPY_VALUES_GRANULARITY, VALUE_SIZE, VALUES_PER_VECTOR};
+        use crate::target::x86_64::AluOperation;
+
+        let [destination, source, count] = operands.physical_registers();
+        let loop_label = emit.unique_label("copy_values");
+
+        // A do-while loop copying COPY_VALUES_GRANULARITY Values per iteration.
+        // Both regions are padded to that granularity, so overshooting the count
+        // is harmless and the loop needs no tail.
+        emit!(emit.output, X86_64;
+            Opcode::Move32Immediate => [register R11, immediate 0];
+            Opcode::Label => [label loop_label.clone()];
+        );
+        for chunk in 0..COPY_VALUES_GRANULARITY / VALUES_PER_VECTOR {
+            let displacement = (chunk * VALUES_PER_VECTOR * VALUE_SIZE) as i64;
+            let address = |base| MachineMemoryAddress {
+                base,
+                index: Some(R11),
+                scale: Some(VALUE_SIZE as i64),
+                displacement: (displacement != 0).then_some(displacement),
+            };
+            emit!(emit.output, X86_64;
+                Opcode::LoadVector128 => [register XMM3, address address(source)];
+                Opcode::StoreVector128 => [address address(destination), register XMM3];
+            );
+        }
+        emit!(emit.output, X86_64;
+            Opcode::AluImmediate { operation: AluOperation::Add, width: IntegerWidth::U64 }
+                => [register R11, immediate COPY_VALUES_GRANULARITY as i64];
+            Opcode::CompareRegister(IntegerWidth::U64) => [register R11, register count];
+            Opcode::JumpCondition(MachineCondition::UnsignedLess) => [label loop_label];
+        );
+        Ok(())
     }
 
     fn finalize_memory_increment(

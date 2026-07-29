@@ -187,6 +187,8 @@ pub(crate) trait Backend: Sync {
 
     fn finalize_indexed_offset_store(&self, emit: &mut Emit<'_>, operands: &[AllocatedOperand]);
 
+    fn finalize_copy_values(&self, emit: &mut Emit<'_>, operands: &[AllocatedOperand]) -> Result<(), CompileError>;
+
     fn finalize_memory_increment(&self, emit: &mut Emit<'_>, operands: &[AllocatedOperand])
     -> Result<(), CompileError>;
 

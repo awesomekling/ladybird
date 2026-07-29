@@ -151,6 +151,7 @@ pub(crate) enum Operation {
     Store64IndexedOffset,
     StorePairIndexed(PairWidth),
     Increment32Memory,
+    CopyValues,
     LoadEffectiveAddress,
     Move(IntegerWidth),
     IntegerBinary {
@@ -731,7 +732,7 @@ const fn scalar_compare_branch() -> InstructionDescription {
 }
 
 use OperandKind::*;
-use aarch64::{D16, X0, X1, X9, X10};
+use aarch64::{D16, X0, X1, X9, X10, X11, X12, X13};
 use x86_64::{R11, RAX, RCX, RDX, XMM3};
 
 const X86_64_LARGE_IMMEDIATE_STORE_DESCRIPTION: InstructionDescription =
@@ -834,6 +835,13 @@ fn lookup_operation(operation: Operation) -> &'static InstructionDescription {
             &const { plain(&[GprIn, GprIn, Imm, GprIn, GprIn]).pre_scratches(&[], &[X10]) }
         }
         Operation::Increment32Memory => &const { plain(&[Memory]).pre_scratches(&[], &[X9, X10]) },
+        Operation::CopyValues => {
+            &const {
+                plain(&[GprIn, GprIn, GprIn])
+                    .x86_64(spec().scratches(&[R11, XMM3]))
+                    .aarch64(spec().scratches(&[X9, X10, X11, X12, X13]))
+            }
+        }
         Operation::LoadEffectiveAddress => &const { plain(&[GprOut, GprInOrMemory]).pre_scratches(&[], &[X9]) },
         Operation::Move(U64) => {
             &const {
