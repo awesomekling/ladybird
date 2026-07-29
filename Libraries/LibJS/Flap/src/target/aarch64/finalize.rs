@@ -1630,7 +1630,13 @@ impl Backend for Aarch64Backend {
         operands: &[AllocatedOperand],
     ) -> Result<(), CompileError> {
         use crate::target::registers::aarch64::{X9, X10, X11, X12, X13};
-        use crate::target::finalize_support::{COPY_VALUES_GRANULARITY, VALUE_SIZE, VALUES_PER_PAIR};
+        use crate::target::finalize_support::{VALUE_SIZE, VALUES_PER_PAIR};
+
+        // NB: The granularity both regions are padded to is owned by the
+        //     layout, so this loop and the padding can never disagree.
+        let granularity = usize::try_from(emit.constant(KnownLayoutConstant::FrameCopyGranuleBytes)?)
+            .map_err(|_| emit.error::<()>("frame copy granule does not fit").unwrap_err())?
+            / VALUE_SIZE;
 
         let [destination, source, count] = operands.physical_registers();
         let loop_label = emit.unique_label("copy_values");
@@ -1645,7 +1651,7 @@ impl Backend for Aarch64Backend {
             Opcode::MoveImmediateDecimal(IntegerWidth::U64) => [register X11, immediate 0];
             Opcode::Label => [label loop_label.clone()];
         );
-        for chunk in 0..COPY_VALUES_GRANULARITY / VALUES_PER_PAIR {
+        for chunk in 0..granularity / VALUES_PER_PAIR {
             let displacement = (chunk * VALUES_PER_PAIR * VALUE_SIZE) as i64;
             let address = |base| MachineMemoryAddress {
                 base,
@@ -1660,7 +1666,7 @@ impl Backend for Aarch64Backend {
                     => [address address(X10), register X12, register X13];
             );
         }
-        let stride = (COPY_VALUES_GRANULARITY * VALUE_SIZE) as i64;
+        let stride = (granularity * VALUE_SIZE) as i64;
         emit!(emit.output, Aarch64;
             Opcode::AddSubtractImmediate {
                 operation: AddSubtractOperation::Add,
@@ -1676,7 +1682,7 @@ impl Backend for Aarch64Backend {
                 operation: AddSubtractOperation::Add,
                 shift: ImmediateShift::None,
                 flags: FlagUpdate::Preserve,
-            } => [register X11, register X11, immediate COPY_VALUES_GRANULARITY as i64];
+            } => [register X11, register X11, immediate granularity as i64];
             Opcode::CompareRegister(IntegerWidth::U64) => [register X11, register count];
             Opcode::BranchCondition(MachineCondition::UnsignedLess) => [label loop_label];
         );

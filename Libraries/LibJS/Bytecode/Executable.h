@@ -329,7 +329,9 @@ public:
     //     pass replaces initializing the registers and locals and then copying
     //     the constants in separately. It is padded out to a multiple of
     //     frame_template_copy_granularity so the interpreter can copy it a
-    //     whole granule at a time without a tail loop.
+    //     whole granule at a time without a tail loop. The interpreter reads
+    //     this same value out of the generated layout, so the padding here and
+    //     the copy there cannot disagree.
     static constexpr u32 frame_template_copy_granularity = 8;
     Vector<Value> frame_template;
 

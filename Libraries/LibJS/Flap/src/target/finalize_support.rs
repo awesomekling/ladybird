@@ -21,9 +21,6 @@ use crate::{CompileError, CompileOptions, CompileStage, ObjectFormat};
 /// runtime constants, handler name and target options, so that the two
 /// architectures present the same signature for every operation even when
 /// only one of them needs a given piece of context.
-/// Values copied per iteration of `copy_values`. Source and destination must be
-/// padded out to this many Values so the loop never needs a tail.
-pub(crate) const COPY_VALUES_GRANULARITY: usize = 8;
 pub(crate) const VALUE_SIZE: usize = 8;
 /// Values moved by one x86-64 128-bit vector move.
 pub(crate) const VALUES_PER_VECTOR: usize = 2;

@@ -1202,7 +1202,13 @@ impl Backend for X86_64Backend {
         operands: &[AllocatedOperand],
     ) -> Result<(), CompileError> {
         use crate::target::registers::x86_64::{R11, XMM3};
-        use crate::target::finalize_support::{COPY_VALUES_GRANULARITY, VALUE_SIZE, VALUES_PER_VECTOR};
+        use crate::target::finalize_support::{VALUE_SIZE, VALUES_PER_VECTOR};
+
+        // NB: The granularity both regions are padded to is owned by the
+        //     layout, so this loop and the padding can never disagree.
+        let granularity = usize::try_from(emit.constant(KnownLayoutConstant::FrameCopyGranuleBytes)?)
+            .map_err(|_| emit.error::<()>("frame copy granule does not fit").unwrap_err())?
+            / VALUE_SIZE;
         use crate::target::x86_64::AluOperation;
 
         let [destination, source, count] = operands.physical_registers();
@@ -1215,7 +1221,7 @@ impl Backend for X86_64Backend {
             Opcode::Move32Immediate => [register R11, immediate 0];
             Opcode::Label => [label loop_label.clone()];
         );
-        for chunk in 0..COPY_VALUES_GRANULARITY / VALUES_PER_VECTOR {
+        for chunk in 0..granularity / VALUES_PER_VECTOR {
             let displacement = (chunk * VALUES_PER_VECTOR * VALUE_SIZE) as i64;
             let address = |base| MachineMemoryAddress {
                 base,
@@ -1230,7 +1236,7 @@ impl Backend for X86_64Backend {
         }
         emit!(emit.output, X86_64;
             Opcode::AluImmediate { operation: AluOperation::Add, width: IntegerWidth::U64 }
-                => [register R11, immediate COPY_VALUES_GRANULARITY as i64];
+                => [register R11, immediate granularity as i64];
             Opcode::CompareRegister(IntegerWidth::U64) => [register R11, register count];
             Opcode::JumpCondition(MachineCondition::UnsignedLess) => [label loop_label];
         );

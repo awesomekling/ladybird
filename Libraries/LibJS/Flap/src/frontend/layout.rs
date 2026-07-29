@@ -67,6 +67,7 @@ define_known_layout_constants! {
     ExecutionContextProgramCounter => "EXECUTION_CONTEXT_PROGRAM_COUNTER";
     ExecutableBytecodeData => "EXECUTABLE_BYTECODE_DATA";
     SizeOfExecutionContext => "SIZEOF_EXECUTION_CONTEXT";
+    FrameCopyGranuleBytes => "FRAME_COPY_GRANULE_BYTES";
     CanonicalNanBits => "CANON_NAN_BITS";
 }
 
