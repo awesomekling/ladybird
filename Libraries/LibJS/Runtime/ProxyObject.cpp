@@ -882,9 +882,9 @@ void ProxyObject::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_handler);
 }
 
-void ProxyObject::get_stack_frame_info(size_t& registers_and_locals_count, ReadonlySpan<Value>& constants, size_t& argument_count)
+void ProxyObject::get_stack_frame_info(ReadonlySpan<Value>& frame_template, size_t& argument_count)
 {
-    as<FunctionObject>(*m_target).get_stack_frame_info(registers_and_locals_count, constants, argument_count);
+    as<FunctionObject>(*m_target).get_stack_frame_info(frame_template, argument_count);
 }
 
 Utf16String ProxyObject::name_for_call_stack() const

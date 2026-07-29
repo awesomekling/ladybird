@@ -1423,8 +1423,8 @@ extern "C" void* rust_create_executable(
     // Set layout indices
     executable->local_index_base = data->number_of_registers;
     executable->argument_index_base = data->number_of_registers + data->local_variable_count + data->constants_count;
-    executable->registers_and_locals_count = data->number_of_registers + data->local_variable_count;
-    executable->registers_and_locals_and_constants_count = data->number_of_registers + data->local_variable_count + data->constants_count;
+    executable->finalize_frame_template(data->number_of_registers + data->local_variable_count);
+    VERIFY(executable->registers_and_locals_and_constants_count == data->number_of_registers + data->local_variable_count + data->constants_count);
     executable->number_of_arguments = data->number_of_arguments;
 
     // Set length identifier (for GetLength optimization)

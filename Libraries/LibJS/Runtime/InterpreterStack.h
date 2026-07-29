@@ -26,9 +26,9 @@ public:
 
     [[nodiscard]] ALWAYS_INLINE void* top() const { return m_top; }
 
-    [[nodiscard]] ALWAYS_INLINE ExecutionContext* allocate(u32 registers_and_locals_count, ReadonlySpan<Value> constants, u32 arguments_count)
+    [[nodiscard]] ALWAYS_INLINE ExecutionContext* allocate(ReadonlySpan<Value> frame_template, u32 arguments_count)
     {
-        auto tail_count = registers_and_locals_count + constants.size() + arguments_count;
+        auto tail_count = frame_template.size() + arguments_count;
         auto size = sizeof(ExecutionContext) + tail_count * sizeof(Value);
 
         // Align up to alignof(ExecutionContext).
@@ -38,7 +38,7 @@ public:
         if (new_top > m_limit) [[unlikely]]
             return nullptr;
 
-        auto* result = new (m_top) ExecutionContext(registers_and_locals_count, constants, arguments_count);
+        auto* result = new (m_top) ExecutionContext(frame_template, arguments_count);
         m_top = new_top;
         return result;
     }

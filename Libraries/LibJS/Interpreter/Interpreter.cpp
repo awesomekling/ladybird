@@ -72,17 +72,14 @@ ThrowCompletionOr<Value> VM::run(Script& script_record, GC::Ptr<Environment> lex
     if (executable && should_dump_bytecode())
         executable->dump();
 
-    u32 registers_and_locals_count = 0;
-    ReadonlySpan<Value> constants;
-    if (executable) {
-        registers_and_locals_count = executable->registers_and_locals_count;
-        constants = executable->constants;
-    }
+    ReadonlySpan<Value> frame_template;
+    if (executable)
+        frame_template = executable->frame_image;
 
     // 2. Let scriptContext be a new ECMAScript code execution context.
     auto& stack = vm.interpreter_stack();
     auto* stack_mark = stack.top();
-    auto* script_context = stack.allocate(registers_and_locals_count, constants, 0);
+    auto* script_context = stack.allocate(frame_template, 0);
     if (!script_context) [[unlikely]]
         return vm.throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
     ScopeGuard deallocate_guard = [&stack, stack_mark] { stack.deallocate(stack_mark); };
@@ -206,10 +203,9 @@ ExecutionContext* VM::push_inline_frame(
     auto& stack = vm().interpreter_stack();
 
     u32 insn_argument_count = arguments.size();
-    size_t registers_and_locals_count = callee_executable.registers_and_locals_count;
     size_t argument_count = max(insn_argument_count, static_cast<u32>(callee_function.formal_parameter_count()));
 
-    auto* callee_context = stack.allocate(registers_and_locals_count, callee_executable.constants, argument_count);
+    auto* callee_context = stack.allocate(callee_executable.frame_image, argument_count);
     if (!callee_context) [[unlikely]]
         return nullptr;
 

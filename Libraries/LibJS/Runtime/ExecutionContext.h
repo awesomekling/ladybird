@@ -24,7 +24,7 @@ using ScriptOrModule = Variant<Empty, GC::Ref<Script>, GC::Ref<Module>>;
 
 // 9.4 Execution Contexts, https://tc39.es/ecma262/#sec-execution-contexts
 struct JS_API ExecutionContext {
-    static NonnullOwnPtr<ExecutionContext> create(u32 registers_and_locals_count, ReadonlySpan<Value> constants, u32 arguments_count);
+    static NonnullOwnPtr<ExecutionContext> create(ReadonlySpan<Value> frame_template, u32 arguments_count);
     [[nodiscard]] NonnullOwnPtr<ExecutionContext> copy() const;
 
     ~ExecutionContext() = default;
@@ -35,17 +35,16 @@ private:
     friend class ExecutionContextAllocator;
 
 public:
-    // NB: The layout is: [registers | locals | constants | arguments]
-    ALWAYS_INLINE ExecutionContext(u32 registers_and_locals_count, ReadonlySpan<Value> constants, u32 arguments_count_)
+    // NB: The layout is: [registers | locals | constants | arguments], and
+    //     frame_template is a prebuilt image of everything but the arguments.
+    ALWAYS_INLINE ExecutionContext(ReadonlySpan<Value> frame_template, u32 arguments_count_)
     {
-        VERIFY(!Checked<u32>::addition_would_overflow(registers_and_locals_count, constants.size(), arguments_count_));
-        registers_and_constants_and_locals_and_arguments_count = registers_and_locals_count + constants.size() + arguments_count_;
+        VERIFY(!Checked<u32>::addition_would_overflow(static_cast<u32>(frame_template.size()), arguments_count_));
+        registers_and_constants_and_locals_and_arguments_count = frame_template.size() + arguments_count_;
         argument_count = arguments_count_;
         auto* values = registers_and_constants_and_locals_and_arguments();
-        for (size_t i = 0; i < registers_and_locals_count; ++i)
-            values[i] = js_special_empty_value();
-        for (size_t i = 0; i < constants.size(); ++i)
-            values[registers_and_locals_count + i] = constants[i];
+        for (size_t i = 0; i < frame_template.size(); ++i)
+            values[i] = frame_template[i];
     }
 
     void operator delete(void* ptr);

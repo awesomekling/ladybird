@@ -114,9 +114,9 @@ size_t BoundFunction::external_memory_size() const
     return vector_external_memory_size(m_bound_arguments);
 }
 
-void BoundFunction::get_stack_frame_info(size_t& registers_and_locals_count, ReadonlySpan<Value>& constants, size_t& argument_count)
+void BoundFunction::get_stack_frame_info(ReadonlySpan<Value>& frame_template, size_t& argument_count)
 {
-    m_bound_target_function->get_stack_frame_info(registers_and_locals_count, constants, argument_count);
+    m_bound_target_function->get_stack_frame_info(frame_template, argument_count);
     argument_count += m_bound_arguments.size();
 }
 

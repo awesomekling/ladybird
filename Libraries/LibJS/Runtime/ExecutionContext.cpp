@@ -17,9 +17,9 @@ namespace JS {
 
 class ExecutionContextAllocator {
 public:
-    NonnullOwnPtr<ExecutionContext> allocate(u32 registers_and_locals_count, ReadonlySpan<Value> constants, u32 arguments_count)
+    NonnullOwnPtr<ExecutionContext> allocate(ReadonlySpan<Value> frame_template, u32 arguments_count)
     {
-        auto tail_size = registers_and_locals_count + constants.size() + arguments_count;
+        auto tail_size = frame_template.size() + arguments_count;
 
         void* slot = nullptr;
         if (tail_size <= 4 && !m_execution_contexts_with_4_tail.is_empty()) {
@@ -37,7 +37,7 @@ public:
         }
 
         if (slot) {
-            return adopt_own(*new (slot) ExecutionContext(registers_and_locals_count, constants, arguments_count));
+            return adopt_own(*new (slot) ExecutionContext(frame_template, arguments_count));
         }
 
         auto tail_allocation_size = [tail_size] -> u32 {
@@ -57,7 +57,7 @@ public:
         };
 
         auto* memory = ::operator new(sizeof(ExecutionContext) + tail_allocation_size() * sizeof(Value));
-        return adopt_own(*::new (memory) ExecutionContext(registers_and_locals_count, constants, arguments_count));
+        return adopt_own(*::new (memory) ExecutionContext(frame_template, arguments_count));
     }
     void deallocate(void* ptr, u32 tail_size)
     {
@@ -89,9 +89,9 @@ private:
 
 static NeverDestroyed<ExecutionContextAllocator> s_execution_context_allocator;
 
-NonnullOwnPtr<ExecutionContext> ExecutionContext::create(u32 registers_and_locals_count, ReadonlySpan<Value> constants, u32 arguments_count)
+NonnullOwnPtr<ExecutionContext> ExecutionContext::create(ReadonlySpan<Value> frame_template, u32 arguments_count)
 {
-    return s_execution_context_allocator->allocate(registers_and_locals_count, constants, arguments_count);
+    return s_execution_context_allocator->allocate(frame_template, arguments_count);
 }
 
 void ExecutionContext::operator delete(void* ptr)
@@ -102,9 +102,10 @@ void ExecutionContext::operator delete(void* ptr)
 
 NonnullOwnPtr<ExecutionContext> ExecutionContext::copy() const
 {
-    // NB: We pass the entire non-argument count as registers_and_locals_count with 0 constants.
-    //     This means all slots get initialized to empty, but we immediately overwrite them below.
-    auto copy = create(registers_and_constants_and_locals_and_arguments_count - argument_count, ReadonlySpan<Value> {}, argument_count);
+    // NB: We hand our own non-argument slots over as the template, so the new
+    //     frame starts out as a verbatim copy of ours.
+    auto non_argument_count = registers_and_constants_and_locals_and_arguments_count - argument_count;
+    auto copy = create({ registers_and_constants_and_locals_and_arguments(), non_argument_count }, argument_count);
     copy->function = function;
     copy->realm = realm;
     copy->script_or_module = script_or_module;
@@ -119,9 +120,9 @@ NonnullOwnPtr<ExecutionContext> ExecutionContext::copy() const
     copy->this_value = this_value;
     copy->executable = executable;
     copy->passed_argument_count = passed_argument_count;
-    copy->registers_and_constants_and_locals_and_arguments_count = registers_and_constants_and_locals_and_arguments_count;
-    for (size_t i = 0; i < registers_and_constants_and_locals_and_arguments_count; ++i)
-        copy->registers_and_constants_and_locals_and_arguments()[i] = registers_and_constants_and_locals_and_arguments()[i];
+    // NB: The template copy above already brought over everything but the arguments.
+    for (size_t i = 0; i < argument_count; ++i)
+        copy->arguments_data()[i] = arguments_data()[i];
     copy->argument_count = argument_count;
     return copy;
 }

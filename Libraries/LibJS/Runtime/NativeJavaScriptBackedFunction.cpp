@@ -61,11 +61,10 @@ void NativeJavaScriptBackedFunction::visit_edges(Visitor& visitor)
     visitor.visit(m_shared_function_instance_data);
 }
 
-void NativeJavaScriptBackedFunction::get_stack_frame_info(size_t& registers_and_locals_count, ReadonlySpan<Value>& constants, size_t& argument_count)
+void NativeJavaScriptBackedFunction::get_stack_frame_info(ReadonlySpan<Value>& frame_template, size_t& argument_count)
 {
     auto& bytecode_executable = this->bytecode_executable();
-    registers_and_locals_count = bytecode_executable.registers_and_locals_count;
-    constants = bytecode_executable.constants;
+    frame_template = bytecode_executable.frame_image;
     argument_count = max(argument_count, m_shared_function_instance_data->m_function_length);
 }
 

@@ -304,7 +304,21 @@ public:
     NonnullOwnPtr<IdentifierTable> identifier_table;
     NonnullOwnPtr<PropertyKeyTable> property_key_table;
     NonnullOwnPtr<RegexTable> regex_table;
-    Vector<Value> constants;
+
+    // NB: The image copied into every new frame's slot area, laid out as
+    //     [empty x registers_and_locals_count | constants]. Copying it in one
+    //     pass replaces initializing the registers and locals and then copying
+    //     the constants in separately. It is padded out to a multiple of
+    //     frame_template_copy_granularity so the interpreter can copy it a
+    //     whole granule at a time without a tail loop.
+    static constexpr u32 frame_template_copy_granularity = 8;
+    Vector<Value> frame_template;
+
+    // The exact prefix of frame_template that a frame is built from.
+    ReadonlySpan<Value> frame_image;
+
+    // A view of the constants at the tail of frame_image.
+    ReadonlySpan<Value> constants;
 
     Vector<GC::Ptr<SharedFunctionInstanceData>> shared_function_data;
     Vector<ClassBlueprint> class_blueprints;
@@ -316,8 +330,11 @@ public:
 
     u32 registers_and_locals_count { 0 };
     u32 registers_and_locals_and_constants_count { 0 };
-    size_t asm_constants_size { 0 };
-    Value const* asm_constants_data { nullptr };
+    Value const* asm_frame_template_data { nullptr };
+
+    // Prefixes frame_template with the callee's register and local slots, which
+    // are only known once the bytecode has been fully decoded.
+    void finalize_frame_template(u32 registers_and_locals_count);
 
     struct ExceptionHandlers {
         size_t start_offset;

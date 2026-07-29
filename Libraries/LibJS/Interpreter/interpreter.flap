@@ -2398,17 +2398,18 @@ handler Call(
     }
     let formal_count: u32 = max(u32(metadata), load(argument_count));
     # Construct an interpreter frame for an inline ECMAScript call.
-    let registers_and_locals_count = executable_pointer.registers_and_locals_count;
     let callee_slot_count = executable_pointer.registers_and_locals_and_constants_count;
     assert_nonzero(executable_pointer);
-    assert_ge_unsigned(callee_slot_count, registers_and_locals_count);
-    let maximum_slot_count: u32 = 4294967295;
+    # NB: The frame image is copied a whole granule at a time, so the frame
+    #     carries a granule of slack past its last argument to absorb the
+    #     overshoot, and the template is padded to match.
+    let maximum_slot_count: u32 = 4294967288;
     let available_argument_slot_count: u32 = maximum_slot_count - callee_slot_count;
     guard available_argument_slot_count >= formal_count else slow;
     let frame_slot_count: u32 = callee_slot_count + formal_count;
     # FIXME: Keep frame size materialization before the VM loads until nested
     #        arithmetic preserves that independent scheduling opportunity.
-    let frame_size: u64 = alias(frame_slot_count) * SIZEOF_VALUE + SIZEOF_EXECUTION_CONTEXT;
+    let frame_size: u64 = alias(frame_slot_count) * SIZEOF_VALUE + FRAME_COPY_OVERSHOOT_BYTES + SIZEOF_EXECUTION_CONTEXT;
     let stack_vm = current_vm();
     let frame_base = stack_vm.interpreter_stack_top;
     let stack_limit = stack_vm.interpreter_stack_limit;
@@ -2433,12 +2434,6 @@ handler Call(
     frame.private_environment = private_environment;
     frame.this_value = receiver;
     frame.executable = executable_pointer;
-    let empty_tag: Value = Value<Empty>;
-    frame.accumulator = empty_tag;
-    frame.exception = empty_tag;
-    frame.this_value_register = receiver;
-    frame.return_value = empty_tag;
-    frame.saved_lexical_environment = empty_tag;
     frame.script_or_module = ecmascript_function.script_or_module;
     frame.program_counter = 0;
     frame.skip_when_determining_incumbent_counter = 0;
@@ -2450,31 +2445,18 @@ handler Call(
     let [_, return_pc, return_destination] = call_site_info(length, dst);
     frame.caller_return_pc = return_pc;
     frame.caller_dst_raw = return_destination;
-    let slot_index: u64 = RESERVED_REGISTER_COUNT;
-    while slot_index + 1 < alias(registers_and_locals_count) {
-        let next_slot_index = slot_index + 1;
-        frame_values[slot_index] = empty_tag;
-        frame_values[next_slot_index] = empty_tag;
-        slot_index = slot_index + 2;
-    }
-    if slot_index < alias(registers_and_locals_count) {
-        frame_values[slot_index] = empty_tag;
-    }
-    let executable = frame.executable;
-    assert_nonzero(executable);
-    let constant_count = executable.asm_constants_size;
-    let constant_data = executable.asm_constants_data;
-    let write_index: u64 = alias(registers_and_locals_count);
-    let constant_index: u64 = 0;
-    while constant_index < alias(constant_count) {
-        assert_nonzero(constant_data);
-        frame_values[write_index] = constant_data[constant_index];
-        constant_index = constant_index + 1;
-        write_index = write_index + 1;
-    }
+    # Materialize the callee's slots from the executable's frame template, which
+    # holds the empty registers and locals followed by the constants.
+    let copy_executable = frame.executable;
+    assert_nonzero(copy_executable);
+    let template_data = copy_executable.asm_frame_template_data;
+    assert_nonzero(template_data);
+    let copy_count: u64 = alias(callee_slot_count);
+    copy_values(frame_values, template_data, copy_count);
+    frame.this_value_register = receiver;
+    let write_index: u64 = alias(callee_slot_count);
     let actual_argument_count = load(argument_count);
     assert_ge_unsigned(formal_count, actual_argument_count);
-    write_index = alias(registers_and_locals_count) + alias(constant_count);
     let caller_values = exec_ctx.slots;
     let argument_operand_indices = &arguments;
     let argument_index: u32 = 0;

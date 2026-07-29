@@ -142,7 +142,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
-void ECMAScriptFunctionObject::get_stack_frame_info(size_t& registers_and_locals_count, ReadonlySpan<Value>& constants, size_t& argument_count)
+void ECMAScriptFunctionObject::get_stack_frame_info(ReadonlySpan<Value>& frame_template, size_t& argument_count)
 {
     auto executable = shared_data().m_executable;
     if (!executable) {
@@ -155,8 +155,7 @@ void ECMAScriptFunctionObject::get_stack_frame_info(size_t& registers_and_locals
             executable->dump();
         m_shared_data->clear_compile_inputs();
     }
-    registers_and_locals_count = executable->registers_and_locals_count;
-    constants = executable->constants;
+    frame_template = executable->frame_image;
     argument_count = max(argument_count, static_cast<size_t>(formal_parameter_count()));
 }
 

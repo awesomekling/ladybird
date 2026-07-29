@@ -154,14 +154,12 @@ int main()
 
     // Executable layout
     outln("\n# Executable layout");
-    EMIT_OFFSET(EXECUTABLE_CONSTANTS, Executable, constants);
     EMIT_OFFSET(EXECUTABLE_PROPERTY_LOOKUP_CACHES, Executable, property_lookup_caches);
     EMIT_OFFSET(EXECUTABLE_GLOBAL_VARIABLE_CACHES, Executable, global_variable_caches);
     EMIT_OFFSET(EXECUTABLE_ENVIRONMENT_COORDINATE_CACHES, Executable, environment_coordinate_caches);
     EMIT_PAIRED_FIELD(EXECUTABLE_REGISTERS_AND_LOCALS_COUNT, Executable, registers_and_locals_count, u32, Executable, registers_and_locals_count, 4, slot_counts);
     EMIT_PAIRED_FIELD(EXECUTABLE_REGISTERS_AND_LOCALS_AND_CONSTANTS_COUNT, Executable, registers_and_locals_and_constants_count, u32, Executable, registers_and_locals_and_constants_count, 4, slot_counts);
-    EMIT_PAIRED_FIELD(EXECUTABLE_ASM_CONSTANTS_SIZE, Executable, asm_constants_size, u64, Executable, asm_constants_size, 8, constants);
-    EMIT_PAIRED_FIELD(EXECUTABLE_ASM_CONSTANTS_DATA, Executable, asm_constants_data, Sequence<Value>, Executable, asm_constants_data, 8, constants);
+    EMIT_FIELD(EXECUTABLE_ASM_FRAME_TEMPLATE_DATA, Executable, asm_frame_template_data, Sequence<Value>, Executable, asm_frame_template_data, 8, nonnull);
 
     // ExecutionContext layout
     outln("\n# ExecutionContext layout");
@@ -200,6 +198,9 @@ int main()
     outln("field ExecutionContext.saved_lexical_environment Value EXECUTION_CONTEXT_SAVED_LEXICAL_ENVIRONMENT nullable return_and_saved_environment");
     outln("const ALIGNOF_EXECUTION_CONTEXT = {}", alignof(ExecutionContext));
     outln("const EXECUTION_CONTEXT_NO_YIELD_CONTINUATION = {}", static_cast<u32>(ExecutionContext::no_yield_continuation));
+
+    outln("const FRAME_COPY_OVERSHOOT_BYTES = {}", (Executable::frame_template_copy_granularity - 1) * sizeof(Value));
+    outln("const FRAME_COPY_GRANULE_BYTES = {}", Executable::frame_template_copy_granularity * sizeof(Value));
     outln("const SIZEOF_SCRIPT_OR_MODULE = {}", sizeof(ScriptOrModule));
     outln("const SIZEOF_VALUE = {}", sizeof(Value));
 
@@ -275,8 +276,6 @@ int main()
         outln("field Executable.global_variable_caches GlobalVariableCaches EXECUTABLE_GLOBAL_VARIABLE_CACHES_DATA nonnull");
         outln("const EXECUTABLE_ENVIRONMENT_COORDINATE_CACHES_DATA = {}", offsetof(Executable, environment_coordinate_caches) + vec_data);
         outln("field Executable.environment_coordinate_caches Sequence<EnvironmentCoordinateEntry> EXECUTABLE_ENVIRONMENT_COORDINATE_CACHES_DATA nullable");
-        outln("const EXECUTABLE_CONSTANTS_DATA = {}", offsetof(Executable, constants) + vec_data);
-        outln("const EXECUTABLE_CONSTANTS_SIZE = {}", offsetof(Executable, constants) + vec_size);
         outln("const OBJECT_PROPERTY_ITERATOR_CACHE_DATA_PROPERTY_VALUES_DATA = {}", offsetof(ObjectPropertyIteratorCacheData, m_property_values) + vec_data);
         outln("const OBJECT_PROPERTY_ITERATOR_CACHE_DATA_PROPERTY_VALUES_SIZE = {}", offsetof(ObjectPropertyIteratorCacheData, m_property_values) + vec_size);
         outln("field ObjectPropertyIteratorCacheData.property_values Sequence<Value> OBJECT_PROPERTY_ITERATOR_CACHE_DATA_PROPERTY_VALUES_DATA nullable");

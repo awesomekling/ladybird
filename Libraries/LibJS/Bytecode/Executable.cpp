@@ -291,7 +291,7 @@ Executable::Executable(
     , identifier_table(move(identifier_table))
     , property_key_table(move(property_key_table))
     , regex_table(move(regex_table))
-    , constants(move(constants))
+    , frame_template(move(constants))
     , source_code(move(source_code))
     , number_of_registers(number_of_registers)
     , is_strict_mode(strict == Strict::Yes)
@@ -304,8 +304,38 @@ Executable::Executable(
         template_object_caches.append(heap().allocate<TemplateObjectCache>());
     object_shape_caches.resize(number_of_object_shape_caches);
     object_property_iterator_caches.resize(number_of_object_property_iterator_caches);
-    asm_constants_size = this->constants.size();
-    asm_constants_data = this->constants.data();
+
+    // NB: Until finalize_frame_template() runs, frame_template holds just the
+    //     constants, so an executable that never gets there still has usable
+    //     views.
+    frame_image = frame_template;
+    constants = frame_template;
+    asm_frame_template_data = frame_template.data();
+}
+
+void Executable::finalize_frame_template(u32 registers_and_locals_count)
+{
+    this->registers_and_locals_count = registers_and_locals_count;
+    registers_and_locals_and_constants_count = registers_and_locals_count + frame_template.size();
+
+    // NB: The interpreter's copy runs at least once, so even a slotless
+    //     executable needs a full granule of padding behind it.
+    auto padded_count = max(round_up_to_power_of_two(registers_and_locals_and_constants_count, frame_template_copy_granularity),
+        frame_template_copy_granularity);
+
+    Vector<Value> image;
+    image.ensure_capacity(padded_count);
+    for (u32 i = 0; i < registers_and_locals_count; ++i)
+        image.unchecked_append(js_special_empty_value());
+    for (auto constant : frame_template)
+        image.unchecked_append(constant);
+    while (image.size() < padded_count)
+        image.unchecked_append(js_special_empty_value());
+    frame_template = move(image);
+
+    frame_image = frame_template.span().trim(registers_and_locals_and_constants_count);
+    constants = frame_image.slice(registers_and_locals_count);
+    asm_frame_template_data = frame_template.data();
 }
 
 Executable::~Executable() = default;
@@ -444,7 +474,7 @@ void Executable::dump() const
 void Executable::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(constants);
+    visitor.visit(frame_template);
     visitor.visit(template_object_caches);
     for (auto& cache : object_property_iterator_caches)
         visitor.visit(cache.data);
@@ -506,7 +536,7 @@ size_t Executable::external_memory_size() const
     size = saturating_add_external_memory_size(size, identifier_table->external_memory_size());
     size = saturating_add_external_memory_size(size, property_key_table->external_memory_size());
     size = saturating_add_external_memory_size(size, regex_table->external_memory_size());
-    size = saturating_add_external_memory_size(size, vector_external_memory_size(constants));
+    size = saturating_add_external_memory_size(size, vector_external_memory_size(frame_template));
     size = saturating_add_external_memory_size(size, vector_external_memory_size(shared_function_data));
     size = saturating_add_external_memory_size(size, vector_external_memory_size(class_blueprints));
     for (auto const& blueprint : class_blueprints)
