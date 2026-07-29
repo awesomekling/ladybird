@@ -2400,16 +2400,16 @@ handler Call(
     # Construct an interpreter frame for an inline ECMAScript call.
     let callee_slot_count = executable_pointer.registers_and_locals_and_constants_count;
     assert_nonzero(executable_pointer);
+    # NB: The slot count is summed as a u64 so it cannot wrap. The stack limit
+    #     check below is what bounds it, and it bounds it far below u32, so the
+    #     narrowing store into the frame is safe.
     # NB: The frame image is copied a whole granule at a time, so the frame
     #     carries a granule of slack past its last argument to absorb the
     #     overshoot, and the template is padded to match.
-    let maximum_slot_count: u32 = 4294967288;
-    let available_argument_slot_count: u32 = maximum_slot_count - callee_slot_count;
-    guard available_argument_slot_count >= formal_count else slow;
-    let frame_slot_count: u32 = callee_slot_count + formal_count;
+    let frame_slot_count: u64 = alias(callee_slot_count) + alias(formal_count);
     # FIXME: Keep frame size materialization before the VM loads until nested
     #        arithmetic preserves that independent scheduling opportunity.
-    let frame_size: u64 = alias(frame_slot_count) * SIZEOF_VALUE + FRAME_COPY_OVERSHOOT_BYTES + SIZEOF_EXECUTION_CONTEXT;
+    let frame_size: u64 = frame_slot_count * SIZEOF_VALUE + FRAME_COPY_OVERSHOOT_BYTES + SIZEOF_EXECUTION_CONTEXT;
     let stack_vm = current_vm();
     let frame_base = stack_vm.interpreter_stack_top;
     let stack_limit = stack_vm.interpreter_stack_limit;
@@ -2420,7 +2420,7 @@ handler Call(
     let stack_update_vm = current_vm();
     stack_update_vm.interpreter_stack_top = frame_end;
     let frame_values = frame.slots;
-    frame.slot_count = frame_slot_count;
+    frame.slot_count = u32(frame_slot_count);
     frame.argument_count = formal_count;
     frame.passed_argument_count = load(argument_count);
     let realm = function.shape.realm;
