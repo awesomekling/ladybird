@@ -72,6 +72,7 @@ public:
 
     auto& bytecode_executable() const { return shared_data().m_executable; }
     [[nodiscard]] bool can_inline_call() const { return shared_data().can_inline_call(); }
+    [[nodiscard]] u64 asm_call_metadata() const { return shared_data().m_asm_call_metadata; }
     [[nodiscard]] Bytecode::Executable& inline_call_executable() const
     {
         VERIFY(can_inline_call());

@@ -163,6 +163,23 @@ struct StaticPropertyLookupCache : public PropertyLookupCache {
     static void sweep_all();
 };
 
+// Remembers the callee a call site last reached, along with everything frame
+// setup would otherwise have to rediscover from it. A single compare against
+// callee stands in for the whole chain of tag, flag and call-metadata checks,
+// since all of them were already satisfied when the entry was filled.
+struct CallCache {
+    // The callee this site last reached. Null means never filled.
+    GC::RawPtr<Object> callee;
+    // SharedFunctionInstanceData::m_asm_call_metadata for that callee.
+    u64 metadata { 0 };
+    GC::RawPtr<Executable> executable;
+    u32 callee_slot_count { 0 };
+    // max(the callee's formal parameter count, this site's argument count).
+    u32 argument_slot_count { 0 };
+};
+// NB: A power-of-two entry lets the interpreter index the table with a shift.
+static_assert(sizeof(CallCache) == 32);
+
 struct GlobalVariableCache {
     PropertyLookupCache::Entry* first_entry()
     {
@@ -287,6 +304,7 @@ public:
         size_t number_of_template_object_caches,
         size_t number_of_object_shape_caches,
         size_t number_of_object_property_iterator_caches,
+        size_t number_of_call_caches,
         size_t number_of_registers,
         Strict);
 
@@ -300,6 +318,7 @@ public:
     Vector<GC::Ref<TemplateObjectCache>> template_object_caches;
     Vector<ObjectShapeCache> object_shape_caches;
     Vector<ObjectPropertyIteratorCache> object_property_iterator_caches;
+    Vector<CallCache> call_caches;
     NonnullOwnPtr<StringTable> string_table;
     NonnullOwnPtr<IdentifierTable> identifier_table;
     NonnullOwnPtr<PropertyKeyTable> property_key_table;
@@ -331,6 +350,7 @@ public:
     u32 registers_and_locals_count { 0 };
     u32 registers_and_locals_and_constants_count { 0 };
     Value const* asm_frame_template_data { nullptr };
+    CallCache* asm_call_caches_data { nullptr };
 
     // Prefixes frame_template with the callee's register and local slots, which
     // are only known once the bytecode has been fully decoded.

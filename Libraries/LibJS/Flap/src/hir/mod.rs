@@ -1340,7 +1340,10 @@ impl<'a> Checker<'a> {
             let symbol = self.lookup(name)?;
             if matches!(
                 symbol.ty,
-                Type::EnvironmentCoordinateCacheIndex | Type::GlobalVariableCacheIndex | Type::PropertyLookupCacheIndex
+                Type::EnvironmentCoordinateCacheIndex
+                    | Type::GlobalVariableCacheIndex
+                    | Type::PropertyLookupCacheIndex
+                    | Type::CallCacheIndex
             ) {
                 return Some((symbol.ty.clone(), Type::U32, FieldWidth::U32));
             }

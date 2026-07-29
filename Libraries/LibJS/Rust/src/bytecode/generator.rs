@@ -269,6 +269,7 @@ pub struct Generator {
 
     // --- Various counters ---
     pub next_property_lookup_cache: u32,
+    pub next_call_cache: u32,
     pub next_global_variable_cache: u32,
     pub next_environment_coordinate_cache: u32,
     pub next_template_object_cache: u32,
@@ -435,6 +436,7 @@ impl Generator {
             finally_contexts: Vec::new(),
             current_finally_context: None,
             next_property_lookup_cache: 0,
+            next_call_cache: 0,
             next_global_variable_cache: 0,
             next_environment_coordinate_cache: 0,
             next_template_object_cache: 0,
@@ -980,6 +982,7 @@ impl Generator {
     // --- Cache index allocation ---
 
     next_cache_method!(next_property_lookup_cache, next_property_lookup_cache);
+    next_cache_method!(next_call_cache, next_call_cache);
     next_cache_method!(next_global_variable_cache, next_global_variable_cache);
     next_cache_method!(next_environment_coordinate_cache, next_environment_coordinate_cache);
     next_cache_method!(next_template_object_cache, next_template_object_cache);

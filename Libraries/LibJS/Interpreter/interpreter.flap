@@ -100,6 +100,14 @@ inline fn array_index(value: Value, else failure: Label) -> u32 {
     index
 }
 
+inline fn load_call_cache(cache: CallCacheIndex) -> CallCache {
+    let executable = exec_ctx.executable;
+    assert_nonzero(executable);
+    let call_cache = &executable.asm_call_caches_data[load(cache)];
+    assert_nonzero(call_cache);
+    call_cache
+}
+
 inline fn load_global_variable_cache(
     cache: GlobalVariableCacheIndex
 ) -> GlobalVariableCache {
@@ -2369,22 +2377,23 @@ handler Call(
     this_value: in Operand,
     length: u32,
     argument_count: u32,
+    cache: CallCacheIndex,
     arguments: Sequence<u32>
 ) {
     let slow = || @cold {
         call_slow_path(asm_slow_path_call);
     };
 
+    # A filled cache entry records a callee that already passed every check
+    # below, so matching it stands in for all of them.
+    let call_cache = load_call_cache(cache);
     guard let Value<Object>(function) = load(callee) else slow;
-    let flags = function.flags;
-    guard flags has OBJECT_FLAG_IS_FUNCTION else slow;
-    guard flags has OBJECT_FLAG_IS_ECMASCRIPT_FUNCTION_OBJECT else invoke_try_native;
+    let cached_callee = call_cache.callee;
+    guard cached_callee == function else cache_miss;
     let ecmascript_function: ECMAScriptFunctionObject = alias(function);
-    let shared_data = ecmascript_function.shared_data;
-    let executable_pointer = shared_data.executable;
-    let metadata = shared_data.asm_call_metadata;
-    guard metadata has SHARED_FUNCTION_INSTANCE_DATA_ASM_CALL_METADATA_CAN_INLINE_CALL else slow;
-    guard metadata lacks SHARED_FUNCTION_INSTANCE_DATA_ASM_CALL_METADATA_NEEDS_ENVIRONMENT_OR_THIS_VALUE_RESOLUTION else invoke_interp_inline;
+    let metadata = call_cache.metadata;
+    let executable_pointer = call_cache.executable;
+    assert_nonzero(executable_pointer);
     let receiver: Value = Value<Empty>;
     if metadata has SHARED_FUNCTION_INSTANCE_DATA_ASM_CALL_METADATA_USES_THIS {
         receiver = load(this_value);
@@ -2396,20 +2405,15 @@ handler Call(
             }
         }
     }
-    let formal_count: u32 = max(u32(metadata), load(argument_count));
-    # Construct an interpreter frame for an inline ECMAScript call.
-    let callee_slot_count = executable_pointer.registers_and_locals_and_constants_count;
-    assert_nonzero(executable_pointer);
-    # NB: The slot count is summed as a u64 so it cannot wrap. The stack limit
-    #     check below is what bounds it, and it bounds it far below u32, so the
-    #     narrowing store into the frame is safe.
-    # NB: The frame image is copied a whole granule at a time, so the frame
-    #     carries a granule of slack past its last argument to absorb the
-    #     overshoot, and the template is padded to match.
-    let frame_slot_count: u64 = alias(callee_slot_count) + alias(formal_count);
-    # FIXME: Keep frame size materialization before the VM loads until nested
-    #        arithmetic preserves that independent scheduling opportunity.
-    let frame_size: u64 = frame_slot_count * SIZEOF_VALUE + FRAME_COPY_OVERSHOOT_BYTES + SIZEOF_EXECUTION_CONTEXT;
+    # Construct an interpreter frame for an inline ECMAScript call. The cache
+    # holds the frame's measurements already: they depend only on the callee
+    # and on this site's argument count, both of which are fixed.
+    # NB: The cache fill rejects any callee whose frame would not fit in a
+    #     u32, so summing the two counts here cannot wrap.
+    let formal_count = call_cache.argument_slot_count;
+    let callee_slot_count = call_cache.callee_slot_count;
+    let frame_slot_count: u32 = callee_slot_count + formal_count;
+    let frame_size: u64 = alias(frame_slot_count) * SIZEOF_VALUE + FRAME_COPY_OVERSHOOT_BYTES + SIZEOF_EXECUTION_CONTEXT;
     let stack_vm = current_vm();
     let frame_base = stack_vm.interpreter_stack_top;
     let stack_limit = stack_vm.interpreter_stack_limit;
@@ -2420,7 +2424,7 @@ handler Call(
     let stack_update_vm = current_vm();
     stack_update_vm.interpreter_stack_top = frame_end;
     let frame_values = frame.slots;
-    frame.slot_count = u32(frame_slot_count);
+    frame.slot_count = frame_slot_count;
     frame.argument_count = formal_count;
     frame.passed_argument_count = load(argument_count);
     let realm = function.shape.realm;
@@ -2589,6 +2593,16 @@ handler Call(
         values = exec_ctx.slots;
         store(dst, native_payload);
         dispatch_variable(load(length));
+    };
+    let cache_miss = || @cold {
+        # A different callee than last time, or a site that has never run.
+        # Sort out what kind of callee it is, then let the interpreter fill
+        # the cache and re-run this instruction so the probe hits.
+        let miss_flags = function.flags;
+        guard miss_flags has OBJECT_FLAG_IS_FUNCTION else slow;
+        guard miss_flags has OBJECT_FLAG_IS_ECMASCRIPT_FUNCTION_OBJECT else invoke_try_native;
+        guard call_interp(asm_fill_call_cache) == 0 else invoke_interp_inline;
+        goto_handler(pc);
     };
 }
 

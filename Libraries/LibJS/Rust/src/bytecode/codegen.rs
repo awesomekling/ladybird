@@ -1460,11 +1460,13 @@ fn generate_yield_from(
 
     // i. Let _innerResult_ be ? Call(_next_, _iterator_, « _received_.[[Value]] »).
     let inner_result = generator.allocate_register();
+    let call_cache_index = generator.next_call_cache();
     generator.emit(Instruction::Call {
         dst: inner_result.operand(),
         callee: next_method.operand(),
         this_value: iterator.operand(),
         argument_count: 1,
+        cache: call_cache_index,
         expression_string: None,
         arguments: vec![received_completion_value.operand()],
     });
@@ -1561,11 +1563,13 @@ fn generate_yield_from(
     generator.switch_to_basic_block(throw_method_defined_block);
 
     // 1. Let _innerResult_ be ? Call(_throw_, _iterator_, « _received_.[[Value]] »).
+    let call_cache_index = generator.next_call_cache();
     generator.emit(Instruction::Call {
         dst: inner_result.operand(),
         callee: throw_method.operand(),
         this_value: iterator.operand(),
         argument_count: 1,
+        cache: call_cache_index,
         expression_string: None,
         arguments: vec![received_completion_value.operand()],
     });
@@ -1644,11 +1648,13 @@ fn generate_yield_from(
         generator.switch_to_basic_block(call_return_block);
 
         let close_result = generator.allocate_register();
+        let call_cache_index = generator.next_call_cache();
         generator.emit(Instruction::Call {
             dst: close_result.operand(),
             callee: return_method.operand(),
             this_value: iterator.operand(),
             argument_count: 0,
+            cache: call_cache_index,
             expression_string: None,
             arguments: vec![],
         });
@@ -1729,11 +1735,13 @@ fn generate_yield_from(
 
     // iv. Let _innerReturnResult_ be ? Call(_return_, _iterator_, « _received_.[[Value]] »).
     let inner_return_result = generator.allocate_register();
+    let call_cache_index = generator.next_call_cache();
     generator.emit(Instruction::Call {
         dst: inner_return_result.operand(),
         callee: return_method.operand(),
         this_value: iterator.operand(),
         argument_count: 1,
+        cache: call_cache_index,
         expression_string: None,
         arguments: vec![received_completion_value.operand()],
     });
@@ -3188,11 +3196,13 @@ fn try_generate_builtin_abstract_operation(
         let callee_name = expression_string_approximation(&data.arguments[0].value, &arena_clone)
             .map(|s| generator.intern_string(&s));
         let arguments: Vec<Operand> = argument_holders.iter().map(|a| a.operand()).collect();
+        let call_cache_index = generator.next_call_cache();
         generator.emit(Instruction::Call {
             dst: dst.operand(),
             callee: callee.operand(),
             this_value: this_value.operand(),
             argument_count: u32_from_usize(arguments.len()),
+            cache: call_cache_index,
             expression_string: callee_name,
             arguments,
         });
@@ -3221,11 +3231,13 @@ fn try_generate_builtin_abstract_operation(
                 argument_holders.push(generator.copy_if_needed_to_preserve_evaluation_order(&val));
             }
             let arguments: Vec<Operand> = argument_holders.iter().map(|a| a.operand()).collect();
+            let call_cache_index = generator.next_call_cache();
             generator.emit(Instruction::Call {
                 dst: dst.operand(),
                 callee: callee.operand(),
                 this_value: undefined.operand(),
                 argument_count: u32_from_usize(arguments.len()),
+                cache: call_cache_index,
                 expression_string: Some(expression_string),
                 arguments,
             });
@@ -3499,21 +3511,25 @@ fn generate_call_expression(
                     arguments,
                 );
             } else {
+                let call_cache_index = generator.next_call_cache();
                 generator.emit(Instruction::Call {
                     dst: dst.operand(),
                     callee: callee.operand(),
                     this_value: this_value.operand(),
                     argument_count: u32_from_usize(arguments.len()),
+                    cache: call_cache_index,
                     expression_string,
                     arguments,
                 });
             }
         } else {
+            let call_cache_index = generator.next_call_cache();
             generator.emit(Instruction::Call {
                 dst: dst.operand(),
                 callee: callee.operand(),
                 this_value: this_value.operand(),
                 argument_count: u32_from_usize(arguments.len()),
+                cache: call_cache_index,
                 expression_string,
                 arguments,
             });
@@ -5115,11 +5131,13 @@ fn generate_tagged_template_literal(
     let dst = choose_dst(generator, preferred_dst);
     let this_op = this_value.unwrap_or_else(|| generator.add_constant_undefined());
     let arguments: Vec<Operand> = argument_regs.iter().map(|a| a.operand()).collect();
+    let call_cache_index = generator.next_call_cache();
     generator.emit(Instruction::Call {
         dst: dst.operand(),
         callee: tag_reg.operand(),
         this_value: this_op.operand(),
         argument_count: u32_from_usize(arguments.len()),
+        cache: call_cache_index,
         expression_string: None,
         arguments,
     });
@@ -7176,10 +7194,12 @@ fn generate_for_of_statement_inner(
         generator.switch_to_basic_block(call_return_block);
 
         let inner_result = generator.allocate_register();
+        let call_cache_index = generator.next_call_cache();
         generator.emit(Instruction::Call {
             dst: inner_result.operand(),
             callee: return_method.operand(),
             this_value: iterator_object.operand(),
+            cache: call_cache_index,
             expression_string: None,
             argument_count: 0,
             arguments: vec![],
@@ -7294,10 +7314,12 @@ fn generate_for_of_statement_inner(
             generator.switch_to_basic_block(call_return_block);
 
             let inner_result = generator.allocate_register();
+            let call_cache_index = generator.next_call_cache();
             generator.emit(Instruction::Call {
                 dst: inner_result.operand(),
                 callee: return_method.operand(),
                 this_value: iterator_object.operand(),
+                cache: call_cache_index,
                 expression_string: None,
                 argument_count: 0,
                 arguments: vec![],

@@ -209,6 +209,7 @@ define_named_types! {
         DeclarativeEnvironmentRareData => "DeclarativeEnvironmentRareData", Some(8), true;
         GlobalVariableCache => "GlobalVariableCache", Some(8), true;
         PropertyLookupCache => "PropertyLookupCache", Some(8), true;
+        CallCache => "CallCache", Some(32), true;
         PropertyNameIterator => "PropertyNameIterator", Some(8), true;
         ObjectPropertyIteratorCacheData => "ObjectPropertyIteratorCacheData", Some(8), true;
         ObjectPropertyIteratorCache => "ObjectPropertyIteratorCache", Some(8), true;
@@ -228,6 +229,7 @@ define_named_types! {
         EnvironmentCoordinateCacheIndex => "EnvironmentCoordinateCacheIndex", Some(4), false;
         GlobalVariableCacheIndex => "GlobalVariableCacheIndex", Some(4), false;
         PropertyLookupCacheIndex => "PropertyLookupCacheIndex", Some(4), false;
+        CallCacheIndex => "CallCacheIndex", Some(4), false;
         Operand => "Operand", Some(8), false;
         Memory => "Memory", None, false;
         IntegerCondition => "IntegerCondition", None, false;
@@ -338,6 +340,7 @@ impl Type {
             "IndexedElements" | "BindingValues" => Self::Sequence(Box::new(Self::Value)),
             "GlobalVariableCaches" => Self::Sequence(Box::new(Self::GlobalVariableCache)),
             "PropertyLookupCaches" => Self::Sequence(Box::new(Self::PropertyLookupCache)),
+            "CallCaches" => Self::Sequence(Box::new(Self::CallCache)),
             _ => Self::from_layout_name(name)?,
         })
     }

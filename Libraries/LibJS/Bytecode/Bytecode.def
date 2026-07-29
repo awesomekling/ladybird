@@ -71,6 +71,7 @@ op Call < Instruction
     m_callee: Operand
     m_this_value: Operand
     m_argument_count: u32
+    m_cache: CallCacheIndex
     m_expression_string: Optional<StringTableIndex>
     m_arguments: Operand[]
 endop

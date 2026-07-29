@@ -292,7 +292,8 @@ fn try_field_type_info(ty: &str) -> Option<FieldType> {
             | "EnvironmentCoordinateCacheIndex"
             | "TemplateObjectCacheIndex"
             | "ObjectShapeCacheIndex"
-            | "ObjectPropertyIteratorCacheIndex" => ("u32", 4, 4, "u32"),
+            | "ObjectPropertyIteratorCacheIndex"
+            | "CallCacheIndex" => ("u32", 4, 4, "u32"),
             _ => return None,
         }
         .into(),

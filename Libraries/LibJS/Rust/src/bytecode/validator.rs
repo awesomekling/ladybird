@@ -47,6 +47,7 @@ pub struct FFIValidatorBounds {
     pub template_object_cache_count: u32,
     pub object_shape_cache_count: u32,
     pub object_property_iterator_cache_count: u32,
+    pub call_cache_count: u32,
     pub class_blueprint_count: u32,
     pub shared_function_data_count: u32,
     /// Variant counts for the C++ enum types referenced by Bytecode.def
@@ -93,6 +94,7 @@ pub enum ValidationErrorKind {
     ExceptionHandlerRangeInvalid = 25,
     SourceMapOffsetInvalid = 26,
     EnvironmentCoordinateCacheIndexOutOfRange = 27,
+    CallCacheIndexOutOfRange = 28,
 }
 
 /// Detail returned to the C++ caller on validation failure.
@@ -305,6 +307,17 @@ pub fn validate_object_property_iterator_cache_index(
     }
     if raw >= ctx.bounds.object_property_iterator_cache_count {
         return Err(ValidationErrorKind::ObjectPropertyIteratorCacheIndexOutOfRange);
+    }
+    Ok(())
+}
+
+#[inline]
+pub fn validate_call_cache_index(raw: u32, ctx: &ValidationContext) -> Result<(), ValidationErrorKind> {
+    if raw == NO_CACHE_INDEX {
+        return Ok(());
+    }
+    if raw >= ctx.bounds.call_cache_count {
+        return Err(ValidationErrorKind::CallCacheIndexOutOfRange);
     }
     Ok(())
 }

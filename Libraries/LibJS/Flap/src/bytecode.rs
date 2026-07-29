@@ -120,6 +120,7 @@ fn bytecode_field_type_matches(field: &bytecode_def::Field, parameter_type: &Typ
         "EnvironmentCoordinateCacheIndex" => *parameter_type == Type::EnvironmentCoordinateCacheIndex,
         "GlobalVariableCacheIndex" => *parameter_type == Type::GlobalVariableCacheIndex,
         "PropertyLookupCacheIndex" => *parameter_type == Type::PropertyLookupCacheIndex,
+        "CallCacheIndex" => *parameter_type == Type::CallCacheIndex,
         "PutKind" => *parameter_type == Type::U8,
         _ => false,
     }

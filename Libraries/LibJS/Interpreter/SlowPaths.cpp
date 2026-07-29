@@ -705,6 +705,7 @@ u64 asm_helper_single_ascii_character_string(u64 encoded_value);
 u64 asm_helper_single_utf16_code_unit_string(u64 encoded_value);
 i64 asm_helper_handle_raw_native_exception(u64 encoded_exception);
 i64 asm_try_inline_call(VM*, u32 pc, Op::Call const*);
+i64 asm_fill_call_cache(VM*, u32 pc, Op::Call const*);
 i64 asm_try_put_by_id_cache(VM*, u32 pc, Op::PutById const*);
 i64 asm_try_get_by_id_cache(VM*, u32 pc, Op::GetById const*);
 
@@ -2120,6 +2121,57 @@ i64 asm_try_inline_call(VM* vm, u32 pc, Op::Call const* instruction)
         false);
 
     return callee_context ? 0 : 1;
+}
+
+// Fills a call site's inline cache so subsequent calls to the same callee can
+// skip rediscovering it. Returns 0 once the entry matches the current callee,
+// which is what lets the handler simply re-run the instruction. Returns 1 when
+// the callee cannot use the cached fast path at all.
+i64 asm_fill_call_cache(VM* vm, u32, Op::Call const* instruction)
+{
+    auto callee = vm->get(instruction->callee());
+    if (!callee.is_object()) [[unlikely]]
+        return 1;
+
+    auto& callee_object = callee.as_object();
+    if (!is<ECMAScriptFunctionObject>(callee_object)) [[unlikely]]
+        return 1;
+
+    auto& callee_function = static_cast<ECMAScriptFunctionObject&>(callee_object);
+    if (!callee_function.can_inline_call()) [[unlikely]]
+        return 1;
+
+    auto metadata = callee_function.asm_call_metadata();
+
+    // The handler's fast path cannot resolve an environment or a this value,
+    // so those callees keep going through the interpreter.
+    if (metadata & SharedFunctionInstanceData::asm_call_metadata_needs_environment_or_this_value_resolution) [[unlikely]]
+        return 1;
+
+    auto& executable = callee_function.inline_call_executable();
+
+    // NB: The frame's measurements depend only on the callee and on this
+    //     site's argument count, so they are fixed for as long as the entry
+    //     lives and the handler can take them straight from the cache.
+    auto argument_slot_count = max(instruction->argument_count(), callee_function.formal_parameter_count());
+    auto callee_slot_count = executable.registers_and_locals_and_constants_count;
+    auto frame_slot_count = static_cast<u64>(callee_slot_count) + argument_slot_count;
+    auto frame_size = frame_slot_count * sizeof(Value)
+        + (Executable::frame_template_copy_granularity - 1) * sizeof(Value)
+        + sizeof(ExecutionContext);
+
+    // A frame this large would fail the interpreter stack check anyway, and
+    // the cache stores its measurements in 32 bits.
+    if (frame_size > NumericLimits<u32>::max()) [[unlikely]]
+        return 1;
+
+    auto& cache = vm->current_executable().call_caches[instruction->cache()];
+    cache.callee = &callee_object;
+    cache.metadata = metadata;
+    cache.executable = &executable;
+    cache.callee_slot_count = callee_slot_count;
+    cache.argument_slot_count = static_cast<u32>(argument_slot_count);
+    return 0;
 }
 
 // Fast cache-only PutById. Tries all cache entries for ChangeOwnProperty and

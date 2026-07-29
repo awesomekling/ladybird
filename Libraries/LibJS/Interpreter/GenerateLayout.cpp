@@ -160,6 +160,21 @@ int main()
     EMIT_PAIRED_FIELD(EXECUTABLE_REGISTERS_AND_LOCALS_COUNT, Executable, registers_and_locals_count, u32, Executable, registers_and_locals_count, 4, slot_counts);
     EMIT_PAIRED_FIELD(EXECUTABLE_REGISTERS_AND_LOCALS_AND_CONSTANTS_COUNT, Executable, registers_and_locals_and_constants_count, u32, Executable, registers_and_locals_and_constants_count, 4, slot_counts);
     EMIT_FIELD(EXECUTABLE_ASM_FRAME_TEMPLATE_DATA, Executable, asm_frame_template_data, Sequence<Value>, Executable, asm_frame_template_data, 8, nonnull);
+    EMIT_FIELD(EXECUTABLE_ASM_CALL_CACHES_DATA, Executable, asm_call_caches_data, CallCaches, Executable, asm_call_caches_data, 8, nullable);
+
+    // CallCache layout
+    outln("\n# CallCache layout");
+    EMIT_OFFSET(CALL_CACHE_CALLEE, CallCache, callee);
+    EMIT_OFFSET(CALL_CACHE_METADATA, CallCache, metadata);
+    EMIT_OFFSET(CALL_CACHE_EXECUTABLE, CallCache, executable);
+    EMIT_OFFSET(CALL_CACHE_CALLEE_SLOT_COUNT, CallCache, callee_slot_count);
+    EMIT_OFFSET(CALL_CACHE_ARGUMENT_SLOT_COUNT, CallCache, argument_slot_count);
+    EMIT_SIZEOF(CALL_CACHE_SIZE, CallCache);
+    outln("field CallCache.callee Object CALL_CACHE_CALLEE nullable stride CALL_CACHE_SIZE");
+    outln("field CallCache.metadata u64 CALL_CACHE_METADATA nullable");
+    outln("field CallCache.executable Executable CALL_CACHE_EXECUTABLE nullable");
+    outln("field CallCache.callee_slot_count u32 CALL_CACHE_CALLEE_SLOT_COUNT nullable call_cache_counts");
+    outln("field CallCache.argument_slot_count u32 CALL_CACHE_ARGUMENT_SLOT_COUNT nullable call_cache_counts");
 
     // ExecutionContext layout
     outln("\n# ExecutionContext layout");

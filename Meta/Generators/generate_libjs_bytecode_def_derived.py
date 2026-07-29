@@ -245,6 +245,7 @@ CACHE_INDEX_TYPES = {
     "TemplateObjectCacheIndex",
     "ObjectShapeCacheIndex",
     "ObjectPropertyIteratorCacheIndex",
+    "CallCacheIndex",
 }
 
 

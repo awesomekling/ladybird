@@ -283,6 +283,7 @@ Executable::Executable(
     size_t number_of_template_object_caches,
     size_t number_of_object_shape_caches,
     size_t number_of_object_property_iterator_caches,
+    size_t number_of_call_caches,
     size_t number_of_registers,
     Strict strict)
     : GC::WeakContainer(heap())
@@ -304,6 +305,8 @@ Executable::Executable(
         template_object_caches.append(heap().allocate<TemplateObjectCache>());
     object_shape_caches.resize(number_of_object_shape_caches);
     object_property_iterator_caches.resize(number_of_object_property_iterator_caches);
+    call_caches.resize(number_of_call_caches);
+    asm_call_caches_data = call_caches.data();
 
     // NB: Until finalize_frame_template() runs, frame_template holds just the
     //     constants, so an executable that never gets there still has usable
@@ -599,6 +602,13 @@ void Executable::remove_dead_cells(Badge<GC::Heap>)
         auto* shape = cache.shape.ptr();
         if (shape && cell_is_dead(shape))
             cache.shape = nullptr;
+    }
+    // NB: A call cache holds its callee weakly, so a call site never keeps a
+    //     closure alive. Everything else in the entry is only reachable
+    //     through that callee, so the whole entry goes at once.
+    for (auto& cache : call_caches) {
+        if (cache.callee && cell_is_dead(cache.callee))
+            cache = {};
     }
 }
 
