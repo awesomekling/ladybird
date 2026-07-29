@@ -2435,12 +2435,8 @@ handler Call(
     frame.this_value = receiver;
     frame.executable = executable_pointer;
     frame.script_or_module = ecmascript_function.script_or_module;
-    frame.program_counter = 0;
-    frame.skip_when_determining_incumbent_counter = 0;
-    frame.yield_continuation = EXECUTION_CONTEXT_NO_YIELD_CONTINUATION;
-    frame.yield_is_await = false;
-    frame.yield_value_is_iterator_result = false;
-    frame.caller_is_construct = false;
+    frame.reset_low = 0;
+    frame.reset_high = EXECUTION_CONTEXT_RESET_HIGH_VALUE;
     frame.caller_frame = exec_ctx;
     let [_, return_pc, return_destination] = call_site_info(length, dst);
     frame.caller_return_pc = return_pc;
@@ -2536,12 +2532,8 @@ handler Call(
         native_frame.script_or_module = zeroed();
         # Raw native frames deliberately have no executable.
         native_frame.executable = null;
-        native_frame.program_counter = 0;
-        native_frame.skip_when_determining_incumbent_counter = 0;
-        native_frame.yield_continuation = EXECUTION_CONTEXT_NO_YIELD_CONTINUATION;
-        native_frame.yield_is_await = false;
-        native_frame.yield_value_is_iterator_result = false;
-        native_frame.caller_is_construct = false;
+        native_frame.reset_low = 0;
+        native_frame.reset_high = EXECUTION_CONTEXT_RESET_HIGH_VALUE;
         let [native_pc, after_pc, destination_offset] = call_site_info(length, dst);
         exec_ctx.program_counter = native_pc;
         native_frame.caller_frame = exec_ctx;

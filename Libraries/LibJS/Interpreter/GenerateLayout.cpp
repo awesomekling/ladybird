@@ -199,6 +199,20 @@ int main()
     outln("const ALIGNOF_EXECUTION_CONTEXT = {}", alignof(ExecutionContext));
     outln("const EXECUTION_CONTEXT_NO_YIELD_CONTINUATION = {}", static_cast<u32>(ExecutionContext::no_yield_continuation));
 
+    // The fields a call resets to a fixed value occupy two contiguous 8-byte
+    // words, so frame setup writes them as two stores instead of six.
+    static_assert(offsetof(ExecutionContext, program_counter) % 8 == 0);
+    static_assert(offsetof(ExecutionContext, skip_when_determining_incumbent_counter) == offsetof(ExecutionContext, program_counter) + 4);
+    static_assert(offsetof(ExecutionContext, yield_continuation) == offsetof(ExecutionContext, program_counter) + 8);
+    static_assert(offsetof(ExecutionContext, yield_is_await) == offsetof(ExecutionContext, yield_continuation) + 4);
+    static_assert(offsetof(ExecutionContext, yield_value_is_iterator_result) == offsetof(ExecutionContext, yield_continuation) + 5);
+    static_assert(offsetof(ExecutionContext, caller_is_construct) == offsetof(ExecutionContext, yield_continuation) + 6);
+    static_assert(offsetof(ExecutionContext, this_value) == offsetof(ExecutionContext, yield_continuation) + 8);
+    outln("const EXECUTION_CONTEXT_RESET_LOW = {}", offsetof(ExecutionContext, program_counter));
+    outln("const EXECUTION_CONTEXT_RESET_HIGH = {}", offsetof(ExecutionContext, yield_continuation));
+    outln("field ExecutionContext.reset_low u64 EXECUTION_CONTEXT_RESET_LOW nullable");
+    outln("field ExecutionContext.reset_high u64 EXECUTION_CONTEXT_RESET_HIGH nullable");
+    outln("const EXECUTION_CONTEXT_RESET_HIGH_VALUE = {}", static_cast<u64>(ExecutionContext::no_yield_continuation));
     outln("const FRAME_COPY_OVERSHOOT_BYTES = {}", (Executable::frame_template_copy_granularity - 1) * sizeof(Value));
     outln("const FRAME_COPY_GRANULE_BYTES = {}", Executable::frame_template_copy_granularity * sizeof(Value));
     outln("const SIZEOF_SCRIPT_OR_MODULE = {}", sizeof(ScriptOrModule));
